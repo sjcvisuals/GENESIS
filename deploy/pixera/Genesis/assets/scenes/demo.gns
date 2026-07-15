@@ -1,0 +1,19 @@
+{
+  "format": "gns",
+  "version": 1,
+  "name": "Demo Scene",
+  "scene_ref": "demo.scene.json",
+  "pixera": {
+    "streams": [
+      {
+        "handle": "main",
+        "resolution_x": 1920,
+        "resolution_y": 1080,
+        "use_scene_camera": false
+      }
+    ],
+    "bindings": {
+      "light_node": "Demo Scene/Directional Light"
+    }
+  }
+}

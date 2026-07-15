@@ -1,0 +1,4 @@
+**/_build/
+/RenderBridge/RX/modules/*.pdb
+/RenderBridge/RX/modules/Ext*.dll
+/RenderBridge/RX/modules/vulkan-1.dll
