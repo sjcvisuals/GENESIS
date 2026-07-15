@@ -6,7 +6,7 @@
 #include "renderer/vulkan/VulkanContext.hpp"
 #include "scene/Scene.hpp"
 #include "scene/SceneDocument.hpp"
-#include "scene/SceneMaterial.hpp"
+#include "scene/ScenePicker.hpp"
 
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
@@ -23,13 +23,22 @@ struct SceneDrawCommand {
     NodeId node_id = 0;
     const Mesh* mesh = nullptr;
     const GpuTexture* base_color_texture = nullptr;
-    MeshDrawPushConstants constants{};
+    glm::mat4 model{1.0f};
+    MeshMaterialPushConstants material{};
+};
+
+struct SceneDrawCollectParams {
+    const float* view_proj_col_major = nullptr;
+    bool enable_cpu_culling = true;
+    bool enable_gpu_culling = true;
 };
 
 struct SceneRenderStats {
     std::uint32_t draw_calls = 0;
+    std::uint32_t draw_batches = 0;
     std::uint32_t triangles = 0;
     std::uint32_t visible_mesh_nodes = 0;
+    std::uint32_t culled_mesh_nodes = 0;
     std::uint32_t scene_nodes = 0;
     std::uint32_t active_lights = 0;
 };
@@ -76,10 +85,14 @@ public:
     void updateTransforms();
 
     void collectDrawCommands(std::vector<SceneDrawCommand>& out,
-                             SceneRenderStats* out_stats = nullptr) const;
+                             SceneRenderStats* out_stats = nullptr,
+                             const SceneDrawCollectParams& params = {}) const;
 
     std::optional<glm::mat4> outputCameraViewProjection(float aspect) const;
     std::optional<glm::vec3> outputCameraPosition() const;
+
+    std::optional<ScenePickResult> pickNodeAtRay(const PickRay& ray,
+                                                 const ScenePickParams& params = {}) const;
 
     const std::string& sourcePath() const { return source_path_; }
     const std::string& documentPath() const { return document_path_; }

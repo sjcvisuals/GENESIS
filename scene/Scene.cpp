@@ -110,6 +110,7 @@ NodeId Scene::createCameraNode(const std::string& name, std::optional<NodeId> pa
     if (Node* node = find(id)) {
         node->has_camera = true;
         node->camera = SceneCamera{};
+        node->pickable = false;
     }
     return id;
 }

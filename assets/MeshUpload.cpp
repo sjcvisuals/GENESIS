@@ -1,5 +1,6 @@
 #include "assets/MeshUpload.hpp"
 
+#include "assets/MeshAabb.hpp"
 #include "renderer/vulkan/Buffer.hpp"
 
 namespace genesis {
@@ -35,6 +36,7 @@ Mesh uploadMesh(const VulkanContext& context, std::span<const MeshVertexPN> vert
     });
 
     out.index_count = static_cast<uint32_t>(indices.size());
+    computeMeshAabb(vertices, out.local_aabb_min, out.local_aabb_max);
     return out;
 }
 
@@ -69,6 +71,7 @@ Mesh uploadMesh(const VulkanContext& context, std::span<const MeshVertexPNU> ver
     });
 
     out.index_count = static_cast<uint32_t>(indices.size());
+    computeMeshAabb(vertices, out.local_aabb_min, out.local_aabb_max);
     return out;
 }
 

@@ -1,5 +1,8 @@
 #include "scene/SceneRuntime.hpp"
 
+#include "scene/Frustum.hpp"
+#include "scene/MeshBounds.hpp"
+
 #include "assets/GltfLoader.hpp"
 #include "assets/PrimitiveMeshes.hpp"
 #include "platform/Paths.hpp"
@@ -8,6 +11,7 @@
 #include "scene/GnsPackage.hpp"
 
 #include <algorithm>
+#include <cstring>
 #include <glm/gtc/quaternion.hpp>
 #include <spdlog/spdlog.h>
 #include <stdexcept>
@@ -101,7 +105,7 @@ void SceneRuntime::loadDemo() {
 
     const NodeId camera = scene_.createCameraNode("Main Camera", root);
     if (Node* n = scene_.find(camera)) {
-        n->local.position = glm::vec3(0.0f, 2.0f, 8.0f);
+        n->local.position = glm::vec3(0.0f, 2.5f, 7.0f);
         n->local.rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
         n->camera->fov_y_radians = glm::radians(55.0f);
     }
@@ -180,12 +184,20 @@ void SceneRuntime::updateTransforms() {
 }
 
 void SceneRuntime::collectDrawCommands(std::vector<SceneDrawCommand>& out,
-                                       SceneRenderStats* out_stats) const {
+                                       SceneRenderStats* out_stats,
+                                       const SceneDrawCollectParams& params) const {
     out.clear();
     out.reserve(scene_.nodes.size());
 
     SceneRenderStats stats{};
     stats.scene_nodes = static_cast<std::uint32_t>(scene_.nodes.size());
+
+    std::optional<Frustum> frustum;
+    if (params.enable_cpu_culling && params.view_proj_col_major != nullptr) {
+        glm::mat4 view_proj{};
+        std::memcpy(&view_proj[0][0], params.view_proj_col_major, sizeof(float) * 16);
+        frustum = frustumFromViewProjection(view_proj);
+    }
 
     for (const Node& node : scene_.nodes) {
         if (node.light.has_value() && node.light->enabled && node.visible) {
@@ -195,11 +207,20 @@ void SceneRuntime::collectDrawCommands(std::vector<SceneDrawCommand>& out,
         const std::uint32_t mesh_id = *node.mesh_resource;
         if (mesh_id >= meshes_.size()) continue;
 
+        if (frustum.has_value()) {
+            if (!isMeshVisibleInFrustum(*frustum, node.world, meshes_[mesh_id].local_aabb_min,
+                                        meshes_[mesh_id].local_aabb_max)) {
+                ++stats.culled_mesh_nodes;
+                continue;
+            }
+        }
+
         SceneDrawCommand cmd{};
         cmd.node_id = node.id;
         cmd.mesh = &meshes_[mesh_id];
+        cmd.model = node.world;
         const SceneMaterial& material = resolveMaterial(node);
-        cmd.constants = makeMeshDrawPushConstants(&node.world[0][0], material);
+        cmd.material = makeMeshMaterialPushConstants(material);
         if (material.base_color_texture_resource.has_value()) {
             cmd.base_color_texture = texture(*material.base_color_texture_resource);
         }
@@ -225,6 +246,11 @@ std::optional<glm::vec3> SceneRuntime::outputCameraPosition() const {
     const Node* cam_node = scene_.activeOutputCameraNode();
     if (!cam_node) return std::nullopt;
     return glm::vec3(cam_node->world[3]);
+}
+
+std::optional<ScenePickResult> SceneRuntime::pickNodeAtRay(const PickRay& ray,
+                                                           const ScenePickParams& params) const {
+    return genesis::pickNodeAtRay(scene_, meshes_, ray, params);
 }
 
 void SceneRuntime::loadGltfSource(const std::filesystem::path& path) {
@@ -308,6 +334,7 @@ void SceneRuntime::applyNodeEntry(const NodeId id, const SceneDocumentNode& entr
     node->name = entry.name;
     node->local = entry.local;
     node->visible = entry.visible;
+    node->pickable = entry.pickable;
 
     if (entry.mesh_ref.has_value()) {
         node->has_mesh = true;

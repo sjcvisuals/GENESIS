@@ -1,10 +1,19 @@
 #version 450
 
+#extension GL_EXT_nonuniform_qualifier : require
+
 struct Light {
     vec4 position;
     vec4 direction;
     vec4 color;
     vec4 params;
+};
+
+struct MeshInstance {
+    mat4 model;
+    mat4 normalMatrix;
+    vec4 boundsCenter;
+    vec4 boundsExtent;
 };
 
 layout(set = 0, binding = 0) uniform FrameUBO {
@@ -17,14 +26,21 @@ layout(set = 0, binding = 0) uniform FrameUBO {
     Light lights[8];
 } uFrame;
 
+layout(set = 0, binding = 1) readonly buffer InstanceBuffer {
+    MeshInstance instances[];
+} uInstances;
+
+layout(set = 1, binding = 0) uniform sampler2D baseColorTextures[256];
+
 layout(push_constant) uniform Push {
-    mat4 model;
     vec4 baseColor;
     vec4 emissive;
     vec4 materialParams;
+    uint instanceBase;
+    uint textureIndex;
+    uint _pad1;
+    uint _pad2;
 } uPush;
-
-layout(set = 1, binding = 0) uniform sampler2D baseColorTex;
 
 layout(location = 0) in vec3 vWorldPos;
 layout(location = 1) in vec3 vWorldNormal;
@@ -118,7 +134,8 @@ void main() {
     int alphaMode = int(uPush.materialParams.z);
     float alphaCutoff = uPush.materialParams.w;
 
-    vec3 albedo = uPush.baseColor.rgb * texture(baseColorTex, vUv).rgb;
+    vec3 sampled = texture(baseColorTextures[nonuniformEXT(uPush.textureIndex)], vUv).rgb;
+    vec3 albedo = uPush.baseColor.rgb * sampled;
     vec3 color = vec3(0.03) * albedo;
 
     for (int i = 0; i < uFrame.lightCount; ++i) {
@@ -126,7 +143,7 @@ void main() {
     }
     color += uPush.emissive.rgb * uPush.emissive.a;
 
-    float alpha = uPush.baseColor.a * texture(baseColorTex, vUv).a;
+    float alpha = uPush.baseColor.a * texture(baseColorTextures[nonuniformEXT(uPush.textureIndex)], vUv).a;
     if (alphaMode == 1 && alpha < alphaCutoff) {
         discard;
     }

@@ -13,6 +13,7 @@
       }
     ],
     "bindings": {
+      "target_node": "Demo Scene/Props/Sphere",
       "light_node": "Demo Scene/Directional Light"
     }
   }

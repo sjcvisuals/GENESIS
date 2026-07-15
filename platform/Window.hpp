@@ -34,6 +34,7 @@ public:
     bool wasResized() const { return resized_; }
     void clearResizedFlag() { resized_ = false; }
     void handleResize(int width, int height);
+    void setTitle(const std::string& title);
 
 private:
     SDL_Window* window_ = nullptr;

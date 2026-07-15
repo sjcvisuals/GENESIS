@@ -1,7 +1,9 @@
 #include "Input.h"
 
 #include "ModulePaths.h"
+#include "ResourceLoader.h"
 #include "SceneSelectors.h"
+#include "runtime/RuntimePaths.hpp"
 #include "common/string.h"
 #include "renderer/vulkan/ExternalRenderTarget.hpp"
 #include "renderer/vulkan/ExternalSync.hpp"
@@ -31,9 +33,13 @@ glm::dmat4 defaultProjectionMatrix(std::uint32_t width, std::uint32_t height) {
 
 Input::Input(std::uint64_t adapter_luid, ValueSet settings)
     : adapter_luid_(adapter_luid), settings_(std::move(settings)), module_dir_(extensionModuleDirectory()) {
+    ::genesis::setRuntimeAssetRoots(module_dir_);
+
     sampler_ = add_output_parameter<ParameterTexture>(ParameterNames::sampler);
 
-    actor_bindings_.registerSceneParameters(*this, show_select_, use_scene_camera_);
+    ParameterVector3* position_param_ = nullptr;
+    actor_bindings_.registerSceneParameters(*this, show_select_, use_scene_camera_, reload_scene_,
+                                              position_param_);
 
     view_matrix_ = add_parameter<ParameterMatrix4>("view_matrix");
     view_matrix_->set_property(PropertyNames::purpose, PurposeNames::ViewMatrix);
@@ -114,10 +120,44 @@ void Input::ensureSession() {
 }
 
 void Input::refreshShowSelector() {
-    show_paths_ = scanShowResources(module_dir_);
-    const std::int32_t demo_index =
-        findSelectorIndex(show_paths_, "scenes/demo.gns", findSelectorIndex(show_paths_, "demo", 0));
-    setShowEnumOptions(show_select_, show_paths_, demo_index);
+    const std::vector<std::string> scanned = ::genesis::scanRuntimeShowResources(module_dir_);
+    const std::int32_t previous_index = show_select_ ? show_select_->value() : 0;
+    const std::string previous_resource = show_paths_.empty() ? "demo" : selectedShowPath();
+
+    show_paths_ = scanned;
+    const std::int32_t restored_index =
+        findSelectorIndex(show_paths_, previous_resource, previous_index);
+    setShowEnumOptions(show_select_, show_paths_, restored_index);
+}
+
+void Input::refreshParameterCatalog() {
+    const std::vector<std::string> scanned = ::genesis::scanRuntimeShowResources(module_dir_);
+    const bool show_list_changed = scanned != show_paths_;
+    if (!show_list_changed) {
+        return;
+    }
+
+    parameter_catalog_ = buildSceneParameterCatalog(module_dir_);
+    const std::size_t added = actor_bindings_.registerNewFromCatalog(*this, parameter_catalog_);
+    if (added > 0) {
+        host().log_info(std::format("GENESIS registered {} new actor/light parameters", added));
+    }
+
+    refreshShowSelector();
+}
+
+void Input::refreshCatalogForLoadedShow() {
+    if (loaded_scene_resource_.empty()) {
+        return;
+    }
+
+    const SceneParameterCatalog show_catalog =
+        buildSceneParameterCatalogForShow(module_dir_, loaded_scene_resource_);
+    const std::size_t added = actor_bindings_.registerNewFromCatalog(*this, show_catalog);
+    if (added > 0) {
+        host().log_info(std::format("GENESIS registered {} parameters for '{}'", added,
+                                    loaded_scene_resource_));
+    }
 }
 
 std::string Input::selectedShowPath() const {
@@ -137,6 +177,9 @@ void Input::applyLoadedPixeraConfig() {
 
     const std::optional<::genesis::GnsPixeraConfig>& pixera = session_->pixeraConfig();
     if (!pixera.has_value()) {
+        ::genesis::GnsBindings empty{};
+        actor_bindings_.applyGnsBindings(empty, session_->sceneRuntime());
+        actor_bindings_.syncAllFromScene(session_->sceneRuntime());
         return;
     }
 
@@ -146,6 +189,16 @@ void Input::applyLoadedPixeraConfig() {
 
     const std::int32_t show_index = findSelectorIndex(show_paths_, loaded_scene_resource_, show_select_->value());
     setShowEnumOptions(show_select_, show_paths_, show_index);
+
+    actor_bindings_.applyGnsBindings(pixera->bindings, session_->sceneRuntime());
+    actor_bindings_.syncAllFromScene(session_->sceneRuntime());
+
+    if (!pixera->bindings.target_node.empty()) {
+        host().log_info(std::format("GENESIS target_node: {}", pixera->bindings.target_node));
+    }
+    if (!pixera->bindings.light_node.empty()) {
+        host().log_info(std::format("GENESIS light_node: {}", pixera->bindings.light_node));
+    }
 }
 
 void Input::reloadSceneIfNeeded() {
@@ -161,11 +214,16 @@ void Input::reloadSceneIfNeeded() {
 
     if (const std::optional<ResolvedSceneResource> resolved =
             resolveSceneResource(host(), resource, module_dir_)) {
-        session_->loadResolved(*resolved);
-        loaded_scene_resource_ = resource;
-        loaded_show_index_ = show_index;
-        applyLoadedPixeraConfig();
-        host().log_info(std::format("GENESIS loaded show '{}'", resource));
+        if (session_->tryLoadResolved(toGenesisRuntimeResource(*resolved))) {
+            loaded_scene_resource_ = resource;
+            loaded_show_index_ = show_index;
+            refreshCatalogForLoadedShow();
+            applyLoadedPixeraConfig();
+            host().log_info(std::format("GENESIS loaded show '{}'", resource));
+        } else {
+            host().log_error(std::format("GENESIS failed to load show '{}': {}", resource,
+                                         session_->lastLoadError()));
+        }
     }
 }
 
@@ -208,6 +266,14 @@ string Input::get_property(string_view name) noexcept {
 }
 
 bool Input::update() noexcept try {
+    if (reload_scene_ && reload_scene_->value()) {
+        loaded_scene_resource_.clear();
+        loaded_show_index_ = -1;
+        reload_scene_->set_value(false);
+        host().log_info("GENESIS manual scene reload requested");
+    }
+
+    refreshParameterCatalog();
     reloadSceneIfNeeded();
     return true;
 } catch (const std::exception& ex) {

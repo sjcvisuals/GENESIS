@@ -1,0 +1,18 @@
+{
+  "genesisVersion": "0.1.0",
+  "runtimeVersion": "0.1.0",
+  "renderBridgeSdkVersion": "1.2",
+  "graphicsBackend": "Vulkan",
+  "extensionDll": "ExtGenesis.dll",
+  "defaultScene": "Scenes/showcase.gns",
+  "sceneFormats": [".gns", ".scene.json", ".glb", ".gltf"],
+  "requiredRuntimeFiles": [
+    "ExtGenesis.dll",
+    "Genesis.manifest.json"
+  ],
+  "assetRoots": [
+    "Assets",
+    "Scenes"
+  ],
+  "notes": "Copy this folder to PIXERA RenderBridge extensions. Scene and asset paths are resolved relative to the extension DLL directory."
+}

@@ -9,11 +9,8 @@
 #include <glm/gtx/matrix_decompose.hpp>
 #include <glm/gtx/quaternion.hpp>
 
-#include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <functional>
-#include <limits>
 #include <optional>
 
 namespace genesis {
@@ -56,6 +53,7 @@ inline glm::mat4 float16ToMat4(const float m[16]) {
     return out;
 }
 
+// ImGuizmo expects OpenGL-style clip Y; undo the Vulkan flip applied to render projections.
 inline glm::mat4 projectionForImGuizmo(glm::mat4 projection) {
     projection[1][1] *= -1.0f;
     return projection;
@@ -71,6 +69,21 @@ inline glm::quat rotationLookAt(const glm::vec3& eye, const glm::vec3& target,
     const glm::vec3 up = glm::cross(forward, right);
     const glm::mat3 basis(right, up, -forward);
     return glm::quat_cast(basis);
+}
+
+inline glm::quat cameraRotationFromLookAt(const glm::vec3& eye, const glm::vec3& target,
+                                          const glm::vec3& world_up = glm::vec3(0.0f, 1.0f, 0.0f)) {
+    const glm::mat4 view = glm::lookAtRH(eye, target, world_up);
+    const glm::mat4 world = glm::inverse(view);
+    glm::vec3 scale{};
+    glm::vec3 skew{};
+    glm::vec4 perspective{};
+    glm::quat rotation{};
+    glm::vec3 position{};
+    if (!glm::decompose(world, scale, rotation, position, skew, perspective)) {
+        return rotationLookAt(eye, target, world_up);
+    }
+    return glm::normalize(rotation);
 }
 
 inline void extractYawPitchFromForward(const glm::vec3& forward, float& yaw, float& pitch) {
@@ -119,77 +132,6 @@ inline ScreenRay rayFromScreen(const glm::mat4& view, const glm::mat4& projectio
     ray.origin = near_world;
     ray.direction = glm::normalize(far_world - near_world);
     return ray;
-}
-
-inline bool rayIntersectsUnitAabb(const ScreenRay& ray, const glm::mat4& world,
-                                  float half_extent, float& out_distance) {
-    const glm::mat4 inv_world = glm::inverse(world);
-    const glm::vec3 origin = glm::vec3(inv_world * glm::vec4(ray.origin, 1.0f));
-    const glm::vec3 direction = glm::normalize(glm::mat3(inv_world) * ray.direction);
-
-    const glm::vec3 box_min(-half_extent);
-    const glm::vec3 box_max(half_extent);
-
-    float t_min = 0.0f;
-    float t_max = std::numeric_limits<float>::max();
-
-    for (int axis = 0; axis < 3; ++axis) {
-        if (std::abs(direction[axis]) < 1e-6f) {
-            if (origin[axis] < box_min[axis] || origin[axis] > box_max[axis]) {
-                return false;
-            }
-            continue;
-        }
-
-        const float inv_d = 1.0f / direction[axis];
-        float t0 = (box_min[axis] - origin[axis]) * inv_d;
-        float t1 = (box_max[axis] - origin[axis]) * inv_d;
-        if (t0 > t1) std::swap(t0, t1);
-        t_min = std::max(t_min, t0);
-        t_max = std::min(t_max, t1);
-        if (t_max < t_min) {
-            return false;
-        }
-    }
-
-    out_distance = t_min;
-    return t_max >= 0.0f;
-}
-
-inline float pickBoundsHalfExtent(const Node& node) {
-    if (node.mesh_resource.has_value()) {
-        return 0.5f;
-    }
-    if (node.light.has_value() || node.camera.has_value()) {
-        return 0.2f;
-    }
-    return 0.15f;
-}
-
-inline std::optional<NodeId> pickNodeAtScreen(const Scene& scene, const ScreenRay& ray,
-                                              const std::function<bool(const Node&)>& skip_node = {}) {
-    std::optional<NodeId> best_id;
-    float best_distance = std::numeric_limits<float>::max();
-
-    for (const Node& node : scene.nodes) {
-        if (!node.visible) continue;
-        if (skip_node && skip_node(node)) continue;
-        if (!node.mesh_resource.has_value() && !node.light.has_value() && !node.camera.has_value()) {
-            continue;
-        }
-
-        const float half_extent = pickBoundsHalfExtent(node);
-        float distance = 0.0f;
-        if (!rayIntersectsUnitAabb(ray, node.world, half_extent, distance)) {
-            continue;
-        }
-        if (distance < best_distance) {
-            best_distance = distance;
-            best_id = node.id;
-        }
-    }
-
-    return best_id;
 }
 
 } // namespace genesis

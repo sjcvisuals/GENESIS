@@ -6,7 +6,9 @@
 #include "renderer/FrameUniforms.hpp"
 
 #include "renderer/GridDrawPushConstants.hpp"
+#include "renderer/MeshBatchDrawer.hpp"
 #include "renderer/MeshDrawPushConstants.hpp"
+#include "scene/SceneDrawBatch.hpp"
 
 #include <filesystem>
 #include <memory>
@@ -22,7 +24,8 @@ class Swapchain;
 class Buffer;
 class GraphicsPipeline;
 class ImGuiLayer;
-class MaterialBinding;
+class BindlessTextures;
+class MeshBatchDrawer;
 class Window;
 class GpuTexture;
 struct Mesh;
@@ -40,12 +43,18 @@ public:
     void drawTriangle();
     void drawMesh(const Mesh& mesh, const MeshDrawPushConstants& draw_constants,
                   const GpuTexture* base_color_texture = nullptr);
+    void drawMeshBatches(const std::vector<SceneMeshBatch>& batches,
+                         const MeshDrawOptions& options = {});
     void drawGrid(const Mesh& mesh, const GridDrawPushConstants& draw_constants);
     void endFrame();
 
     // Temporary API for camera + lighting. Will evolve into render graph inputs later.
     void setFrameUniforms(const FrameUniforms& uniforms);
     void setViewProjection(const float* mat4_col_major);
+
+    // When enabled, mesh/grid draws are clipped to this screen-space rectangle (pixels).
+    void setViewportDrawRegion(float x, float y, float width, float height);
+    void clearViewportDrawRegion();
 
     void onResize(int width, int height);
 
@@ -65,13 +74,19 @@ private:
     void createFrameDescriptorSets();
     void recreateSwapchain(int width, int height);
 
+    void ensureRenderPass();
+    void createMeshPipelines();
+    void applyDrawRegion(VkCommandBuffer cmd) const;
+
     Window& window_;
     std::unique_ptr<VulkanContext> context_;
     std::unique_ptr<Swapchain> swapchain_;
     std::unique_ptr<GraphicsPipeline> triangle_pipeline_;
     std::unique_ptr<GraphicsPipeline> mesh_pipeline_;
+    std::unique_ptr<GraphicsPipeline> mesh_depth_pipeline_;
     std::unique_ptr<GraphicsPipeline> grid_pipeline_;
-    std::unique_ptr<MaterialBinding> material_binding_;
+    std::unique_ptr<BindlessTextures> bindless_textures_;
+    std::unique_ptr<MeshBatchDrawer> mesh_batch_drawer_;
     std::unique_ptr<Buffer> vertex_buffer_;
     std::unique_ptr<ImGuiLayer> imgui_;
 
@@ -91,7 +106,15 @@ private:
     size_t current_frame_ = 0;
     uint32_t image_index_ = 0;
     bool framebuffer_resized_ = false;
+    bool render_pass_active_ = false;
+    FrameUniforms frame_uniforms_{};
     std::string device_name_;
+
+    bool draw_region_enabled_ = false;
+    float draw_region_x_ = 0.0f;
+    float draw_region_y_ = 0.0f;
+    float draw_region_w_ = 0.0f;
+    float draw_region_h_ = 0.0f;
 };
 
 } // namespace genesis

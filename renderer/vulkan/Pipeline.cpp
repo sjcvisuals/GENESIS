@@ -110,7 +110,7 @@ GraphicsPipeline::GraphicsPipeline(const VulkanContext& context, const GraphicsP
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_NONE;
+    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
     rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_FALSE;
 
@@ -122,7 +122,7 @@ GraphicsPipeline::GraphicsPipeline(const VulkanContext& context, const GraphicsP
     depth_stencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     if (config.depth_test) {
         depth_stencil.depthTestEnable = VK_TRUE;
-        depth_stencil.depthWriteEnable = VK_TRUE;
+        depth_stencil.depthWriteEnable = config.depth_write ? VK_TRUE : VK_FALSE;
         depth_stencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
     } else {
         depth_stencil.depthTestEnable = VK_FALSE;
@@ -133,8 +133,7 @@ GraphicsPipeline::GraphicsPipeline(const VulkanContext& context, const GraphicsP
     depth_stencil.stencilTestEnable = VK_FALSE;
 
     VkPipelineColorBlendAttachmentState color_blend_attachment{};
-    color_blend_attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                                            VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    color_blend_attachment.colorWriteMask = config.color_write_mask;
     color_blend_attachment.blendEnable = VK_FALSE;
 
     VkPipelineColorBlendStateCreateInfo color_blending{};

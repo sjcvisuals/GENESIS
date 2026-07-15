@@ -34,5 +34,7 @@ struct SceneParameterCatalog {
 std::string parameterIdFromPath(std::string_view node_path);
 
 SceneParameterCatalog buildSceneParameterCatalog(const std::filesystem::path& module_dir);
+SceneParameterCatalog buildSceneParameterCatalogForShow(const std::filesystem::path& module_dir,
+                                                      std::string_view show_resource);
 
 } // namespace rxext::genesis_ext

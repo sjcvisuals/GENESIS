@@ -52,7 +52,7 @@ FetchContent_MakeAvailable(SDL3)
 # -----------------------------------------------------------------------------
 FetchContent_Declare(
     imgui
-    URL https://codeload.github.com/ocornut/imgui/zip/refs/tags/v1.91.8
+    URL https://codeload.github.com/ocornut/imgui/zip/refs/heads/docking
 )
 FetchContent_MakeAvailable(imgui)
 
@@ -81,6 +81,15 @@ FetchContent_Declare(
 FetchContent_GetProperties(imguizmo)
 if(NOT imguizmo_POPULATED)
     FetchContent_Populate(imguizmo)
+    # Upstream SetRect() incorrectly sets mYMax from mXMax; breaks non-fullscreen viewports.
+    set(_imguizmo_cpp "${imguizmo_SOURCE_DIR}/src/ImGuizmo.cpp")
+    if(EXISTS "${_imguizmo_cpp}")
+        file(READ "${_imguizmo_cpp}" _imguizmo_src)
+        string(REPLACE "gContext.mYMax = gContext.mY + gContext.mXMax;"
+                       "gContext.mYMax = gContext.mY + gContext.mHeight;"
+                       _imguizmo_src "${_imguizmo_src}")
+        file(WRITE "${_imguizmo_cpp}" "${_imguizmo_src}")
+    endif()
 endif()
 
 add_library(imguizmo_lib STATIC

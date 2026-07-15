@@ -1,4 +1,5 @@
 #include "platform/ImGuiLayer.hpp"
+#include "platform/EditorPaths.hpp"
 
 #include "renderer/vulkan/Swapchain.hpp"
 #include "renderer/vulkan/VulkanContext.hpp"
@@ -29,7 +30,8 @@ ImGuiLayer::ImGuiLayer(SDL_Window* window, const VulkanContext& context, Swapcha
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
+    io.IniFilename = editorLayoutIniCString();
 
     ImGui::StyleColorsDark();
 
@@ -40,6 +42,7 @@ ImGuiLayer::ImGuiLayer(SDL_Window* window, const VulkanContext& context, Swapcha
     createDescriptorPool(context);
 
     ImGui_ImplVulkan_InitInfo init_info{};
+    init_info.ApiVersion = VK_API_VERSION_1_2;
     init_info.Instance = context.instance();
     init_info.PhysicalDevice = context.physicalDevice();
     init_info.Device = context.device();
@@ -48,9 +51,9 @@ ImGuiLayer::ImGuiLayer(SDL_Window* window, const VulkanContext& context, Swapcha
     init_info.DescriptorPool = descriptor_pool_;
     init_info.MinImageCount = static_cast<uint32_t>(swapchain.images().size());
     init_info.ImageCount = static_cast<uint32_t>(swapchain.images().size());
-    init_info.RenderPass = swapchain.renderPass();
-    init_info.Subpass = 0;
-    init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+    init_info.PipelineInfoMain.RenderPass = swapchain.renderPass();
+    init_info.PipelineInfoMain.Subpass = 0;
+    init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
     init_info.UseDynamicRendering = false;
     init_info.CheckVkResultFn = checkVulkanResult;
 

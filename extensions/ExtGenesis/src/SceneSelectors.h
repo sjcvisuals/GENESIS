@@ -16,9 +16,6 @@ struct SceneSelectorLists {
     std::vector<std::string> light_paths;
 };
 
-// Discover bundled show files next to the extension DLL.
-std::vector<std::string> scanShowResources(const std::filesystem::path& module_dir);
-
 // Build dropdown lists from the loaded scene graph.
 SceneSelectorLists buildSceneSelectorLists(const genesis::Scene& scene);
 

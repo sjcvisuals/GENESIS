@@ -55,6 +55,12 @@ void Window::handleResize(int width, int height) {
     resized_ = true;
 }
 
+void Window::setTitle(const std::string& title) {
+    if (window_) {
+        SDL_SetWindowTitle(window_, title.c_str());
+    }
+}
+
 void processWindowEvent(Window& window, const SDL_Event& event) {
     switch (event.type) {
     case SDL_EVENT_QUIT:

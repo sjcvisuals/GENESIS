@@ -17,6 +17,7 @@ struct SceneDocumentNode {
     std::optional<std::string> parent_path;
     Transform local{};
     bool visible = true;
+    bool pickable = true;
 
     std::optional<std::string> mesh_ref;
     std::optional<std::string> material_ref;

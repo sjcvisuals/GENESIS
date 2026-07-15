@@ -1,6 +1,7 @@
 #include "SceneParameterCatalog.h"
 
 #include "SceneSelectors.h"
+#include "runtime/RuntimePaths.hpp"
 #include "scene/GnsPackage.hpp"
 #include "scene/SceneDocument.hpp"
 #include "scene/SceneSerializer.hpp"
@@ -23,33 +24,57 @@ std::string friendlyNodeLabel(const std::string& node_path) {
     return node_path.substr(slash + 1);
 }
 
-std::optional<genesis::SceneDocument> loadDocumentForShow(const std::filesystem::path& module_dir,
-                                                          std::string_view show_resource) {
+std::optional<std::filesystem::path> resolveShowDocumentPath(const std::filesystem::path& module_dir,
+                                                             std::string_view show_resource) {
     if (show_resource == "demo" || show_resource.empty()) {
-        const std::filesystem::path demo_path = module_dir / "assets" / "scenes" / "demo.scene.json";
-        if (std::filesystem::exists(demo_path)) {
-            return genesis::SceneSerializer::load(demo_path);
+        const std::filesystem::path candidates[] = {
+            module_dir / "Scenes" / "demo.gns",
+            module_dir / "scenes" / "demo.gns",
+            module_dir / "assets" / "scenes" / "demo.gns",
+            module_dir / "assets" / "scenes" / "demo.scene.json",
+            module_dir / "Scenes" / "demo.scene.json",
+        };
+        for (const std::filesystem::path& candidate : candidates) {
+            if (std::filesystem::exists(candidate)) {
+                return candidate;
+            }
         }
         return std::nullopt;
     }
 
-    const std::filesystem::path resource_path(show_resource);
-    std::filesystem::path absolute = module_dir / "assets" / resource_path;
-    if (!std::filesystem::exists(absolute)) {
-        absolute = module_dir / resource_path;
+    const std::filesystem::path candidates[] = {
+        module_dir / "Scenes" / show_resource,
+        module_dir / "scenes" / show_resource,
+        module_dir / "assets" / "scenes" / show_resource,
+        module_dir / "Assets" / "Scenes" / show_resource,
+        module_dir / "assets" / show_resource,
+        module_dir / "Assets" / show_resource,
+        module_dir / show_resource,
+    };
+    for (const std::filesystem::path& candidate : candidates) {
+        if (std::filesystem::exists(candidate)) {
+            return candidate;
+        }
     }
-    if (!std::filesystem::exists(absolute)) {
+    return std::nullopt;
+}
+
+std::optional<genesis::SceneDocument> loadDocumentForShow(const std::filesystem::path& module_dir,
+                                                          std::string_view show_resource) {
+    const std::optional<std::filesystem::path> absolute =
+        resolveShowDocumentPath(module_dir, show_resource);
+    if (!absolute.has_value()) {
         return std::nullopt;
     }
 
-    if (absolute.extension() == ".gns") {
-        const genesis::GnsPackage package = genesis::GnsPackage::load(absolute);
-        return package.resolveScene(absolute.parent_path());
+    if (absolute->extension() == ".gns") {
+        const genesis::GnsPackage package = genesis::GnsPackage::load(*absolute);
+        return package.resolveScene(absolute->parent_path());
     }
 
-    const std::string ext = absolute.extension().string();
+    const std::string ext = absolute->extension().string();
     if (ext == ".json" || ext == ".scene" || ext == ".scene.json") {
-        return genesis::SceneSerializer::load(absolute);
+        return genesis::SceneSerializer::load(*absolute);
     }
 
     return std::nullopt;
@@ -110,6 +135,23 @@ CatalogLight lightFromNode(const genesis::SceneDocumentNode& node) {
     return light;
 }
 
+SceneParameterCatalog catalogFromDocument(const genesis::SceneDocument& document) {
+    SceneParameterCatalog catalog;
+    for (const genesis::SceneDocumentNode& node : document.nodes) {
+        if (node.mesh_ref.has_value()) {
+            catalog.actors.push_back(actorFromNode(document, node));
+        }
+        if (node.light.has_value()) {
+            catalog.lights.push_back(lightFromNode(node));
+        }
+    }
+    std::sort(catalog.actors.begin(), catalog.actors.end(),
+              [](const CatalogActor& a, const CatalogActor& b) { return a.path < b.path; });
+    std::sort(catalog.lights.begin(), catalog.lights.end(),
+              [](const CatalogLight& a, const CatalogLight& b) { return a.path < b.path; });
+    return catalog;
+}
+
 } // namespace
 
 std::string parameterIdFromPath(std::string_view node_path) {
@@ -125,25 +167,28 @@ std::string parameterIdFromPath(std::string_view node_path) {
     return id;
 }
 
+SceneParameterCatalog buildSceneParameterCatalogForShow(const std::filesystem::path& module_dir,
+                                                      std::string_view show_resource) {
+    const std::optional<genesis::SceneDocument> document = loadDocumentForShow(module_dir, show_resource);
+    if (!document.has_value()) {
+        return {};
+    }
+    return catalogFromDocument(*document);
+}
+
 SceneParameterCatalog buildSceneParameterCatalog(const std::filesystem::path& module_dir) {
     SceneParameterCatalog catalog;
     std::map<std::string, CatalogActor> actors;
     std::map<std::string, CatalogLight> lights;
 
-    const std::vector<std::string> shows = scanShowResources(module_dir);
+    const std::vector<std::string> shows = ::genesis::scanRuntimeShowResources(module_dir);
     for (const std::string& show : shows) {
-        std::optional<genesis::SceneDocument> document = loadDocumentForShow(module_dir, show);
-        if (!document.has_value()) {
-            continue;
+        const SceneParameterCatalog show_catalog = buildSceneParameterCatalogForShow(module_dir, show);
+        for (const CatalogActor& actor : show_catalog.actors) {
+            actors.emplace(actor.path, actor);
         }
-
-        for (const genesis::SceneDocumentNode& node : document->nodes) {
-            if (node.mesh_ref.has_value() && !actors.contains(node.path)) {
-                actors.emplace(node.path, actorFromNode(*document, node));
-            }
-            if (node.light.has_value() && !lights.contains(node.path)) {
-                lights.emplace(node.path, lightFromNode(node));
-            }
+        for (const CatalogLight& light : show_catalog.lights) {
+            lights.emplace(light.path, light);
         }
     }
 

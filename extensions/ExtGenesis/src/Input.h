@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ActorBindings.h"
-#include "GenesisSession.h"
+#include "runtime/GenesisSession.hpp"
 #include "ResourceLoader.h"
 #include "SceneParameterCatalog.h"
 #include "rxext_client.h"
@@ -38,6 +38,8 @@ private:
     void publishTargetTexture();
     void ensureSession();
     void refreshShowSelector();
+    void refreshParameterCatalog();
+    void refreshCatalogForLoadedShow();
     void applyLoadedPixeraConfig();
     void reloadSceneIfNeeded();
     std::string selectedShowPath() const;
@@ -51,6 +53,7 @@ private:
     ParameterMatrix4* projection_matrix_ = nullptr;
     ParameterInt* show_select_ = nullptr;
     ParameterBool* use_scene_camera_ = nullptr;
+    ParameterBool* reload_scene_ = nullptr;
     ActorBindings actor_bindings_;
     SceneParameterCatalog parameter_catalog_;
     std::filesystem::path module_dir_;

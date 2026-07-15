@@ -42,7 +42,10 @@ glm::mat4 Camera::viewMatrix() const {
 }
 
 glm::mat4 Camera::projectionMatrix(float aspect) const {
-    return glm::perspectiveRH_ZO(fov_y_radians, aspect, near_plane, far_plane);
+    glm::mat4 projection = glm::perspectiveRH_ZO(fov_y_radians, aspect, near_plane, far_plane);
+    // Vulkan NDC has +Y downward; flip clip-space Y to match the framebuffer.
+    projection[1][1] *= -1.0f;
+    return projection;
 }
 
 glm::mat4 Camera::viewProjection(float aspect) const {

@@ -4,16 +4,27 @@
 
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace genesis {
 
 namespace {
+
+std::vector<std::filesystem::path> g_asset_search_roots;
 
 bool pathExists(const std::filesystem::path& path) {
     return !path.empty() && std::filesystem::exists(path);
 }
 
 } // namespace
+
+void setAssetSearchRoots(std::span<const std::filesystem::path> roots) {
+    g_asset_search_roots.assign(roots.begin(), roots.end());
+}
+
+void clearAssetSearchRoots() {
+    g_asset_search_roots.clear();
+}
 
 std::filesystem::path resolveAssetPath(const std::filesystem::path& path) {
     if (path.empty()) {
@@ -27,6 +38,16 @@ std::filesystem::path resolveAssetPath(const std::filesystem::path& path) {
 
     if (pathExists(path)) {
         return std::filesystem::absolute(path);
+    }
+
+    for (const std::filesystem::path& root : g_asset_search_roots) {
+        if (root.empty()) {
+            continue;
+        }
+        const std::filesystem::path candidate = root / path;
+        if (pathExists(candidate)) {
+            return std::filesystem::absolute(candidate);
+        }
     }
 
     if (const char* base = SDL_GetBasePath()) {

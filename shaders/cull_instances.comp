@@ -1,0 +1,78 @@
+#version 450
+
+struct MeshInstance {
+    mat4 model;
+    mat4 normalMatrix;
+    vec4 boundsCenter;
+    vec4 boundsExtent;
+};
+
+struct BatchCullHeader {
+    uint instanceOffset;
+    uint instanceCount;
+    uint visibleOffset;
+    uint visibleCount;
+};
+
+layout(set = 0, binding = 0) readonly buffer InputInstances {
+    MeshInstance instances[];
+} uInput;
+
+layout(set = 0, binding = 1) writeonly buffer OutputInstances {
+    MeshInstance instances[];
+} uOutput;
+
+layout(set = 0, binding = 2) buffer BatchHeaders {
+    BatchCullHeader batches[];
+} uBatches;
+
+layout(push_constant) uniform Push {
+    vec4 frustumPlanes[6];
+    uint batchCount;
+    uint totalInstances;
+    uint _pad0;
+    uint _pad1;
+} uPush;
+
+bool sphereInFrustum(vec3 center, vec3 halfExtent) {
+    for (int i = 0; i < 6; ++i) {
+        vec3 normal = uPush.frustumPlanes[i].xyz;
+        float distance = uPush.frustumPlanes[i].w;
+        vec3 positive = center + halfExtent * sign(normal);
+        if (dot(normal, positive) + distance < 0.0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void main() {
+    uint globalId = gl_GlobalInvocationID.x;
+    if (globalId >= uPush.totalInstances) {
+        return;
+    }
+
+    uint batchIndex = 0u;
+    uint localIndex = globalId;
+    for (uint i = 0u; i < uPush.batchCount; ++i) {
+        BatchCullHeader header = uBatches.batches[i];
+        if (localIndex < header.instanceCount) {
+            batchIndex = i;
+            break;
+        }
+        localIndex -= header.instanceCount;
+    }
+
+    BatchCullHeader header = uBatches.batches[batchIndex];
+    uint sourceIndex = header.instanceOffset + localIndex;
+    MeshInstance inst = uInput.instances[sourceIndex];
+
+    vec3 center = inst.boundsCenter.xyz;
+    vec3 halfExtent = inst.boundsExtent.xyz;
+    if (!sphereInFrustum(center, halfExtent)) {
+        return;
+    }
+
+    uint outIndex = atomicAdd(uBatches.batches[batchIndex].visibleCount, 1u);
+    uOutput.instances[header.visibleOffset + outIndex] = inst;
+}

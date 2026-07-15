@@ -1,7 +1,9 @@
 #include "renderer/OffscreenRenderer.hpp"
 
 #include "renderer/Mesh.hpp"
-#include "renderer/MaterialBinding.hpp"
+#include "renderer/MeshBatchDrawer.hpp"
+#include "renderer/MeshInstance.hpp"
+#include "renderer/BindlessTextures.hpp"
 #include "renderer/vulkan/Buffer.hpp"
 #include "renderer/vulkan/ExternalRenderTarget.hpp"
 #include "renderer/vulkan/ExternalSync.hpp"
@@ -48,7 +50,8 @@ OffscreenRenderer::~OffscreenRenderer() {
     }
 
     mesh_pipeline_.reset();
-    material_binding_.reset();
+    mesh_depth_pipeline_.reset();
+    bindless_textures_.reset();
     frame_ubo_.reset();
 
     if (frame_descriptor_pool_ != VK_NULL_HANDLE) {
@@ -118,32 +121,40 @@ void OffscreenRenderer::createCommandBuffers() {
 }
 
 void OffscreenRenderer::createMeshPipeline() {
-    material_binding_ = std::make_unique<MaterialBinding>(*context_);
+    bindless_textures_ = std::make_unique<BindlessTextures>(*context_);
 
-    VkDescriptorSetLayoutBinding ubo_binding{};
-    ubo_binding.binding = 0;
-    ubo_binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    ubo_binding.descriptorCount = 1;
-    ubo_binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    VkDescriptorSetLayoutBinding bindings[2]{};
+
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    bindings[1].binding = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
     VkDescriptorSetLayoutCreateInfo layout_info{};
     layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layout_info.bindingCount = 1;
-    layout_info.pBindings = &ubo_binding;
+    layout_info.bindingCount = 2;
+    layout_info.pBindings = bindings;
 
     if (vkCreateDescriptorSetLayout(context_->device(), &layout_info, nullptr, &frame_set_layout_) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create offscreen descriptor set layout");
     }
 
-    VkDescriptorPoolSize pool_size{};
-    pool_size.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    pool_size.descriptorCount = static_cast<uint32_t>(kFramesInFlight);
+    VkDescriptorPoolSize pool_sizes[2]{};
+    pool_sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    pool_sizes[0].descriptorCount = static_cast<uint32_t>(kFramesInFlight);
+    pool_sizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    pool_sizes[1].descriptorCount = static_cast<uint32_t>(kFramesInFlight);
 
     VkDescriptorPoolCreateInfo pool_info{};
     pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     pool_info.maxSets = static_cast<uint32_t>(kFramesInFlight);
-    pool_info.poolSizeCount = 1;
-    pool_info.pPoolSizes = &pool_size;
+    pool_info.poolSizeCount = 2;
+    pool_info.pPoolSizes = pool_sizes;
 
     if (vkCreateDescriptorPool(context_->device(), &pool_info, nullptr, &frame_descriptor_pool_) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create offscreen descriptor pool");
@@ -182,11 +193,20 @@ void OffscreenRenderer::createMeshPipeline() {
         vkUpdateDescriptorSets(context_->device(), 1, &write, 0, nullptr);
     }
 
-    recreatePipelines();
+    mesh_batch_drawer_ = std::make_unique<MeshBatchDrawer>(*context_);
+    for (VkDescriptorSet frame_set : frame_descriptor_sets_) {
+        mesh_batch_drawer_->bindInstanceBuffer(context_->device(), frame_set);
+    }
+
+    createMeshPipelines();
 }
 
-void OffscreenRenderer::recreatePipelines() {
+void OffscreenRenderer::createMeshPipelines() {
     mesh_pipeline_.reset();
+    mesh_depth_pipeline_.reset();
+    if (!bindless_textures_) {
+        return;
+    }
 
     const std::filesystem::path shader_dir = GENESIS_SHADER_DIR;
     GraphicsPipelineConfig pipeline_config{};
@@ -195,19 +215,35 @@ void OffscreenRenderer::recreatePipelines() {
     pipeline_config.frag_shader = shader_dir / "mesh.frag.spv";
     pipeline_config.extent = target_->extent();
     pipeline_config.set0_layout = frame_set_layout_;
-    pipeline_config.set1_layout = material_binding_->layout();
+    pipeline_config.set1_layout = bindless_textures_->layout();
     pipeline_config = withMeshVertexLayout(pipeline_config);
     pipeline_config.depth_test = true;
-    pipeline_config.push_constant_size = sizeof(MeshDrawPushConstants);
+    pipeline_config.depth_write = false;
+    pipeline_config.push_constant_size = sizeof(MeshMaterialPushConstants);
     pipeline_config.push_constant_stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
     if (std::filesystem::exists(pipeline_config.vert_shader) &&
         std::filesystem::exists(pipeline_config.frag_shader)) {
         mesh_pipeline_ = std::make_unique<GraphicsPipeline>(*context_, pipeline_config);
     }
+
+    GraphicsPipelineConfig depth_config = pipeline_config;
+    depth_config.frag_shader = shader_dir / "mesh_depth.frag.spv";
+    depth_config.set1_layout = VK_NULL_HANDLE;
+    depth_config.depth_write = true;
+    depth_config.color_write_mask = 0;
+    depth_config.push_constant_stages = VK_SHADER_STAGE_VERTEX_BIT;
+    if (std::filesystem::exists(depth_config.vert_shader) && std::filesystem::exists(depth_config.frag_shader)) {
+        mesh_depth_pipeline_ = std::make_unique<GraphicsPipeline>(*context_, depth_config);
+    }
+}
+
+void OffscreenRenderer::recreatePipelines() {
+    createMeshPipelines();
 }
 
 void OffscreenRenderer::setFrameUniforms(const FrameUniforms& uniforms) {
+    frame_uniforms_ = uniforms;
     if (!frame_ubo_) {
         return;
     }
@@ -215,19 +251,12 @@ void OffscreenRenderer::setFrameUniforms(const FrameUniforms& uniforms) {
     frame_ubo_->upload(&uniforms, sizeof(FrameUniforms), offset);
 }
 
-void OffscreenRenderer::beginFrame() {
-    vkWaitForFences(context_->device(), 1, &in_flight_fences_[current_frame_], VK_TRUE, UINT64_MAX);
-    vkResetFences(context_->device(), 1, &in_flight_fences_[current_frame_]);
-
-    VkCommandBuffer cmd = command_buffers_[current_frame_];
-    vkResetCommandBuffer(cmd, 0);
-
-    VkCommandBufferBeginInfo begin_info{};
-    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    if (vkBeginCommandBuffer(cmd, &begin_info) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to begin offscreen command buffer");
+void OffscreenRenderer::ensureRenderPass() {
+    if (render_pass_active_) {
+        return;
     }
 
+    VkCommandBuffer cmd = command_buffers_[current_frame_];
     VkClearValue clear_color{};
     clear_color.color = {{0.02f, 0.02f, 0.03f, 1.0f}};
     VkClearValue clear_depth{};
@@ -244,15 +273,66 @@ void OffscreenRenderer::beginFrame() {
     render_pass_info.pClearValues = clears;
 
     vkCmdBeginRenderPass(cmd, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
+    render_pass_active_ = true;
+}
+
+void OffscreenRenderer::beginFrame() {
+    vkWaitForFences(context_->device(), 1, &in_flight_fences_[current_frame_], VK_TRUE, UINT64_MAX);
+    vkResetFences(context_->device(), 1, &in_flight_fences_[current_frame_]);
+
+    VkCommandBuffer cmd = command_buffers_[current_frame_];
+    vkResetCommandBuffer(cmd, 0);
+
+    VkCommandBufferBeginInfo begin_info{};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    if (vkBeginCommandBuffer(cmd, &begin_info) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to begin offscreen command buffer");
+    }
+
+    render_pass_active_ = false;
+    if (mesh_batch_drawer_) {
+        mesh_batch_drawer_->resetFrame();
+    }
 }
 
 void OffscreenRenderer::drawMesh(const Mesh& mesh, const MeshDrawPushConstants& draw_constants,
                                  const GpuTexture* base_color_texture) {
-    if (!mesh_pipeline_ || !material_binding_) {
+    SceneMeshBatch batch{};
+    batch.mesh = &mesh;
+    batch.base_color_texture = base_color_texture;
+    std::memcpy(batch.material.base_color, draw_constants.base_color, sizeof(batch.material.base_color));
+    std::memcpy(batch.material.emissive, draw_constants.emissive, sizeof(batch.material.emissive));
+    std::memcpy(batch.material.material_params, draw_constants.material_params,
+                sizeof(batch.material.material_params));
+
+    GpuMeshInstance instance{};
+    glm::mat4 model{};
+    std::memcpy(&model[0][0], draw_constants.model, sizeof(draw_constants.model));
+    fillGpuMeshInstance(instance, model, mesh.local_aabb_min, mesh.local_aabb_max);
+    batch.instances.push_back(instance);
+    drawMeshBatches({batch});
+}
+
+void OffscreenRenderer::drawMeshBatches(const std::vector<SceneMeshBatch>& batches,
+                                        const MeshDrawOptions& options) {
+    if (!mesh_pipeline_ || !bindless_textures_ || !mesh_batch_drawer_ || batches.empty()) {
         return;
     }
 
     VkCommandBuffer cmd = command_buffers_[current_frame_];
+
+    MeshDrawOptions draw_options = options;
+    if (draw_options.view_proj_col_major == nullptr) {
+        draw_options.view_proj_col_major = frame_uniforms_.view_proj;
+    }
+
+    if (!mesh_batch_drawer_->prepareDraw(batches, *bindless_textures_, draw_options)) {
+        return;
+    }
+
+    mesh_batch_drawer_->dispatchGpuCull(cmd);
+    mesh_batch_drawer_->bindDrawInstanceBuffer(context_->device(), frame_descriptor_sets_[current_frame_]);
+    ensureRenderPass();
 
     VkViewport viewport{};
     viewport.width = static_cast<float>(target_->extent().width);
@@ -263,26 +343,20 @@ void OffscreenRenderer::drawMesh(const Mesh& mesh, const MeshDrawPushConstants& 
     VkRect2D scissor{{0, 0}, target_->extent()};
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh_pipeline_->handle());
-
-    const VkDescriptorSet material_set = material_binding_->descriptorFor(base_color_texture);
-    const VkDescriptorSet sets[] = {frame_descriptor_sets_[current_frame_], material_set};
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh_pipeline_->layout(), 0, 2, sets, 0,
-                            nullptr);
-
-    vkCmdPushConstants(cmd, mesh_pipeline_->layout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                       sizeof(MeshDrawPushConstants), &draw_constants);
-
-    VkBuffer vb = mesh.vertex_buffer->handle();
-    VkDeviceSize off = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &off);
-    vkCmdBindIndexBuffer(cmd, mesh.index_buffer->handle(), 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(cmd, mesh.index_count, 1, 0, 0, 0);
+    if (draw_options.enable_depth_prepass && mesh_depth_pipeline_) {
+        mesh_batch_drawer_->drawDepthPrepass(cmd, *mesh_depth_pipeline_, frame_descriptor_sets_[current_frame_],
+                                             *bindless_textures_);
+    }
+    mesh_batch_drawer_->drawColorPass(cmd, *mesh_pipeline_, frame_descriptor_sets_[current_frame_],
+                                      *bindless_textures_);
 }
 
 void OffscreenRenderer::endFrame(VkSemaphore wait_host_finished) {
     VkCommandBuffer cmd = command_buffers_[current_frame_];
-    vkCmdEndRenderPass(cmd);
+    if (render_pass_active_) {
+        vkCmdEndRenderPass(cmd);
+        render_pass_active_ = false;
+    }
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
         throw std::runtime_error("Failed to record offscreen command buffer");

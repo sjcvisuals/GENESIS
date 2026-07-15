@@ -1,8 +1,7 @@
-#include "GenesisSession.h"
+#include "runtime/GenesisSession.hpp"
 
-#include "ResourceLoader.h"
+#include "runtime/RuntimeScene.hpp"
 #include "renderer/vulkan/ExternalSync.hpp"
-#include "scene/GnsPackage.hpp"
 #include "scene/Lighting.hpp"
 #include "scene/Scene.hpp"
 
@@ -26,24 +25,35 @@ void GenesisSession::resize(std::uint32_t width, std::uint32_t height) {
     renderer_->resize(width, height);
 }
 
-void GenesisSession::loadResolved(const rxext::genesis_ext::ResolvedSceneResource& resource) {
-    last_pixera_config_.reset();
-    switch (resource.kind) {
-    case rxext::genesis_ext::SceneResourceKind::Demo:
-        scene_->loadDemo();
-        break;
-    case rxext::genesis_ext::SceneResourceKind::Document:
-        scene_->loadDocumentFile(resource.path);
-        break;
-    case rxext::genesis_ext::SceneResourceKind::Gltf:
-        scene_->loadGltfFile(resource.path);
-        break;
-    case rxext::genesis_ext::SceneResourceKind::Gns:
-        last_pixera_config_ = GnsPackage::load(resource.path).pixera;
-        scene_->loadGnsFile(resource.path);
-        break;
+void GenesisSession::loadResolved(const RuntimeSceneResource& resource) {
+    if (!tryLoadResolved(resource)) {
+        throw std::runtime_error(last_load_error_.empty() ? "Scene load failed" : last_load_error_);
     }
-    scene_->updateTransforms();
+}
+
+bool GenesisSession::tryLoadResolved(const RuntimeSceneResource& resource) {
+    auto candidate = std::make_unique<SceneRuntime>(renderer_->context());
+    std::optional<GnsPixeraConfig> pixera;
+
+    if (!tryLoadRuntimeScene(*candidate, resource, &last_load_error_)) {
+        spdlog::error("GenesisSession scene load failed: {}", last_load_error_);
+        return false;
+    }
+
+    if (resource.kind == RuntimeSceneKind::Gns) {
+        try {
+            pixera = GnsPackage::load(resource.path).pixera;
+        } catch (const std::exception& ex) {
+            last_load_error_ = ex.what();
+            spdlog::error("GenesisSession GNS metadata load failed: {}", last_load_error_);
+            return false;
+        }
+    }
+
+    scene_ = std::move(candidate);
+    last_pixera_config_ = pixera;
+    last_load_error_.clear();
+    return true;
 }
 
 void GenesisSession::updateTransforms() {
@@ -87,10 +97,17 @@ void GenesisSession::render(const glm::dmat4& view,
     renderer_->setFrameUniforms(frame_uniforms_);
     renderer_->beginFrame();
 
-    scene_->collectDrawCommands(draw_commands_);
-    for (const SceneDrawCommand& cmd : draw_commands_) {
-        renderer_->drawMesh(*cmd.mesh, cmd.constants, cmd.base_color_texture);
-    }
+    SceneDrawCollectParams collect_params{};
+    collect_params.view_proj_col_major = frame_uniforms_.view_proj;
+    collect_params.enable_cpu_culling = true;
+    collect_params.enable_gpu_culling = false;
+    scene_->collectDrawCommands(draw_commands_, nullptr, collect_params);
+    buildDrawBatches(draw_commands_, draw_batches_);
+
+    MeshDrawOptions draw_options{};
+    draw_options.view_proj_col_major = frame_uniforms_.view_proj;
+    draw_options.enable_gpu_cull = false;
+    renderer_->drawMeshBatches(draw_batches_, draw_options);
 
     renderer_->endFrame(renderer_->sync().hostFinishedSemaphore());
 }

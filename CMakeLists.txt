@@ -26,41 +26,56 @@ genesis_compile_shaders(genesis_shaders
     shaders/triangle.frag
     shaders/mesh.vert
     shaders/mesh.frag
+    shaders/mesh_depth.frag
     shaders/grid.vert
     shaders/grid.frag
+    shaders/cull_instances.comp
+    shaders/finalize_cull.comp
 )
 
 # -----------------------------------------------------------------------------
 # Platform
 # -----------------------------------------------------------------------------
+add_library(genesis_platform_core STATIC
+    platform/Timer.cpp
+    platform/Paths.cpp
+)
+target_include_directories(genesis_platform_core PUBLIC
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/third_party
+)
+target_link_libraries(genesis_platform_core PUBLIC
+    SDL3::SDL3-static
+    spdlog::spdlog
+    glm::glm
+)
+
 add_library(genesis_platform STATIC
     platform/Window.cpp
     platform/Input.cpp
-    platform/Timer.cpp
     platform/ImGuiLayer.cpp
-    platform/Paths.cpp
+    platform/EditorPaths.cpp
 )
 target_include_directories(genesis_platform PUBLIC
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/third_party
 )
 target_link_libraries(genesis_platform PUBLIC
-    SDL3::SDL3-static
+    genesis_platform_core
     imgui_lib
-    spdlog::spdlog
-    glm::glm
     genesis_vulkan
 )
 
 # -----------------------------------------------------------------------------
-# Renderer
+# Renderer — core (offscreen + shared Vulkan) vs windowed (editor / player)
 # -----------------------------------------------------------------------------
-add_library(genesis_renderer STATIC
-    renderer/Renderer.cpp
+add_library(genesis_renderer_core STATIC
     renderer/OffscreenRenderer.cpp
+    renderer/MeshBatchDrawer.cpp
+    renderer/BindlessTextures.cpp
     renderer/MaterialBinding.cpp
+    renderer/vulkan/ComputePipeline.cpp
     renderer/vulkan/VulkanContext.cpp
-    renderer/vulkan/Swapchain.cpp
     renderer/vulkan/Buffer.cpp
     renderer/vulkan/Pipeline.cpp
     renderer/vulkan/ShaderModule.cpp
@@ -69,27 +84,38 @@ add_library(genesis_renderer STATIC
     renderer/vulkan/ExternalSync.cpp
     renderer/vulkan/VulkanInterop.cpp
 )
-target_include_directories(genesis_renderer PUBLIC
+target_include_directories(genesis_renderer_core PUBLIC
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_BINARY_DIR}
 )
-target_link_libraries(genesis_renderer PUBLIC
-    genesis_platform
+target_link_libraries(genesis_renderer_core PUBLIC
+    genesis_platform_core
     genesis_vulkan
 )
-add_dependencies(genesis_renderer genesis_shaders)
-target_sources(genesis_renderer PRIVATE ${GENESIS_SHADER_SPV})
+add_dependencies(genesis_renderer_core genesis_shaders)
+target_sources(genesis_renderer_core PRIVATE ${GENESIS_SHADER_SPV})
 set_source_files_properties(${GENESIS_SHADER_SPV} PROPERTIES GENERATED TRUE)
-
-target_compile_definitions(genesis_renderer PRIVATE
+target_compile_definitions(genesis_renderer_core PUBLIC
     GENESIS_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders/spv"
 )
 
+add_library(genesis_renderer_windowed STATIC
+    renderer/Renderer.cpp
+    renderer/vulkan/Swapchain.cpp
+)
+target_include_directories(genesis_renderer_windowed PUBLIC
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_BINARY_DIR}
+)
+target_link_libraries(genesis_renderer_windowed PUBLIC genesis_renderer_core)
+target_link_libraries(genesis_renderer_windowed PRIVATE genesis_platform)
+
+add_library(genesis_renderer ALIAS genesis_renderer_windowed)
+
 # -----------------------------------------------------------------------------
-# Engine
+# Engine (runtime core — shared by editor, player, and RenderBridge extension)
 # -----------------------------------------------------------------------------
-add_library(genesis_engine STATIC
-    engine/Application.cpp
+add_library(genesis_engine_runtime STATIC
     scene/Transform.cpp
     scene/Camera.cpp
     scene/Scene.cpp
@@ -99,15 +125,34 @@ add_library(genesis_engine STATIC
     scene/SceneSerializer.cpp
     scene/GnsPackage.cpp
     scene/SceneRuntime.cpp
-    host/HostBridge.cpp
     assets/GltfLoader.cpp
     assets/GltfTextures.cpp
     assets/MeshUpload.cpp
     assets/PrimitiveMeshes.cpp
     assets/GridMesh.cpp
 )
+target_include_directories(genesis_engine_runtime PUBLIC ${CMAKE_SOURCE_DIR})
+target_link_libraries(genesis_engine_runtime PUBLIC genesis_renderer_core fastgltf::fastgltf nlohmann_json::nlohmann_json)
+
+add_library(genesis_runtime STATIC
+    runtime/GenesisSession.cpp
+    runtime/RuntimePaths.cpp
+    runtime/RuntimeScene.cpp
+)
+target_include_directories(genesis_runtime PUBLIC ${CMAKE_SOURCE_DIR})
+target_link_libraries(genesis_runtime PUBLIC genesis_engine_runtime)
+
+add_library(genesis_engine STATIC
+    engine/Application.cpp
+    host/HostBridge.cpp
+)
 target_include_directories(genesis_engine PUBLIC ${CMAKE_SOURCE_DIR})
-target_link_libraries(genesis_engine PUBLIC genesis_renderer fastgltf::fastgltf nlohmann_json::nlohmann_json)
+target_link_libraries(genesis_engine PUBLIC
+    genesis_engine_runtime
+    genesis_runtime
+    genesis_platform
+    genesis_renderer_windowed
+)
 
 # -----------------------------------------------------------------------------
 # Examples
@@ -121,7 +166,7 @@ if(GENESIS_BUILD_EXAMPLES)
     target_link_libraries(genesis_camera PRIVATE genesis_engine)
     add_dependencies(genesis_camera genesis_shaders)
 
-    add_executable(genesis_gltf_viewer examples/gltf_viewer/main.cpp)
+    add_executable(genesis_gltf_viewer examples/gltf_viewer/main.cpp editor/EditorSession.cpp)
     target_link_libraries(genesis_gltf_viewer PRIVATE genesis_engine imguizmo_lib)
     add_dependencies(genesis_gltf_viewer genesis_shaders)
 
@@ -135,6 +180,17 @@ if(GENESIS_BUILD_EXAMPLES)
     add_executable(genesis_bridge_host examples/bridge_host/main.cpp)
     target_link_libraries(genesis_bridge_host PRIVATE genesis_engine)
     add_dependencies(genesis_bridge_host genesis_shaders)
+
+    add_executable(genesis_player examples/player/main.cpp)
+    target_link_libraries(genesis_player PRIVATE genesis_engine)
+    add_dependencies(genesis_player genesis_shaders)
+
+    add_custom_command(TARGET genesis_player POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets"
+            "$<TARGET_FILE_DIR:genesis_player>/assets"
+        COMMENT "Copying assets next to genesis_player"
+    )
 
     add_custom_command(TARGET genesis_bridge_host POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -157,7 +213,6 @@ if(GENESIS_BUILD_RENDERBRIDGE_EXT AND WIN32)
         ${EXT_GENESIS_DIR}/src/Extension.cpp
         ${EXT_GENESIS_DIR}/src/Device.cpp
         ${EXT_GENESIS_DIR}/src/Input.cpp
-        ${EXT_GENESIS_DIR}/src/GenesisSession.cpp
         ${EXT_GENESIS_DIR}/src/ModulePaths.cpp
         ${EXT_GENESIS_DIR}/src/ResourceLoader.cpp
         ${EXT_GENESIS_DIR}/src/SceneSelectors.cpp
@@ -175,7 +230,7 @@ if(GENESIS_BUILD_RENDERBRIDGE_EXT AND WIN32)
     )
 
     target_link_libraries(ExtGenesis PRIVATE
-        genesis_engine
+        genesis_runtime
     )
 
     target_compile_definitions(ExtGenesis PRIVATE
@@ -207,6 +262,26 @@ if(GENESIS_BUILD_RENDERBRIDGE_EXT AND WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/assets"
             "$<TARGET_FILE_DIR:ExtGenesis>/assets"
-        COMMENT "Deploying ExtGenesis to RX modules for local testing"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_BINARY_DIR}/deploy/GenesisPixera"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/Scenes"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/Assets"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:ExtGenesis>"
+            "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/ExtGenesis.dll"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets/scenes"
+            "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/Scenes"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets/test"
+            "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/Assets/test"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/deploy/Genesis.manifest.json"
+            "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/Genesis.manifest.json"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/deploy/README-pixera.txt"
+            "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/README.txt"
+        COMMENT "Deploying ExtGenesis to RX modules and GenesisPixera package"
     )
+
+    add_custom_target(GenesisDeploy DEPENDS ExtGenesis)
 endif()

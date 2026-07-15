@@ -7,7 +7,7 @@ GENESIS integrates with PIXERA the same way **Notch Blocks** and **TouchDesigner
 | **Renderer** (`ExtGenesis.dll`) | RenderBridge plugin — what PIXERA's **generic extension** file picker loads | Pick the `.dll` once per layer/device setup |
 | **Show** (`.gns`) | Scene + PIXERA bindings — what you author per project | Per show, like a Notch `.dfx` or TouchDesigner `.tox` |
 
-The generic extension slot in PIXERA is **not** where you import a `.gns`. It loads `ExtGenesis.dll` (must export `rxext_open` / `rxext_close`). The `.gns` is configured separately on the layer via **`scene_resource`**.
+The generic extension slot in PIXERA is **not** where you import a `.gns`. It loads `ExtGenesis.dll` (must export `rxext_open` / `rxext_close`). The show is chosen on the layer via the **`show_select`** dropdown (no path typing).
 
 ## Add GENESIS in PIXERA (generic extension)
 
@@ -36,7 +36,7 @@ MyGenesis/                    ← PIXERA often remembers this folder, not just t
 
 Recommended: copy `build\rxExt\ExtGenesis\Debug\` (DLL + `assets\`) into your **PIXERA project folder** or a fixed install path, then import **that** `ExtGenesis.dll`. Avoid pointing at paths inside the GENESIS git repo unless that repo will stay put on the show machine.
 
-After importing the DLL resource, drag it to the timeline. PIXERA should offer a **Main** stream (1920×1080). Then set layer **`scene_resource`** to your `.gns` (e.g. `scenes/demo.gns` if using bundled assets, or a project storage path).
+After importing the DLL resource, drag it to the timeline. PIXERA should offer a **Main** stream (1920×1080). Pick **Show** from the `show_select` dropdown (e.g. `scenes/demo.gns` when using bundled assets).
 
 ### API version
 
@@ -106,11 +106,11 @@ Example (`assets/scenes/demo.gns`):
 
 When a `.gns` loads, ExtGenesis applies the embedded PIXERA bindings automatically (node paths, default camera mode, then syncs transform/color from the scene).
 
-**Workflow:** export or author a `.gns` in GENESIS, import it into the PIXERA project bundle, set `scene_resource` to that path (or future: PIXERA compositing import creates the layer from the file).
+**Workflow:** export or author a `.gns` in GENESIS, copy it into the extension `Scenes/` folder (or PIXERA project storage), then pick it from **`show_select`**.
 
 ## Scene resources (per show)
 
-Set **`scene_resource`** to choose what that layer loads:
+Use **`show_select`** to choose what that layer loads:
 
 | Value | Result |
 |--------|--------|
@@ -120,13 +120,13 @@ Set **`scene_resource`** to choose what that layer loads:
 | Path in PIXERA storage | Resolved via `resolve_storage_filename` |
 | Absolute `.gltf` / `.glb` | Direct glTF load |
 
-When `scene_resource` changes, the scene reloads on the next frame.
+When `show_select` changes, the scene reloads on the next frame. Toggle **`reload_scene`** after saving a scene in the editor to force a refresh without restarting the stream.
 
 Bundled default assets live beside the extension DLL. **Project scenes** should live in PIXERA project storage and be referenced by path — the same idea as importing a Notch block file into the project bundle.
 
 ## What’s still missing for full Notch-like UX
 
-Today you add a GENESIS RenderBridge layer and point `scene_resource` at a `.gns` file. Notch goes further: PIXERA has a dedicated **import Block** flow in Compositing that auto-creates the layer and exposes parameters from the file.
+Today you add a GENESIS RenderBridge layer and pick a show from `show_select`. Notch goes further: PIXERA has a dedicated **import Block** flow in Compositing that auto-creates the layer and exposes parameters from the file.
 
 To match that for GENESIS we still need (product + code):
 
@@ -165,6 +165,8 @@ Global stream parameters:
 | `projection_matrix` | ProjectionMatrix | Camera projection |
 | `use_scene_camera` | — | Use the scene’s output camera instead of view/proj |
 | `show_select` | — | Dropdown of available shows (`.gns`, `.scene.json`, built-in demo) |
+| `reload_scene` | — | Force reload after editor save (clears on next frame) |
+| `position` | Position | Drives `target_node` from `.gns` bindings (for `run.lua` / keyframes) |
 | `time` | TimelineTime | Timeline clock |
 
 **Workspace gizmo:** Split X/Y/Z parameters are easier to keyframe but may not attach PIXERA’s **Show UI in Workspace** handle (that path expects purpose-tagged transform sets). Try it on a **Color** or full transform folder if PIXERA offers the option on your layer.
@@ -199,12 +201,7 @@ SET_STREAM_INPUTS = function(stream)
 end
 ```
 
-To test a scene file:
-
-```lua
--- In SET_STREAM_INPUTS or layer setup, set:
--- stream.scene_resource = "scenes/demo.scene.json"
-```
+To test a different show, change `show_select` in the RX layer UI or set it from Lua if your host exposes stream inputs by name.
 
 ## Architecture
 
@@ -223,8 +220,8 @@ PIXERA compositor (sampler output)
 ## Troubleshooting
 
 - **Actor won't hide**: Do not use a parameter named or labeled **Visible** — PIXERA reserves that for layer visibility. Use **`Mesh Enabled`** (`actor_*_mesh_enabled`) for per-mesh show/hide. Rebuild and re-import the DLL after parameter schema changes.
-- **Nothing in preview**: Preview and output use the same extension render path; both need a valid **adapter LUID** (PIXERA usually injects this per engine). Ensure layer opacity is up and **`scene_resource`** is set (e.g. `scenes/demo.gns`). Check PIXERA logs for `GENESIS` messages.
+- **Nothing in preview**: Preview and output use the same extension render path; both need a valid **adapter LUID** (PIXERA usually injects this per engine). Ensure layer opacity is up and **`show_select`** points at a valid show (e.g. `scenes/demo.gns`). Check PIXERA logs for `GENESIS` messages.
 - **Black output**: Confirm adapter LUID matches the GPU PIXERA uses for shared textures.
-- **Scene not found**: Check `scene_resource` path; prefer `.gns` in PIXERA storage. If using `scene_ref`, keep the referenced scene next to the `.gns` file.
+- **Scene not found**: Check `show_select` value; prefer `.gns` in the extension `Scenes/` folder or PIXERA storage. If using `scene_ref`, keep the referenced scene next to the `.gns` file.
 - **Transforms have no effect**: Verify `target_node` matches a node path in the loaded scene (`Parent/Child` hierarchy).
 - **Wrong camera**: Enable `use_scene_camera` for scene-authored cameras, or drive `view_matrix` / `projection_matrix` from PIXERA tracking.

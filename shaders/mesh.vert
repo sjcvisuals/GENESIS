@@ -7,6 +7,13 @@ struct Light {
     vec4 params;
 };
 
+struct MeshInstance {
+    mat4 model;
+    mat4 normalMatrix;
+    vec4 boundsCenter;
+    vec4 boundsExtent;
+};
+
 layout(set = 0, binding = 0) uniform FrameUBO {
     mat4 viewProj;
     vec4 cameraPos;
@@ -17,11 +24,18 @@ layout(set = 0, binding = 0) uniform FrameUBO {
     Light lights[8];
 } uFrame;
 
+layout(set = 0, binding = 1) readonly buffer InstanceBuffer {
+    MeshInstance instances[];
+} uInstances;
+
 layout(push_constant) uniform Push {
-    mat4 model;
     vec4 baseColor;
     vec4 emissive;
     vec4 materialParams;
+    uint instanceBase;
+    uint textureIndex;
+    uint _pad1;
+    uint _pad2;
 } uPush;
 
 layout(location = 0) in vec3 inPosition;
@@ -33,10 +47,10 @@ layout(location = 1) out vec3 vWorldNormal;
 layout(location = 2) out vec2 vUv;
 
 void main() {
-    vec4 worldPos = uPush.model * vec4(inPosition, 1.0);
+    MeshInstance inst = uInstances.instances[uPush.instanceBase + gl_InstanceIndex];
+    vec4 worldPos = inst.model * vec4(inPosition, 1.0);
     gl_Position = uFrame.viewProj * worldPos;
     vWorldPos = worldPos.xyz;
-    mat3 normalMatrix = mat3(transpose(inverse(uPush.model)));
-    vWorldNormal = normalMatrix * inNormal;
+    vWorldNormal = mat3(inst.normalMatrix) * inNormal;
     vUv = inUv;
 }

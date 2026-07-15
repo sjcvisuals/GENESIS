@@ -212,6 +212,7 @@ SceneDocument SceneSerializer::buildDocument(const Scene& scene, const std::stri
         if (node.parent.has_value()) entry.parent_path = nodePath(scene, *node.parent);
         entry.local = node.local;
         entry.visible = node.visible;
+        entry.pickable = node.pickable;
         if (node.mesh_resource.has_value() && *node.mesh_resource < mesh_names.size()) {
             entry.mesh_ref = mesh_names[*node.mesh_resource];
         }
@@ -257,6 +258,7 @@ json SceneSerializer::documentToJson(const SceneDocument& document) {
             {"path", node.path},
             {"name", node.name},
             {"visible", node.visible},
+            {"pickable", node.pickable},
             {"transform", transformToJson(node.local)},
         };
         if (node.parent_path.has_value()) {
@@ -312,6 +314,9 @@ SceneDocument SceneSerializer::loadFromJson(const json& root) {
             node.path = entry.at("path").get<std::string>();
             node.name = entry.value("name", node.path);
             node.visible = entry.value("visible", true);
+            if (entry.contains("pickable")) {
+                node.pickable = entry["pickable"].get<bool>();
+            }
             if (entry.contains("transform")) node.local = transformFromJson(entry["transform"]);
             if (entry.contains("parent") && !entry["parent"].is_null()) {
                 node.parent_path = entry["parent"].get<std::string>();
@@ -324,6 +329,9 @@ SceneDocument SceneSerializer::loadFromJson(const json& root) {
             }
             if (entry.contains("camera")) node.camera = cameraFromJson(entry["camera"]);
             if (entry.contains("light")) node.light = lightFromJson(entry["light"]);
+            if (!entry.contains("pickable")) {
+                node.pickable = !node.camera.has_value();
+            }
             document.nodes.push_back(std::move(node));
         }
     }

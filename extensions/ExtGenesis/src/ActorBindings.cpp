@@ -3,6 +3,10 @@
 #include "Input.h"
 #include "SceneSelectors.h"
 
+#include "scene/GnsPackage.hpp"
+#include "scene/Scene.hpp"
+#include "scene/SceneMaterial.hpp"
+#include "scene/ScenePath.hpp"
 #include "scene/SceneRuntime.hpp"
 
 #include <cctype>
@@ -59,7 +63,9 @@ glm::quat rotationFromEulerDegrees(const Axis3Binding& rotation) {
     return glm::quat(glm::radians(euler_degrees));
 }
 
-void applyActorBinding(::genesis::SceneRuntime& runtime, const ActorBinding& binding) {
+} // namespace
+
+void ActorBindings::applyActorBinding(genesis::SceneRuntime& runtime, const ActorBinding& binding) const {
     if (binding.node_path.empty()) {
         return;
     }
@@ -87,7 +93,81 @@ void applyActorBinding(::genesis::SceneRuntime& runtime, const ActorBinding& bin
     }
 }
 
-} // namespace
+void ActorBindings::applyPrimaryTargetBinding(genesis::SceneRuntime& runtime,
+                                              const ActorBinding& binding) const {
+    if (binding.node_path.empty()) {
+        return;
+    }
+
+    genesis::Node* node = runtime.findNodeByPath(binding.node_path);
+    if (!node || !binding.rotation.x || !binding.scale.x || !binding.color || !binding.mesh_enabled) {
+        return;
+    }
+
+    glm::vec3 position = node->local.position;
+    if (target_position_) {
+        const std::array<double, 3>& pos = target_position_->value();
+        position = glm::vec3(static_cast<float>(pos[0]), static_cast<float>(pos[1]),
+                             static_cast<float>(pos[2]));
+    } else if (binding.position.x && binding.position.y && binding.position.z) {
+        position = glm::vec3(static_cast<float>(binding.position.x->value()),
+                             static_cast<float>(binding.position.y->value()),
+                             static_cast<float>(binding.position.z->value()));
+    }
+
+    node->visible = binding.mesh_enabled->value();
+    node->local.position = position;
+    node->local.rotation = rotationFromEulerDegrees(binding.rotation);
+    node->local.scale = glm::vec3(static_cast<float>(binding.scale.x->value()),
+                                  static_cast<float>(binding.scale.y->value()),
+                                  static_cast<float>(binding.scale.z->value()));
+
+    const auto& color = binding.color->value();
+    if (node->material_resource.has_value()) {
+        if (genesis::SceneMaterial* material = runtime.material(*node->material_resource)) {
+            material->base_color = colorFromUi(color);
+        }
+    }
+}
+
+void ActorBindings::syncBindingFromScene(genesis::SceneRuntime& runtime, const ActorBinding& binding,
+                                         const genesis::Node& node) const {
+    if (binding.position.x && binding.position.y && binding.position.z) {
+        binding.position.x->set_value(node.local.position.x);
+        binding.position.y->set_value(node.local.position.y);
+        binding.position.z->set_value(node.local.position.z);
+    }
+
+    if (target_position_ && binding.node_path == primary_target_node_path_) {
+        target_position_->set_value(
+            {node.local.position.x, node.local.position.y, node.local.position.z});
+    }
+
+    const glm::vec3 euler = glm::degrees(glm::eulerAngles(node.local.rotation));
+    if (binding.rotation.x && binding.rotation.y && binding.rotation.z) {
+        binding.rotation.x->set_value(euler.x);
+        binding.rotation.y->set_value(euler.y);
+        binding.rotation.z->set_value(euler.z);
+    }
+
+    if (binding.scale.x && binding.scale.y && binding.scale.z) {
+        binding.scale.x->set_value(node.local.scale.x);
+        binding.scale.y->set_value(node.local.scale.y);
+        binding.scale.z->set_value(node.local.scale.z);
+    }
+
+    if (binding.mesh_enabled) {
+        binding.mesh_enabled->set_value(node.visible);
+    }
+
+    if (binding.color && node.material_resource.has_value()) {
+        if (genesis::SceneMaterial* material = runtime.material(*node.material_resource)) {
+            binding.color->set_value(colorToUi(
+                {material->base_color.r, material->base_color.g, material->base_color.b,
+                 material->base_color.a}));
+        }
+    }
+}
 
 ParameterValue* ActorBindings::registerAxis3(Axis3Binding& axes,
                                              Input& input,
@@ -118,8 +198,10 @@ ParameterValue* ActorBindings::registerAxis3(Axis3Binding& axes,
 }
 
 void ActorBindings::registerSceneParameters(Input& input,
-                                              ParameterInt*& show_select,
-                                              ParameterBool*& use_scene_camera) {
+                                            ParameterInt*& show_select,
+                                            ParameterBool*& use_scene_camera,
+                                            ParameterBool*& reload_scene,
+                                            ParameterVector3*& target_position) {
     show_select = input.add_parameter<ParameterInt>("show_select", 0);
     show_select->set_property(PropertyNames::name, "Show");
     applySceneGroupProperties(show_select);
@@ -127,6 +209,48 @@ void ActorBindings::registerSceneParameters(Input& input,
     use_scene_camera = input.add_parameter<ParameterBool>("use_scene_camera", false);
     use_scene_camera->set_property(PropertyNames::name, "Use Scene Camera");
     applySceneGroupProperties(use_scene_camera);
+
+    reload_scene = input.add_parameter<ParameterBool>("reload_scene", false);
+    reload_scene->set_property(PropertyNames::name, "Reload Scene");
+    applySceneGroupProperties(reload_scene);
+
+    target_position = input.add_parameter<ParameterVector3>(
+        "position", std::array<double, 3>{0.0, 0.0, 0.0});
+    target_position->set_property(PropertyNames::purpose, PurposeNames::Position);
+    target_position->set_property(PropertyNames::name, "Position");
+    target_position_ = target_position;
+}
+
+void ActorBindings::registerLight(Input& input, const CatalogLight& light) {
+    LightBinding binding{};
+    binding.node_path = light.path;
+    const std::string prefix = std::format("light_{}", light.param_id);
+
+    binding.intensity = input.add_parameter<ParameterValue>(prefix + "_intensity", light.default_intensity);
+    binding.intensity->set_property(PropertyNames::name, "Intensity");
+    binding.intensity->set_property(PropertyNames::group_name, actorGroup(light.group_label));
+    binding.intensity->set_property(PropertyNames::min_value, 0.0);
+    binding.intensity->set_property(PropertyNames::max_value, 100.0);
+
+    lights_.push_back(binding);
+}
+
+bool ActorBindings::hasActorPath(const std::string& node_path) const {
+    for (const ActorBinding& binding : actors_) {
+        if (binding.node_path == node_path) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ActorBindings::hasLightPath(const std::string& node_path) const {
+    for (const LightBinding& binding : lights_) {
+        if (binding.node_path == node_path) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void ActorBindings::registerActor(Input& input, const CatalogActor& actor) {
@@ -190,23 +314,83 @@ void ActorBindings::registerActors(Input& input, const SceneParameterCatalog& ca
 
     lights_.reserve(catalog.lights.size());
     for (const CatalogLight& light : catalog.lights) {
-        LightBinding binding{};
-        binding.node_path = light.path;
-        const std::string prefix = std::format("light_{}", light.param_id);
-
-        binding.intensity = input.add_parameter<ParameterValue>(prefix + "_intensity", light.default_intensity);
-        binding.intensity->set_property(PropertyNames::name, "Intensity");
-        binding.intensity->set_property(PropertyNames::group_name, actorGroup(light.group_label));
-        binding.intensity->set_property(PropertyNames::min_value, 0.0);
-        binding.intensity->set_property(PropertyNames::max_value, 100.0);
-
-        lights_.push_back(binding);
+        registerLight(input, light);
     }
 }
 
-void ActorBindings::apply(::genesis::SceneRuntime& runtime) const {
+std::size_t ActorBindings::registerNewFromCatalog(Input& input, const SceneParameterCatalog& catalog) {
+    std::size_t added = 0;
+    for (const CatalogActor& actor : catalog.actors) {
+        if (hasActorPath(actor.path)) {
+            continue;
+        }
+        registerActor(input, actor);
+        ++added;
+    }
+    for (const CatalogLight& light : catalog.lights) {
+        if (hasLightPath(light.path)) {
+            continue;
+        }
+        registerLight(input, light);
+        ++added;
+    }
+    return added;
+}
+
+void ActorBindings::syncAllFromScene(genesis::SceneRuntime& runtime) const {
     for (const ActorBinding& binding : actors_) {
-        applyActorBinding(runtime, binding);
+        if (const genesis::Node* node = runtime.findNodeByPath(binding.node_path)) {
+            syncBindingFromScene(runtime, binding, *node);
+        }
+    }
+
+    for (const LightBinding& binding : lights_) {
+        const genesis::Node* node = runtime.findNodeByPath(binding.node_path);
+        if (!node || !binding.intensity || !node->light.has_value()) {
+            continue;
+        }
+        binding.intensity->set_value(node->light->intensity);
+    }
+}
+
+void ActorBindings::applyGnsBindings(const genesis::GnsBindings& bindings,
+                                     genesis::SceneRuntime& runtime) {
+    primary_target_node_path_ = bindings.target_node;
+    primary_light_node_path_ = bindings.light_node;
+
+    runtime.updateTransforms();
+
+    if (!primary_target_node_path_.empty()) {
+        if (const genesis::Node* node = runtime.findNodeByPath(primary_target_node_path_)) {
+            for (const ActorBinding& binding : actors_) {
+                if (binding.node_path == primary_target_node_path_) {
+                    syncBindingFromScene(runtime, binding, *node);
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!primary_light_node_path_.empty()) {
+        if (const genesis::Node* node = runtime.findNodeByPath(primary_light_node_path_)) {
+            for (const LightBinding& binding : lights_) {
+                if (binding.node_path == primary_light_node_path_ && binding.intensity &&
+                    node->light.has_value()) {
+                    binding.intensity->set_value(node->light->intensity);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+void ActorBindings::apply(genesis::SceneRuntime& runtime) const {
+    for (const ActorBinding& binding : actors_) {
+        if (!primary_target_node_path_.empty() && binding.node_path == primary_target_node_path_) {
+            applyPrimaryTargetBinding(runtime, binding);
+        } else {
+            applyActorBinding(runtime, binding);
+        }
     }
 
     for (const LightBinding& binding : lights_) {

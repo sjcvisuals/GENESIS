@@ -8,11 +8,6 @@ namespace rxext::genesis_ext {
 
 namespace {
 
-bool isShowFile(const std::filesystem::path& path) {
-    const std::string ext = path.extension().string();
-    return ext == ".gns" || ext == ".json" || ext == ".scene" || ext == ".scene.json";
-}
-
 std::string friendlyShowLabel(const std::string& resource_path) {
     if (resource_path == "demo") {
         return "Built-in Demo";
@@ -39,35 +34,6 @@ void appendUnique(std::vector<std::string>& paths, const std::string& path) {
 }
 
 } // namespace
-
-std::vector<std::string> scanShowResources(const std::filesystem::path& module_dir) {
-    std::vector<std::string> shows{"demo"};
-
-    const auto scan_dir = [&](const std::filesystem::path& directory) {
-        if (!std::filesystem::exists(directory)) {
-            return;
-        }
-        std::vector<std::filesystem::path> files;
-        for (const auto& entry : std::filesystem::recursive_directory_iterator(directory)) {
-            if (entry.is_regular_file() && isShowFile(entry.path())) {
-                files.push_back(entry.path());
-            }
-        }
-        std::sort(files.begin(), files.end());
-        for (const std::filesystem::path& file : files) {
-            const std::filesystem::path relative =
-                std::filesystem::relative(file, module_dir / "assets");
-            appendUnique(shows, relative.generic_string());
-        }
-    };
-
-    if (!module_dir.empty()) {
-        scan_dir(module_dir / "assets" / "scenes");
-        scan_dir(module_dir / "assets");
-    }
-
-    return shows;
-}
 
 SceneSelectorLists buildSceneSelectorLists(const genesis::Scene& scene) {
     SceneSelectorLists lists;

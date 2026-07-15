@@ -1,5 +1,6 @@
 #pragma once
 
+#include "runtime/RuntimeScene.hpp"
 #include "rxext_client.h"
 
 #include <filesystem>
@@ -24,5 +25,7 @@ struct ResolvedSceneResource {
 std::optional<ResolvedSceneResource> resolveSceneResource(HostContext& host,
                                                           std::string_view resource,
                                                           const std::filesystem::path& module_dir);
+
+::genesis::RuntimeSceneResource toGenesisRuntimeResource(const ResolvedSceneResource& resource);
 
 } // namespace rxext::genesis_ext

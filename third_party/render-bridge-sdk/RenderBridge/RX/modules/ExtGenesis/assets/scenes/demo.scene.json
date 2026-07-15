@@ -19,6 +19,7 @@
       "name": "Floor",
       "parent": "Demo Scene",
       "visible": true,
+      "pickable": false,
       "mesh": "Plane",
       "material": "Floor",
       "transform": {
@@ -102,14 +103,15 @@
       "name": "Main Camera",
       "parent": "Demo Scene",
       "visible": true,
+      "pickable": false,
       "camera": {
         "fov_y_degrees": 55.0,
         "near": 0.1,
         "far": 200.0
       },
       "transform": {
-        "position": [0.0, 1.6, 5.0],
-        "rotation": [1.0, 0.0, 0.0, 0.0],
+        "position": [0.0, 2.5, 7.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
         "scale": [1.0, 1.0, 1.0]
       }
     }

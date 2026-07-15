@@ -3,7 +3,9 @@
 #include "engine/FrameStats.hpp"
 #include "host/HostSceneCommand.hpp"
 #include "host/HostTypes.hpp"
+#include "runtime/RuntimeScene.hpp"
 #include "renderer/FrameUniforms.hpp"
+#include "scene/SceneDrawBatch.hpp"
 #include "scene/SceneRuntime.hpp"
 
 #include <filesystem>
@@ -40,6 +42,7 @@ public:
     void loadGltf(const std::filesystem::path& path);
     void loadDocument(const std::filesystem::path& path);
     void saveDocument(const std::filesystem::path& path);
+    bool tryLoadRuntimeResource(const RuntimeSceneResource& resource, std::string* out_error = nullptr);
 
     // --- Host scene control ---
     bool applyCommand(const HostSceneCommand& command, std::string* out_error = nullptr);
@@ -64,6 +67,7 @@ private:
     std::unique_ptr<SceneRuntime> scene_;
 
     std::vector<SceneDrawCommand> draw_commands_;
+    std::vector<SceneMeshBatch> draw_batches_;
     FrameUniforms frame_uniforms_{};
     FrameStats frame_stats_{};
     bool stats_overlay_ = false;

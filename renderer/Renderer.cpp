@@ -2,7 +2,7 @@
 
 #include "renderer/FrameUniforms.hpp"
 #include "renderer/GridDrawPushConstants.hpp"
-#include "renderer/MeshDrawPushConstants.hpp"
+#include "renderer/MeshInstance.hpp"
 
 #include "platform/ImGuiLayer.hpp"
 #include "platform/Window.hpp"
@@ -10,7 +10,8 @@
 #include "renderer/vulkan/Pipeline.hpp"
 #include "renderer/vulkan/Swapchain.hpp"
 #include "renderer/vulkan/VulkanContext.hpp"
-#include "renderer/MaterialBinding.hpp"
+#include "renderer/MeshBatchDrawer.hpp"
+#include "renderer/BindlessTextures.hpp"
 #include "renderer/Mesh.hpp"
 
 #include <imgui.h>
@@ -19,7 +20,8 @@
 #include <array>
 #include <filesystem>
 #include <string>
-#include <stdexcept>
+#include <glm/glm.hpp>
+#include <cstring>
 #include <cstring>
 
 namespace genesis {
@@ -87,7 +89,8 @@ Renderer::~Renderer() {
     triangle_pipeline_.reset();
     mesh_pipeline_.reset();
     grid_pipeline_.reset();
-    material_binding_.reset();
+    mesh_batch_drawer_.reset();
+    bindless_textures_.reset();
     imgui_.reset();
     frame_ubo_.reset();
 
@@ -119,6 +122,7 @@ Renderer::~Renderer() {
 }
 
 void Renderer::setFrameUniforms(const FrameUniforms& uniforms) {
+    frame_uniforms_ = uniforms;
     if (!frame_ubo_) {
         return;
     }
@@ -134,17 +138,61 @@ void Renderer::setViewProjection(const float* mat4_col_major) {
     setFrameUniforms(u);
 }
 
+void Renderer::setViewportDrawRegion(const float x, const float y, const float width, const float height) {
+    draw_region_enabled_ = width > 1.0f && height > 1.0f;
+    draw_region_x_ = x;
+    draw_region_y_ = y;
+    draw_region_w_ = width;
+    draw_region_h_ = height;
+}
+
+void Renderer::clearViewportDrawRegion() {
+    draw_region_enabled_ = false;
+}
+
+void Renderer::applyDrawRegion(const VkCommandBuffer cmd) const {
+    VkViewport viewport{};
+    VkRect2D scissor{};
+
+    if (draw_region_enabled_) {
+        viewport.x = draw_region_x_;
+        viewport.y = draw_region_y_;
+        viewport.width = draw_region_w_;
+        viewport.height = draw_region_h_;
+        scissor.offset.x = static_cast<int32_t>(draw_region_x_);
+        scissor.offset.y = static_cast<int32_t>(draw_region_y_);
+        scissor.extent.width = static_cast<uint32_t>(draw_region_w_);
+        scissor.extent.height = static_cast<uint32_t>(draw_region_h_);
+    } else {
+        viewport.width = static_cast<float>(swapchain_->extent().width);
+        viewport.height = static_cast<float>(swapchain_->extent().height);
+        scissor.offset = {0, 0};
+        scissor.extent = swapchain_->extent();
+    }
+
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+}
+
 void Renderer::createFrameDescriptorSetLayout() {
-    VkDescriptorSetLayoutBinding ubo_binding{};
-    ubo_binding.binding = 0;
-    ubo_binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    ubo_binding.descriptorCount = 1;
-    ubo_binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    VkDescriptorSetLayoutBinding bindings[2]{};
+
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    bindings[1].binding = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
     VkDescriptorSetLayoutCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    info.bindingCount = 1;
-    info.pBindings = &ubo_binding;
+    info.bindingCount = 2;
+    info.pBindings = bindings;
 
     if (vkCreateDescriptorSetLayout(context_->device(), &info, nullptr, &frame_set_layout_) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create frame descriptor set layout");
@@ -152,15 +200,17 @@ void Renderer::createFrameDescriptorSetLayout() {
 }
 
 void Renderer::createFrameDescriptorPool() {
-    VkDescriptorPoolSize pool_size{};
-    pool_size.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    pool_size.descriptorCount = static_cast<uint32_t>(kFramesInFlight);
+    VkDescriptorPoolSize pool_sizes[2]{};
+    pool_sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    pool_sizes[0].descriptorCount = static_cast<uint32_t>(kFramesInFlight);
+    pool_sizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    pool_sizes[1].descriptorCount = static_cast<uint32_t>(kFramesInFlight);
 
     VkDescriptorPoolCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     info.maxSets = static_cast<uint32_t>(kFramesInFlight);
-    info.poolSizeCount = 1;
-    info.pPoolSizes = &pool_size;
+    info.poolSizeCount = 2;
+    info.pPoolSizes = pool_sizes;
 
     if (vkCreateDescriptorPool(context_->device(), &info, nullptr, &frame_descriptor_pool_) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create frame descriptor pool");
@@ -285,7 +335,22 @@ void Renderer::createTriangleResources() {
 }
 
 void Renderer::createMeshResources() {
-    material_binding_ = std::make_unique<MaterialBinding>(*context_);
+    bindless_textures_ = std::make_unique<BindlessTextures>(*context_);
+    mesh_batch_drawer_ = std::make_unique<MeshBatchDrawer>(*context_);
+
+    for (VkDescriptorSet frame_set : frame_descriptor_sets_) {
+        mesh_batch_drawer_->bindInstanceBuffer(context_->device(), frame_set);
+    }
+
+    createMeshPipelines();
+}
+
+void Renderer::createMeshPipelines() {
+    mesh_pipeline_.reset();
+    mesh_depth_pipeline_.reset();
+    if (!bindless_textures_) {
+        return;
+    }
 
     const std::filesystem::path shader_dir = GENESIS_SHADER_DIR;
     GraphicsPipelineConfig pipeline_config{};
@@ -294,14 +359,24 @@ void Renderer::createMeshResources() {
     pipeline_config.frag_shader = shader_dir / "mesh.frag.spv";
     pipeline_config.extent = swapchain_->extent();
     pipeline_config.set0_layout = frame_set_layout_;
-    pipeline_config.set1_layout = material_binding_->layout();
+    pipeline_config.set1_layout = bindless_textures_->layout();
     pipeline_config = withMeshVertexLayout(pipeline_config);
     pipeline_config.depth_test = true;
-    pipeline_config.push_constant_size = sizeof(MeshDrawPushConstants);
+    pipeline_config.depth_write = false;
+    pipeline_config.push_constant_size = sizeof(MeshMaterialPushConstants);
     pipeline_config.push_constant_stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    // Mesh pipeline is optional: it will only be used by the glTF viewer example.
     if (std::filesystem::exists(pipeline_config.vert_shader) && std::filesystem::exists(pipeline_config.frag_shader)) {
         mesh_pipeline_ = std::make_unique<GraphicsPipeline>(*context_, pipeline_config);
+    }
+
+    GraphicsPipelineConfig depth_config = pipeline_config;
+    depth_config.frag_shader = shader_dir / "mesh_depth.frag.spv";
+    depth_config.set1_layout = VK_NULL_HANDLE;
+    depth_config.depth_write = true;
+    depth_config.color_write_mask = 0;
+    depth_config.push_constant_stages = VK_SHADER_STAGE_VERTEX_BIT;
+    if (std::filesystem::exists(depth_config.vert_shader) && std::filesystem::exists(depth_config.frag_shader)) {
+        mesh_depth_pipeline_ = std::make_unique<GraphicsPipeline>(*context_, depth_config);
     }
 }
 
@@ -344,22 +419,12 @@ void Renderer::recreateSwapchain(int width, int height) {
     pipeline_config.set0_layout = frame_set_layout_;
     triangle_pipeline_ = std::make_unique<GraphicsPipeline>(*context_, pipeline_config);
 
-    // Recreate mesh pipeline if present.
-    if (mesh_pipeline_ && material_binding_) {
-        mesh_pipeline_.reset();
-        GraphicsPipelineConfig mesh_cfg{};
-        mesh_cfg.render_pass = swapchain_->renderPass();
-        mesh_cfg.vert_shader = std::filesystem::path(GENESIS_SHADER_DIR) / "mesh.vert.spv";
-        mesh_cfg.frag_shader = std::filesystem::path(GENESIS_SHADER_DIR) / "mesh.frag.spv";
-        mesh_cfg.extent = swapchain_->extent();
-        mesh_cfg.set0_layout = frame_set_layout_;
-        mesh_cfg.set1_layout = material_binding_->layout();
-        mesh_cfg = withMeshVertexLayout(mesh_cfg);
-        mesh_cfg.depth_test = true;
-        mesh_cfg.push_constant_size = sizeof(MeshDrawPushConstants);
-        mesh_cfg.push_constant_stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-        if (std::filesystem::exists(mesh_cfg.vert_shader) && std::filesystem::exists(mesh_cfg.frag_shader)) {
-            mesh_pipeline_ = std::make_unique<GraphicsPipeline>(*context_, mesh_cfg);
+    if (bindless_textures_) {
+        createMeshPipelines();
+        if (mesh_batch_drawer_) {
+            for (VkDescriptorSet frame_set : frame_descriptor_sets_) {
+                mesh_batch_drawer_->bindInstanceBuffer(context_->device(), frame_set);
+            }
         }
     }
 
@@ -396,6 +461,34 @@ void Renderer::onResize(int width, int height) {
     recreateSwapchain(width, height);
 }
 
+void Renderer::ensureRenderPass() {
+    if (render_pass_active_) {
+        return;
+    }
+
+    VkCommandBuffer cmd = command_buffers_[current_frame_];
+
+    VkClearValue clear_color{};
+    clear_color.color = {{0.02f, 0.02f, 0.03f, 1.0f}};
+
+    VkClearValue clear_depth{};
+    clear_depth.depthStencil = {1.0f, 0};
+
+    VkClearValue clears[2] = {clear_color, clear_depth};
+
+    VkRenderPassBeginInfo render_pass_info{};
+    render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    render_pass_info.renderPass = swapchain_->renderPass();
+    render_pass_info.framebuffer = swapchain_->framebuffers()[image_index_];
+    render_pass_info.renderArea.offset = {0, 0};
+    render_pass_info.renderArea.extent = swapchain_->extent();
+    render_pass_info.clearValueCount = 2;
+    render_pass_info.pClearValues = clears;
+
+    vkCmdBeginRenderPass(cmd, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
+    render_pass_active_ = true;
+}
+
 void Renderer::beginFrame() {
     if (window_.wasResized()) {
         onResize(window_.width(), window_.height());
@@ -417,42 +510,16 @@ void Renderer::beginFrame() {
         throw std::runtime_error("Failed to begin command buffer");
     }
 
-    VkClearValue clear_color{};
-    clear_color.color = {{0.02f, 0.02f, 0.03f, 1.0f}};
-
-    VkClearValue clear_depth{};
-    clear_depth.depthStencil = {1.0f, 0};
-
-    VkClearValue clears[2] = {clear_color, clear_depth};
-
-    VkRenderPassBeginInfo render_pass_info{};
-    render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    render_pass_info.renderPass = swapchain_->renderPass();
-    render_pass_info.framebuffer = swapchain_->framebuffers()[image_index_];
-    render_pass_info.renderArea.offset = {0, 0};
-    render_pass_info.renderArea.extent = swapchain_->extent();
-    render_pass_info.clearValueCount = 2;
-    render_pass_info.pClearValues = clears;
-
-    vkCmdBeginRenderPass(cmd, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
+    render_pass_active_ = false;
+    if (mesh_batch_drawer_) {
+        mesh_batch_drawer_->resetFrame();
+    }
 }
 
 void Renderer::drawTriangle() {
+    ensureRenderPass();
     VkCommandBuffer cmd = command_buffers_[current_frame_];
-
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(swapchain_->extent().width);
-    viewport.height = static_cast<float>(swapchain_->extent().height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
-
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = swapchain_->extent();
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    applyDrawRegion(cmd);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, triangle_pipeline_->handle());
 
@@ -469,42 +536,49 @@ void Renderer::drawTriangle() {
 
 void Renderer::drawMesh(const Mesh& mesh, const MeshDrawPushConstants& draw_constants,
                         const GpuTexture* base_color_texture) {
-    if (!mesh_pipeline_ || !material_binding_) {
+    SceneMeshBatch batch{};
+    batch.mesh = &mesh;
+    batch.base_color_texture = base_color_texture;
+    std::memcpy(batch.material.base_color, draw_constants.base_color, sizeof(batch.material.base_color));
+    std::memcpy(batch.material.emissive, draw_constants.emissive, sizeof(batch.material.emissive));
+    std::memcpy(batch.material.material_params, draw_constants.material_params,
+                sizeof(batch.material.material_params));
+
+    GpuMeshInstance instance{};
+    glm::mat4 model{};
+    std::memcpy(&model[0][0], draw_constants.model, sizeof(draw_constants.model));
+    fillGpuMeshInstance(instance, model, mesh.local_aabb_min, mesh.local_aabb_max);
+    batch.instances.push_back(instance);
+    drawMeshBatches({batch});
+}
+
+void Renderer::drawMeshBatches(const std::vector<SceneMeshBatch>& batches, const MeshDrawOptions& options) {
+    if (!mesh_pipeline_ || !bindless_textures_ || !mesh_batch_drawer_ || batches.empty()) {
         return;
     }
 
     VkCommandBuffer cmd = command_buffers_[current_frame_];
 
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(swapchain_->extent().width);
-    viewport.height = static_cast<float>(swapchain_->extent().height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    MeshDrawOptions draw_options = options;
+    if (draw_options.view_proj_col_major == nullptr) {
+        draw_options.view_proj_col_major = frame_uniforms_.view_proj;
+    }
 
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = swapchain_->extent();
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    if (!mesh_batch_drawer_->prepareDraw(batches, *bindless_textures_, draw_options)) {
+        return;
+    }
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh_pipeline_->handle());
+    mesh_batch_drawer_->dispatchGpuCull(cmd);
+    mesh_batch_drawer_->bindDrawInstanceBuffer(context_->device(), frame_descriptor_sets_[current_frame_]);
+    ensureRenderPass();
+    applyDrawRegion(cmd);
 
-    const VkDescriptorSet material_set = material_binding_->descriptorFor(base_color_texture);
-    const VkDescriptorSet sets[] = {frame_descriptor_sets_[current_frame_], material_set};
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh_pipeline_->layout(), 0, 2, sets, 0,
-                            nullptr);
-
-    vkCmdPushConstants(cmd, mesh_pipeline_->layout(),
-                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                       sizeof(MeshDrawPushConstants), &draw_constants);
-
-    VkBuffer vb = mesh.vertex_buffer->handle();
-    VkDeviceSize off = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &off);
-    vkCmdBindIndexBuffer(cmd, mesh.index_buffer->handle(), 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(cmd, mesh.index_count, 1, 0, 0, 0);
+    if (draw_options.enable_depth_prepass && mesh_depth_pipeline_) {
+        mesh_batch_drawer_->drawDepthPrepass(cmd, *mesh_depth_pipeline_, frame_descriptor_sets_[current_frame_],
+                                             *bindless_textures_);
+    }
+    mesh_batch_drawer_->drawColorPass(cmd, *mesh_pipeline_, frame_descriptor_sets_[current_frame_],
+                                      *bindless_textures_);
 }
 
 void Renderer::drawGrid(const Mesh& mesh, const GridDrawPushConstants& draw_constants) {
@@ -512,21 +586,9 @@ void Renderer::drawGrid(const Mesh& mesh, const GridDrawPushConstants& draw_cons
         return;
     }
 
+    ensureRenderPass();
     VkCommandBuffer cmd = command_buffers_[current_frame_];
-
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(swapchain_->extent().width);
-    viewport.height = static_cast<float>(swapchain_->extent().height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
-
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = swapchain_->extent();
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    applyDrawRegion(cmd);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, grid_pipeline_->handle());
 
@@ -552,9 +614,16 @@ void Renderer::beginUiFrame() {
 void Renderer::endFrame() {
     VkCommandBuffer cmd = command_buffers_[current_frame_];
 
+    if (!render_pass_active_) {
+        ensureRenderPass();
+    }
+
     imgui_->endFrame(cmd);
 
-    vkCmdEndRenderPass(cmd);
+    if (render_pass_active_) {
+        vkCmdEndRenderPass(cmd);
+        render_pass_active_ = false;
+    }
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
         throw std::runtime_error("Failed to record command buffer");

@@ -24,6 +24,7 @@ struct Node {
     Transform local{};
     glm::mat4 world{1.0f};
     bool visible = true;
+    bool pickable = true;
 
     // Runtime mesh resource index (owned by application mesh pool).
     std::optional<std::uint32_t> mesh_resource;

@@ -1,7 +1,9 @@
 #pragma once
 
 #include "renderer/FrameUniforms.hpp"
+#include "renderer/MeshBatchDrawer.hpp"
 #include "renderer/MeshDrawPushConstants.hpp"
+#include "scene/SceneDrawBatch.hpp"
 
 #include <volk.h>
 
@@ -17,7 +19,8 @@ class ExternalRenderTarget;
 class ExternalSync;
 class Buffer;
 class GraphicsPipeline;
-class MaterialBinding;
+class BindlessTextures;
+class MeshBatchDrawer;
 class GpuTexture;
 struct Mesh;
 
@@ -42,6 +45,8 @@ public:
     void beginFrame();
     void drawMesh(const Mesh& mesh, const MeshDrawPushConstants& draw_constants,
                   const GpuTexture* base_color_texture = nullptr);
+    void drawMeshBatches(const std::vector<SceneMeshBatch>& batches,
+                         const MeshDrawOptions& options = {});
     void endFrame(VkSemaphore wait_host_finished = VK_NULL_HANDLE);
 
     void setFrameUniforms(const FrameUniforms& uniforms);
@@ -55,14 +60,18 @@ private:
     void createCommandPool();
     void createSyncObjects();
     void createCommandBuffers();
+    void ensureRenderPass();
     void createMeshPipeline();
+    void createMeshPipelines();
     void recreatePipelines();
 
     std::unique_ptr<VulkanContext> context_;
     std::unique_ptr<ExternalRenderTarget> target_;
     std::unique_ptr<ExternalSync> sync_;
     std::unique_ptr<GraphicsPipeline> mesh_pipeline_;
-    std::unique_ptr<MaterialBinding> material_binding_;
+    std::unique_ptr<GraphicsPipeline> mesh_depth_pipeline_;
+    std::unique_ptr<BindlessTextures> bindless_textures_;
+    std::unique_ptr<MeshBatchDrawer> mesh_batch_drawer_;
     std::unique_ptr<Buffer> frame_ubo_;
 
     VkDescriptorSetLayout frame_set_layout_ = VK_NULL_HANDLE;
@@ -76,6 +85,8 @@ private:
     std::vector<VkFence> in_flight_fences_;
 
     size_t current_frame_ = 0;
+    bool render_pass_active_ = false;
+    FrameUniforms frame_uniforms_{};
     std::string device_name_;
 };
 

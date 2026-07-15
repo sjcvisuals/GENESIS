@@ -25,6 +25,9 @@ struct GraphicsPipelineConfig {
     VkExtent2D extent{};
     VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     bool depth_test = false;
+    bool depth_write = true;
+    VkColorComponentFlags color_write_mask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                             VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     VkDescriptorSetLayout set0_layout = VK_NULL_HANDLE;
     VkDescriptorSetLayout set1_layout = VK_NULL_HANDLE;
 

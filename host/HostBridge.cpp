@@ -3,6 +3,7 @@
 #include "platform/Paths.hpp"
 #include "platform/Window.hpp"
 #include "renderer/Renderer.hpp"
+#include "runtime/RuntimeScene.hpp"
 #include "scene/Lighting.hpp"
 #include "scene/ScenePath.hpp"
 
@@ -78,6 +79,10 @@ void HostBridge::loadGltf(const std::filesystem::path& path) {
 void HostBridge::loadDocument(const std::filesystem::path& path) {
     scene_->loadDocument(path);
     scene_->updateTransforms();
+}
+
+bool HostBridge::tryLoadRuntimeResource(const RuntimeSceneResource& resource, std::string* out_error) {
+    return tryLoadRuntimeScene(*scene_, resource, out_error);
 }
 
 void HostBridge::saveDocument(const std::filesystem::path& path) {
@@ -244,7 +249,11 @@ void HostBridge::beginFrame(const HostFrameInput& input) {
 
 void HostBridge::renderScene() {
     SceneRenderStats render_stats{};
-    scene_->collectDrawCommands(draw_commands_, &render_stats);
+    SceneDrawCollectParams collect_params{};
+    collect_params.view_proj_col_major = frame_uniforms_.view_proj;
+    collect_params.enable_cpu_culling = true;
+    collect_params.enable_gpu_culling = false;
+    scene_->collectDrawCommands(draw_commands_, &render_stats, collect_params);
 
     frame_stats_.draw_calls = render_stats.draw_calls;
     frame_stats_.triangles = render_stats.triangles;
@@ -252,9 +261,12 @@ void HostBridge::renderScene() {
     frame_stats_.scene_nodes = render_stats.scene_nodes;
     frame_stats_.active_lights = render_stats.active_lights;
 
-    for (const SceneDrawCommand& cmd : draw_commands_) {
-        renderer_->drawMesh(*cmd.mesh, cmd.constants, cmd.base_color_texture);
-    }
+    buildDrawBatches(draw_commands_, draw_batches_, &render_stats);
+
+    MeshDrawOptions draw_options{};
+    draw_options.view_proj_col_major = frame_uniforms_.view_proj;
+    draw_options.enable_gpu_cull = false;
+    renderer_->drawMeshBatches(draw_batches_, draw_options);
 }
 
 void HostBridge::endFrame() {
