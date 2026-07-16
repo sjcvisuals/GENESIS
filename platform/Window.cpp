@@ -39,7 +39,10 @@ Window::~Window() {
         SDL_DestroyWindow(window_);
         window_ = nullptr;
     }
-    SDL_Quit();
+    // Do not call SDL_Quit() here. Short-lived hosts (multiview player, bridge host)
+    // destroy Window during stack unwind; pairing SDL_Quit with ImGui SDL backends on
+    // the Debug CRT frequently trips _CrtIsValidHeapPointer during process exit.
+    // Process teardown is enough for a single-window GENESIS process.
 }
 
 void Window::pollEvents() {

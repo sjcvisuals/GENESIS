@@ -1,8 +1,8 @@
 {
   "format": "gns",
   "version": 1,
-  "name": "Demo Scene",
-  "scene_ref": "demo.scene.json",
+  "name": "Default Scene",
+  "scene_ref": "default.scene.json",
   "pixera": {
     "streams": [
       {
@@ -13,8 +13,8 @@
       }
     ],
     "bindings": {
-      "target_node": "Demo Scene/Props/Sphere",
-      "light_node": "Demo Scene/Directional Light"
+      "target_node": "Scene/Cube",
+      "light_node": "Scene/Directional Light"
     }
   }
 }

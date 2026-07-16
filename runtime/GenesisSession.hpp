@@ -1,5 +1,6 @@
 #pragma once
 
+#include "runtime/GenesisFrameTime.hpp"
 #include "runtime/RuntimeScene.hpp"
 #include "renderer/OffscreenRenderer.hpp"
 #include "scene/GnsPackage.hpp"
@@ -31,12 +32,15 @@ public:
 
     void updateTransforms();
 
+    GenesisFrameTime advanceProductionTime(const HostTimingInput& input);
+    const GenesisFrameTime& currentFrameTime() const { return current_frame_time_; }
+
     const std::optional<GnsPixeraConfig>& pixeraConfig() const { return last_pixera_config_; }
     const std::string& lastLoadError() const { return last_load_error_; }
 
     void render(const glm::dmat4& view,
                 const glm::dmat4& projection,
-                double timeline_time,
+                const GenesisFrameTime& frame_time,
                 bool use_scene_camera);
 
     OffscreenRenderer& renderer() { return *renderer_; }
@@ -56,6 +60,8 @@ private:
     std::uint32_t height_ = 1080;
     std::optional<GnsPixeraConfig> last_pixera_config_;
     std::string last_load_error_;
+    ProductionClock production_clock_{};
+    GenesisFrameTime current_frame_time_{};
 };
 
 } // namespace genesis

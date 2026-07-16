@@ -7,9 +7,11 @@
 #include "platform/Paths.hpp"
 #include "scene/ScenePath.hpp"
 
+#include <glm/gtc/matrix_transform.hpp>
 #include <spdlog/spdlog.h>
 
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <string>
 
@@ -19,19 +21,6 @@ void trySetSceneOutputCamera(genesis::HostBridge& bridge) {
     genesis::HostSceneCommand camera_cmd{};
     camera_cmd.type = genesis::HostSceneCommandType::SetOutputCamera;
 
-    const char* candidates[] = {
-        "Demo Scene/Main Camera",
-        "Root/SceneCamera",
-    };
-
-    for (const char* path : candidates) {
-        camera_cmd.path = path;
-        if (bridge.applyCommand(camera_cmd)) {
-            return;
-        }
-    }
-
-    // Fall back to first camera node in the scene.
     for (const genesis::Node& node : bridge.sceneRuntime().scene().nodes) {
         if (!node.camera.has_value()) continue;
         camera_cmd.path = genesis::nodePath(bridge.sceneRuntime().scene(), node.id);
@@ -39,6 +28,20 @@ void trySetSceneOutputCamera(genesis::HostBridge& bridge) {
             return;
         }
     }
+}
+
+void fillHostLookAtViewProjection(genesis::HostFrameInput& frame, const float aspect) {
+    const glm::vec3 eye(8.0f, 4.5f, 9.0f);
+    const glm::vec3 target(0.0f, 0.0f, 0.0f);
+    const glm::mat4 view = glm::lookAtRH(eye, target, glm::vec3(0.0f, 1.0f, 0.0f));
+    const glm::mat4 proj = glm::perspectiveRH_ZO(glm::radians(55.0f), aspect, 0.1f, 200.0f);
+    // Match Vulkan clip space Y flip used by the editor/player cameras.
+    glm::mat4 vulkan_proj = proj;
+    vulkan_proj[1][1] *= -1.0f;
+    const glm::mat4 view_proj = vulkan_proj * view;
+    std::memcpy(frame.view_projection, &view_proj[0][0], sizeof(float) * 16);
+    frame.camera_position = eye;
+    frame.camera_mode = genesis::HostFrameInput::CameraMode::HostMatrix;
 }
 
 } // namespace
@@ -68,21 +71,28 @@ int main(int argc, char** argv) {
 
         trySetSceneOutputCamera(bridge);
 
-        float time = 0.0f;
+        double production_time_seconds = 0.0;
+        std::uint64_t production_frame_number = 0;
+
         while (!bridge.shouldClose()) {
             bridge.pollEvents();
 
-            time += 0.016f;
-
-            // Simulate host-side scene edits arriving over a link.
-            if (genesis::Node* sphere = bridge.sceneRuntime().findNodeByPath("Demo Scene/Props/Sphere")) {
-                sphere->local.position.y = 0.525f + std::sin(time * 1.5f) * 0.08f;
-                bridge.updateTransforms();
-            }
+            production_time_seconds += 1.0 / 50.0;
+            ++production_frame_number;
 
             genesis::HostFrameInput frame{};
-            frame.camera_mode = genesis::HostFrameInput::CameraMode::SceneOutput;
-            frame.delta_time = 0.016f;
+            frame.production_time_seconds = production_time_seconds;
+            frame.production_frame_number = production_frame_number;
+
+            if (bridge.sceneRuntime().scene().active_output_camera.has_value()) {
+                frame.camera_mode = genesis::HostFrameInput::CameraMode::SceneOutput;
+            } else {
+                const float aspect =
+                    bridge.height() > 0
+                        ? static_cast<float>(bridge.width()) / static_cast<float>(bridge.height())
+                        : 1.0f;
+                fillHostLookAtViewProjection(frame, aspect);
+            }
 
             bridge.beginFrame(frame);
             bridge.renderScene();

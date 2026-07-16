@@ -1,5 +1,6 @@
 #include "renderer/MeshBatchDrawer.hpp"
 
+#include "platform/Paths.hpp"
 #include "renderer/vulkan/Buffer.hpp"
 #include "renderer/vulkan/ComputePipeline.hpp"
 #include "renderer/vulkan/Pipeline.hpp"
@@ -164,7 +165,7 @@ void MeshBatchDrawer::createCullResources() {
         throw std::runtime_error("Failed to allocate finalize descriptor set");
     }
 
-    const std::filesystem::path shader_dir = GENESIS_SHADER_DIR;
+    const std::filesystem::path shader_dir = resolveShaderDirectory();
     const std::filesystem::path cull_shader = shader_dir / "cull_instances.comp.spv";
     const std::filesystem::path finalize_shader = shader_dir / "finalize_cull.comp.spv";
     if (std::filesystem::exists(cull_shader)) {
@@ -196,14 +197,25 @@ void MeshBatchDrawer::bindDrawInstanceBuffer(const VkDevice device,
 }
 
 MeshBatchDrawer::~MeshBatchDrawer() {
+    prepared_batches_.clear();
+    batch_headers_.clear();
+    cull_pipeline_.reset();
+    finalize_pipeline_.reset();
+    instance_buffer_.reset();
+    visible_instance_buffer_.reset();
+    batch_header_buffer_.reset();
+    indirect_buffer_.reset();
     if (cull_descriptor_pool_ != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(context_.device(), cull_descriptor_pool_, nullptr);
+        cull_descriptor_pool_ = VK_NULL_HANDLE;
     }
     if (cull_set_layout_ != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(context_.device(), cull_set_layout_, nullptr);
+        cull_set_layout_ = VK_NULL_HANDLE;
     }
     if (finalize_set_layout_ != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(context_.device(), finalize_set_layout_, nullptr);
+        finalize_set_layout_ = VK_NULL_HANDLE;
     }
 }
 

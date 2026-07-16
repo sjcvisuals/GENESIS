@@ -3,6 +3,7 @@
 #include "ModulePaths.h"
 #include "ResourceLoader.h"
 #include "SceneSelectors.h"
+#include "runtime/HostTimingAdapter.hpp"
 #include "runtime/RuntimePaths.hpp"
 #include "common/string.h"
 #include "renderer/vulkan/ExternalRenderTarget.hpp"
@@ -293,10 +294,13 @@ SyncDesc Input::before_render() noexcept {
 
 RenderResult Input::render() noexcept try {
     actor_bindings_.apply(session_->sceneRuntime());
+    const ::genesis::HostTimingInput timing =
+        ::genesis::hostTimingFromPixeraTimeline(time_->value());
+    const ::genesis::GenesisFrameTime frame_time = session_->advanceProductionTime(timing);
     session_->updateTransforms();
     session_->render(view_matrix_->value(),
                      projection_matrix_->value(),
-                     time_->value(),
+                     frame_time,
                      use_scene_camera_->value());
     return RenderResult::Succeeded;
 } catch (const std::exception& ex) {

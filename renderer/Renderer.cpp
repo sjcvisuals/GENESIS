@@ -5,6 +5,7 @@
 #include "renderer/MeshInstance.hpp"
 
 #include "platform/ImGuiLayer.hpp"
+#include "platform/Paths.hpp"
 #include "platform/Window.hpp"
 #include "renderer/vulkan/Buffer.hpp"
 #include "renderer/vulkan/Pipeline.hpp"
@@ -88,6 +89,7 @@ Renderer::~Renderer() {
     vertex_buffer_.reset();
     triangle_pipeline_.reset();
     mesh_pipeline_.reset();
+    mesh_depth_pipeline_.reset();
     grid_pipeline_.reset();
     mesh_batch_drawer_.reset();
     bindless_textures_.reset();
@@ -115,6 +117,7 @@ Renderer::~Renderer() {
 
     if (command_pool_ != VK_NULL_HANDLE) {
         vkDestroyCommandPool(context_->device(), command_pool_, nullptr);
+        command_pool_ = VK_NULL_HANDLE;
     }
 
     swapchain_.reset();
@@ -136,6 +139,13 @@ void Renderer::setViewProjection(const float* mat4_col_major) {
     u.camera_pos[3] = 1.0f;
     u.light_count = 0;
     setFrameUniforms(u);
+}
+
+void Renderer::setClearColor(const float r, const float g, const float b, const float a) {
+    clear_color_[0] = r;
+    clear_color_[1] = g;
+    clear_color_[2] = b;
+    clear_color_[3] = a;
 }
 
 void Renderer::setViewportDrawRegion(const float x, const float y, const float width, const float height) {
@@ -298,7 +308,7 @@ void Renderer::createCommandBuffers() {
 }
 
 void Renderer::createTriangleResources() {
-    const std::filesystem::path shader_dir = GENESIS_SHADER_DIR;
+    const std::filesystem::path shader_dir = resolveShaderDirectory();
 
     if (!frame_set_layout_) {
         createFrameDescriptorSetLayout();
@@ -352,7 +362,7 @@ void Renderer::createMeshPipelines() {
         return;
     }
 
-    const std::filesystem::path shader_dir = GENESIS_SHADER_DIR;
+    const std::filesystem::path shader_dir = resolveShaderDirectory();
     GraphicsPipelineConfig pipeline_config{};
     pipeline_config.render_pass = swapchain_->renderPass();
     pipeline_config.vert_shader = shader_dir / "mesh.vert.spv";
@@ -381,7 +391,7 @@ void Renderer::createMeshPipelines() {
 }
 
 void Renderer::createGridResources() {
-    const std::filesystem::path shader_dir = GENESIS_SHADER_DIR;
+    const std::filesystem::path shader_dir = resolveShaderDirectory();
     GraphicsPipelineConfig pipeline_config{};
     pipeline_config.render_pass = swapchain_->renderPass();
     pipeline_config.vert_shader = shader_dir / "grid.vert.spv";
@@ -413,8 +423,8 @@ void Renderer::recreateSwapchain(int width, int height) {
     triangle_pipeline_.reset();
     GraphicsPipelineConfig pipeline_config{};
     pipeline_config.render_pass = swapchain_->renderPass();
-    pipeline_config.vert_shader = std::filesystem::path(GENESIS_SHADER_DIR) / "triangle.vert.spv";
-    pipeline_config.frag_shader = std::filesystem::path(GENESIS_SHADER_DIR) / "triangle.frag.spv";
+    pipeline_config.vert_shader = resolveShaderDirectory() / "triangle.vert.spv";
+    pipeline_config.frag_shader = resolveShaderDirectory() / "triangle.frag.spv";
     pipeline_config.extent = swapchain_->extent();
     pipeline_config.set0_layout = frame_set_layout_;
     triangle_pipeline_ = std::make_unique<GraphicsPipeline>(*context_, pipeline_config);
@@ -432,8 +442,8 @@ void Renderer::recreateSwapchain(int width, int height) {
         grid_pipeline_.reset();
         GraphicsPipelineConfig grid_cfg{};
         grid_cfg.render_pass = swapchain_->renderPass();
-        grid_cfg.vert_shader = std::filesystem::path(GENESIS_SHADER_DIR) / "grid.vert.spv";
-        grid_cfg.frag_shader = std::filesystem::path(GENESIS_SHADER_DIR) / "grid.frag.spv";
+        grid_cfg.vert_shader = resolveShaderDirectory() / "grid.vert.spv";
+        grid_cfg.frag_shader = resolveShaderDirectory() / "grid.frag.spv";
         grid_cfg.extent = swapchain_->extent();
         grid_cfg.set0_layout = frame_set_layout_;
         grid_cfg.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
@@ -457,8 +467,22 @@ void Renderer::recreateSwapchain(int width, int height) {
 }
 
 void Renderer::onResize(int width, int height) {
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+    if (swapchain_ && swapchain_->extent().width == static_cast<std::uint32_t>(width) &&
+        swapchain_->extent().height == static_cast<std::uint32_t>(height)) {
+        framebuffer_resized_ = false;
+        return;
+    }
     framebuffer_resized_ = true;
     recreateSwapchain(width, height);
+}
+
+void Renderer::enableImGuiLayoutPersistence() {
+    if (imgui_) {
+        imgui_->enableLayoutPersistence();
+    }
 }
 
 void Renderer::ensureRenderPass() {
@@ -469,7 +493,7 @@ void Renderer::ensureRenderPass() {
     VkCommandBuffer cmd = command_buffers_[current_frame_];
 
     VkClearValue clear_color{};
-    clear_color.color = {{0.02f, 0.02f, 0.03f, 1.0f}};
+    clear_color.color = {{clear_color_[0], clear_color_[1], clear_color_[2], clear_color_[3]}};
 
     VkClearValue clear_depth{};
     clear_depth.depthStencil = {1.0f, 0};

@@ -15,4 +15,8 @@ void clearAssetSearchRoots();
 // Search order: absolute, configured roots, cwd-relative, executable-relative.
 std::filesystem::path resolveAssetPath(const std::filesystem::path& path);
 
+// SPIR-V shaders for renderer pipelines. Search order: compile-time path (if it
+// exists), module/exe-relative shaders/spv, then configured asset search roots.
+std::filesystem::path resolveShaderDirectory();
+
 } // namespace genesis

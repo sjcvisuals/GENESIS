@@ -31,7 +31,9 @@ ImGuiLayer::ImGuiLayer(SDL_Window* window, const VulkanContext& context, Swapcha
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
-    io.IniFilename = editorLayoutIniCString();
+    // Default null: host tools and short-lived players avoid CRT heap asserts when
+    // ImGui writes imgui.ini during DestroyContext. Editor calls enableLayoutPersistence().
+    io.IniFilename = nullptr;
 
     ImGui::StyleColorsDark();
 
@@ -62,6 +64,10 @@ ImGuiLayer::ImGuiLayer(SDL_Window* window, const VulkanContext& context, Swapcha
     }
 
     // Font texture is uploaded automatically on the first ImGui_ImplVulkan_NewFrame().
+}
+
+void ImGuiLayer::enableLayoutPersistence() {
+    ImGui::GetIO().IniFilename = editorLayoutIniCString();
 }
 
 ImGuiLayer::~ImGuiLayer() {

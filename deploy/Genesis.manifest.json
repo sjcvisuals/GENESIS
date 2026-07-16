@@ -4,7 +4,7 @@
   "renderBridgeSdkVersion": "1.2",
   "graphicsBackend": "Vulkan",
   "extensionDll": "ExtGenesis.dll",
-  "defaultScene": "Scenes/showcase.gns",
+  "defaultScene": "Scenes/default.gns",
   "sceneFormats": [".gns", ".scene.json", ".glb", ".gltf"],
   "requiredRuntimeFiles": [
     "ExtGenesis.dll",

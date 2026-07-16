@@ -44,7 +44,7 @@ SDK reference: [render-bridge-sdk](https://github.com/avstumpfl/render-bridge-sd
 
 `HostBridge` + `genesis_bridge_host` simulate host-driven scene edits in an SDL window. This is **not** how PIXERA loads GENESIS — use it for local iteration only.
 
-`genesis_gltf_viewer` remains the editor / inspector.
+`genesis_gltf_viewer` remains the **editor / inspector** (single monitor, single viewport). Multi-output topology and node assignment belong to the **player / PIXERA** path (`genesis_multiview_player`, ExtGenesis), not the editor.
 
 ## Future media-server fork
 

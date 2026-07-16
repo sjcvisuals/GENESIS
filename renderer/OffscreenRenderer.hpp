@@ -35,6 +35,8 @@ struct OffscreenRendererConfig {
 class OffscreenRenderer {
 public:
     explicit OffscreenRenderer(const OffscreenRendererConfig& config);
+    // Additional output on an existing Vulkan device (shared meshes/textures/scene).
+    OffscreenRenderer(VulkanContext& shared_context, std::uint32_t width, std::uint32_t height);
     ~OffscreenRenderer();
 
     OffscreenRenderer(const OffscreenRenderer&) = delete;
@@ -48,8 +50,12 @@ public:
     void drawMeshBatches(const std::vector<SceneMeshBatch>& batches,
                          const MeshDrawOptions& options = {});
     void endFrame(VkSemaphore wait_host_finished = VK_NULL_HANDLE);
+    void waitFrameComplete();
 
     void setFrameUniforms(const FrameUniforms& uniforms);
+
+    // Default is transparent (RGB black, A=0) so PIXERA can composite over clips behind.
+    void setClearColor(float r, float g, float b, float a);
 
     const VulkanContext& context() const;
     const ExternalRenderTarget& target() const;
@@ -65,7 +71,9 @@ private:
     void createMeshPipelines();
     void recreatePipelines();
 
-    std::unique_ptr<VulkanContext> context_;
+    std::unique_ptr<VulkanContext> owned_context_;
+    VulkanContext* context_ = nullptr;
+    bool owns_context_ = true;
     std::unique_ptr<ExternalRenderTarget> target_;
     std::unique_ptr<ExternalSync> sync_;
     std::unique_ptr<GraphicsPipeline> mesh_pipeline_;
@@ -87,6 +95,7 @@ private:
     size_t current_frame_ = 0;
     bool render_pass_active_ = false;
     FrameUniforms frame_uniforms_{};
+    float clear_color_[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     std::string device_name_;
 };
 

@@ -60,6 +60,11 @@ void GenesisSession::updateTransforms() {
     scene_->updateTransforms();
 }
 
+GenesisFrameTime GenesisSession::advanceProductionTime(const HostTimingInput& input) {
+    current_frame_time_ = production_clock_.advance(input);
+    return current_frame_time_;
+}
+
 void GenesisSession::prepareFrameUniforms(const glm::dmat4& view, const glm::dmat4& projection) {
     const glm::dmat4 view_proj = projection * view;
     glm::mat4 view_proj_f = glm::mat4(view_proj);
@@ -74,9 +79,9 @@ void GenesisSession::prepareFrameUniforms(const glm::dmat4& view, const glm::dma
 
 void GenesisSession::render(const glm::dmat4& view,
                             const glm::dmat4& projection,
-                            double timeline_time,
+                            const GenesisFrameTime& frame_time,
                             bool use_scene_camera) {
-    (void)timeline_time;
+    (void)frame_time;
 
     glm::dmat4 render_view = view;
     glm::dmat4 render_projection = projection;

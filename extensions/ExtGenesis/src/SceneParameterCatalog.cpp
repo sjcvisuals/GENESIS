@@ -26,13 +26,14 @@ std::string friendlyNodeLabel(const std::string& node_path) {
 
 std::optional<std::filesystem::path> resolveShowDocumentPath(const std::filesystem::path& module_dir,
                                                              std::string_view show_resource) {
-    if (show_resource == "demo" || show_resource.empty()) {
+    if (show_resource == "demo" || show_resource == "default" || show_resource == "builtin" ||
+        show_resource.empty()) {
         const std::filesystem::path candidates[] = {
-            module_dir / "Scenes" / "demo.gns",
-            module_dir / "scenes" / "demo.gns",
-            module_dir / "assets" / "scenes" / "demo.gns",
-            module_dir / "assets" / "scenes" / "demo.scene.json",
-            module_dir / "Scenes" / "demo.scene.json",
+            module_dir / "Scenes" / "default.gns",
+            module_dir / "scenes" / "default.gns",
+            module_dir / "assets" / "scenes" / "default.gns",
+            module_dir / "assets" / "scenes" / "default.scene.json",
+            module_dir / "Scenes" / "default.scene.json",
         };
         for (const std::filesystem::path& candidate : candidates) {
             if (std::filesystem::exists(candidate)) {

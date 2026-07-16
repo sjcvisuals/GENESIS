@@ -32,6 +32,13 @@
 #include <string>
 #include <vector>
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace {
 
 constexpr float kGridHalfExtentM = 12.0f;
@@ -61,28 +68,10 @@ public:
         updateWindowTitle();
     }
 
-    void loadDefaultDemoScene() {
-        try {
-            loadSceneDocument(session_.bundledScenePath("showcase.scene.json"));
-            if (genesis::Node* hero = runtime_.findNodeByPath("Showcase/Stage/Hero Sphere")) {
-                selectNode(hero->id);
-            }
-            return;
-        } catch (const std::exception& ex) {
-            spdlog::warn("Failed to load showcase.scene.json, trying demo.scene.json: {}", ex.what());
-        }
-
-        try {
-            loadSceneDocument(session_.bundledScenePath("demo.scene.json"));
-            if (genesis::Node* sphere = runtime_.findNodeByPath("Demo Scene/Props/Sphere")) {
-                selectNode(sphere->id);
-            }
-            return;
-        } catch (const std::exception& ex) {
-            spdlog::warn("Failed to load demo.scene.json, using built-in demo: {}", ex.what());
-        }
-
+    void loadDefaultScene() {
         newBlankScene();
+        session_.dirty = false;
+        updateWindowTitle();
     }
 
     void loadSceneDocument(const std::filesystem::path& path) {
@@ -186,9 +175,11 @@ protected:
             last_draw_batches_ = 0;
         }
 
-        const genesis::GridDrawPushConstants grid_pc =
-            genesis::makeGridDrawPushConstants(nullptr, 0.28f, 0.32f, 0.38f, 0.95f);
-        renderer().drawGrid(grid_mesh_, grid_pc);
+        if (show_grid_) {
+            const genesis::GridDrawPushConstants grid_pc =
+                genesis::makeGridDrawPushConstants(nullptr, 0.28f, 0.32f, 0.38f, 0.95f);
+            renderer().drawGrid(grid_mesh_, grid_pc);
+        }
 
         last_culled_nodes_ = render_stats.culled_mesh_nodes;
     }
@@ -330,23 +321,6 @@ private:
                                   : session_.document_path.string().c_str());
             }
             ImGui::Separator();
-            if (ImGui::BeginMenu("Open Bundled")) {
-                if (ImGui::MenuItem("Showcase")) {
-                    try {
-                        loadSceneDocument(session_.bundledScenePath("showcase.scene.json"));
-                    } catch (const std::exception& ex) {
-                        spdlog::error("Load showcase failed: {}", ex.what());
-                    }
-                }
-                if (ImGui::MenuItem("Demo")) {
-                    try {
-                        loadSceneDocument(session_.bundledScenePath("demo.scene.json"));
-                    } catch (const std::exception& ex) {
-                        spdlog::error("Load demo failed: {}", ex.what());
-                    }
-                }
-                ImGui::EndMenu();
-            }
             if (!session_.recent_files.empty() && ImGui::BeginMenu("Open Recent")) {
                 for (const std::filesystem::path& recent : session_.recent_files) {
                     if (ImGui::MenuItem(recent.string().c_str())) {
@@ -376,6 +350,7 @@ private:
             ImGui::MenuItem("Viewport", nullptr, &show_viewport_);
             ImGui::MenuItem("Toolbar", nullptr, &show_toolbar_);
             ImGui::MenuItem("Viewport Help", nullptr, &show_viewport_help_);
+            ImGui::MenuItem("Show Grid", nullptr, &show_grid_);
             ImGui::Separator();
             ImGui::MenuItem("Performance / Debug", nullptr, &show_debug_window_);
             ImGui::Separator();
@@ -632,6 +607,11 @@ private:
         ImGui::SameLine();
         ImGui::TextUnformatted("|");
         ImGui::SameLine();
+        ImGui::Checkbox("Grid", &show_grid_);
+
+        ImGui::SameLine();
+        ImGui::TextUnformatted("|");
+        ImGui::SameLine();
         if (selected_ != 0 && scene.find(selected_)) {
             ImGui::Text("Selected: %s", scene.find(selected_)->name.c_str());
         } else {
@@ -819,30 +799,12 @@ private:
     }
 
     bool applyGizmoWorldToLocal(genesis::Scene& scene, genesis::Node& node, const float* matrix_m) {
-        float translation[3]{};
-        float rotation[3]{};
-        float scale[3]{};
-        float world_f[16]{};
-        std::memcpy(world_f, matrix_m, sizeof(world_f));
-
-        ImGuizmo::DecomposeMatrixToComponents(world_f, translation, rotation, scale);
-        ImGuizmo::RecomposeMatrixFromComponents(translation, rotation, scale, world_f);
-
-        const glm::mat4 new_world = genesis::float16ToMat4(world_f);
-        const glm::mat4 new_local_mat = genesis::worldToLocalMatrix(scene, node, new_world);
-
-        float local_f[16]{};
-        genesis::mat4ToFloat16(new_local_mat, local_f);
-        ImGuizmo::DecomposeMatrixToComponents(local_f, translation, rotation, scale);
-
-        node.local.position = glm::vec3(translation[0], translation[1], translation[2]);
-        node.local.scale = glm::vec3(scale[0], scale[1], scale[2]);
-
-        const glm::vec3 euler_rad = glm::radians(glm::vec3(rotation[0], rotation[1], rotation[2]));
-        const glm::quat qx = glm::angleAxis(euler_rad.x, glm::vec3(1.0f, 0.0f, 0.0f));
-        const glm::quat qy = glm::angleAxis(euler_rad.y, glm::vec3(0.0f, 1.0f, 0.0f));
-        const glm::quat qz = glm::angleAxis(euler_rad.z, glm::vec3(0.0f, 0.0f, 1.0f));
-        node.local.rotation = glm::normalize(qx * qy * qz);
+        const glm::mat4 new_world = genesis::float16ToMat4(matrix_m);
+        const glm::mat4 new_local = genesis::worldToLocalMatrix(scene, node, new_world);
+        if (!genesis::decomposeTransform(new_local, node.local)) {
+            return false;
+        }
+        node.local.rotation = glm::normalize(node.local.rotation);
         return true;
     }
 
@@ -913,17 +875,24 @@ private:
             n->light->intensity = 1.0f;
         }
 
-        const genesis::NodeId camera = runtime_.scene().createCameraNode("Main Camera", root);
-        if (genesis::Node* n = runtime_.scene().find(camera)) {
-            n->local.position = glm::vec3(0.0f, 2.5f, 7.0f);
-            n->camera->fov_y_radians = glm::radians(55.0f);
+        const std::uint32_t cube_mesh = runtime_.addMesh("Cube", genesis::createCubeMesh(renderer().context()));
+        const std::uint32_t cube_mat = runtime_.addMaterial("Cube Material", genesis::SceneMaterial{});
+        if (genesis::SceneMaterial* mat = runtime_.material(cube_mat)) {
+            mat->base_color = glm::vec4(0.75f, 0.35f, 0.25f, 1.0f);
+            mat->roughness = 0.45f;
+            mat->metallic = 0.05f;
+        }
+        const genesis::NodeId cube = runtime_.scene().createMeshNode("Cube", cube_mesh, root, cube_mat);
+        if (genesis::Node* n = runtime_.scene().find(cube)) {
+            n->local.position = glm::vec3(0.0f, 0.0f, 0.0f);
         }
 
-        runtime_.scene().setActiveOutputCamera(camera);
+        runtime_.scene().active_output_camera.reset();
         session_.document_path = genesis::uniqueProjectPath("Untitled Scene");
         session_.dirty = true;
-        selectNode(root);
+        selectNode(cube);
         use_editor_output_ = true;
+        resetEditorCamera();
         syncEditorAfterDocumentLoad();
         updateWindowTitle();
     }
@@ -1119,6 +1088,7 @@ private:
     bool show_toolbar_ = true;
     bool show_viewport_help_ = true;
     bool show_debug_window_ = false;
+    bool show_grid_ = true;
 
     bool open_open_modal_ = false;
     bool open_save_as_modal_ = false;
@@ -1153,11 +1123,14 @@ int main(int argc, char** argv) {
                 }
             }
         } else {
-            app.loadDefaultDemoScene();
+            app.loadDefaultScene();
         }
         return app.run();
     } catch (const std::exception& ex) {
         spdlog::critical("Fatal error: {}", ex.what());
+#if defined(_WIN32)
+        MessageBoxA(nullptr, ex.what(), "GENESIS Editor", MB_ICONERROR | MB_OK);
+#endif
         return 1;
     }
 }

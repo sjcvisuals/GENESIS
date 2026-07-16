@@ -3,6 +3,8 @@
 #include "platform/Paths.hpp"
 #include "platform/Window.hpp"
 #include "renderer/Renderer.hpp"
+#include "runtime/HostTimingAdapter.hpp"
+#include "host/HostFrameTiming.hpp"
 #include "runtime/RuntimeScene.hpp"
 #include "scene/Lighting.hpp"
 #include "scene/ScenePath.hpp"
@@ -37,7 +39,14 @@ HostBridge::HostBridge(const HostBridgeConfig& config) {
     stats_overlay_ = config.enable_stats_overlay;
 }
 
-HostBridge::~HostBridge() = default;
+HostBridge::~HostBridge() {
+    draw_commands_.clear();
+    draw_batches_.clear();
+    // Scene GPU resources must be destroyed while the Renderer Vulkan device still exists.
+    scene_.reset();
+    renderer_.reset();
+    window_.reset();
+}
 
 bool HostBridge::shouldClose() const {
     return window_->shouldClose();
@@ -48,10 +57,14 @@ void HostBridge::pollEvents() {
 }
 
 void HostBridge::resize(int width, int height) {
-    if (width > 0 && height > 0) {
-        window_->handleResize(width, height);
-        renderer_->onResize(width, height);
+    if (width <= 0 || height <= 0) {
+        return;
     }
+    if (width == window_->width() && height == window_->height()) {
+        return;
+    }
+    window_->handleResize(width, height);
+    renderer_->onResize(width, height);
 }
 
 int HostBridge::width() const {
@@ -241,6 +254,8 @@ void HostBridge::beginFrame(const HostFrameInput& input) {
         resize(window_->width(), window_->height());
         window_->clearResizedFlag();
     }
+
+    current_frame_time_ = adaptHostFrameInput(production_clock_, input);
 
     prepareFrameUniforms(input);
     renderer_->setFrameUniforms(frame_uniforms_);

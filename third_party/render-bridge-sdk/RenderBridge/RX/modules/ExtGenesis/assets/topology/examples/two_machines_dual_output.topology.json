@@ -1,0 +1,87 @@
+{
+  "format": "genesis-topology",
+  "version": 1,
+  "production_id": "example-2machines-dual-out",
+  "name": "Two machines, one GPU each, two outputs per machine",
+  "logical_canvas": {
+    "width": 15360,
+    "height": 2160,
+    "frame_rate_hz": 50.0
+  },
+  "machines": [
+    {
+      "machine_id": "machine-a",
+      "name": "Machine A",
+      "gpus": [
+        {
+          "gpu_id": "machine-a-gpu-0",
+          "name": "GPU 0",
+          "frame_budget_ms": 18.0,
+          "outputs": [
+            {
+              "output_id": "machine-a-gpu-0-out-0",
+              "name": "Output 1",
+              "output_index": 0,
+              "width": 3840,
+              "height": 2160,
+              "refresh_rate_hz": 50.0,
+              "enabled": true,
+              "logical_region": { "x": 0, "y": 0, "width": 3840, "height": 2160 },
+              "render_viewport": { "x": 0, "y": 0, "width": 3840, "height": 2160 },
+              "frame_budget_ms": 8.0
+            },
+            {
+              "output_id": "machine-a-gpu-0-out-1",
+              "name": "Output 2",
+              "output_index": 1,
+              "width": 3840,
+              "height": 2160,
+              "refresh_rate_hz": 50.0,
+              "enabled": true,
+              "logical_region": { "x": 3840, "y": 0, "width": 3840, "height": 2160 },
+              "render_viewport": { "x": 0, "y": 0, "width": 3840, "height": 2160 },
+              "frame_budget_ms": 8.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "machine_id": "machine-b",
+      "name": "Machine B",
+      "gpus": [
+        {
+          "gpu_id": "machine-b-gpu-0",
+          "name": "GPU 0",
+          "frame_budget_ms": 18.0,
+          "outputs": [
+            {
+              "output_id": "machine-b-gpu-0-out-0",
+              "name": "Output 3",
+              "output_index": 0,
+              "width": 3840,
+              "height": 2160,
+              "refresh_rate_hz": 50.0,
+              "enabled": true,
+              "logical_region": { "x": 7680, "y": 0, "width": 3840, "height": 2160 },
+              "render_viewport": { "x": 0, "y": 0, "width": 3840, "height": 2160 },
+              "frame_budget_ms": 8.0
+            },
+            {
+              "output_id": "machine-b-gpu-0-out-1",
+              "name": "Output 4",
+              "output_index": 1,
+              "width": 3840,
+              "height": 2160,
+              "refresh_rate_hz": 50.0,
+              "enabled": true,
+              "logical_region": { "x": 11520, "y": 0, "width": 3840, "height": 2160 },
+              "render_viewport": { "x": 0, "y": 0, "width": 3840, "height": 2160 },
+              "frame_budget_ms": 8.0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

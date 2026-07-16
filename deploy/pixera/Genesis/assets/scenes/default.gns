@@ -1,20 +1,20 @@
 {
   "format": "gns",
   "version": 1,
-  "name": "Showcase",
-  "scene_ref": "showcase.scene.json",
+  "name": "Default Scene",
+  "scene_ref": "default.scene.json",
   "pixera": {
     "streams": [
       {
         "handle": "main",
         "resolution_x": 1920,
         "resolution_y": 1080,
-        "use_scene_camera": true
+        "use_scene_camera": false
       }
     ],
     "bindings": {
-      "target_node": "Showcase/Stage/Hero Sphere",
-      "light_node": "Showcase/Lighting/Sun"
+      "target_node": "Scene/Cube",
+      "light_node": "Scene/Directional Light"
     }
   }
 }

@@ -4,6 +4,12 @@ Run on a Windows machine **without** Visual Studio, Vulkan SDK, or the GENESIS s
 
 ## Package under test
 
+**Option A — installer (recommended)**
+
+Run `build\package\GenesisSetup-0.1.0.exe`, select the components you need, and complete the wizard.
+
+**Option B — manual copy**
+
 Copy `build/deploy/GenesisPixera/` (or a Release build of the same layout) to:
 
 ```
@@ -32,9 +38,8 @@ ExtGenesis/
   ExtGenesis.dll
   Genesis.manifest.json
   Scenes/
-    demo.gns
-    demo.scene.json
-    showcase.gns
+    default.gns
+    default.scene.json
   Assets/
     test/          (bundled glTF meshes)
 ```
@@ -43,9 +48,9 @@ ExtGenesis/
 
 - [ ] PIXERA loads `ExtGenesis.dll` without API version error
 - [ ] Layer shows **Main** stream at expected resolution
-- [ ] **Show Select** lists bundled scenes (`demo`, `Scenes/*.gns`)
-- [ ] Selecting `Scenes/demo.gns` renders sphere + cube
-- [ ] Switching to `Scenes/showcase.gns` reloads scene (previous scene kept on failure)
+- [ ] **Show Select** lists bundled scenes (`default`, `Scenes/*.gns`)
+- [ ] Selecting `Scenes/default.gns` renders a cube at the origin
+- [ ] Empty / transparent background composites over clips (no solid black clear)
 - [ ] **Position** / per-actor parameters move meshes in preview and output
 - [ ] **Reload Scene** picks up editor-saved changes without restarting PIXERA
 - [ ] Adapter LUID set correctly — output is not black

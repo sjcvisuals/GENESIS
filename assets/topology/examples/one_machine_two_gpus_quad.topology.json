@@ -1,0 +1,85 @@
+{
+  "format": "genesis-topology",
+  "version": 1,
+  "production_id": "example-1machine-2gpu-quad",
+  "name": "One machine, two GPUs, two outputs per GPU",
+  "logical_canvas": {
+    "width": 7680,
+    "height": 4320,
+    "frame_rate_hz": 50.0
+  },
+  "machines": [
+    {
+      "machine_id": "machine-a",
+      "name": "Machine A",
+      "gpus": [
+        {
+          "gpu_id": "machine-a-gpu-0",
+          "name": "GPU 0",
+          "model": "RTX A6000",
+          "vram_mb": 49152,
+          "frame_budget_ms": 18.0,
+          "outputs": [
+            {
+              "output_id": "machine-a-gpu-0-out-0",
+              "name": "Output 1",
+              "output_index": 0,
+              "width": 3840,
+              "height": 2160,
+              "refresh_rate_hz": 50.0,
+              "enabled": true,
+              "logical_region": { "x": 0, "y": 0, "width": 3840, "height": 2160 },
+              "render_viewport": { "x": 0, "y": 0, "width": 3840, "height": 2160 },
+              "frame_budget_ms": 8.0
+            },
+            {
+              "output_id": "machine-a-gpu-0-out-1",
+              "name": "Output 2",
+              "output_index": 1,
+              "width": 3840,
+              "height": 2160,
+              "refresh_rate_hz": 50.0,
+              "enabled": true,
+              "logical_region": { "x": 3840, "y": 0, "width": 3840, "height": 2160 },
+              "render_viewport": { "x": 0, "y": 0, "width": 3840, "height": 2160 },
+              "frame_budget_ms": 8.0
+            }
+          ]
+        },
+        {
+          "gpu_id": "machine-a-gpu-1",
+          "name": "GPU 1",
+          "model": "RTX A6000",
+          "vram_mb": 49152,
+          "frame_budget_ms": 18.0,
+          "outputs": [
+            {
+              "output_id": "machine-a-gpu-1-out-0",
+              "name": "Output 3",
+              "output_index": 0,
+              "width": 3840,
+              "height": 2160,
+              "refresh_rate_hz": 50.0,
+              "enabled": true,
+              "logical_region": { "x": 0, "y": 2160, "width": 3840, "height": 2160 },
+              "render_viewport": { "x": 0, "y": 0, "width": 3840, "height": 2160 },
+              "frame_budget_ms": 8.0
+            },
+            {
+              "output_id": "machine-a-gpu-1-out-1",
+              "name": "Output 4",
+              "output_index": 1,
+              "width": 3840,
+              "height": 2160,
+              "refresh_rate_hz": 50.0,
+              "enabled": true,
+              "logical_region": { "x": 3840, "y": 2160, "width": 3840, "height": 2160 },
+              "render_viewport": { "x": 0, "y": 0, "width": 3840, "height": 2160 },
+              "frame_budget_ms": 8.0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

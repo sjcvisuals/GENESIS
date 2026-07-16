@@ -49,6 +49,9 @@ target_link_libraries(genesis_platform_core PUBLIC
     spdlog::spdlog
     glm::glm
 )
+target_compile_definitions(genesis_platform_core PUBLIC
+    GENESIS_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders/spv"
+)
 
 add_library(genesis_platform STATIC
     platform/Window.cpp
@@ -136,8 +139,15 @@ target_link_libraries(genesis_engine_runtime PUBLIC genesis_renderer_core fastgl
 
 add_library(genesis_runtime STATIC
     runtime/GenesisSession.cpp
+    runtime/GenesisFrameTime.cpp
+    runtime/HostTimingAdapter.cpp
+    runtime/SceneStateHash.cpp
+    runtime/DeterministicAnimation.cpp
     runtime/RuntimePaths.cpp
     runtime/RuntimeScene.cpp
+    runtime/ProductionTopology.cpp
+    runtime/NodeAssignment.cpp
+    runtime/MultiViewSession.cpp
 )
 target_include_directories(genesis_runtime PUBLIC ${CMAKE_SOURCE_DIR})
 target_link_libraries(genesis_runtime PUBLIC genesis_engine_runtime)
@@ -145,6 +155,8 @@ target_link_libraries(genesis_runtime PUBLIC genesis_engine_runtime)
 add_library(genesis_engine STATIC
     engine/Application.cpp
     host/HostBridge.cpp
+    host/HostFrameTiming.cpp
+    host/MultiViewHostSession.cpp
 )
 target_include_directories(genesis_engine PUBLIC ${CMAKE_SOURCE_DIR})
 target_link_libraries(genesis_engine PUBLIC
@@ -184,6 +196,23 @@ if(GENESIS_BUILD_EXAMPLES)
     add_executable(genesis_player examples/player/main.cpp)
     target_link_libraries(genesis_player PRIVATE genesis_engine)
     add_dependencies(genesis_player genesis_shaders)
+
+    add_executable(genesis_topology_validate examples/topology_validate/main.cpp)
+    target_link_libraries(genesis_topology_validate PRIVATE genesis_runtime)
+
+    add_executable(genesis_determinism_harness examples/determinism_harness/main.cpp)
+    target_link_libraries(genesis_determinism_harness PRIVATE genesis_runtime nlohmann_json::nlohmann_json)
+
+    add_executable(genesis_multiview_player examples/multiview_player/main.cpp)
+    target_link_libraries(genesis_multiview_player PRIVATE genesis_engine)
+    add_dependencies(genesis_multiview_player genesis_shaders)
+
+    add_custom_command(TARGET genesis_multiview_player POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets"
+            "$<TARGET_FILE_DIR:genesis_multiview_player>/assets"
+        COMMENT "Copying assets next to genesis_multiview_player"
+    )
 
     add_custom_command(TARGET genesis_player POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -284,4 +313,17 @@ if(GENESIS_BUILD_RENDERBRIDGE_EXT AND WIN32)
     )
 
     add_custom_target(GenesisDeploy DEPENDS ExtGenesis)
+endif()
+
+# -----------------------------------------------------------------------------
+# Windows installer (Inno Setup — run scripts/package-installer.ps1)
+# -----------------------------------------------------------------------------
+if(WIN32)
+    add_custom_target(GenesisInstaller
+        COMMAND powershell -ExecutionPolicy Bypass
+            -File "${CMAKE_SOURCE_DIR}/scripts/package-installer.ps1"
+            -BuildDir "${CMAKE_BINARY_DIR}"
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Stage Release build and compile GenesisSetup.exe (requires Inno Setup 6)"
+    )
 endif()

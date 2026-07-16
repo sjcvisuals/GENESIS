@@ -3,6 +3,7 @@
 #include "engine/FrameStats.hpp"
 #include "host/HostSceneCommand.hpp"
 #include "host/HostTypes.hpp"
+#include "runtime/GenesisFrameTime.hpp"
 #include "runtime/RuntimeScene.hpp"
 #include "renderer/FrameUniforms.hpp"
 #include "scene/SceneDrawBatch.hpp"
@@ -48,6 +49,8 @@ public:
     bool applyCommand(const HostSceneCommand& command, std::string* out_error = nullptr);
     void updateTransforms();
 
+    const GenesisFrameTime& currentFrameTime() const { return current_frame_time_; }
+
     SceneRuntime& sceneRuntime() { return *scene_; }
     const SceneRuntime& sceneRuntime() const { return *scene_; }
 
@@ -70,6 +73,8 @@ private:
     std::vector<SceneMeshBatch> draw_batches_;
     FrameUniforms frame_uniforms_{};
     FrameStats frame_stats_{};
+    ProductionClock production_clock_{};
+    GenesisFrameTime current_frame_time_{};
     bool stats_overlay_ = false;
 };
 

@@ -81,12 +81,19 @@ int main(int argc, char** argv) {
         trySetSceneOutputCamera(bridge);
         spdlog::info("Genesis Player loaded '{}'", resource);
 
+        double production_time_seconds = 0.0;
+        std::uint64_t production_frame_number = 0;
+
         while (!bridge.shouldClose()) {
             bridge.pollEvents();
 
+            production_time_seconds += 1.0 / 50.0;
+            ++production_frame_number;
+
             genesis::HostFrameInput frame{};
             frame.camera_mode = genesis::HostFrameInput::CameraMode::SceneOutput;
-            frame.delta_time = 1.0f / 60.0f;
+            frame.production_time_seconds = production_time_seconds;
+            frame.production_frame_number = production_frame_number;
 
             bridge.beginFrame(frame);
             bridge.renderScene();

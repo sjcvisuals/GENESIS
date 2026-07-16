@@ -67,6 +67,21 @@ See [docs/pixera-integration.md](docs/pixera-integration.md) for PIXERA setup an
 
 See `docs/host-bridge.md` for fork architecture.
 
+## Windows installer
+
+Build a single setup executable with component selection (Editor / Player / PIXERA extension):
+
+1. Install [Inno Setup 6](https://jrsoftware.org/isinfo.php)
+2. Run:
+
+```powershell
+.\scripts\package-installer.ps1
+```
+
+Output: `build\package\GenesisSetup-0.1.0.exe`
+
+The wizard lets users pick which components to install. The PIXERA extension is copied to `<PIXERA>\data\rxExt\ExtGenesis\`. Uninstall via Windows Settings or the GENESIS uninstaller entry.
+
 ## Project layout
 
 See `docs/architecture.md` for system design.

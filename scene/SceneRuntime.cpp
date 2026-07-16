@@ -91,7 +91,7 @@ void SceneRuntime::saveDocument(const std::filesystem::path& path) {
 void SceneRuntime::loadDemo() {
     clear();
 
-    const NodeId root = scene_.createEmptyNode("Demo Scene");
+    const NodeId root = scene_.createEmptyNode("Scene");
 
     const NodeId dir_light =
         scene_.createLightNode("Directional Light", SceneLightType::Directional, root);
@@ -103,14 +103,20 @@ void SceneRuntime::loadDemo() {
         n->light->intensity = 1.0f;
     }
 
-    const NodeId camera = scene_.createCameraNode("Main Camera", root);
-    if (Node* n = scene_.find(camera)) {
-        n->local.position = glm::vec3(0.0f, 2.5f, 7.0f);
-        n->local.rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-        n->camera->fov_y_radians = glm::radians(55.0f);
+    const std::uint32_t cube_mesh = addMesh("Cube", createCubeMesh(context_));
+    const std::uint32_t cube_mat = addMaterial("Cube Material", SceneMaterial{});
+    if (SceneMaterial* mat = material(cube_mat)) {
+        mat->base_color = glm::vec4(0.75f, 0.35f, 0.25f, 1.0f);
+        mat->roughness = 0.45f;
+        mat->metallic = 0.05f;
     }
 
-    scene_.setActiveOutputCamera(camera);
+    const NodeId cube = scene_.createMeshNode("Cube", cube_mesh, root, cube_mat);
+    if (Node* n = scene_.find(cube)) {
+        n->local.position = glm::vec3(0.0f, 0.0f, 0.0f);
+    }
+
+    scene_.active_output_camera.reset();
     source_path_ = "builtin";
     scene_.updateWorldTransforms();
 }

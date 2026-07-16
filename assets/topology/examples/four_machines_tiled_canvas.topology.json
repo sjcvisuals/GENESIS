@@ -1,0 +1,113 @@
+{
+  "format": "genesis-topology",
+  "version": 1,
+  "production_id": "example-4machines-tiled",
+  "name": "Four machines, one output each, tiled canvas",
+  "logical_canvas": {
+    "width": 7680,
+    "height": 4320,
+    "frame_rate_hz": 50.0
+  },
+  "machines": [
+    {
+      "machine_id": "machine-a",
+      "name": "Machine A",
+      "gpus": [
+        {
+          "gpu_id": "machine-a-gpu-0",
+          "name": "GPU 0",
+          "frame_budget_ms": 18.0,
+          "outputs": [
+            {
+              "output_id": "machine-a-gpu-0-out-0",
+              "name": "Tile A",
+              "output_index": 0,
+              "width": 3840,
+              "height": 2160,
+              "refresh_rate_hz": 50.0,
+              "enabled": true,
+              "logical_region": { "x": 0, "y": 0, "width": 3840, "height": 2160 },
+              "render_viewport": { "x": 0, "y": 0, "width": 3840, "height": 2160 },
+              "frame_budget_ms": 8.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "machine_id": "machine-b",
+      "name": "Machine B",
+      "gpus": [
+        {
+          "gpu_id": "machine-b-gpu-0",
+          "name": "GPU 0",
+          "frame_budget_ms": 18.0,
+          "outputs": [
+            {
+              "output_id": "machine-b-gpu-0-out-0",
+              "name": "Tile B",
+              "output_index": 0,
+              "width": 3840,
+              "height": 2160,
+              "refresh_rate_hz": 50.0,
+              "enabled": true,
+              "logical_region": { "x": 3840, "y": 0, "width": 3840, "height": 2160 },
+              "render_viewport": { "x": 0, "y": 0, "width": 3840, "height": 2160 },
+              "frame_budget_ms": 8.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "machine_id": "machine-c",
+      "name": "Machine C",
+      "gpus": [
+        {
+          "gpu_id": "machine-c-gpu-0",
+          "name": "GPU 0",
+          "frame_budget_ms": 18.0,
+          "outputs": [
+            {
+              "output_id": "machine-c-gpu-0-out-0",
+              "name": "Tile C",
+              "output_index": 0,
+              "width": 3840,
+              "height": 2160,
+              "refresh_rate_hz": 50.0,
+              "enabled": true,
+              "logical_region": { "x": 0, "y": 2160, "width": 3840, "height": 2160 },
+              "render_viewport": { "x": 0, "y": 0, "width": 3840, "height": 2160 },
+              "frame_budget_ms": 8.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "machine_id": "machine-d",
+      "name": "Machine D",
+      "gpus": [
+        {
+          "gpu_id": "machine-d-gpu-0",
+          "name": "GPU 0",
+          "frame_budget_ms": 18.0,
+          "outputs": [
+            {
+              "output_id": "machine-d-gpu-0-out-0",
+              "name": "Tile D",
+              "output_index": 0,
+              "width": 3840,
+              "height": 2160,
+              "refresh_rate_hz": 50.0,
+              "enabled": true,
+              "logical_region": { "x": 3840, "y": 2160, "width": 3840, "height": 2160 },
+              "render_viewport": { "x": 0, "y": 0, "width": 3840, "height": 2160 },
+              "frame_budget_ms": 8.0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

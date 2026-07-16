@@ -22,6 +22,9 @@ on playback machines:
 
 The Genesis Editor is NOT required on playback machines.
 
+Topology examples (Assets/topology/) are included for reference. Multi-output
+simulation tools live with Genesis Player, not inside this PIXERA folder.
+
 Scene loading
 -------------
 - Select shows via the RenderBridge parameter "Show Select" (show_select).

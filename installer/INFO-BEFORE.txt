@@ -1,0 +1,16 @@
+GENESIS Setup
+
+Components
+----------
+* Editor  — single-monitor scene authoring
+* Player  — scene preview, multi-view topology simulation, topology validation
+* PIXERA  — ExtGenesis RenderBridge extension (data\rxExt\ExtGenesis)
+
+Notes
+-----
+* Multi-output / production topology tools install with Player, not the Editor.
+* Prefer Debug editor builds from the source tree for active development if the
+  installed Release editor misbehaves; Player and PIXERA tools are intended for
+  the installer Release payload.
+* After installing PIXERA extension, restart PIXERA / reload the generic extension
+  layer so it picks up the new ExtGenesis.dll.

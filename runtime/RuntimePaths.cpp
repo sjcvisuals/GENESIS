@@ -128,7 +128,8 @@ std::optional<RuntimeSceneResource> resolveRuntimeSceneResource(
     const std::filesystem::path& module_dir, std::string_view resource,
     const std::function<std::string(std::string_view)>& resolve_storage) {
     const std::string trimmed = trim(resource);
-    if (trimmed.empty() || equalsIgnoreCase(trimmed, "demo") || equalsIgnoreCase(trimmed, "builtin")) {
+    if (trimmed.empty() || equalsIgnoreCase(trimmed, "demo") || equalsIgnoreCase(trimmed, "default") ||
+        equalsIgnoreCase(trimmed, "builtin")) {
         return RuntimeSceneResource{RuntimeSceneKind::Demo, {}};
     }
 
@@ -174,8 +175,9 @@ std::optional<RuntimeSceneResource> resolveRuntimeSceneResource(
 }
 
 std::vector<std::string> scanRuntimeShowResources(const std::filesystem::path& module_dir) {
-    std::vector<std::string> shows{"demo"};
+    std::vector<std::string> shows;
     if (module_dir.empty()) {
+        shows.push_back("default");
         return shows;
     }
 
@@ -184,6 +186,10 @@ std::vector<std::string> scanRuntimeShowResources(const std::filesystem::path& m
     scanShowDirectory(module_dir / "assets" / "scenes", module_dir / "assets", shows);
     scanShowDirectory(module_dir / "Assets" / "Scenes", module_dir / "Assets", shows);
     scanShowDirectory(module_dir / "assets", module_dir / "assets", shows);
+
+    if (shows.empty()) {
+        shows.push_back("default");
+    }
     return shows;
 }
 

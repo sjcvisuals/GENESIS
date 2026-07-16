@@ -1,5 +1,6 @@
 #include "renderer/OffscreenRenderer.hpp"
 
+#include "platform/Paths.hpp"
 #include "renderer/Mesh.hpp"
 #include "renderer/MeshBatchDrawer.hpp"
 #include "renderer/MeshInstance.hpp"
@@ -18,13 +19,14 @@
 
 namespace genesis {
 
-OffscreenRenderer::OffscreenRenderer(const OffscreenRendererConfig& config) {
+OffscreenRenderer::OffscreenRenderer(const OffscreenRendererConfig& config) : owns_context_(true) {
     VulkanContextConfig context_config{};
     context_config.window = nullptr;
     context_config.adapter_luid = config.adapter_luid;
     context_config.enable_validation = config.enable_validation;
 
-    context_ = std::make_unique<VulkanContext>(context_config);
+    owned_context_ = std::make_unique<VulkanContext>(context_config);
+    context_ = owned_context_.get();
 
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(context_->physicalDevice(), &props);
@@ -42,6 +44,27 @@ OffscreenRenderer::OffscreenRenderer(const OffscreenRendererConfig& config) {
     createMeshPipeline();
 
     spdlog::info("OffscreenRenderer initialized ({}x{})", config.width, config.height);
+}
+
+OffscreenRenderer::OffscreenRenderer(VulkanContext& shared_context, const std::uint32_t width,
+                                     const std::uint32_t height)
+    : context_(&shared_context), owns_context_(false) {
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(context_->physicalDevice(), &props);
+    device_name_ = props.deviceName;
+
+    ExternalRenderTargetConfig target_config{};
+    target_config.width = width;
+    target_config.height = height;
+    target_ = std::make_unique<ExternalRenderTarget>(*context_, target_config);
+    sync_ = std::make_unique<ExternalSync>(*context_);
+
+    createCommandPool();
+    createSyncObjects();
+    createCommandBuffers();
+    createMeshPipeline();
+
+    spdlog::info("OffscreenRenderer shared output initialized ({}x{})", width, height);
 }
 
 OffscreenRenderer::~OffscreenRenderer() {
@@ -71,7 +94,8 @@ OffscreenRenderer::~OffscreenRenderer() {
 
     sync_.reset();
     target_.reset();
-    context_.reset();
+    owned_context_.reset();
+    context_ = nullptr;
 }
 
 void OffscreenRenderer::resize(std::uint32_t width, std::uint32_t height) {
@@ -208,7 +232,7 @@ void OffscreenRenderer::createMeshPipelines() {
         return;
     }
 
-    const std::filesystem::path shader_dir = GENESIS_SHADER_DIR;
+    const std::filesystem::path shader_dir = resolveShaderDirectory();
     GraphicsPipelineConfig pipeline_config{};
     pipeline_config.render_pass = target_->renderPass();
     pipeline_config.vert_shader = shader_dir / "mesh.vert.spv";
@@ -251,6 +275,13 @@ void OffscreenRenderer::setFrameUniforms(const FrameUniforms& uniforms) {
     frame_ubo_->upload(&uniforms, sizeof(FrameUniforms), offset);
 }
 
+void OffscreenRenderer::setClearColor(const float r, const float g, const float b, const float a) {
+    clear_color_[0] = r;
+    clear_color_[1] = g;
+    clear_color_[2] = b;
+    clear_color_[3] = a;
+}
+
 void OffscreenRenderer::ensureRenderPass() {
     if (render_pass_active_) {
         return;
@@ -258,7 +289,7 @@ void OffscreenRenderer::ensureRenderPass() {
 
     VkCommandBuffer cmd = command_buffers_[current_frame_];
     VkClearValue clear_color{};
-    clear_color.color = {{0.02f, 0.02f, 0.03f, 1.0f}};
+    clear_color.color = {{clear_color_[0], clear_color_[1], clear_color_[2], clear_color_[3]}};
     VkClearValue clear_depth{};
     clear_depth.depthStencil = {1.0f, 0};
     VkClearValue clears[2] = {clear_color, clear_depth};
@@ -382,6 +413,11 @@ void OffscreenRenderer::endFrame(VkSemaphore wait_host_finished) {
     }
 
     current_frame_ = (current_frame_ + 1) % kFramesInFlight;
+}
+
+void OffscreenRenderer::waitFrameComplete() {
+    const size_t completed_frame = (current_frame_ + kFramesInFlight - 1) % kFramesInFlight;
+    vkWaitForFences(context_->device(), 1, &in_flight_fences_[completed_frame], VK_TRUE, UINT64_MAX);
 }
 
 const VulkanContext& OffscreenRenderer::context() const {

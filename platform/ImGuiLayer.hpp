@@ -22,6 +22,9 @@ public:
     void endFrame(VkCommandBuffer command_buffer);
     void onResize();
 
+    // Safe for process lifetime; uses EditorPaths static storage.
+    void enableLayoutPersistence();
+
 private:
     void createDescriptorPool(const VulkanContext& context);
 

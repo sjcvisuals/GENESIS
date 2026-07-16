@@ -17,6 +17,7 @@ Application::Application(const ApplicationConfig& config) {
     window_config.height = config.height;
     window_ = std::make_unique<Window>(window_config);
     renderer_ = std::make_unique<Renderer>(*window_);
+    renderer_->enableImGuiLayoutPersistence();
 }
 
 Application::~Application() = default;

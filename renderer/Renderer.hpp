@@ -52,11 +52,17 @@ public:
     void setFrameUniforms(const FrameUniforms& uniforms);
     void setViewProjection(const float* mat4_col_major);
 
+    // Default is transparent (RGB black, A=0) so PIXERA can composite over clips behind.
+    // Call with A=1 when an explicit solid background colour is desired.
+    void setClearColor(float r, float g, float b, float a);
+
     // When enabled, mesh/grid draws are clipped to this screen-space rectangle (pixels).
     void setViewportDrawRegion(float x, float y, float width, float height);
     void clearViewportDrawRegion();
 
     void onResize(int width, int height);
+
+    void enableImGuiLayoutPersistence();
 
     VkInstance instance() const;
     const VulkanContext& context() const;
@@ -108,6 +114,7 @@ private:
     bool framebuffer_resized_ = false;
     bool render_pass_active_ = false;
     FrameUniforms frame_uniforms_{};
+    float clear_color_[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     std::string device_name_;
 
     bool draw_region_enabled_ = false;

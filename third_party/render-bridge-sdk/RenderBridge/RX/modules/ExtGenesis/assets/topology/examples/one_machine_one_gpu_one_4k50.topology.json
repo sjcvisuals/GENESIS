@@ -1,0 +1,42 @@
+{
+  "format": "genesis-topology",
+  "version": 1,
+  "production_id": "example-1x4k50",
+  "name": "One machine, one GPU, one 4K50 output",
+  "logical_canvas": {
+    "width": 3840,
+    "height": 2160,
+    "frame_rate_hz": 50.0
+  },
+  "performance_profile": "4K50 Single Output",
+  "budget_policy": "warn",
+  "machines": [
+    {
+      "machine_id": "machine-a",
+      "name": "Machine A",
+      "gpus": [
+        {
+          "gpu_id": "machine-a-gpu-0",
+          "name": "GPU 0",
+          "model": "RTX A6000",
+          "vram_mb": 49152,
+          "frame_budget_ms": 18.0,
+          "outputs": [
+            {
+              "output_id": "machine-a-gpu-0-out-0",
+              "name": "Output 1",
+              "output_index": 0,
+              "width": 3840,
+              "height": 2160,
+              "refresh_rate_hz": 50.0,
+              "enabled": true,
+              "logical_region": { "x": 0, "y": 0, "width": 3840, "height": 2160 },
+              "render_viewport": { "x": 0, "y": 0, "width": 3840, "height": 2160 },
+              "frame_budget_ms": 8.0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

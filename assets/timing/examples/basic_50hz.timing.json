@@ -1,0 +1,21 @@
+{
+  "format": "genesis-timing-replay",
+  "output_frame_rate_hz": 50.0,
+  "simulation_step_seconds": 0.01,
+  "scene_seed": 42,
+  "frames": [
+    { "production_time_seconds": 0.0, "production_frame_number": 0, "force_discontinuity": true },
+    { "production_time_seconds": 0.02, "production_frame_number": 1 },
+    { "production_time_seconds": 0.04, "production_frame_number": 2 },
+    { "production_time_seconds": 0.06, "production_frame_number": 3 },
+    { "production_time_seconds": 0.08, "production_frame_number": 4 },
+    { "production_time_seconds": 0.10, "production_frame_number": 5 },
+    { "production_time_seconds": 0.12, "production_frame_number": 6, "is_paused": true },
+    { "production_time_seconds": 0.12, "production_frame_number": 6, "is_paused": true },
+    { "production_time_seconds": 0.14, "production_frame_number": 7 },
+    { "production_time_seconds": 0.50, "production_frame_number": 25, "force_discontinuity": true },
+    { "production_time_seconds": 0.52, "production_frame_number": 26 },
+    { "production_time_seconds": 0.48, "production_frame_number": 24, "force_discontinuity": true },
+    { "production_time_seconds": 0.50, "production_frame_number": 25 }
+  ]
+}

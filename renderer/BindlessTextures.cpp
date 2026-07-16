@@ -52,12 +52,17 @@ BindlessTextures::BindlessTextures(const VulkanContext& context) : context_(cont
 }
 
 BindlessTextures::~BindlessTextures() {
+    textures_.clear();
+    lookup_.clear();
     if (pool_ != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(context_.device(), pool_, nullptr);
+        pool_ = VK_NULL_HANDLE;
     }
     if (layout_ != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(context_.device(), layout_, nullptr);
+        layout_ = VK_NULL_HANDLE;
     }
+    default_texture_.reset();
 }
 
 std::uint32_t BindlessTextures::registerTexture(const GpuTexture* texture) {
