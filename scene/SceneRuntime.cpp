@@ -3,6 +3,8 @@
 #include "scene/Frustum.hpp"
 #include "scene/MeshBounds.hpp"
 
+#include "animation/AnimationAuthoring.hpp"
+#include "animation/AnimationEvaluator.hpp"
 #include "assets/GltfLoader.hpp"
 #include "assets/PrimitiveMeshes.hpp"
 #include "platform/Paths.hpp"
@@ -18,9 +20,14 @@
 
 namespace genesis {
 
-SceneRuntime::SceneRuntime(const VulkanContext& context) : context_(context) {}
+SceneRuntime::SceneRuntime(const VulkanContext& context) : context_(context) {
+    animation_graph_.ensureDefaults();
+}
 
 void SceneRuntime::clear() {
+    if (context_.device() != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(context_.device());
+    }
     scene_ = Scene{};
     meshes_.clear();
     mesh_names_.clear();
@@ -31,6 +38,14 @@ void SceneRuntime::clear() {
     source_path_ = "builtin";
     document_path_.clear();
     gltf_source_path_.clear();
+    animation_clips_.clear();
+    animation_graph_ = {};
+    animation_playback_ = {};
+    animation_graph_.ensureDefaults();
+    particle_world_.clear();
+    particle_step_accumulator_ = 0.0;
+    particle_cube_mesh_id_.reset();
+    particle_sphere_mesh_id_.reset();
 }
 
 void SceneRuntime::loadGltf(const std::filesystem::path& path) {
@@ -81,10 +96,43 @@ void SceneRuntime::loadGnsFile(const std::filesystem::path& absolute_path) {
     document_path_ = absolute_path.string();
 }
 
-void SceneRuntime::saveDocument(const std::filesystem::path& path) {
-    const SceneDocument document =
+SceneDocument SceneRuntime::buildSceneDocument() const {
+    SceneDocument document =
         SceneSerializer::buildDocument(scene_, source_path_, mesh_names_, material_names_, materials_);
-    SceneSerializer::save(document, path);
+    document.animations = animation_clips_;
+    for (AnimationClip& clip : document.animations) {
+        for (AnimationChannel& channel : clip.channels) {
+            if (channel.target_node_id != 0) {
+                channel.target_node_name = nodePath(scene_, channel.target_node_id);
+            }
+            channel.target_node_id = 0;
+        }
+    }
+    return document;
+}
+
+void SceneRuntime::saveDocument(const std::filesystem::path& path) {
+    SceneDocument document = buildSceneDocument();
+    const std::string ext = path.extension().string();
+    if (ext == ".gns" || ext == ".GNS" || ext == ".genesis" || ext == ".GENESIS") {
+        GnsPackage package{};
+        package.version = 1;
+        package.name = path.stem().string();
+        package.scene = std::move(document);
+        package.pixera.streams.push_back(GnsStreamDesc{});
+        // Best-effort bindings from common demo/editor names.
+        for (const Node& node : scene_.nodes) {
+            if (node.mesh_resource.has_value() && package.pixera.bindings.target_node.empty()) {
+                package.pixera.bindings.target_node = nodePath(scene_, node.id);
+            }
+            if (node.light.has_value() && package.pixera.bindings.light_node.empty()) {
+                package.pixera.bindings.light_node = nodePath(scene_, node.id);
+            }
+        }
+        GnsPackage::save(package, path);
+    } else {
+        SceneSerializer::save(document, path);
+    }
     document_path_ = path.string();
 }
 
@@ -99,16 +147,16 @@ void SceneRuntime::loadDemo() {
         n->local.rotation =
             glm::angleAxis(glm::radians(-50.0f), glm::vec3(1.0f, 0.0f, 0.0f)) *
             glm::angleAxis(glm::radians(40.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-        n->light->color = glm::vec3(1.0f, 0.98f, 0.94f);
-        n->light->intensity = 1.0f;
+        n->light->color = glm::vec3(1.0f, 0.97f, 0.92f);
+        n->light->intensity = 2.4f;
     }
 
     const std::uint32_t cube_mesh = addMesh("Cube", createCubeMesh(context_));
     const std::uint32_t cube_mat = addMaterial("Cube Material", SceneMaterial{});
     if (SceneMaterial* mat = material(cube_mat)) {
-        mat->base_color = glm::vec4(0.75f, 0.35f, 0.25f, 1.0f);
-        mat->roughness = 0.45f;
-        mat->metallic = 0.05f;
+        mat->base_color = glm::vec4(0.82f, 0.38f, 0.26f, 1.0f);
+        mat->roughness = 0.38f;
+        mat->metallic = 0.12f;
     }
 
     const NodeId cube = scene_.createMeshNode("Cube", cube_mesh, root, cube_mat);
@@ -151,6 +199,142 @@ std::uint32_t SceneRuntime::addTexture(std::string name, GpuTexture texture) {
     textures_.push_back(std::move(texture));
     texture_names_.push_back(std::move(name));
     return static_cast<std::uint32_t>(textures_.size() - 1);
+}
+
+std::int32_t SceneRuntime::addAnimationClip(AnimationClip clip) {
+    animation_clips_.push_back(std::move(clip));
+    return static_cast<std::int32_t>(animation_clips_.size() - 1);
+}
+
+std::int32_t SceneRuntime::ensureSceneAnimationClip() {
+    for (std::int32_t i = 0; i < static_cast<std::int32_t>(animation_clips_.size()); ++i) {
+        if (animation_clips_[static_cast<std::size_t>(i)].name == "Scene") {
+            return i;
+        }
+    }
+    AnimationClip clip{};
+    clip.name = "Scene";
+    clip.duration_seconds = 5.0f;
+    clip.ticks_per_second = 30.0f;
+    const std::int32_t index = addAnimationClip(std::move(clip));
+    animation_graph_.states.push_back(AnimationGraphState{"Scene", index, true});
+    if (animation_graph_.entry_state.empty() || animation_graph_.entry_state == "Idle") {
+        animation_graph_.entry_state = "Scene";
+        animation_graph_.active_state = "Scene";
+    }
+    if (animation_playback_.clip_index < 0) {
+        animation_playback_.clip_index = index;
+    }
+    return index;
+}
+
+void SceneRuntime::keyframeNode(NodeId node_id, float time_seconds, AnimationTrack tracks) {
+    const Node* node = scene_.find(node_id);
+    if (!node) {
+        return;
+    }
+    std::int32_t target = animation_playback_.clip_index;
+    if (target < 0 || target >= static_cast<std::int32_t>(animation_clips_.size())) {
+        target = ensureSceneAnimationClip();
+        animation_playback_.clip_index = target;
+    }
+    genesis::keyframeNode(animation_clips_[static_cast<std::size_t>(target)], *node, time_seconds, tracks);
+}
+
+void SceneRuntime::keyframeNodes(const std::vector<NodeId>& node_ids, float time_seconds,
+                                 AnimationTrack tracks) {
+    for (NodeId id : node_ids) {
+        keyframeNode(id, time_seconds, tracks);
+    }
+}
+
+void SceneRuntime::applyActiveAnimation() {
+    if (animation_playback_.clip_index < 0 ||
+        animation_playback_.clip_index >= static_cast<std::int32_t>(animation_clips_.size())) {
+        return;
+    }
+    const AnimationClip& clip = animation_clips_[static_cast<std::size_t>(animation_playback_.clip_index)];
+    applyAnimationClip(scene_, clip, animation_playback_.time_seconds, animation_playback_.loop);
+    updateTransforms();
+}
+
+void SceneRuntime::tickAnimations(float dt_seconds) {
+    if (animation_playback_.clip_index < 0 ||
+        animation_playback_.clip_index >= static_cast<std::int32_t>(animation_clips_.size())) {
+        return;
+    }
+    AnimationClip& clip = animation_clips_[static_cast<std::size_t>(animation_playback_.clip_index)];
+    tickAnimationPlayback(animation_playback_, &clip, dt_seconds);
+    // Only drive transforms while playing so paused scrubbing / inspector edits can be keyed.
+    if (animation_playback_.playing) {
+        applyAnimationClip(scene_, clip, animation_playback_.time_seconds, animation_playback_.loop);
+    }
+}
+
+void SceneRuntime::tickParticles(float dt_seconds, float fixed_step_seconds, std::uint64_t max_steps) {
+    if (fixed_step_seconds <= 1e-8f) {
+        return;
+    }
+    particle_step_accumulator_ += static_cast<double>(dt_seconds);
+    std::uint64_t steps = 0;
+    while (particle_step_accumulator_ >= static_cast<double>(fixed_step_seconds) && steps < max_steps) {
+        particle_step_accumulator_ -= static_cast<double>(fixed_step_seconds);
+        ++steps;
+    }
+    if (steps >= max_steps) {
+        particle_step_accumulator_ = 0.0;
+    }
+    particle_world_.simulate(scene_, steps, fixed_step_seconds);
+}
+
+void SceneRuntime::resetParticles() {
+    particle_world_.reset();
+    particle_step_accumulator_ = 0.0;
+}
+
+void SceneRuntime::appendParticleDrawCommands(std::vector<SceneDrawCommand>& out) {
+    if (!particle_cube_mesh_id_.has_value()) {
+        particle_cube_mesh_id_ = addMesh("ParticleCube", createCubeMesh(context_));
+    }
+    if (!particle_sphere_mesh_id_.has_value()) {
+        particle_sphere_mesh_id_ = addMesh("ParticleSphere", createSphereMesh(context_, 0.5f, 12, 8));
+    }
+
+    std::vector<ParticleWorld::ParticleInstanceBatch> batches;
+    particle_world_.collectInstances(scene_, batches);
+
+    SceneMaterial lit{};
+    lit.base_color = glm::vec4(1.0f);
+    lit.roughness = 0.55f;
+    lit.metallic = 0.0f;
+    lit.alpha_mode = AlphaMode::Blend;
+
+    SceneMaterial unlit = lit;
+    unlit.emissive = glm::vec3(1.0f);
+    unlit.emissive_strength = 2.5f;
+    unlit.roughness = 1.0f;
+
+    for (const ParticleWorld::ParticleInstanceBatch& batch : batches) {
+        const Mesh* mesh = nullptr;
+        if (batch.mesh == ParticleRenderMesh::Sphere) {
+            mesh = this->mesh(*particle_sphere_mesh_id_);
+        } else {
+            mesh = this->mesh(*particle_cube_mesh_id_);
+        }
+        if (!mesh) {
+            continue;
+        }
+        const SceneMaterial& material = batch.unlit ? unlit : lit;
+        for (const GpuMeshInstance& instance : batch.instances) {
+            SceneDrawCommand cmd{};
+            cmd.node_id = 0;
+            cmd.mesh = mesh;
+            cmd.model = instance.model;
+            cmd.material = makeMeshMaterialPushConstants(material);
+            cmd.instance_color = instance.color;
+            out.push_back(cmd);
+        }
+    }
 }
 
 Mesh* SceneRuntime::mesh(const std::uint32_t id) {
@@ -230,6 +414,15 @@ void SceneRuntime::collectDrawCommands(std::vector<SceneDrawCommand>& out,
         if (material.base_color_texture_resource.has_value()) {
             cmd.base_color_texture = texture(*material.base_color_texture_resource);
         }
+        if (material.metallic_roughness_texture_resource.has_value()) {
+            cmd.metallic_roughness_texture = texture(*material.metallic_roughness_texture_resource);
+        }
+        if (material.normal_texture_resource.has_value()) {
+            cmd.normal_texture = texture(*material.normal_texture_resource);
+        }
+        if (material.emissive_texture_resource.has_value()) {
+            cmd.emissive_texture = texture(*material.emissive_texture_resource);
+        }
         out.push_back(cmd);
 
         ++stats.visible_mesh_nodes;
@@ -260,6 +453,9 @@ std::optional<ScenePickResult> SceneRuntime::pickNodeAtRay(const PickRay& ray,
 }
 
 void SceneRuntime::loadGltfSource(const std::filesystem::path& path) {
+    if (context_.device() != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(context_.device());
+    }
     materials_.clear();
     material_names_.clear();
     textures_.clear();
@@ -354,6 +550,8 @@ void SceneRuntime::applyNodeEntry(const NodeId id, const SceneDocumentNode& entr
     node->has_camera = entry.camera.has_value();
     node->light = entry.light;
     node->has_light = entry.light.has_value();
+    node->particle_emitter = entry.particle_emitter;
+    node->has_particle_emitter = entry.particle_emitter.has_value();
 }
 
 void SceneRuntime::createNodeFromEntry(const SceneDocumentNode& entry) {
@@ -374,6 +572,8 @@ void SceneRuntime::createNodeFromEntry(const SceneDocumentNode& entry) {
         id = scene_.createCameraNode(entry.name, parent_id);
     } else if (entry.light.has_value()) {
         id = scene_.createLightNode(entry.name, entry.light->type, parent_id);
+    } else if (entry.particle_emitter.has_value()) {
+        id = scene_.createParticleEmitterNode(entry.name, parent_id, *entry.particle_emitter);
     } else {
         id = scene_.createEmptyNode(entry.name, parent_id);
     }
@@ -393,6 +593,27 @@ void SceneRuntime::finishDocumentLoad(const SceneDocument& document) {
     } else {
         scene_.active_output_camera.reset();
     }
+
+    animation_clips_ = document.animations;
+    for (AnimationClip& clip : animation_clips_) {
+        bindClipChannels(scene_, clip);
+    }
+    animation_graph_ = {};
+    animation_graph_.ensureDefaults();
+    for (std::int32_t i = 0; i < static_cast<std::int32_t>(animation_clips_.size()); ++i) {
+        animation_graph_.states.push_back(
+            AnimationGraphState{animation_clips_[static_cast<std::size_t>(i)].name, i, true});
+    }
+    if (!animation_clips_.empty()) {
+        animation_graph_.entry_state = animation_clips_.front().name;
+        animation_graph_.active_state = animation_graph_.entry_state;
+        animation_playback_.clip_index = 0;
+    } else {
+        animation_playback_ = {};
+    }
+
+    particle_world_.reset();
+    particle_step_accumulator_ = 0.0;
 }
 
 std::uint32_t SceneRuntime::resolveMeshRef(const std::string& ref) {

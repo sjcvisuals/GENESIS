@@ -34,7 +34,7 @@ struct GpuBatchCullHeader {
 
 class MeshBatchDrawer {
 public:
-    static constexpr std::uint32_t kMaxInstancesPerFrame = 4096;
+    static constexpr std::uint32_t kMaxInstancesPerFrame = 16384;
     static constexpr std::uint32_t kMaxBatchesPerFrame = 512;
 
     explicit MeshBatchDrawer(const VulkanContext& context);
@@ -51,7 +51,8 @@ public:
     void drawDepthPrepass(VkCommandBuffer cmd, const GraphicsPipeline& pipeline,
                           VkDescriptorSet frame_descriptor_set, BindlessTextures& bindless);
     void drawColorPass(VkCommandBuffer cmd, const GraphicsPipeline& pipeline,
-                       VkDescriptorSet frame_descriptor_set, BindlessTextures& bindless);
+                       VkDescriptorSet frame_descriptor_set, BindlessTextures& bindless,
+                       VkDescriptorSet display_lut_set = VK_NULL_HANDLE);
 
     Buffer& instanceBuffer() { return *instance_buffer_; }
 
@@ -61,7 +62,7 @@ private:
     void buildIndirectCommands();
     void drawIndexedBatches(VkCommandBuffer cmd, const GraphicsPipeline& pipeline,
                             VkDescriptorSet frame_descriptor_set, BindlessTextures& bindless,
-                            bool depth_only);
+                            VkDescriptorSet display_lut_set, bool depth_only);
 
     const VulkanContext& context_;
 

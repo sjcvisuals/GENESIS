@@ -65,13 +65,13 @@ void ensureEditorDataDirs() {
 std::filesystem::path uniqueProjectPath(const std::string& base_name) {
     ensureEditorDataDirs();
     const std::filesystem::path dir = editorProjectsDir();
-    std::filesystem::path candidate = dir / (base_name + ".scene.json");
+    std::filesystem::path candidate = dir / (base_name + ".genesis");
     if (!std::filesystem::exists(candidate)) {
         return candidate;
     }
 
     for (int i = 2; i < 1000; ++i) {
-        candidate = dir / (base_name + " " + std::to_string(i) + ".scene.json");
+        candidate = dir / (base_name + " " + std::to_string(i) + ".genesis");
         if (!std::filesystem::exists(candidate)) {
             return candidate;
         }

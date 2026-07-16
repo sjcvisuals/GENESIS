@@ -1,5 +1,6 @@
 #pragma once
 
+#include "animation/AnimationClip.hpp"
 #include "scene/Scene.hpp"
 #include "scene/SceneDocument.hpp"
 
@@ -21,6 +22,9 @@ public:
     static SceneDocument load(const std::filesystem::path& path);
     static SceneDocument loadFromJson(const nlohmann::json& root);
     static nlohmann::json documentToJson(const SceneDocument& document);
+
+    static nlohmann::json animationClipToJson(const AnimationClip& clip);
+    static AnimationClip animationClipFromJson(const nlohmann::json& j);
 };
 
 } // namespace genesis

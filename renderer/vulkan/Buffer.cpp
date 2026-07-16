@@ -61,7 +61,17 @@ Buffer::Buffer(Buffer&& other) noexcept
 
 Buffer& Buffer::operator=(Buffer&& other) noexcept {
     if (this != &other) {
-        this->~Buffer();
+        if (mapped_) {
+            unmap();
+        }
+        if (context_ != nullptr) {
+            if (buffer_ != VK_NULL_HANDLE) {
+                vkDestroyBuffer(context_->device(), buffer_, nullptr);
+            }
+            if (memory_ != VK_NULL_HANDLE) {
+                vkFreeMemory(context_->device(), memory_, nullptr);
+            }
+        }
         context_ = other.context_;
         buffer_ = other.buffer_;
         memory_ = other.memory_;

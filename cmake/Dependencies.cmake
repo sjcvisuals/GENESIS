@@ -113,3 +113,26 @@ FetchContent_Declare(
     URL https://codeload.github.com/nlohmann/json/zip/refs/tags/v3.11.3
 )
 FetchContent_MakeAvailable(json)
+
+# -----------------------------------------------------------------------------
+# Assimp — glTF / OBJ / FBX model import (incl. node animation clips)
+# -----------------------------------------------------------------------------
+set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+set(ASSIMP_INJECT_DEBUG_POSTFIX OFF CACHE BOOL "" FORCE)
+set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ALL_EXPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_OBJ_IMPORTER ON CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_FBX_IMPORTER ON CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_GLTF_IMPORTER ON CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ZLIB ON CACHE BOOL "" FORCE)
+# Match SDL: static link so editor/deploy need no assimp-*.dll next to the exe.
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+    assimp
+    URL https://codeload.github.com/assimp/assimp/zip/refs/tags/v5.4.3
+)
+FetchContent_MakeAvailable(assimp)

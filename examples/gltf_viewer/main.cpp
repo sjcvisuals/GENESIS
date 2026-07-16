@@ -1,10 +1,16 @@
 #include "assets/GridMesh.hpp"
+#include "assets/ModelImporter.hpp"
 #include "assets/PrimitiveMeshes.hpp"
+#include "assets/TextureLoader.hpp"
+#include "animation/AnimationAuthoring.hpp"
+#include "animation/AnimationEvaluator.hpp"
+#include "color/ColorManagement.hpp"
 #include "editor/EditorLayout.hpp"
 #include "editor/EditorSession.hpp"
 #include "editor/SceneViewport.hpp"
 #include "engine/Application.hpp"
 #include "platform/EditorPaths.hpp"
+#include "platform/FileDialog.hpp"
 #include "platform/Paths.hpp"
 #include "renderer/GridDrawPushConstants.hpp"
 #include "scene/Camera.hpp"
@@ -26,8 +32,11 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <algorithm>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -53,8 +62,20 @@ public:
         session_.loadRecentList();
 
         grid_mesh_ = genesis::createEditorGridMesh(renderer().context(), kGridHalfExtentM, kGridDivisions);
-        std::snprintf(path_input_, sizeof(path_input_), "%s",
-                      genesis::editorProjectsDir().string().c_str());
+        if (color_mgmt_.lutDirty()) {
+            renderer().uploadDisplayLut(color_mgmt_.rebuildDisplayLut());
+        }
+    }
+
+    ~GltfViewerApp() override {
+        // Release scene GPU objects before Application destroys the Vulkan device.
+        draw_commands_.clear();
+        draw_batches_.clear();
+        grid_mesh_ = {};
+        runtime_.clear();
+        if (renderer().context().device() != VK_NULL_HANDLE) {
+            vkDeviceWaitIdle(renderer().context().device());
+        }
     }
 
     void load(const std::filesystem::path& path) {
@@ -74,7 +95,16 @@ public:
         updateWindowTitle();
     }
 
+    void enableSmokeExit(int frames) {
+        smoke_exit_frames_ = frames;
+        exit_confirmed_ = true;
+        session_.dirty = false;
+    }
+
     void loadSceneDocument(const std::filesystem::path& path) {
+        draw_commands_.clear();
+        draw_batches_.clear();
+        selection_.clear();
         session_.loadDocument(runtime_, path);
         selectNode(runtime_.scene().roots.empty() ? 0 : runtime_.scene().roots.front());
         syncEditorAfterDocumentLoad();
@@ -82,17 +112,22 @@ public:
     }
 
     void loadGnsPackage(const std::filesystem::path& path) {
-        runtime_.loadGnsFile(path);
-        session_.document_path = std::filesystem::absolute(path);
-        session_.touchRecent(session_.document_path);
-        session_.dirty = false;
-        selectNode(runtime_.scene().roots.empty() ? 0 : runtime_.scene().roots.front());
-        syncEditorAfterDocumentLoad();
-        updateWindowTitle();
+        loadSceneDocument(path);
     }
 
 protected:
     void onUpdate(float dt) override {
+        if (smoke_exit_frames_ >= 0) {
+            if (--smoke_exit_frames_ < 0) {
+                exit_confirmed_ = true;
+                session_.dirty = false;
+                window().setShouldClose(true);
+            }
+        }
+
+        runtime_.tickAnimations(dt);
+        runtime_.updateTransforms();
+        runtime_.tickParticles(dt);
         handleEditorShortcuts();
 
         if (window().shouldClose() && session_.dirty && !exit_confirmed_) {
@@ -100,7 +135,16 @@ protected:
             show_exit_confirm_ = true;
         }
 
-        if (input().mouseButtonDown(SDL_BUTTON_RIGHT) && viewport_hovered_ && !ImGuizmo::IsUsing()) {
+        if (input().mouseButtonDown(SDL_BUTTON_RIGHT) && !ImGuizmo::IsUsing()) {
+            // Stay in fly mode while RMB is held even if capture moves the cursor off the rect.
+            if (viewport_hovered_) {
+                fly_camera_active_ = true;
+            }
+        } else {
+            fly_camera_active_ = false;
+        }
+
+        if (fly_camera_active_) {
             input().setMouseCaptured(true);
             const float sensitivity = 0.0025f;
             editor_camera_.yaw_radians += input().mouseDeltaX() * sensitivity;
@@ -122,7 +166,9 @@ protected:
         } else {
             input().setMouseCaptured(false);
 
-            if (!ImGuizmo::IsUsing() && !viewport_hovered_) {
+            // W/E/R switch tools even over the viewport; RMB+WASD is reserved for fly above.
+            const bool typing = ImGui::GetIO().WantTextInput;
+            if (!ImGuizmo::IsUsing() && !typing) {
                 if (input().keyPressed(SDL_SCANCODE_W)) gizmo_operation_ = ImGuizmo::TRANSLATE;
                 if (input().keyPressed(SDL_SCANCODE_E)) gizmo_operation_ = ImGuizmo::ROTATE;
                 if (input().keyPressed(SDL_SCANCODE_R)) gizmo_operation_ = ImGuizmo::SCALE;
@@ -132,7 +178,8 @@ protected:
         const float aspect = refreshOutputAspect();
         const glm::mat4 vp = outputViewProjection(renderAspect());
         const genesis::FrameUniforms frame =
-            genesis::buildFrameUniforms(runtime_.scene(), &vp[0][0], outputCameraPosition());
+            genesis::buildFrameUniforms(runtime_.scene(), &vp[0][0], outputCameraPosition(),
+                                        &color_mgmt_.settings());
         renderer().setFrameUniforms(frame);
     }
 
@@ -153,6 +200,15 @@ protected:
         collect_params.enable_cpu_culling = true;
         collect_params.enable_gpu_culling = false;
         runtime_.collectDrawCommands(draw_commands_, &render_stats, collect_params);
+        runtime_.appendParticleDrawCommands(draw_commands_);
+        render_stats.draw_calls = static_cast<std::uint32_t>(draw_commands_.size());
+        // Recount triangles roughly including particles.
+        render_stats.triangles = 0;
+        for (const genesis::SceneDrawCommand& cmd : draw_commands_) {
+            if (cmd.mesh) {
+                render_stats.triangles += cmd.mesh->index_count / 3;
+            }
+        }
 
         genesis::FrameStats& stats = frameStats();
         stats.draw_calls = render_stats.draw_calls;
@@ -201,6 +257,8 @@ protected:
         if (show_inspector_) drawInspectorPanel(scene);
         if (show_toolbar_) drawToolbarPanel(scene);
         if (show_viewport_help_) drawViewportHelpPanel();
+        if (show_timeline_) drawTimelinePanel();
+        if (show_animation_graph_) drawAnimationGraphPanel();
         if (show_debug_window_) drawDebugWindow();
 
         drawFileModals(scene);
@@ -208,20 +266,23 @@ protected:
         if (show_viewport_) {
             ImVec2 rect_min{};
             ImVec2 rect_max{};
+            bool viewport_input_active = false;
             genesis::drawViewportInputOverlay(
                 dockspace_id_, show_viewport_, rect_min, rect_max, viewport_hovered_,
-                [&]() { drawViewportGizmo(scene); });
+                viewport_input_active, [&]() { drawViewportGizmo(scene); });
             viewport_.x = rect_min.x;
             viewport_.y = rect_min.y;
             viewport_.w = std::max(rect_max.x - rect_min.x, 1.0f);
             viewport_.h = std::max(rect_max.y - rect_min.y, 1.0f);
             viewport_.hovered = viewport_hovered_;
 
-            handleViewportPick(scene);
+            handleViewportSelection(scene);
+            drawSelectionOverlays(scene);
         } else {
             viewport_.w = 0.0f;
             viewport_.h = 0.0f;
             viewport_hovered_ = false;
+            marquee_ = {};
         }
     }
 
@@ -244,7 +305,7 @@ private:
             saveCurrentDocument();
         }
         if (ctrl && input().keyPressed(SDL_SCANCODE_O)) {
-            open_open_modal_ = true;
+            requestOpenScene();
         }
         if (ctrl && input().keyPressed(SDL_SCANCODE_N)) {
             requestNewScene();
@@ -311,14 +372,14 @@ private:
 
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("New Scene", "Ctrl+N")) requestNewScene();
-            if (ImGui::MenuItem("Open Scene...", "Ctrl+O")) open_open_modal_ = true;
+            if (ImGui::MenuItem("Open Scene...", "Ctrl+O")) requestOpenScene();
             if (ImGui::MenuItem("Save Scene", "Ctrl+S")) saveCurrentDocument();
             if (ImGui::MenuItem("Save Scene As...")) {
-                open_save_as_modal_ = true;
-                std::snprintf(path_input_, sizeof(path_input_), "%s",
-                              session_.document_path.empty()
-                                  ? genesis::uniqueProjectPath("Untitled Scene").string().c_str()
-                                  : session_.document_path.string().c_str());
+                saveSceneAsDialog();
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Import Model...")) {
+                importModelDialog();
             }
             ImGui::Separator();
             if (!session_.recent_files.empty() && ImGui::BeginMenu("Open Recent")) {
@@ -344,12 +405,19 @@ private:
             ImGui::EndMenu();
         }
 
+        if (ImGui::BeginMenu("Color")) {
+            drawColorMenu();
+            ImGui::EndMenu();
+        }
+
         if (ImGui::BeginMenu("View")) {
             ImGui::MenuItem("Hierarchy", nullptr, &show_hierarchy_);
             ImGui::MenuItem("Inspector", nullptr, &show_inspector_);
             ImGui::MenuItem("Viewport", nullptr, &show_viewport_);
             ImGui::MenuItem("Toolbar", nullptr, &show_toolbar_);
             ImGui::MenuItem("Viewport Help", nullptr, &show_viewport_help_);
+            ImGui::MenuItem("Timeline", nullptr, &show_timeline_);
+            ImGui::MenuItem("Animation Graph", nullptr, &show_animation_graph_);
             ImGui::MenuItem("Show Grid", nullptr, &show_grid_);
             ImGui::Separator();
             ImGui::MenuItem("Performance / Debug", nullptr, &show_debug_window_);
@@ -404,26 +472,44 @@ private:
         if (ImGui::Button("Light", ImVec2(128, 0))) {
             addLightNode("Directional Light", genesis::SceneLightType::Directional);
         }
+        if (ImGui::Button("Particles", ImVec2(128, 0))) {
+            genesis::ParticleEmitter emitter = genesis::makeDefaultParticleEmitter();
+            emitter.burst_count = 24;
+            selectNode(scene.createParticleEmitterNode("Particle Emitter", createParent(), emitter));
+            markDirty();
+        }
 
         ImGui::Spacing();
         ImGui::TextUnformatted("Selection");
 
-        ImGui::BeginDisabled(selected_ == 0);
+        ImGui::BeginDisabled(selection_.empty());
         if (ImGui::Button("Duplicate")) {
-            if (const genesis::NodeId copy_id = scene.duplicateNode(selected_)) {
-                selectNode(copy_id);
+            std::vector<genesis::NodeId> created;
+            created.reserve(selection_.size());
+            for (const genesis::NodeId id : selection_) {
+                if (const genesis::NodeId copy_id = scene.duplicateNode(id)) {
+                    created.push_back(copy_id);
+                }
+            }
+            if (!created.empty()) {
+                setSelection(created);
                 markDirty();
             }
         }
         ImGui::SameLine();
         if (ImGui::Button("Delete")) {
-            const genesis::NodeId to_delete = selected_;
-            const bool was_output = !use_editor_output_ && scene.active_output_camera == to_delete;
-            if (scene.deleteNode(to_delete)) {
-                selectNode(0);
-                if (was_output) use_editor_output_ = true;
-                markDirty();
+            const bool clearing_output =
+                !use_editor_output_ && scene.active_output_camera.has_value() &&
+                isSelected(*scene.active_output_camera);
+            std::vector<genesis::NodeId> to_delete = selection_;
+            clearSelection();
+            for (const genesis::NodeId id : to_delete) {
+                scene.deleteNode(id);
             }
+            if (clearing_output) {
+                use_editor_output_ = true;
+            }
+            markDirty();
         }
         ImGui::EndDisabled();
 
@@ -436,7 +522,7 @@ private:
 
             ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanFullWidth;
             if (n->children.empty()) flags |= ImGuiTreeNodeFlags_Leaf;
-            if (selected_ == id) flags |= ImGuiTreeNodeFlags_Selected;
+            if (isSelected(id)) flags |= ImGuiTreeNodeFlags_Selected;
 
             std::string label = n->name;
             if (n->mesh_resource.has_value()) label += "   M";
@@ -445,7 +531,12 @@ private:
 
             const bool open = ImGui::TreeNodeEx((void*)(uintptr_t)n->id, flags, "%s", label.c_str());
             if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) {
-                selectNode(id);
+                const bool additive = ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift;
+                if (additive) {
+                    toggleSelected(id);
+                } else {
+                    selectNode(id);
+                }
             }
             if (open) {
                 for (auto child : n->children) self(self, child);
@@ -463,11 +554,12 @@ private:
         ImGui::TextColored(ImVec4(0.55f, 0.70f, 0.95f, 1.0f), "INSPECTOR");
         ImGui::Separator();
 
-        if (selected_ == 0) {
+        if (selection_.empty()) {
             ImGui::TextWrapped("Select an actor in the viewport or outliner.");
             ImGui::Spacing();
-            ImGui::TextDisabled("LMB pick  |  RMB+WASD fly  |  W/E/R gizmo");
-        } else if (genesis::Node* n = scene.find(selected_)) {
+            ImGui::TextDisabled("LMB pick / drag marquee");
+            ImGui::TextDisabled("Shift/Ctrl multi  |  RMB+WASD fly  |  W/E/R gizmo");
+        } else if (genesis::Node* n = scene.find(primarySelected())) {
             char name_buf[128]{};
             std::snprintf(name_buf, sizeof(name_buf), "%s", n->name.c_str());
             if (ImGui::InputText("Name", name_buf, sizeof(name_buf))) {
@@ -503,8 +595,8 @@ private:
                 changed = true;
             }
 
-            if (rot_edit_node_ != selected_) {
-                rot_edit_node_ = selected_;
+            if (rot_edit_node_ != primarySelected()) {
+                rot_edit_node_ = primarySelected();
                 const glm::vec3 euler = glm::degrees(glm::eulerAngles(n->local.rotation));
                 rot_euler_deg_[0] = euler.x;
                 rot_euler_deg_[1] = euler.y;
@@ -525,15 +617,156 @@ private:
             if (changed) {
                 runtime_.updateTransforms();
                 markDirty();
+                maybeAutoKey();
+            }
+
+            if (ImGui::Button("Key Transform @ Playhead")) {
+                keyframeSelection(genesis::AnimationTrack::Transform);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Stores Position/Rotation/Scale of the selection into the active clip.");
             }
 
             drawMaterialInspector(*n);
             drawCameraInspector(scene, *n);
             drawLightInspector(*n);
+            drawParticleEmitterInspector(*n);
         } else {
             ImGui::TextUnformatted("Selected node not found.");
         }
         ImGui::End();
+    }
+
+    void drawColorMenu() {
+        auto& settings = color_mgmt_.settings();
+        bool dirty = false;
+
+        if (ImGui::RadioButton("Display: Rec.709 (PIXERA default)",
+                               settings.display == genesis::DisplayColorSpace::Rec709)) {
+            settings.display = genesis::DisplayColorSpace::Rec709;
+            dirty = true;
+        }
+        if (ImGui::RadioButton("Display: sRGB", settings.display == genesis::DisplayColorSpace::sRGB)) {
+            settings.display = genesis::DisplayColorSpace::sRGB;
+            dirty = true;
+        }
+        if (ImGui::RadioButton("Display: ACES OCIO view",
+                               settings.display == genesis::DisplayColorSpace::AcesOcio)) {
+            settings.display = genesis::DisplayColorSpace::AcesOcio;
+            dirty = true;
+        }
+
+        if (ImGui::DragFloat("Exposure", &settings.exposure, 0.01f, 0.05f, 8.0f)) {
+            dirty = true;
+        }
+
+        ImGui::Separator();
+        ImGui::TextWrapped("%s", color_mgmt_.configDescription().empty()
+                                     ? "ACES 2.0 Studio config"
+                                     : color_mgmt_.configDescription().c_str());
+        ImGui::TextDisabled("%s", color_mgmt_.resolvedConfigPath().string().c_str());
+
+        if (ImGui::Button("Reload ACES Studio (latest)")) {
+            std::string error;
+            if (!color_mgmt_.loadDefaultAcesConfig(&error)) {
+                spdlog::warn("Reload ACES config: {}", error);
+            }
+            dirty = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Import OCIO...")) {
+            genesis::openFileDialog(
+                window().handle(),
+                {{"OCIO Config", "ocio"}, {"All Files", "*"}},
+                [this](std::filesystem::path path) {
+                    if (path.empty()) return;
+                    std::string error;
+                    if (!color_mgmt_.loadConfig(path, &error)) {
+                        spdlog::error("OCIO import failed: {}", error);
+                        return;
+                    }
+                    color_mgmt_.settings().display = genesis::DisplayColorSpace::AcesOcio;
+                    renderer().uploadDisplayLut(color_mgmt_.rebuildDisplayLut());
+                });
+        }
+
+        if (!color_mgmt_.displays().empty() &&
+            ImGui::BeginCombo("OCIO Display", settings.ocio_display.c_str())) {
+            for (const std::string& display : color_mgmt_.displays()) {
+                const bool selected = display == settings.ocio_display;
+                if (ImGui::Selectable(display.c_str(), selected)) {
+                    settings.ocio_display = display;
+                    dirty = true;
+                }
+            }
+            ImGui::EndCombo();
+        }
+        if (!color_mgmt_.views().empty() && ImGui::BeginCombo("OCIO View", settings.ocio_view.c_str())) {
+            for (const std::string& view : color_mgmt_.views()) {
+                const bool selected = view == settings.ocio_view;
+                if (ImGui::Selectable(view.c_str(), selected)) {
+                    settings.ocio_view = view;
+                    dirty = true;
+                }
+            }
+            ImGui::EndCombo();
+        }
+        if (!color_mgmt_.colorSpaces().empty() &&
+            ImGui::BeginCombo("Working space", settings.ocio_input_space.c_str())) {
+            for (const std::string& space : color_mgmt_.colorSpaces()) {
+                const bool selected = space == settings.ocio_input_space;
+                if (ImGui::Selectable(space.c_str(), selected)) {
+                    settings.ocio_input_space = space;
+                    dirty = true;
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+#if !defined(GENESIS_WITH_OCIO)
+        ImGui::TextWrapped(
+            "OpenColorIO runtime not linked — Rec.709/sRGB analytic displays work. "
+            "Build with GENESIS_WITH_OCIO for full ACES view transforms.");
+#endif
+
+        if (dirty) {
+            color_mgmt_.markLutDirty();
+            renderer().uploadDisplayLut(color_mgmt_.rebuildDisplayLut());
+        }
+    }
+
+    void importMaterialMap(const std::uint32_t material_id, const char* slot) {
+        genesis::openFileDialog(
+            window().handle(),
+            {{"Images", "png;jpg;jpeg;tga;bmp;gif"}, {"All Files", "*"}},
+            [this, material_id, slot = std::string(slot)](std::filesystem::path path) {
+                if (path.empty()) return;
+                genesis::SceneMaterial* mat = runtime_.material(material_id);
+                if (!mat) return;
+                try {
+                    const bool color_map = slot == "base" || slot == "emissive";
+                    auto loaded = genesis::loadImageTexture(
+                        renderer().context(), path, genesis::TextureColorSpace::Auto, color_map);
+                    const std::uint32_t id =
+                        runtime_.addTexture(loaded.label, std::move(loaded.texture));
+                    if (slot == "base") {
+                        mat->base_color_texture = path.filename().string();
+                        mat->base_color_texture_resource = id;
+                    } else if (slot == "mr") {
+                        mat->metallic_roughness_texture = path.filename().string();
+                        mat->metallic_roughness_texture_resource = id;
+                    } else if (slot == "normal") {
+                        mat->normal_texture = path.filename().string();
+                        mat->normal_texture_resource = id;
+                    } else if (slot == "emissive") {
+                        mat->emissive_texture = path.filename().string();
+                        mat->emissive_texture_resource = id;
+                    }
+                    markDirty();
+                } catch (const std::exception& ex) {
+                    spdlog::error("Texture import failed: {}", ex.what());
+                }
+            });
     }
 
     void drawMaterialInspector(genesis::Node& n) {
@@ -555,6 +788,32 @@ private:
         if (ImGui::ColorEdit4("Base color", &mat.base_color.x)) markDirty();
         if (ImGui::DragFloat("Metallic", &mat.metallic, 0.01f, 0.0f, 1.0f)) markDirty();
         if (ImGui::DragFloat("Roughness", &mat.roughness, 0.01f, 0.0f, 1.0f)) markDirty();
+        if (ImGui::DragFloat("Normal scale", &mat.normal_scale, 0.01f, 0.0f, 4.0f)) markDirty();
+        if (ImGui::ColorEdit3("Emissive", &mat.emissive.x)) markDirty();
+        if (ImGui::DragFloat("Emissive strength", &mat.emissive_strength, 0.05f, 0.0f, 32.0f)) markDirty();
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("Textures");
+        auto mapRow = [&](const char* label, const char* slot, std::string& name,
+                          std::optional<std::uint32_t>& resource) {
+            ImGui::Text("%s: %s", label, name.empty() ? "(none)" : name.c_str());
+            ImGui::SameLine();
+            const std::string import_id = std::string("Import##") + slot;
+            const std::string clear_id = std::string("Clear##") + slot;
+            if (ImGui::SmallButton(import_id.c_str())) {
+                importMaterialMap(*n.material_resource, slot);
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton(clear_id.c_str())) {
+                name.clear();
+                resource.reset();
+                markDirty();
+            }
+        };
+        mapRow("Base", "base", mat.base_color_texture, mat.base_color_texture_resource);
+        mapRow("MR", "mr", mat.metallic_roughness_texture, mat.metallic_roughness_texture_resource);
+        mapRow("Normal", "normal", mat.normal_texture, mat.normal_texture_resource);
+        mapRow("Emissive", "emissive", mat.emissive_texture, mat.emissive_texture_resource);
     }
 
     void drawCameraInspector(genesis::Scene& scene, genesis::Node& n) {
@@ -583,6 +842,67 @@ private:
         if (ImGui::DragFloat("Intensity", &light.intensity, 0.05f, 0.0f, 100.0f)) markDirty();
     }
 
+    void drawParticleEmitterInspector(genesis::Node& n) {
+        if (!n.particle_emitter.has_value()) {
+            return;
+        }
+        ImGui::Separator();
+        ImGui::TextUnformatted("Particle Emitter");
+        genesis::ParticleEmitter& e = *n.particle_emitter;
+        bool dirty = false;
+        dirty |= ImGui::Checkbox("Enabled", &e.enabled);
+        ImGui::SameLine();
+        dirty |= ImGui::Checkbox("Looping", &e.looping);
+        dirty |= ImGui::Checkbox("World space", &e.world_space);
+        dirty |= ImGui::Checkbox("Unlit", &e.unlit);
+        dirty |= ImGui::DragFloat("Rate / s", &e.rate_per_second, 1.0f, 0.0f, 5000.0f);
+        int burst = static_cast<int>(e.burst_count);
+        if (ImGui::DragInt("Burst", &burst, 1, 0, 100000)) {
+            e.burst_count = static_cast<std::uint32_t>(std::max(burst, 0));
+            dirty = true;
+        }
+        int max_p = static_cast<int>(e.max_particles);
+        if (ImGui::DragInt("Max particles", &max_p, 1, 1, 16384)) {
+            e.max_particles = static_cast<std::uint32_t>(std::max(max_p, 1));
+            dirty = true;
+        }
+        dirty |= ImGui::DragFloatRange2("Lifetime", &e.lifetime_min, &e.lifetime_max, 0.01f, 0.01f, 60.0f);
+        dirty |= ImGui::DragFloatRange2("Speed", &e.speed_min, &e.speed_max, 0.01f, 0.0f, 100.0f);
+        dirty |= ImGui::DragFloatRange2("Size", &e.size_min, &e.size_max, 0.001f, 0.001f, 10.0f);
+        dirty |= ImGui::DragFloat("Size end mul", &e.size_end_multiplier, 0.01f, 0.0f, 2.0f);
+        dirty |= ImGui::ColorEdit4("Color start", &e.color_start.x);
+        dirty |= ImGui::ColorEdit4("Color end", &e.color_end.x);
+        dirty |= ImGui::DragFloat3("Gravity", &e.gravity.x, 0.05f);
+        dirty |= ImGui::DragFloat("Drag", &e.drag, 0.01f, 0.0f, 10.0f);
+
+        const char* shapes[] = {"Point", "Sphere", "Cone", "Box"};
+        int shape = static_cast<int>(e.spawn_shape);
+        if (ImGui::Combo("Spawn shape", &shape, shapes, 4)) {
+            e.spawn_shape = static_cast<genesis::ParticleSpawnShape>(shape);
+            dirty = true;
+        }
+        dirty |= ImGui::DragFloat("Spawn radius", &e.spawn_radius, 0.01f, 0.0f, 50.0f);
+        dirty |= ImGui::DragFloat("Cone angle", &e.cone_angle_degrees, 0.5f, 0.0f, 89.0f);
+
+        const char* meshes[] = {"Cube", "Sphere"};
+        int mesh = static_cast<int>(e.render_mesh);
+        if (ImGui::Combo("Render mesh", &mesh, meshes, 2)) {
+            e.render_mesh = static_cast<genesis::ParticleRenderMesh>(mesh);
+            dirty = true;
+        }
+
+        const auto stats = runtime_.particleWorld().stats();
+        ImGui::TextDisabled("Alive %u  |  Emitters %u  |  Steps %u", stats.alive, stats.emitters,
+                            stats.steps);
+        if (ImGui::Button("Restart Particles")) {
+            runtime_.resetParticles();
+        }
+
+        if (dirty) {
+            markDirty();
+        }
+    }
+
     void drawToolbarPanel(genesis::Scene& scene) {
         ImGui::Begin("Toolbar", &show_toolbar_);
 
@@ -598,6 +918,8 @@ private:
             gizmo_operation_ = ImGuizmo::SCALE;
         }
         ImGui::SameLine();
+        ImGui::TextDisabled("RMB+WASD fly");
+        ImGui::SameLine();
         ImGui::TextUnformatted("|");
         ImGui::SameLine();
         if (ImGui::RadioButton("Local", gizmo_mode_ == ImGuizmo::LOCAL)) gizmo_mode_ = ImGuizmo::LOCAL;
@@ -612,8 +934,12 @@ private:
         ImGui::SameLine();
         ImGui::TextUnformatted("|");
         ImGui::SameLine();
-        if (selected_ != 0 && scene.find(selected_)) {
-            ImGui::Text("Selected: %s", scene.find(selected_)->name.c_str());
+        if (!selection_.empty() && scene.find(primarySelected())) {
+            if (selection_.size() == 1) {
+                ImGui::Text("Selected: %s", scene.find(primarySelected())->name.c_str());
+            } else {
+                ImGui::Text("Selected: %zu objects", selection_.size());
+            }
         } else {
             ImGui::TextUnformatted("No selection");
         }
@@ -630,20 +956,289 @@ private:
 
     void drawViewportHelpPanel() {
         ImGui::Begin("Viewport Help", &show_viewport_help_);
-        ImGui::TextUnformatted("LMB: select actor");
-        ImGui::TextUnformatted("Drag gizmo: transform");
+        ImGui::TextUnformatted("LMB: click select / drag marquee");
+        ImGui::TextUnformatted("Shift or Ctrl + LMB: add / toggle");
+        ImGui::TextUnformatted("Drag gizmo: transform (primary selection)");
         ImGui::TextUnformatted("RMB + WASD/QE: fly (in viewport)");
         ImGui::TextUnformatted("F: focus camera on selection");
         const char* camera_label = use_editor_output_ ? "Editor Camera" : "Scene Camera";
         const glm::vec3 cam_pos = outputCameraPosition();
         ImGui::Text("Camera: %s", camera_label);
         ImGui::Text("Eye: %.1f, %.1f, %.1f m", cam_pos.x, cam_pos.y, cam_pos.z);
-        if (selected_ != 0) {
-            if (const genesis::Node* n = runtime_.scene().find(selected_)) {
-                ImGui::Text("Active: %s", n->name.c_str());
+        if (!selection_.empty()) {
+            if (const genesis::Node* n = runtime_.scene().find(primarySelected())) {
+                if (selection_.size() == 1) {
+                    ImGui::Text("Active: %s", n->name.c_str());
+                } else {
+                    ImGui::Text("Active: %s (+%zu)", n->name.c_str(), selection_.size() - 1);
+                }
             }
         }
         ImGui::TextDisabled("%u visible meshes", frameStats().visible_mesh_nodes);
+        ImGui::End();
+    }
+
+    void importModelDialog() {
+        genesis::openFileDialog(
+            window().handle(),
+            {{"3D Models", "gltf;glb;obj;fbx"}, {"glTF", "gltf;glb"}, {"OBJ", "obj"}, {"FBX", "fbx"},
+             {"All Files", "*"}},
+            [this](std::filesystem::path path) {
+                if (path.empty()) {
+                    return;
+                }
+                try {
+                    const genesis::ModelImportResult result = genesis::ModelImporter::importInto(runtime_, path);
+                    if (!result.ok) {
+                        spdlog::error("Import failed: {}", result.error);
+                        return;
+                    }
+                    selectNode(result.root_node != 0 ? result.root_node : 0);
+                    markDirty();
+                    show_timeline_ = true;
+                    if (!result.clip_indices.empty()) {
+                        show_animation_graph_ = true;
+                    }
+                } catch (const std::exception& ex) {
+                    spdlog::error("Import failed: {}", ex.what());
+                }
+            });
+    }
+
+    void drawTimelinePanel() {
+        ImGui::Begin("Timeline", &show_timeline_);
+        genesis::AnimationPlayback& playback = runtime_.animationPlayback();
+        auto& clips = runtime_.animationClips();
+
+        if (clips.empty()) {
+            ImGui::TextWrapped(
+                "No clips yet. Keyframe any object transform, or import an animated FBX/glTF.");
+            if (ImGui::Button("Create Scene Clip")) {
+                playback.clip_index = runtime_.ensureSceneAnimationClip();
+                show_timeline_ = true;
+                markDirty();
+            }
+            ImGui::End();
+            return;
+        }
+
+        if (playback.clip_index < 0 || playback.clip_index >= static_cast<int>(clips.size())) {
+            playback.clip_index = 0;
+        }
+
+        if (ImGui::BeginCombo("Clip", clips[static_cast<std::size_t>(playback.clip_index)].name.c_str())) {
+            for (std::int32_t i = 0; i < static_cast<std::int32_t>(clips.size()); ++i) {
+                const bool selected = i == playback.clip_index;
+                if (ImGui::Selectable(clips[static_cast<std::size_t>(i)].name.c_str(), selected)) {
+                    playback.clip_index = i;
+                    playback.time_seconds = 0.0f;
+                    playback.playing = false;
+                    runtime_.applyActiveAnimation();
+                    if (const genesis::AnimationGraphState* state = runtime_.animationGraph().findState(
+                            clips[static_cast<std::size_t>(i)].name)) {
+                        runtime_.animationGraph().setActiveState(state->name);
+                    }
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        genesis::AnimationClip& clip = clips[static_cast<std::size_t>(playback.clip_index)];
+        ImGui::Text("Duration: %.2fs  |  Channels: %zu", clip.duration_seconds, clip.channels.size());
+
+        if (ImGui::Button(playback.playing ? "Pause" : "Play")) {
+            playback.playing = !playback.playing;
+            if (playback.playing) {
+                runtime_.applyActiveAnimation();
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Stop")) {
+            playback.playing = false;
+            playback.time_seconds = 0.0f;
+            runtime_.applyActiveAnimation();
+        }
+        ImGui::SameLine();
+        ImGui::Checkbox("Loop", &playback.loop);
+        ImGui::SameLine();
+        ImGui::Checkbox("Auto-Key", &auto_key_);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("When on, transform edits (inspector/gizmo) insert keys at the playhead.");
+        }
+
+        float time = playback.time_seconds;
+        float duration = std::max(clip.duration_seconds, 0.001f);
+        if (ImGui::DragFloat("Duration (s)", &duration, 0.05f, 0.1f, 3600.0f, "%.2f")) {
+            clip.duration_seconds = duration;
+            markDirty();
+        }
+        if (ImGui::SliderFloat("Time", &time, 0.0f, std::max(clip.duration_seconds, 0.001f), "%.3f s")) {
+            playback.time_seconds = time;
+            playback.playing = false;
+            runtime_.applyActiveAnimation();
+        }
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("Keyframe selection");
+        const bool has_sel = !selection_.empty();
+        ImGui::BeginDisabled(!has_sel);
+        if (ImGui::Button("Key All")) {
+            keyframeSelection(genesis::AnimationTrack::Transform);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Key Pos")) {
+            keyframeSelection(genesis::AnimationTrack::Translation);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Key Rot")) {
+            keyframeSelection(genesis::AnimationTrack::Rotation);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Key Scale")) {
+            keyframeSelection(genesis::AnimationTrack::Scale);
+        }
+        if (ImGui::Button("Remove Keys @ Time")) {
+            removeKeysAtPlayhead(genesis::AnimationTrack::Transform);
+        }
+        ImGui::EndDisabled();
+        if (!has_sel) {
+            ImGui::TextDisabled("Select one or more objects to keyframe.");
+        }
+
+        // Scrub bar with key marks for the primary selection.
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        const ImVec2 p0 = ImGui::GetCursorScreenPos();
+        const float width = ImGui::GetContentRegionAvail().x;
+        const float height = 22.0f;
+        draw->AddRectFilled(p0, ImVec2(p0.x + width, p0.y + height), IM_COL32(28, 30, 36, 255));
+        if (clip.duration_seconds > 1e-5f) {
+            const genesis::NodeId focus = primarySelected();
+            for (const genesis::AnimationChannel& channel : clip.channels) {
+                if (focus != 0 && channel.target_node_id != 0 && channel.target_node_id != focus) {
+                    continue;
+                }
+                auto mark = [&](float t, ImU32 col) {
+                    const float x = p0.x + width * std::clamp(t / clip.duration_seconds, 0.0f, 1.0f);
+                    draw->AddLine(ImVec2(x, p0.y + 2.0f), ImVec2(x, p0.y + height - 2.0f), col, 1.5f);
+                };
+                for (const auto& k : channel.translations) mark(k.time_seconds, IM_COL32(80, 180, 255, 220));
+                for (const auto& k : channel.rotations) mark(k.time_seconds, IM_COL32(180, 120, 255, 220));
+                for (const auto& k : channel.scales) mark(k.time_seconds, IM_COL32(120, 220, 140, 220));
+            }
+            const float x =
+                p0.x + width * std::clamp(playback.time_seconds / clip.duration_seconds, 0.0f, 1.0f);
+            draw->AddLine(ImVec2(x, p0.y), ImVec2(x, p0.y + height), IM_COL32(255, 196, 64, 255), 2.0f);
+        }
+        ImGui::Dummy(ImVec2(width, height));
+        ImGui::TextDisabled("Keys: pos (blue) rot (purple) scale (green). Pause to edit, then Key.");
+        ImGui::End();
+    }
+
+    void keyframeSelection(genesis::AnimationTrack tracks) {
+        if (selection_.empty()) {
+            return;
+        }
+        runtime_.ensureSceneAnimationClip();
+        if (runtime_.animationPlayback().clip_index < 0) {
+            runtime_.animationPlayback().clip_index = runtime_.ensureSceneAnimationClip();
+        }
+        runtime_.keyframeNodes(selection_, runtime_.animationPlayback().time_seconds, tracks);
+        markDirty();
+    }
+
+    void removeKeysAtPlayhead(genesis::AnimationTrack tracks) {
+        auto& clips = runtime_.animationClips();
+        auto& playback = runtime_.animationPlayback();
+        if (playback.clip_index < 0 || playback.clip_index >= static_cast<int>(clips.size())) {
+            return;
+        }
+        genesis::AnimationClip& clip = clips[static_cast<std::size_t>(playback.clip_index)];
+        for (genesis::NodeId id : selection_) {
+            genesis::removeKeysAtTime(clip, id, playback.time_seconds, tracks);
+        }
+        markDirty();
+    }
+
+    void maybeAutoKey() {
+        if (!auto_key_ || selection_.empty() || runtime_.animationPlayback().playing) {
+            return;
+        }
+        keyframeSelection(genesis::AnimationTrack::Transform);
+    }
+
+    void drawAnimationGraphPanel() {
+        ImGui::Begin("Animation Graph", &show_animation_graph_);
+        genesis::AnimationGraph& graph = runtime_.animationGraph();
+        graph.ensureDefaults();
+
+        ImGui::TextWrapped(
+            "States select which clip the Timeline drives. Transitions are listed for authoring; "
+            "blend evaluation comes next.");
+        ImGui::Separator();
+
+        char entry_buf[128]{};
+        std::snprintf(entry_buf, sizeof(entry_buf), "%s", graph.entry_state.c_str());
+        if (ImGui::InputText("Entry state", entry_buf, sizeof(entry_buf))) {
+            graph.entry_state = entry_buf;
+        }
+
+        if (ImGui::BeginCombo("Active state", graph.active_state.c_str())) {
+            for (const genesis::AnimationGraphState& state : graph.states) {
+                const bool selected = state.name == graph.active_state;
+                if (ImGui::Selectable(state.name.c_str(), selected)) {
+                    graph.setActiveState(state.name);
+                    genesis::AnimationPlayback& playback = runtime_.animationPlayback();
+                    playback.clip_index = state.clip_index;
+                    playback.loop = state.loop;
+                    playback.time_seconds = 0.0f;
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("States");
+        for (std::size_t i = 0; i < graph.states.size(); ++i) {
+            genesis::AnimationGraphState& state = graph.states[i];
+            ImGui::PushID(static_cast<int>(i));
+            char name_buf[128]{};
+            std::snprintf(name_buf, sizeof(name_buf), "%s", state.name.c_str());
+            if (ImGui::InputText("Name", name_buf, sizeof(name_buf))) {
+                state.name = name_buf;
+            }
+            ImGui::DragInt("Clip index", &state.clip_index, 1, -1,
+                           static_cast<int>(runtime_.animationClips().size()) - 1);
+            ImGui::Checkbox("Loop", &state.loop);
+            if (ImGui::Button("Activate")) {
+                graph.setActiveState(state.name);
+                runtime_.animationPlayback().clip_index = state.clip_index;
+                runtime_.animationPlayback().loop = state.loop;
+            }
+            ImGui::Separator();
+            ImGui::PopID();
+        }
+
+        if (ImGui::Button("Add State")) {
+            genesis::AnimationGraphState state{};
+            state.name = "State " + std::to_string(graph.states.size() + 1);
+            graph.states.push_back(state);
+        }
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("Transitions");
+        for (std::size_t i = 0; i < graph.transitions.size(); ++i) {
+            genesis::AnimationGraphTransition& tr = graph.transitions[i];
+            ImGui::PushID(static_cast<int>(1000 + i));
+            ImGui::Text("%s -> %s (%.2fs)", tr.from_state.c_str(), tr.to_state.c_str(), tr.blend_seconds);
+            ImGui::PopID();
+        }
+        if (ImGui::Button("Add Transition (active -> entry)")) {
+            genesis::AnimationGraphTransition tr{};
+            tr.from_state = graph.active_state;
+            tr.to_state = graph.entry_state;
+            graph.transitions.push_back(tr);
+        }
+
         ImGui::End();
     }
 
@@ -676,63 +1271,17 @@ private:
     void drawFileModals(genesis::Scene& scene) {
         (void)scene;
 
-        if (open_open_modal_) {
-            ImGui::OpenPopup("Open Scene");
-            open_open_modal_ = false;
-        }
-        if (open_save_as_modal_) {
-            ImGui::OpenPopup("Save Scene As");
-            open_save_as_modal_ = false;
-        }
         if (show_new_scene_confirm_) {
             ImGui::OpenPopup("Discard Changes?");
             show_new_scene_confirm_ = false;
         }
+        if (show_open_confirm_) {
+            ImGui::OpenPopup("Open Scene?");
+            show_open_confirm_ = false;
+        }
         if (show_exit_confirm_) {
             ImGui::OpenPopup("Exit GENESIS?");
             show_exit_confirm_ = false;
-        }
-
-        if (ImGui::BeginPopupModal("Open Scene", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::InputText("Path", path_input_, sizeof(path_input_));
-            ImGui::TextDisabled("Example: %s", genesis::editorProjectsDir().string().c_str());
-            if (!session_.recent_files.empty()) {
-                ImGui::Separator();
-                ImGui::TextUnformatted("Recent");
-                for (const std::filesystem::path& recent : session_.recent_files) {
-                    if (ImGui::Selectable(recent.string().c_str())) {
-                        std::snprintf(path_input_, sizeof(path_input_), "%s", recent.string().c_str());
-                    }
-                }
-            }
-            if (ImGui::Button("Open")) {
-                try {
-                    loadSceneDocument(path_input_);
-                    ImGui::CloseCurrentPopup();
-                } catch (const std::exception& ex) {
-                    spdlog::error("Open scene failed: {}", ex.what());
-                }
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
-            ImGui::EndPopup();
-        }
-
-        if (ImGui::BeginPopupModal("Save Scene As", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::InputText("Path", path_input_, sizeof(path_input_));
-            ImGui::TextDisabled("Saved under your GENESIS projects folder by default.");
-            if (ImGui::Button("Save")) {
-                try {
-                    session_.saveDocument(runtime_, path_input_);
-                    updateWindowTitle();
-                    ImGui::CloseCurrentPopup();
-                } catch (const std::exception& ex) {
-                    spdlog::error("Save scene failed: {}", ex.what());
-                }
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
-            ImGui::EndPopup();
         }
 
         if (ImGui::BeginPopupModal("Discard Changes?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
@@ -746,13 +1295,22 @@ private:
             ImGui::EndPopup();
         }
 
+        if (ImGui::BeginPopupModal("Open Scene?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextUnformatted("Discard unsaved changes and open another scene?");
+            if (ImGui::Button("Open...")) {
+                ImGui::CloseCurrentPopup();
+                openSceneDialog();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+
         if (ImGui::BeginPopupModal("Exit GENESIS?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
             ImGui::TextUnformatted("Save changes before exiting?");
             if (ImGui::Button("Save")) {
-                saveCurrentDocument();
-                exit_confirmed_ = true;
-                window().setShouldClose(true);
                 ImGui::CloseCurrentPopup();
+                saveAndExit();
             }
             ImGui::SameLine();
             if (ImGui::Button("Don't Save")) {
@@ -767,8 +1325,9 @@ private:
     }
 
     void drawViewportGizmo(genesis::Scene& scene) {
-        if (selected_ == 0) return;
-        genesis::Node* node = scene.find(selected_);
+        const genesis::NodeId primary = primarySelected();
+        if (primary == 0) return;
+        genesis::Node* node = scene.find(primary);
         if (!node) return;
 
         runtime_.updateTransforms();
@@ -787,13 +1346,14 @@ private:
         ImGuizmo::SetOrthographic(false);
         ImGuizmo::SetRect(viewport_.x, viewport_.y, viewport_.w, viewport_.h);
         ImGuizmo::Enable(true);
-        ImGuizmo::SetID(static_cast<int>(selected_));
+        ImGuizmo::SetID(static_cast<int>(primary));
 
         if (ImGuizmo::Manipulate(view_m, proj_m, gizmo_operation_, gizmo_mode_, matrix_m)) {
             if (applyGizmoWorldToLocal(scene, *node, matrix_m)) {
                 runtime_.updateTransforms();
                 rot_edit_node_ = 0;
                 markDirty();
+                maybeAutoKey();
             }
         }
     }
@@ -808,18 +1368,56 @@ private:
         return true;
     }
 
-    void handleViewportPick(genesis::Scene& scene) {
-        if (!viewport_hovered_) return;
-        if (!ImGui::IsMouseClicked(ImGuiMouseButton_Left)) return;
-        if (ImGuizmo::IsOver() || ImGuizmo::IsUsing()) return;
+    void handleViewportSelection(genesis::Scene& scene) {
+        (void)scene;
+        if (fly_camera_active_) {
+            marquee_ = {};
+            return;
+        }
 
-        const ImVec2 mouse = ImGui::GetIO().MousePos;
-        pickAtViewportMouse(mouse, scene);
+        const ImGuiIO& io = ImGui::GetIO();
+        const ImVec2 mouse = io.MousePos;
+        const bool over_viewport = viewport_.contains(mouse.x, mouse.y);
+        const bool gizmo_blocks = ImGuizmo::IsOver() || ImGuizmo::IsUsing();
+
+        if (over_viewport && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !gizmo_blocks) {
+            marquee_.active = true;
+            marquee_.dragging = false;
+            marquee_.start = mouse;
+            marquee_.current = mouse;
+        }
+
+        if (marquee_.active && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            marquee_.current = mouse;
+            const float dx = marquee_.current.x - marquee_.start.x;
+            const float dy = marquee_.current.y - marquee_.start.y;
+            if ((dx * dx + dy * dy) >= kMarqueeDragThresholdPx * kMarqueeDragThresholdPx) {
+                marquee_.dragging = true;
+            }
+        }
+
+        if (marquee_.active && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+            const bool additive = io.KeyShift || io.KeyCtrl;
+            if (marquee_.dragging) {
+                applyMarqueeSelection(additive);
+            } else if (over_viewport && !gizmo_blocks) {
+                applyClickSelection(mouse, additive);
+            }
+            marquee_ = {};
+        }
+
+        if (!ImGui::IsMouseDown(ImGuiMouseButton_Left) && !ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            // Cancel stale marquee if mouse was released outside our handlers.
+            if (marquee_.active && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+                marquee_ = {};
+            }
+        }
     }
 
-    void pickAtViewportMouse(const ImVec2& mouse, genesis::Scene& scene) {
-        (void)scene;
-        if (!viewport_.contains(mouse.x, mouse.y)) return;
+    void applyClickSelection(const ImVec2& mouse, const bool additive) {
+        if (!viewport_.contains(mouse.x, mouse.y)) {
+            return;
+        }
 
         const float aspect = renderAspect();
         const float local_x = mouse.x - viewport_.x;
@@ -830,22 +1428,148 @@ private:
             viewport_.h);
 
         const genesis::PickRay ray{screen_ray.origin, screen_ray.direction};
+        genesis::ScenePickParams params{};
+        params.meshes_only = false;
+        params.exclude_cameras = true;
+
+        if (std::optional<genesis::ScenePickResult> picked = runtime_.pickNodeAtRay(ray, params)) {
+            if (additive) {
+                toggleSelected(picked->node_id);
+            } else {
+                selectNode(picked->node_id);
+            }
+        } else if (!additive) {
+            clearSelection();
+        }
+    }
+
+    void applyMarqueeSelection(const bool additive) {
+        genesis::ScreenRect rect{};
+        rect.min_x = marquee_.start.x - viewport_.x;
+        rect.min_y = marquee_.start.y - viewport_.y;
+        rect.max_x = marquee_.current.x - viewport_.x;
+        rect.max_y = marquee_.current.y - viewport_.y;
+        rect.normalize();
+
+        const float aspect = renderAspect();
+        const glm::mat4 view_proj =
+            genesis::projectionForImGuizmo(outputProjectionMatrix(aspect)) * outputViewMatrix();
 
         genesis::ScenePickParams params{};
-        params.meshes_only = true;
+        params.meshes_only = false;
         params.exclude_cameras = true;
-        if (std::optional<genesis::ScenePickResult> picked = runtime_.pickNodeAtRay(ray, params)) {
-            selectNode(picked->node_id);
-        } else {
-            selectNode(0);
+
+        std::vector<genesis::NodeId> hits;
+        genesis::pickNodesInScreenRect(runtime_.scene(), runtime_.meshes(), view_proj, viewport_.w,
+                                       viewport_.h, rect, params, hits);
+
+        if (!additive) {
+            clearSelection();
+        }
+        for (const genesis::NodeId id : hits) {
+            addToSelection(id);
+        }
+    }
+
+    void drawSelectionOverlays(genesis::Scene& scene) {
+        ImDrawList* draw = ImGui::GetForegroundDrawList();
+        if (marquee_.active && marquee_.dragging) {
+            draw->AddRectFilled(marquee_.start, marquee_.current, IM_COL32(64, 140, 255, 40));
+            draw->AddRect(marquee_.start, marquee_.current, IM_COL32(80, 160, 255, 220), 0.0f, 0, 1.5f);
+        }
+
+        if (selection_.empty() || viewport_.w < 2.0f) {
+            return;
+        }
+
+        runtime_.updateTransforms();
+        const float aspect = renderAspect();
+        const glm::mat4 view_proj =
+            genesis::projectionForImGuizmo(outputProjectionMatrix(aspect)) * outputViewMatrix();
+        genesis::ScenePickParams params{};
+
+        for (const genesis::NodeId id : selection_) {
+            const genesis::Node* node = scene.find(id);
+            if (!node) {
+                continue;
+            }
+            const genesis::Mesh* mesh = nullptr;
+            if (node->mesh_resource.has_value()) {
+                mesh = runtime_.mesh(*node->mesh_resource);
+            }
+            glm::vec3 aabb_min{};
+            glm::vec3 aabb_max{};
+            if (!genesis::nodeWorldPickAabb(*node, mesh, params, aabb_min, aabb_max)) {
+                continue;
+            }
+            genesis::ScreenRect rect{};
+            if (!genesis::projectWorldAabbToScreen(view_proj, aabb_min, aabb_max, viewport_.w, viewport_.h,
+                                                    rect)) {
+                continue;
+            }
+            const ImVec2 a(viewport_.x + rect.min_x, viewport_.y + rect.min_y);
+            const ImVec2 b(viewport_.x + rect.max_x, viewport_.y + rect.max_y);
+            const bool primary = id == primarySelected();
+            draw->AddRect(a, b, primary ? IM_COL32(255, 196, 64, 230) : IM_COL32(80, 170, 255, 200), 0.0f,
+                          0, primary ? 2.0f : 1.25f);
+        }
+    }
+
+    bool isSelected(const genesis::NodeId id) const {
+        return std::find(selection_.begin(), selection_.end(), id) != selection_.end();
+    }
+
+    genesis::NodeId primarySelected() const {
+        return selection_.empty() ? 0 : selection_.back();
+    }
+
+    void clearSelection() {
+        selection_.clear();
+        rot_edit_node_ = 0;
+    }
+
+    void setSelection(std::vector<genesis::NodeId> ids) {
+        selection_ = std::move(ids);
+        rot_edit_node_ = 0;
+        if (const genesis::NodeId primary = primarySelected()) {
+            syncReparentFromSelection(primary);
         }
     }
 
     void selectNode(const genesis::NodeId id) {
-        selected_ = id;
+        selection_.clear();
+        if (id != 0) {
+            selection_.push_back(id);
+            syncReparentFromSelection(id);
+        }
         rot_edit_node_ = 0;
+    }
+
+    void addToSelection(const genesis::NodeId id) {
+        if (id == 0 || isSelected(id)) {
+            return;
+        }
+        selection_.push_back(id);
+        syncReparentFromSelection(id);
+        rot_edit_node_ = 0;
+    }
+
+    void toggleSelected(const genesis::NodeId id) {
+        if (id == 0) {
+            return;
+        }
+        const auto it = std::find(selection_.begin(), selection_.end(), id);
+        if (it != selection_.end()) {
+            selection_.erase(it);
+        } else {
+            selection_.push_back(id);
+            syncReparentFromSelection(id);
+        }
+        rot_edit_node_ = 0;
+    }
+
+    void syncReparentFromSelection(const genesis::NodeId id) {
         genesis::Scene& scene = runtime_.scene();
-        if (id == 0) return;
         if (const genesis::Node* n = scene.find(id)) {
             reparent_target_ = n->parent.value_or(0);
             reparent_preview_ =
@@ -871,16 +1595,16 @@ private:
             n->local.rotation =
                 glm::angleAxis(glm::radians(-50.0f), glm::vec3(1.0f, 0.0f, 0.0f)) *
                 glm::angleAxis(glm::radians(40.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-            n->light->color = glm::vec3(1.0f, 0.98f, 0.94f);
-            n->light->intensity = 1.0f;
+            n->light->color = glm::vec3(1.0f, 0.97f, 0.92f);
+            n->light->intensity = 2.4f;
         }
 
         const std::uint32_t cube_mesh = runtime_.addMesh("Cube", genesis::createCubeMesh(renderer().context()));
         const std::uint32_t cube_mat = runtime_.addMaterial("Cube Material", genesis::SceneMaterial{});
         if (genesis::SceneMaterial* mat = runtime_.material(cube_mat)) {
-            mat->base_color = glm::vec4(0.75f, 0.35f, 0.25f, 1.0f);
-            mat->roughness = 0.45f;
-            mat->metallic = 0.05f;
+            mat->base_color = glm::vec4(0.82f, 0.38f, 0.26f, 1.0f);
+            mat->roughness = 0.38f;
+            mat->metallic = 0.12f;
         }
         const genesis::NodeId cube = runtime_.scene().createMeshNode("Cube", cube_mesh, root, cube_mat);
         if (genesis::Node* n = runtime_.scene().find(cube)) {
@@ -897,13 +1621,91 @@ private:
         updateWindowTitle();
     }
 
+    void requestOpenScene() {
+        if (session_.dirty) {
+            show_open_confirm_ = true;
+            return;
+        }
+        openSceneDialog();
+    }
+
+    void openSceneDialog() {
+        std::filesystem::path default_path = session_.document_path;
+        if (default_path.empty() || session_.isBundledScenePath(default_path)) {
+            default_path = genesis::editorProjectsDir();
+        }
+
+        genesis::openFileDialog(
+            window().handle(),
+            {{"GENESIS Scene", "genesis;gns;json"},
+             {"GENESIS Package", "genesis"},
+             {"GNS Package", "gns"},
+             {"JSON Scene", "json"},
+             {"All Files", "*"}},
+            [this](std::filesystem::path path) {
+                if (path.empty()) {
+                    return;
+                }
+                try {
+                    loadSceneDocument(path);
+                } catch (const std::exception& ex) {
+                    spdlog::error("Open scene failed: {}", ex.what());
+                }
+            },
+            default_path);
+    }
+
+    void saveSceneAsDialog(bool exit_after_save = false) {
+        std::filesystem::path default_path = session_.document_path;
+        if (default_path.empty() || session_.isBundledScenePath(default_path)) {
+            default_path = genesis::uniqueProjectPath("Untitled Scene");
+        }
+
+        genesis::saveFileDialog(
+            window().handle(),
+            {{"GENESIS Package", "genesis"},
+             {"GNS Package", "gns"},
+             {"JSON Scene", "json"},
+             {"All Files", "*"}},
+            [this, exit_after_save](std::filesystem::path path) {
+                if (path.empty()) {
+                    return;
+                }
+                if (!path.has_extension()) {
+                    path += ".genesis";
+                }
+                try {
+                    session_.saveDocument(runtime_, path);
+                    updateWindowTitle();
+                    if (exit_after_save) {
+                        exit_confirmed_ = true;
+                        window().setShouldClose(true);
+                    }
+                } catch (const std::exception& ex) {
+                    spdlog::error("Save scene failed: {}", ex.what());
+                }
+            },
+            default_path);
+    }
+
+    void saveAndExit() {
+        if (session_.requiresSaveAs()) {
+            saveSceneAsDialog(true);
+            return;
+        }
+        try {
+            session_.saveDocument(runtime_, session_.document_path);
+            updateWindowTitle();
+            exit_confirmed_ = true;
+            window().setShouldClose(true);
+        } catch (const std::exception& ex) {
+            spdlog::error("Save scene failed: {}", ex.what());
+        }
+    }
+
     void saveCurrentDocument() {
         if (session_.requiresSaveAs()) {
-            open_save_as_modal_ = true;
-            std::snprintf(path_input_, sizeof(path_input_), "%s",
-                          session_.document_path.empty()
-                              ? genesis::uniqueProjectPath("Untitled Scene").string().c_str()
-                              : session_.document_path.string().c_str());
+            saveSceneAsDialog(false);
             return;
         }
 
@@ -953,8 +1755,9 @@ private:
     }
 
     std::optional<genesis::NodeId> createParent() const {
-        if (selected_ == 0) return std::nullopt;
-        return selected_;
+        const genesis::NodeId primary = primarySelected();
+        if (primary == 0) return std::nullopt;
+        return primary;
     }
 
     void addPrimitiveMesh(const char* prefix, genesis::Mesh mesh) {
@@ -993,27 +1796,32 @@ private:
     }
 
     void focusEditorCameraOnSelection() {
-        if (selected_ == 0) return;
-        const genesis::Node* node = runtime_.scene().find(selected_);
-        if (!node) return;
+        if (selection_.empty()) return;
 
         runtime_.updateTransforms();
 
-        glm::vec3 target = glm::vec3(node->world[3]);
-        float focus_distance = 3.0f;
+        glm::vec3 bounds_min(std::numeric_limits<float>::max());
+        glm::vec3 bounds_max(std::numeric_limits<float>::lowest());
+        bool any = false;
 
-        if (node->mesh_resource.has_value()) {
-            const std::uint32_t mesh_id = *node->mesh_resource;
-            if (mesh_id < runtime_.meshes().size()) {
-                const genesis::Mesh& mesh = runtime_.meshes()[mesh_id];
-                glm::vec3 center{};
-                glm::vec3 half_extent{};
-                genesis::worldBoundsFromMesh(node->world, mesh.local_aabb_min, mesh.local_aabb_max, center,
-                                               half_extent);
-                target = center;
-                focus_distance = std::max(glm::length(half_extent) * 3.5f, 1.5f);
+        for (const genesis::NodeId id : selection_) {
+            const genesis::Node* node = runtime_.scene().find(id);
+            if (!node) continue;
+            glm::vec3 aabb_min{};
+            glm::vec3 aabb_max{};
+            const genesis::Mesh* mesh =
+                node->mesh_resource.has_value() ? runtime_.mesh(*node->mesh_resource) : nullptr;
+            if (!genesis::nodeWorldPickAabb(*node, mesh, {}, aabb_min, aabb_max)) {
+                continue;
             }
+            bounds_min = glm::min(bounds_min, aabb_min);
+            bounds_max = glm::max(bounds_max, aabb_max);
+            any = true;
         }
+        if (!any) return;
+
+        const glm::vec3 target = (bounds_min + bounds_max) * 0.5f;
+        const float focus_distance = std::max(glm::length(bounds_max - bounds_min) * 1.75f, 1.5f);
 
         glm::vec3 offset = editor_camera_.transform.position - target;
         if (glm::length(offset) < 0.25f) {
@@ -1059,14 +1867,23 @@ private:
 
     genesis::EditorSession session_;
     genesis::SceneRuntime runtime_;
+    genesis::ColorManagement color_mgmt_;
     genesis::Mesh grid_mesh_{};
     genesis::Camera editor_camera_{};
     genesis::ViewportRect viewport_{};
     bool use_editor_output_ = true;
     float output_aspect_ = 1.0f;
     bool viewport_hovered_ = false;
+    bool fly_camera_active_ = false;
     bool ui_style_initialized_ = false;
-    genesis::NodeId selected_ = 0;
+    std::vector<genesis::NodeId> selection_;
+    struct MarqueeState {
+        bool active = false;
+        bool dragging = false;
+        ImVec2 start{};
+        ImVec2 current{};
+    } marquee_{};
+    static constexpr float kMarqueeDragThresholdPx = 5.0f;
     genesis::NodeId rot_edit_node_ = 0;
     float rot_euler_deg_[3] = {0.0f, 0.0f, 0.0f};
     genesis::NodeId reparent_target_ = 0;
@@ -1087,15 +1904,17 @@ private:
     bool show_viewport_ = true;
     bool show_toolbar_ = true;
     bool show_viewport_help_ = true;
+    bool show_timeline_ = true;
+    bool show_animation_graph_ = false;
+    bool auto_key_ = false;
     bool show_debug_window_ = false;
     bool show_grid_ = true;
 
-    bool open_open_modal_ = false;
-    bool open_save_as_modal_ = false;
     bool show_new_scene_confirm_ = false;
+    bool show_open_confirm_ = false;
     bool show_exit_confirm_ = false;
     bool exit_confirmed_ = false;
-    char path_input_[512]{};
+    int smoke_exit_frames_ = -1;
 };
 
 } // namespace
@@ -1107,23 +1926,37 @@ int main(int argc, char** argv) {
         config.width = 1680;
         config.height = 1050;
 
+        int smoke_frames = -1;
+        std::filesystem::path open_path;
+        for (int i = 1; i < argc; ++i) {
+            const std::string arg = argv[i];
+            if (arg == "--smoke" || arg.rfind("--smoke=", 0) == 0) {
+                smoke_frames = 3;
+                if (arg.rfind("--smoke=", 0) == 0) {
+                    smoke_frames = std::max(1, std::atoi(arg.c_str() + 8));
+                }
+            } else if (open_path.empty()) {
+                open_path = arg;
+            }
+        }
+
         GltfViewerApp app(config);
 
-        if (argc >= 2) {
-            const std::filesystem::path arg_path = argv[1];
-            if (arg_path.extension() == ".gns") {
-                app.loadGnsPackage(genesis::resolveAssetPath(arg_path));
+        if (!open_path.empty()) {
+            const std::filesystem::path asset_path = genesis::resolveAssetPath(open_path);
+            const std::string ext = asset_path.extension().string();
+            if (ext == ".gns" || ext == ".GNS" || ext == ".genesis" || ext == ".GENESIS" ||
+                ext == ".json" || ext == ".scene") {
+                app.loadSceneDocument(asset_path);
             } else {
-                const std::filesystem::path asset_path = genesis::resolveAssetPath(arg_path);
-                const std::string ext = asset_path.extension().string();
-                if (ext == ".json" || ext == ".scene") {
-                    app.loadSceneDocument(asset_path);
-                } else {
-                    app.load(asset_path);
-                }
+                app.load(asset_path);
             }
         } else {
             app.loadDefaultScene();
+        }
+
+        if (smoke_frames > 0) {
+            app.enableSmokeExit(smoke_frames);
         }
         return app.run();
     } catch (const std::exception& ex) {

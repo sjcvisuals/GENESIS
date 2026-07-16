@@ -11,10 +11,14 @@ layout(set = 0, binding = 0) uniform FrameUBO {
     mat4 viewProj;
     vec4 cameraPos;
     int lightCount;
-    int _pad0;
-    int _pad1;
-    int _pad2;
+    float iblIntensity;
+    float fogDensity;
+    float fogHeight;
     Light lights[8];
+    vec4 ambientSky;
+    vec4 ambientGround;
+    vec4 fogColor;
+    vec4 displayParams;
 } uFrame;
 
 layout(push_constant) uniform Push {

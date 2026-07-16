@@ -3,6 +3,7 @@
 #include "scene/SceneMaterial.hpp"
 
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <span>
 #include <string>
@@ -26,11 +27,11 @@ struct DecodedImage {
 bool decodeGltfImage(const fastgltf::Asset& asset, std::size_t image_index,
                      const std::filesystem::path& base_dir, DecodedImage& out);
 
-void bindGltfBaseColorTextures(const fastgltf::Asset& asset,
+void bindGltfMaterialTextures(const fastgltf::Asset& asset,
                                const std::filesystem::path& base_dir,
                                const VulkanContext& context,
                                std::vector<SceneMaterial>& materials,
-                               std::vector<GpuTexture>& textures,
+                               std::deque<GpuTexture>& textures,
                                std::vector<std::string>& texture_names);
 
 } // namespace genesis

@@ -13,15 +13,17 @@ struct GpuMeshInstance {
     alignas(16) glm::mat4 normal_matrix{1.0f};
     alignas(16) glm::vec4 bounds_center{0.0f}; // xyz = world center, w unused
     alignas(16) glm::vec4 bounds_extent{0.5f}; // xyz = world half extents, w unused
+    alignas(16) glm::vec4 color{1.0f};         // rgba instance tint (default opaque white)
 };
 
-static_assert(sizeof(GpuMeshInstance) == 160, "GpuMeshInstance size mismatch");
+static_assert(sizeof(GpuMeshInstance) == 176, "GpuMeshInstance size mismatch");
 
 inline void fillGpuMeshInstance(GpuMeshInstance& out, const glm::mat4& model,
                                 const glm::vec3& local_aabb_min, const glm::vec3& local_aabb_max) {
     out.model = model;
     const glm::mat3 normal = glm::transpose(glm::inverse(glm::mat3(model)));
     out.normal_matrix = glm::mat4(normal);
+    out.color = glm::vec4(1.0f);
 
     const std::array<glm::vec3, 8> corners = {
         glm::vec3(local_aabb_min.x, local_aabb_min.y, local_aabb_min.z),

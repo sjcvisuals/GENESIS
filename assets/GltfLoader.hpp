@@ -6,6 +6,7 @@
 #include "scene/Scene.hpp"
 #include "scene/SceneMaterial.hpp"
 
+#include <deque>
 #include <filesystem>
 #include <vector>
 
@@ -17,7 +18,7 @@ public:
 
     static void loadTexturesForFile(const std::filesystem::path& path, const VulkanContext& context,
                                     std::vector<SceneMaterial>& materials,
-                                    std::vector<GpuTexture>& textures,
+                                    std::deque<GpuTexture>& textures,
                                     std::vector<std::string>& texture_names);
 
     static Scene loadScene(const std::filesystem::path& path,

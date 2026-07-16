@@ -16,9 +16,8 @@ namespace {
 
 std::filesystem::path playerModuleDirectory() {
     if (const char* base = SDL_GetBasePath()) {
-        const std::filesystem::path dir = base;
-        SDL_free(const_cast<char*>(base));
-        return dir;
+        // SDL3: GetBasePath is owned by SDL — do not SDL_free.
+        return std::filesystem::path(base);
     }
     return {};
 }

@@ -248,6 +248,8 @@ void MeshBatchDrawer::bindInstanceBuffer(const VkDevice device, const VkDescript
 bool MeshBatchDrawer::prepareDraw(const std::vector<SceneMeshBatch>& batches,
                                   BindlessTextures& bindless, const MeshDrawOptions& options) {
     resetFrame();
+    // Scene textures live in a reallocating container; never keep GpuTexture* across frames.
+    bindless.resetFrame();
     if (batches.empty()) {
         return false;
     }
@@ -267,6 +269,19 @@ bool MeshBatchDrawer::prepareDraw(const std::vector<SceneMeshBatch>& batches,
 
         batch.texture_index = bindless.registerTexture(batch.base_color_texture);
         batch.material.texture_index = batch.texture_index;
+
+        if (batch.metallic_roughness_texture) {
+            batch.material.mr_texture_index = bindless.registerTexture(batch.metallic_roughness_texture);
+        } else {
+            batch.material.mr_texture_index = kInvalidTextureIndex;
+        }
+
+        const std::uint32_t normal_index =
+            batch.normal_texture ? bindless.registerTexture(batch.normal_texture) : kInvalidTextureIndex;
+        const std::uint32_t emissive_index =
+            batch.emissive_texture ? bindless.registerTexture(batch.emissive_texture)
+                                   : kInvalidTextureIndex;
+        batch.material.packed_maps = packMapIndices(normal_index, emissive_index);
 
         GpuBatchCullHeader header{};
         header.instance_offset = total_instances_;
@@ -427,7 +442,8 @@ void MeshBatchDrawer::dispatchGpuCull(VkCommandBuffer cmd) {
 
 void MeshBatchDrawer::drawIndexedBatches(VkCommandBuffer cmd, const GraphicsPipeline& pipeline,
                                          VkDescriptorSet frame_descriptor_set,
-                                         BindlessTextures& bindless, bool depth_only) {
+                                         BindlessTextures& bindless, VkDescriptorSet display_lut_set,
+                                         bool depth_only) {
     if (!prepared_) {
         return;
     }
@@ -459,9 +475,16 @@ void MeshBatchDrawer::drawIndexedBatches(VkCommandBuffer cmd, const GraphicsPipe
         MeshMaterialPushConstants push = batch.material;
         push.instance_base = gpu_cull_enabled_ ? header.visible_offset : header.instance_offset;
 
-        const VkDescriptorSet sets[] = {frame_descriptor_set, bindless.descriptorSet()};
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout(), 0,
-                                depth_only ? 1u : 2u, sets, 0, nullptr);
+        if (depth_only || display_lut_set == VK_NULL_HANDLE) {
+            const VkDescriptorSet sets[] = {frame_descriptor_set, bindless.descriptorSet()};
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout(), 0, 2, sets,
+                                    0, nullptr);
+        } else {
+            const VkDescriptorSet sets[] = {frame_descriptor_set, bindless.descriptorSet(),
+                                            display_lut_set};
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout(), 0, 3, sets,
+                                    0, nullptr);
+        }
         vkCmdPushConstants(cmd, pipeline.layout(),
                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                            sizeof(MeshMaterialPushConstants), &push);
@@ -477,13 +500,13 @@ void MeshBatchDrawer::drawIndexedBatches(VkCommandBuffer cmd, const GraphicsPipe
 void MeshBatchDrawer::drawDepthPrepass(VkCommandBuffer cmd, const GraphicsPipeline& pipeline,
                                        VkDescriptorSet frame_descriptor_set,
                                        BindlessTextures& bindless) {
-    drawIndexedBatches(cmd, pipeline, frame_descriptor_set, bindless, true);
+    drawIndexedBatches(cmd, pipeline, frame_descriptor_set, bindless, VK_NULL_HANDLE, true);
 }
 
 void MeshBatchDrawer::drawColorPass(VkCommandBuffer cmd, const GraphicsPipeline& pipeline,
-                                    VkDescriptorSet frame_descriptor_set,
-                                    BindlessTextures& bindless) {
-    drawIndexedBatches(cmd, pipeline, frame_descriptor_set, bindless, false);
+                                    VkDescriptorSet frame_descriptor_set, BindlessTextures& bindless,
+                                    VkDescriptorSet display_lut_set) {
+    drawIndexedBatches(cmd, pipeline, frame_descriptor_set, bindless, display_lut_set, false);
 }
 
 } // namespace genesis

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "animation/AnimationClip.hpp"
+#include "particles/ParticleEmitter.hpp"
 #include "scene/SceneCamera.hpp"
 #include "scene/SceneLight.hpp"
 #include "scene/SceneMaterial.hpp"
@@ -24,6 +26,7 @@ struct SceneDocumentNode {
 
     std::optional<SceneCamera> camera;
     std::optional<SceneLight> light;
+    std::optional<ParticleEmitter> particle_emitter;
 };
 
 struct SceneDocument {
@@ -33,6 +36,7 @@ struct SceneDocument {
 
     std::vector<std::pair<std::string, SceneMaterial>> materials;
     std::vector<SceneDocumentNode> nodes;
+    std::vector<AnimationClip> animations;
 };
 
 } // namespace genesis

@@ -58,6 +58,7 @@ add_library(genesis_platform STATIC
     platform/Input.cpp
     platform/ImGuiLayer.cpp
     platform/EditorPaths.cpp
+    platform/FileDialog.cpp
 )
 target_include_directories(genesis_platform PUBLIC
     ${CMAKE_SOURCE_DIR}
@@ -76,6 +77,7 @@ add_library(genesis_renderer_core STATIC
     renderer/OffscreenRenderer.cpp
     renderer/MeshBatchDrawer.cpp
     renderer/BindlessTextures.cpp
+    renderer/DisplayLutBinding.cpp
     renderer/MaterialBinding.cpp
     renderer/vulkan/ComputePipeline.cpp
     renderer/vulkan/VulkanContext.cpp
@@ -128,15 +130,27 @@ add_library(genesis_engine_runtime STATIC
     scene/SceneSerializer.cpp
     scene/GnsPackage.cpp
     scene/SceneRuntime.cpp
+    color/ColorManagement.cpp
+    animation/AnimationClip.cpp
+    animation/AnimationAuthoring.cpp
+    animation/AnimationGraph.cpp
+    animation/AnimationEvaluator.cpp
+    particles/ParticleWorld.cpp
     assets/GltfLoader.cpp
     assets/GltfTextures.cpp
+    assets/TextureLoader.cpp
     assets/MeshUpload.cpp
     assets/PrimitiveMeshes.cpp
     assets/GridMesh.cpp
+    assets/ModelImporter.cpp
 )
 target_include_directories(genesis_engine_runtime PUBLIC ${CMAKE_SOURCE_DIR})
-target_link_libraries(genesis_engine_runtime PUBLIC genesis_renderer_core fastgltf::fastgltf nlohmann_json::nlohmann_json)
-
+target_link_libraries(genesis_engine_runtime PUBLIC
+    genesis_renderer_core
+    fastgltf::fastgltf
+    nlohmann_json::nlohmann_json
+    assimp::assimp
+)
 add_library(genesis_runtime STATIC
     runtime/GenesisSession.cpp
     runtime/GenesisFrameTime.cpp
@@ -291,18 +305,27 @@ if(GENESIS_BUILD_RENDERBRIDGE_EXT AND WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/assets"
             "$<TARGET_FILE_DIR:ExtGenesis>/assets"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets/scenes"
+            "${RX_DEPLOY_DIR}/scenes"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets/scenes"
+            "$<TARGET_FILE_DIR:ExtGenesis>/scenes"
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_BINARY_DIR}/deploy/GenesisPixera"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/Scenes"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/Assets"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/scenes"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/assets"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:ExtGenesis>"
             "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/ExtGenesis.dll"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/assets/scenes"
-            "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/Scenes"
+            "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/scenes"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets/scenes"
+            "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/assets/scenes"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/assets/test"
-            "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/Assets/test"
+            "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/assets/test"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_SOURCE_DIR}/deploy/Genesis.manifest.json"
             "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/Genesis.manifest.json"

@@ -4,6 +4,7 @@
 #include "renderer/MeshDrawPushConstants.hpp"
 #include "scene/SceneRuntime.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
@@ -13,6 +14,9 @@ namespace genesis {
 struct SceneMeshBatch {
     const Mesh* mesh = nullptr;
     const GpuTexture* base_color_texture = nullptr;
+    const GpuTexture* metallic_roughness_texture = nullptr;
+    const GpuTexture* normal_texture = nullptr;
+    const GpuTexture* emissive_texture = nullptr;
     std::uint32_t texture_index = 0;
     MeshMaterialPushConstants material{};
     std::vector<GpuMeshInstance> instances;
@@ -31,18 +35,26 @@ inline std::uint64_t materialKey(const MeshMaterialPushConstants& material) {
 
 struct BatchKey {
     const Mesh* mesh = nullptr;
-    const GpuTexture* texture = nullptr;
+    const GpuTexture* base_color = nullptr;
+    const GpuTexture* metallic_roughness = nullptr;
+    const GpuTexture* normal = nullptr;
+    const GpuTexture* emissive = nullptr;
     std::uint64_t material_hash = 0;
 
     bool operator==(const BatchKey& other) const {
-        return mesh == other.mesh && texture == other.texture && material_hash == other.material_hash;
+        return mesh == other.mesh && base_color == other.base_color &&
+               metallic_roughness == other.metallic_roughness && normal == other.normal &&
+               emissive == other.emissive && material_hash == other.material_hash;
     }
 };
 
 struct BatchKeyHash {
     std::size_t operator()(const BatchKey& key) const {
         std::size_t hash = std::hash<const void*>{}(key.mesh);
-        hash ^= std::hash<const void*>{}(key.texture) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash ^= std::hash<const void*>{}(key.base_color) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash ^= std::hash<const void*>{}(key.metallic_roughness) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash ^= std::hash<const void*>{}(key.normal) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash ^= std::hash<const void*>{}(key.emissive) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
         hash ^= key.material_hash + 0x9e3779b9 + (hash << 6) + (hash >> 2);
         return hash;
     }
@@ -51,6 +63,9 @@ struct BatchKeyHash {
 inline std::uint64_t batchSortKey(const SceneMeshBatch& batch) {
     std::uint64_t key = reinterpret_cast<std::uint64_t>(batch.mesh);
     key = (key << 16) ^ reinterpret_cast<std::uint64_t>(batch.base_color_texture);
+    key = (key << 8) ^ reinterpret_cast<std::uint64_t>(batch.metallic_roughness_texture);
+    key = (key << 8) ^ reinterpret_cast<std::uint64_t>(batch.normal_texture);
+    key = (key << 8) ^ reinterpret_cast<std::uint64_t>(batch.emissive_texture);
     key = (key << 32) ^ materialKey(batch.material);
     return key;
 }
@@ -79,12 +94,16 @@ inline void buildDrawBatches(const std::vector<SceneDrawCommand>& commands,
     for (const SceneDrawCommand& command : commands) {
         MeshMaterialPushConstants material = command.material;
 
-        const BatchKey key{command.mesh, command.base_color_texture, materialKey(material)};
+        const BatchKey key{command.mesh, command.base_color_texture, command.metallic_roughness_texture,
+                           command.normal_texture, command.emissive_texture, materialKey(material)};
         auto [it, inserted] = batch_lookup.emplace(key, out_batches.size());
         if (inserted) {
             SceneMeshBatch batch{};
             batch.mesh = command.mesh;
             batch.base_color_texture = command.base_color_texture;
+            batch.metallic_roughness_texture = command.metallic_roughness_texture;
+            batch.normal_texture = command.normal_texture;
+            batch.emissive_texture = command.emissive_texture;
             batch.material = material;
             out_batches.push_back(std::move(batch));
         }
@@ -97,6 +116,7 @@ inline void buildDrawBatches(const std::vector<SceneDrawCommand>& commands,
         } else {
             fillGpuMeshInstance(instance, command.model, glm::vec3(-0.5f), glm::vec3(0.5f));
         }
+        instance.color = command.instance_color;
         batch.instances.push_back(instance);
         batch.node_ids.push_back(command.node_id);
     }

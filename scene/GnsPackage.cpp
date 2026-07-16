@@ -63,8 +63,9 @@ GnsPackage GnsPackage::load(const std::filesystem::path& path) {
 
     const json root = json::parse(in);
     const std::string format = root.value("format", std::string{});
-    if (format != "gns") {
-        throw std::runtime_error("GNS package missing or invalid format field: " + path.string());
+    // .genesis is the editor-facing package name; .gns remains the PIXERA show format.
+    if (format != "gns" && format != "genesis") {
+        throw std::runtime_error("GENESIS package missing or invalid format field: " + path.string());
     }
 
     GnsPackage package{};
@@ -76,7 +77,7 @@ GnsPackage GnsPackage::load(const std::filesystem::path& path) {
     } else if (root.contains("scene") && root["scene"].is_object()) {
         package.scene = SceneSerializer::loadFromJson(root["scene"]);
     } else {
-        throw std::runtime_error("GNS package must contain scene or scene_ref: " + path.string());
+        throw std::runtime_error("GENESIS package must contain scene or scene_ref: " + path.string());
     }
 
     if (root.contains("pixera") && root["pixera"].is_object()) {
@@ -95,13 +96,15 @@ GnsPackage GnsPackage::load(const std::filesystem::path& path) {
         package.pixera.streams.push_back(GnsStreamDesc{});
     }
 
-    spdlog::info("Loaded GNS package: {} ({})", path.string(), package.name);
+    spdlog::info("Loaded GENESIS package: {} ({})", path.string(), package.name);
     return package;
 }
 
 void GnsPackage::save(const GnsPackage& package, const std::filesystem::path& path) {
+    const std::string ext = path.extension().string();
+    const bool genesis_ext = ext == ".genesis" || ext == ".GENESIS";
     json root{
-        {"format", "gns"},
+        {"format", genesis_ext ? "genesis" : "gns"},
         {"version", package.version},
         {"name", package.name},
         {"pixera",
@@ -116,7 +119,7 @@ void GnsPackage::save(const GnsPackage& package, const std::filesystem::path& pa
     } else if (package.scene.has_value()) {
         root["scene"] = SceneSerializer::documentToJson(*package.scene);
     } else {
-        throw std::runtime_error("GNS package must contain scene or scene_ref to save");
+        throw std::runtime_error("GENESIS package must contain scene or scene_ref to save");
     }
 
     for (const GnsStreamDesc& stream : package.pixera.streams) {
@@ -125,10 +128,10 @@ void GnsPackage::save(const GnsPackage& package, const std::filesystem::path& pa
 
     std::ofstream out(path);
     if (!out) {
-        throw std::runtime_error("Failed to open GNS package for writing: " + path.string());
+        throw std::runtime_error("Failed to open GENESIS package for writing: " + path.string());
     }
     out << root.dump(2);
-    spdlog::info("Saved GNS package: {}", path.string());
+    spdlog::info("Saved GENESIS package: {}", path.string());
 }
 
 SceneDocument GnsPackage::resolveScene(const std::filesystem::path& package_dir) const {

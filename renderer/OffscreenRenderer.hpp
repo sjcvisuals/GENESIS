@@ -20,9 +20,11 @@ class ExternalSync;
 class Buffer;
 class GraphicsPipeline;
 class BindlessTextures;
+class DisplayLutBinding;
 class MeshBatchDrawer;
 class GpuTexture;
 struct Mesh;
+struct ColorLut3D;
 
 struct OffscreenRendererConfig {
     std::uint64_t adapter_luid = 0;
@@ -56,6 +58,7 @@ public:
 
     // Default is transparent (RGB black, A=0) so PIXERA can composite over clips behind.
     void setClearColor(float r, float g, float b, float a);
+    void uploadDisplayLut(const ColorLut3D& lut);
 
     const VulkanContext& context() const;
     const ExternalRenderTarget& target() const;
@@ -79,6 +82,7 @@ private:
     std::unique_ptr<GraphicsPipeline> mesh_pipeline_;
     std::unique_ptr<GraphicsPipeline> mesh_depth_pipeline_;
     std::unique_ptr<BindlessTextures> bindless_textures_;
+    std::unique_ptr<DisplayLutBinding> display_lut_;
     std::unique_ptr<MeshBatchDrawer> mesh_batch_drawer_;
     std::unique_ptr<Buffer> frame_ubo_;
 

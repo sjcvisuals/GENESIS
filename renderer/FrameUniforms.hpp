@@ -4,7 +4,7 @@
 
 namespace genesis {
 
-// std140 layout — must match shaders/mesh.vert and shaders/mesh.frag
+// std140 layout — must match shaders/mesh.vert, mesh.frag, grid.vert
 struct GpuLight {
     float position[4];
     float direction[4];
@@ -14,12 +14,19 @@ struct GpuLight {
 
 struct FrameUniforms {
     float view_proj[16];
-    float camera_pos[4];
+    float camera_pos[4]; // xyz = eye, w = exposure
     std::int32_t light_count;
-    std::int32_t _pad[3];
+    float ibl_intensity;
+    float fog_density;
+    float fog_height;
     GpuLight lights[8];
+    float ambient_sky[4];
+    float ambient_ground[4];
+    float fog_color[4];
+    float display_params[4]; // x = display mode (0 Rec709, 1 sRGB, 2 OCIO LUT)
 };
 
-static_assert(sizeof(FrameUniforms) == 96 + 8 * sizeof(GpuLight), "FrameUniforms std140 size mismatch");
+static_assert(sizeof(GpuLight) == 64, "GpuLight std140 size mismatch");
+static_assert(sizeof(FrameUniforms) == 672, "FrameUniforms std140 size mismatch");
 
 } // namespace genesis

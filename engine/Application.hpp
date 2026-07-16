@@ -20,7 +20,7 @@ struct ApplicationConfig {
 class Application {
 public:
     explicit Application(const ApplicationConfig& config);
-    ~Application();
+    virtual ~Application();
 
     int run();
 

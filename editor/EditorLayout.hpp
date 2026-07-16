@@ -54,6 +54,7 @@ inline void beginEditorDockSpace(ImGuiID dockspace_id, bool& first_time_setup) {
         ImGui::DockBuilderDockWindow("Hierarchy", dock_left);
         ImGui::DockBuilderDockWindow("Inspector", dock_right);
         ImGui::DockBuilderDockWindow("Toolbar", dock_bottom);
+        ImGui::DockBuilderDockWindow("Timeline", dock_bottom);
         // Leave dock_main (center) empty — scene renders in the passthrough hole.
         ImGui::DockBuilderFinish(dockspace_id);
     }
@@ -63,8 +64,10 @@ inline void beginEditorDockSpace(ImGuiID dockspace_id, bool& first_time_setup) {
 
 template <typename DrawGizmoFn>
 inline void drawViewportInputOverlay(const ImGuiID dockspace_id, bool enabled, ImVec2& out_rect_min,
-                                     ImVec2& out_rect_max, bool& out_hovered, DrawGizmoFn&& draw_gizmo) {
+                                     ImVec2& out_rect_max, bool& out_hovered, bool& out_input_active,
+                                     DrawGizmoFn&& draw_gizmo) {
     out_hovered = false;
+    out_input_active = false;
     if (!enabled) {
         return;
     }
@@ -91,13 +94,16 @@ inline void drawViewportInputOverlay(const ImGuiID dockspace_id, bool enabled, I
     // ImGuizmo treats this overlay as the viewport so arrows receive hover/drag input.
     ImGuizmo::SetAlternativeWindow(ImGui::GetCurrentWindow());
 
-    // Manipulate before InvisibleButton — CanActivate() fails if any item is already hovered.
+    // Manipulate first — ImGuizmo::CanActivate fails if another item is already active/hovered.
     draw_gizmo();
 
-    if (!ImGuizmo::IsOver() && !ImGuizmo::IsUsing()) {
+    // Keep a hit target when the gizmo is idle so the overlay window receives focus/clicks.
+    // While using/hovering the gizmo, skip the button so Manipulate keeps mouse ownership.
+    if (!ImGuizmo::IsUsing() && !ImGuizmo::IsOver()) {
+        ImGui::SetCursorScreenPos(pos);
         ImGui::InvisibleButton("##ViewportInput", size);
+        out_input_active = ImGui::IsItemHovered() || ImGui::IsItemActive();
     }
-
     out_hovered = ImGui::IsMouseHoveringRect(out_rect_min, out_rect_max, false);
 
     ImGui::End();

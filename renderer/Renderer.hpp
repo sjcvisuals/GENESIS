@@ -10,6 +10,9 @@
 #include "renderer/MeshDrawPushConstants.hpp"
 #include "scene/SceneDrawBatch.hpp"
 
+#include "renderer/DisplayLutBinding.hpp"
+#include "color/ColorManagement.hpp"
+
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -25,10 +28,12 @@ class Buffer;
 class GraphicsPipeline;
 class ImGuiLayer;
 class BindlessTextures;
+class DisplayLutBinding;
 class MeshBatchDrawer;
 class Window;
 class GpuTexture;
 struct Mesh;
+struct ColorLut3D;
 
 class Renderer {
 public:
@@ -55,6 +60,8 @@ public:
     // Default is transparent (RGB black, A=0) so PIXERA can composite over clips behind.
     // Call with A=1 when an explicit solid background colour is desired.
     void setClearColor(float r, float g, float b, float a);
+    void uploadDisplayLut(const ColorLut3D& lut);
+    DisplayLutBinding* displayLut() { return display_lut_.get(); }
 
     // When enabled, mesh/grid draws are clipped to this screen-space rectangle (pixels).
     void setViewportDrawRegion(float x, float y, float width, float height);
@@ -92,6 +99,7 @@ private:
     std::unique_ptr<GraphicsPipeline> mesh_depth_pipeline_;
     std::unique_ptr<GraphicsPipeline> grid_pipeline_;
     std::unique_ptr<BindlessTextures> bindless_textures_;
+    std::unique_ptr<DisplayLutBinding> display_lut_;
     std::unique_ptr<MeshBatchDrawer> mesh_batch_drawer_;
     std::unique_ptr<Buffer> vertex_buffer_;
     std::unique_ptr<ImGuiLayer> imgui_;

@@ -28,6 +28,8 @@ public:
     VkDescriptorSet descriptorSet() const { return descriptor_set_; }
     const GpuTexture& defaultTexture() const { return *default_texture_; }
 
+    // Drop cached scene texture pointers (call once per frame before re-registering).
+    void resetFrame();
     std::uint32_t registerTexture(const GpuTexture* texture);
     void refreshDescriptorSet();
 

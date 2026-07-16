@@ -102,6 +102,7 @@ json materialToJson(const std::string& name, const SceneMaterial& material) {
         {"emissive_strength", material.emissive_strength},
         {"alpha_mode", alphaModeName(material.alpha_mode)},
         {"alpha_cutoff", material.alpha_cutoff},
+        {"normal_scale", material.normal_scale},
     };
     if (!material.base_color_texture.empty()) j["base_color_texture"] = material.base_color_texture;
     if (!material.metallic_roughness_texture.empty()) {
@@ -121,6 +122,7 @@ SceneMaterial materialFromJson(const json& j) {
     if (j.contains("emissive_strength")) material.emissive_strength = j["emissive_strength"].get<float>();
     if (j.contains("alpha_mode")) material.alpha_mode = alphaModeFromName(j["alpha_mode"].get<std::string>());
     if (j.contains("alpha_cutoff")) material.alpha_cutoff = j["alpha_cutoff"].get<float>();
+    if (j.contains("normal_scale")) material.normal_scale = j["normal_scale"].get<float>();
     if (j.contains("base_color_texture")) material.base_color_texture = j["base_color_texture"].get<std::string>();
     if (j.contains("metallic_roughness_texture")) {
         material.metallic_roughness_texture = j["metallic_roughness_texture"].get<std::string>();
@@ -182,6 +184,90 @@ SceneLight lightFromJson(const json& j) {
     return light;
 }
 
+const char* spawnShapeName(ParticleSpawnShape shape) {
+    switch (shape) {
+    case ParticleSpawnShape::Sphere:
+        return "sphere";
+    case ParticleSpawnShape::Cone:
+        return "cone";
+    case ParticleSpawnShape::Box:
+        return "box";
+    default:
+        return "point";
+    }
+}
+
+ParticleSpawnShape spawnShapeFromName(const std::string& name) {
+    if (name == "sphere") return ParticleSpawnShape::Sphere;
+    if (name == "cone") return ParticleSpawnShape::Cone;
+    if (name == "box") return ParticleSpawnShape::Box;
+    return ParticleSpawnShape::Point;
+}
+
+json particleEmitterToJson(const ParticleEmitter& e) {
+    return json{
+        {"enabled", e.enabled},
+        {"looping", e.looping},
+        {"world_space", e.world_space},
+        {"duration", e.duration_seconds},
+        {"start_delay", e.start_delay_seconds},
+        {"rate", e.rate_per_second},
+        {"burst", e.burst_count},
+        {"max_particles", e.max_particles},
+        {"lifetime_min", e.lifetime_min},
+        {"lifetime_max", e.lifetime_max},
+        {"speed_min", e.speed_min},
+        {"speed_max", e.speed_max},
+        {"size_min", e.size_min},
+        {"size_max", e.size_max},
+        {"size_end_multiplier", e.size_end_multiplier},
+        {"color_start", vec4ToJson(e.color_start)},
+        {"color_end", vec4ToJson(e.color_end)},
+        {"gravity", vec3ToJson(e.gravity)},
+        {"drag", e.drag},
+        {"spawn_shape", spawnShapeName(e.spawn_shape)},
+        {"spawn_radius", e.spawn_radius},
+        {"spawn_box_height", e.spawn_box_height},
+        {"cone_angle_degrees", e.cone_angle_degrees},
+        {"render_mesh", e.render_mesh == ParticleRenderMesh::Sphere ? "sphere" : "cube"},
+        {"unlit", e.unlit},
+        {"seed_override", e.seed_override},
+    };
+}
+
+ParticleEmitter particleEmitterFromJson(const json& j) {
+    ParticleEmitter e = makeDefaultParticleEmitter();
+    e.enabled = j.value("enabled", e.enabled);
+    e.looping = j.value("looping", e.looping);
+    e.world_space = j.value("world_space", e.world_space);
+    e.duration_seconds = j.value("duration", e.duration_seconds);
+    e.start_delay_seconds = j.value("start_delay", e.start_delay_seconds);
+    e.rate_per_second = j.value("rate", e.rate_per_second);
+    e.burst_count = j.value("burst", e.burst_count);
+    e.max_particles = j.value("max_particles", e.max_particles);
+    e.lifetime_min = j.value("lifetime_min", e.lifetime_min);
+    e.lifetime_max = j.value("lifetime_max", e.lifetime_max);
+    e.speed_min = j.value("speed_min", e.speed_min);
+    e.speed_max = j.value("speed_max", e.speed_max);
+    e.size_min = j.value("size_min", e.size_min);
+    e.size_max = j.value("size_max", e.size_max);
+    e.size_end_multiplier = j.value("size_end_multiplier", e.size_end_multiplier);
+    if (j.contains("color_start")) e.color_start = vec4FromJson(j["color_start"]);
+    if (j.contains("color_end")) e.color_end = vec4FromJson(j["color_end"]);
+    if (j.contains("gravity")) e.gravity = vec3FromJson(j["gravity"]);
+    e.drag = j.value("drag", e.drag);
+    if (j.contains("spawn_shape")) e.spawn_shape = spawnShapeFromName(j["spawn_shape"].get<std::string>());
+    e.spawn_radius = j.value("spawn_radius", e.spawn_radius);
+    e.spawn_box_height = j.value("spawn_box_height", e.spawn_box_height);
+    e.cone_angle_degrees = j.value("cone_angle_degrees", e.cone_angle_degrees);
+    if (j.value("render_mesh", std::string{"cube"}) == "sphere") {
+        e.render_mesh = ParticleRenderMesh::Sphere;
+    }
+    e.unlit = j.value("unlit", e.unlit);
+    e.seed_override = j.value("seed_override", e.seed_override);
+    return e;
+}
+
 } // namespace
 
 using json = nlohmann::json;
@@ -221,6 +307,7 @@ SceneDocument SceneSerializer::buildDocument(const Scene& scene, const std::stri
         }
         entry.camera = node.camera;
         entry.light = node.light;
+        entry.particle_emitter = node.particle_emitter;
         document.nodes.push_back(std::move(entry));
     }
 
@@ -270,9 +357,20 @@ json SceneSerializer::documentToJson(const SceneDocument& document) {
         if (node.material_ref.has_value()) entry["material"] = *node.material_ref;
         if (node.camera.has_value()) entry["camera"] = cameraToJson(*node.camera);
         if (node.light.has_value()) entry["light"] = lightToJson(*node.light);
+        if (node.particle_emitter.has_value()) {
+            entry["particle_emitter"] = particleEmitterToJson(*node.particle_emitter);
+        }
         nodes.push_back(std::move(entry));
     }
     root["nodes"] = nodes;
+
+    json animations = json::array();
+    for (const AnimationClip& clip : document.animations) {
+        animations.push_back(animationClipToJson(clip));
+    }
+    if (!animations.empty()) {
+        root["animations"] = animations;
+    }
     return root;
 }
 
@@ -329,6 +427,9 @@ SceneDocument SceneSerializer::loadFromJson(const json& root) {
             }
             if (entry.contains("camera")) node.camera = cameraFromJson(entry["camera"]);
             if (entry.contains("light")) node.light = lightFromJson(entry["light"]);
+            if (entry.contains("particle_emitter")) {
+                node.particle_emitter = particleEmitterFromJson(entry["particle_emitter"]);
+            }
             if (!entry.contains("pickable")) {
                 node.pickable = !node.camera.has_value();
             }
@@ -336,7 +437,86 @@ SceneDocument SceneSerializer::loadFromJson(const json& root) {
         }
     }
 
+    if (root.contains("animations") && root["animations"].is_array()) {
+        for (const json& entry : root["animations"]) {
+            document.animations.push_back(animationClipFromJson(entry));
+        }
+    }
+
     return document;
+}
+
+json SceneSerializer::animationClipToJson(const AnimationClip& clip) {
+    json channels = json::array();
+    for (const AnimationChannel& channel : clip.channels) {
+        json ch{{"target", channel.target_node_name}};
+        if (!channel.translations.empty()) {
+            json keys = json::array();
+            for (const AnimationVec3Key& key : channel.translations) {
+                keys.push_back({{"t", key.time_seconds}, {"v", vec3ToJson(key.value)}});
+            }
+            ch["translations"] = keys;
+        }
+        if (!channel.rotations.empty()) {
+            json keys = json::array();
+            for (const AnimationQuatKey& key : channel.rotations) {
+                keys.push_back({{"t", key.time_seconds},
+                                {"v", json::array({key.value.x, key.value.y, key.value.z, key.value.w})}});
+            }
+            ch["rotations"] = keys;
+        }
+        if (!channel.scales.empty()) {
+            json keys = json::array();
+            for (const AnimationVec3Key& key : channel.scales) {
+                keys.push_back({{"t", key.time_seconds}, {"v", vec3ToJson(key.value)}});
+            }
+            ch["scales"] = keys;
+        }
+        channels.push_back(std::move(ch));
+    }
+    return json{
+        {"name", clip.name},
+        {"duration", clip.duration_seconds},
+        {"ticks_per_second", clip.ticks_per_second},
+        {"channels", channels},
+    };
+}
+
+AnimationClip SceneSerializer::animationClipFromJson(const json& j) {
+    AnimationClip clip{};
+    clip.name = j.value("name", std::string{"Clip"});
+    clip.duration_seconds = j.value("duration", 0.0f);
+    clip.ticks_per_second = j.value("ticks_per_second", 25.0f);
+    if (!j.contains("channels") || !j["channels"].is_array()) {
+        return clip;
+    }
+    for (const json& ch : j["channels"]) {
+        AnimationChannel channel{};
+        channel.target_node_name = ch.value("target", std::string{});
+        if (ch.contains("translations") && ch["translations"].is_array()) {
+            for (const json& key : ch["translations"]) {
+                channel.translations.push_back(
+                    AnimationVec3Key{key.value("t", 0.0f), vec3FromJson(key.at("v"))});
+            }
+        }
+        if (ch.contains("rotations") && ch["rotations"].is_array()) {
+            for (const json& key : ch["rotations"]) {
+                const json& v = key.at("v");
+                channel.rotations.push_back(AnimationQuatKey{
+                    key.value("t", 0.0f),
+                    glm::quat(v[3].get<float>(), v[0].get<float>(), v[1].get<float>(), v[2].get<float>()),
+                });
+            }
+        }
+        if (ch.contains("scales") && ch["scales"].is_array()) {
+            for (const json& key : ch["scales"]) {
+                channel.scales.push_back(
+                    AnimationVec3Key{key.value("t", 0.0f), vec3FromJson(key.at("v"))});
+            }
+        }
+        clip.channels.push_back(std::move(channel));
+    }
+    return clip;
 }
 
 } // namespace genesis

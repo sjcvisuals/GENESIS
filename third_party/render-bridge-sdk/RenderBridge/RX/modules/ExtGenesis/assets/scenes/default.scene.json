@@ -51,9 +51,9 @@
   "materials": [
     {
       "name": "Cube Material",
-      "base_color": [0.75, 0.35, 0.25, 1.0],
-      "metallic": 0.05,
-      "roughness": 0.45
+      "base_color": [0.82, 0.38, 0.26, 1.0],
+      "metallic": 0.12,
+      "roughness": 0.38
     }
   ]
 }

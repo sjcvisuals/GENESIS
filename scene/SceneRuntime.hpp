@@ -1,5 +1,8 @@
 #pragma once
 
+#include "animation/AnimationClip.hpp"
+#include "animation/AnimationGraph.hpp"
+#include "particles/ParticleWorld.hpp"
 #include "renderer/Mesh.hpp"
 #include "renderer/MeshDrawPushConstants.hpp"
 #include "renderer/vulkan/Texture.hpp"
@@ -12,6 +15,7 @@
 #include <glm/vec3.hpp>
 
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -23,8 +27,12 @@ struct SceneDrawCommand {
     NodeId node_id = 0;
     const Mesh* mesh = nullptr;
     const GpuTexture* base_color_texture = nullptr;
+    const GpuTexture* metallic_roughness_texture = nullptr;
+    const GpuTexture* normal_texture = nullptr;
+    const GpuTexture* emissive_texture = nullptr;
     glm::mat4 model{1.0f};
     MeshMaterialPushConstants material{};
+    glm::vec4 instance_color{1.0f};
 };
 
 struct SceneDrawCollectParams {
@@ -57,7 +65,10 @@ public:
     void loadDocumentData(const SceneDocument& document, const std::filesystem::path& asset_root);
     void loadGnsFile(const std::filesystem::path& absolute_path);
     void saveDocument(const std::filesystem::path& path);
+    SceneDocument buildSceneDocument() const;
     void loadDemo();
+
+    const VulkanContext& context() const { return context_; }
 
     Scene& scene() { return scene_; }
     const Scene& scene() const { return scene_; }
@@ -98,10 +109,35 @@ public:
     const std::string& documentPath() const { return document_path_; }
     const std::vector<std::string>& meshNames() const { return mesh_names_; }
     const std::vector<std::string>& materialNames() const { return material_names_; }
-    const std::vector<Mesh>& meshes() const { return meshes_; }
+    // deque: push_back does not invalidate pointers to existing elements (bindless / draw cmds).
+    const std::deque<Mesh>& meshes() const { return meshes_; }
     const std::vector<SceneMaterial>& materials() const { return materials_; }
-    const std::vector<GpuTexture>& textures() const { return textures_; }
+    const std::deque<GpuTexture>& textures() const { return textures_; }
     const std::vector<std::string>& textureNames() const { return texture_names_; }
+
+    std::int32_t addAnimationClip(AnimationClip clip);
+    // Creates or returns the editable "Scene" clip used for in-editor keyframes.
+    std::int32_t ensureSceneAnimationClip();
+    void keyframeNode(NodeId node_id, float time_seconds,
+                      AnimationTrack tracks = AnimationTrack::Transform);
+    void keyframeNodes(const std::vector<NodeId>& node_ids, float time_seconds,
+                       AnimationTrack tracks = AnimationTrack::Transform);
+    const std::vector<AnimationClip>& animationClips() const { return animation_clips_; }
+    std::vector<AnimationClip>& animationClips() { return animation_clips_; }
+    AnimationGraph& animationGraph() { return animation_graph_; }
+    const AnimationGraph& animationGraph() const { return animation_graph_; }
+    AnimationPlayback& animationPlayback() { return animation_playback_; }
+    const AnimationPlayback& animationPlayback() const { return animation_playback_; }
+    void tickAnimations(float dt_seconds);
+    void applyActiveAnimation();
+
+    // Fixed-step particle simulation (dt accumulated into 0.01s steps by default).
+    void tickParticles(float dt_seconds, float fixed_step_seconds = 0.01f,
+                       std::uint64_t max_steps = 8);
+    void resetParticles();
+    ParticleWorld& particleWorld() { return particle_world_; }
+    const ParticleWorld& particleWorld() const { return particle_world_; }
+    void appendParticleDrawCommands(std::vector<SceneDrawCommand>& out);
 
 private:
     void loadGltfSource(const std::filesystem::path& path);
@@ -113,15 +149,22 @@ private:
 
     const VulkanContext& context_;
     Scene scene_{};
-    std::vector<Mesh> meshes_;
+    std::deque<Mesh> meshes_;
     std::vector<std::string> mesh_names_;
     std::vector<SceneMaterial> materials_;
     std::vector<std::string> material_names_;
-    std::vector<GpuTexture> textures_;
+    std::deque<GpuTexture> textures_;
     std::vector<std::string> texture_names_;
     std::string source_path_ = "builtin";
     std::string document_path_;
     std::filesystem::path gltf_source_path_;
+    std::vector<AnimationClip> animation_clips_;
+    AnimationGraph animation_graph_{};
+    AnimationPlayback animation_playback_{};
+    ParticleWorld particle_world_{};
+    double particle_step_accumulator_ = 0.0;
+    std::optional<std::uint32_t> particle_cube_mesh_id_;
+    std::optional<std::uint32_t> particle_sphere_mesh_id_;
 };
 
 } // namespace genesis

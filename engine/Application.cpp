@@ -1,5 +1,7 @@
 #include "engine/Application.hpp"
 
+#include "platform/FileDialog.hpp"
+
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 #include <SDL3/SDL.h>
@@ -41,6 +43,7 @@ int Application::run() {
             timer_.tick();
             input_.beginFrame();
             pollEvents();
+            pollFileDialogResults();
 
             uint64_t phase_start = SDL_GetPerformanceCounter();
             onUpdate(timer_.deltaTime());

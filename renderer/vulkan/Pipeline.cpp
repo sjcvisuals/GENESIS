@@ -111,7 +111,8 @@ GraphicsPipeline::GraphicsPipeline(const VulkanContext& context, const GraphicsP
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
     rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    // perspectiveMatrix flips clip Y for Vulkan NDC; that reverses winding, so front is clockwise.
+    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_FALSE;
 
     VkPipelineMultisampleStateCreateInfo multisampling{};
@@ -150,6 +151,9 @@ GraphicsPipeline::GraphicsPipeline(const VulkanContext& context, const GraphicsP
     }
     if (config.set1_layout != VK_NULL_HANDLE) {
         set_layouts.push_back(config.set1_layout);
+    }
+    if (config.set2_layout != VK_NULL_HANDLE) {
+        set_layouts.push_back(config.set2_layout);
     }
     if (!set_layouts.empty()) {
         layout_info.setLayoutCount = static_cast<uint32_t>(set_layouts.size());

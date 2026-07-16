@@ -126,6 +126,16 @@ NodeId Scene::createLightNode(const std::string& name, SceneLightType type, std:
     return id;
 }
 
+NodeId Scene::createParticleEmitterNode(const std::string& name, std::optional<NodeId> parent,
+                                        ParticleEmitter emitter) {
+    const NodeId id = createEmptyNode(name, parent);
+    if (Node* node = find(id)) {
+        node->has_particle_emitter = true;
+        node->particle_emitter = std::move(emitter);
+    }
+    return id;
+}
+
 void Scene::setActiveOutputCamera(std::optional<NodeId> node_id) {
     if (!node_id.has_value()) {
         active_output_camera.reset();

@@ -44,7 +44,8 @@ bool isDocumentPath(const std::filesystem::path& path) {
 }
 
 bool isGnsPath(const std::filesystem::path& path) {
-    return path.extension() == ".gns";
+    const std::string ext = path.extension().string();
+    return equalsIgnoreCase(ext, ".gns") || equalsIgnoreCase(ext, ".genesis");
 }
 
 bool isGltfPath(const std::filesystem::path& path) {
@@ -181,11 +182,14 @@ std::vector<std::string> scanRuntimeShowResources(const std::filesystem::path& m
         return shows;
     }
 
-    scanShowDirectory(module_dir / "Scenes", module_dir, shows);
+    // Dropdown sources next to ExtGenesis.dll:
+    //   scenes/            (preferred project drop folder)
+    //   assets/scenes/     (bundled defaults shipped with the module)
+    // Always store paths relative to the module directory so resolve matches.
     scanShowDirectory(module_dir / "scenes", module_dir, shows);
-    scanShowDirectory(module_dir / "assets" / "scenes", module_dir / "assets", shows);
-    scanShowDirectory(module_dir / "Assets" / "Scenes", module_dir / "Assets", shows);
-    scanShowDirectory(module_dir / "assets", module_dir / "assets", shows);
+    scanShowDirectory(module_dir / "Scenes", module_dir, shows);
+    scanShowDirectory(module_dir / "assets" / "scenes", module_dir, shows);
+    scanShowDirectory(module_dir / "Assets" / "Scenes", module_dir, shows);
 
     if (shows.empty()) {
         shows.push_back("default");

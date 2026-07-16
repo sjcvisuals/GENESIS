@@ -48,8 +48,8 @@ std::filesystem::path resolveAssetPath(const std::filesystem::path& path) {
     }
 
     if (const char* base = SDL_GetBasePath()) {
+        // SDL3: GetBasePath is owned by SDL — do not SDL_free (unlike SDL2).
         const std::filesystem::path exe_dir = base;
-        SDL_free(const_cast<char*>(base));
 
         const std::filesystem::path from_exe = exe_dir / path;
         if (pathExists(from_exe)) {
@@ -84,8 +84,8 @@ std::filesystem::path resolveShaderDirectory() {
 #endif
 
     if (const char* base = SDL_GetBasePath()) {
+        // SDL3: GetBasePath is owned by SDL — do not SDL_free (unlike SDL2).
         const std::filesystem::path exe_dir = base;
-        SDL_free(const_cast<char*>(base));
         if (const auto resolved = try_directory(exe_dir / "shaders" / "spv")) {
             return *resolved;
         }

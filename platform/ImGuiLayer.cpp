@@ -74,6 +74,11 @@ ImGuiLayer::~ImGuiLayer() {
     vkDeviceWaitIdle(device_);
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplSDL3_Shutdown();
+    // Never let DestroyContext write imgui.ini — Debug CRT often asserts (_CrtIsValidHeapPointer)
+    // on that path. Layout is saved during NewFrame when WantSaveIniSettings is set.
+    if (ImGui::GetCurrentContext()) {
+        ImGui::GetIO().IniFilename = nullptr;
+    }
     ImGui::DestroyContext();
 
     if (descriptor_pool_ != VK_NULL_HANDLE) {

@@ -12,16 +12,21 @@ struct MeshInstance {
     mat4 normalMatrix;
     vec4 boundsCenter;
     vec4 boundsExtent;
+    vec4 color;
 };
 
 layout(set = 0, binding = 0) uniform FrameUBO {
     mat4 viewProj;
     vec4 cameraPos;
     int lightCount;
-    int _pad0;
-    int _pad1;
-    int _pad2;
+    float iblIntensity;
+    float fogDensity;
+    float fogHeight;
     Light lights[8];
+    vec4 ambientSky;
+    vec4 ambientGround;
+    vec4 fogColor;
+    vec4 displayParams;
 } uFrame;
 
 layout(set = 0, binding = 1) readonly buffer InstanceBuffer {
@@ -34,8 +39,8 @@ layout(push_constant) uniform Push {
     vec4 materialParams;
     uint instanceBase;
     uint textureIndex;
-    uint _pad1;
-    uint _pad2;
+    uint mrTextureIndex;
+    uint packedMaps;
 } uPush;
 
 layout(location = 0) in vec3 inPosition;
@@ -45,6 +50,7 @@ layout(location = 2) in vec2 inUv;
 layout(location = 0) out vec3 vWorldPos;
 layout(location = 1) out vec3 vWorldNormal;
 layout(location = 2) out vec2 vUv;
+layout(location = 3) out vec4 vInstanceColor;
 
 void main() {
     MeshInstance inst = uInstances.instances[uPush.instanceBase + gl_InstanceIndex];
@@ -53,4 +59,5 @@ void main() {
     vWorldPos = worldPos.xyz;
     vWorldNormal = mat3(inst.normalMatrix) * inNormal;
     vUv = inUv;
+    vInstanceColor = inst.color;
 }

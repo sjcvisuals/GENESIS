@@ -12,7 +12,8 @@ namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
 
-MeshVertexPNU vtx(float px, float py, float pz, float nx, float ny, float nz, float u = 0.0f, float v = 0.0f) {
+MeshVertexPNU vtx(float px, float py, float pz, float nx = 0.0f, float ny = 0.0f, float nz = 1.0f,
+                  float u = 0.0f, float v = 0.0f) {
     return MeshVertexPNU{px, py, pz, nx, ny, nz, u, v};
 }
 
@@ -25,11 +26,21 @@ Mesh createCubeMesh(const VulkanContext& context, float half_extent) {
     vertices.reserve(24);
     indices.reserve(36);
 
+    // Outward CCW winding (Vulkan front face = counter-clockwise).
     auto face = [&](float nx, float ny, float nz, MeshVertexPNU v0, MeshVertexPNU v1, MeshVertexPNU v2,
                     MeshVertexPNU v3) {
-        (void)nx;
-        (void)ny;
-        (void)nz;
+        v0.nx = nx;
+        v0.ny = ny;
+        v0.nz = nz;
+        v1.nx = nx;
+        v1.ny = ny;
+        v1.nz = nz;
+        v2.nx = nx;
+        v2.ny = ny;
+        v2.nz = nz;
+        v3.nx = nx;
+        v3.ny = ny;
+        v3.nz = nz;
         const std::uint32_t base = static_cast<std::uint32_t>(vertices.size());
         vertices.push_back(v0);
         vertices.push_back(v1);
@@ -44,23 +55,17 @@ Mesh createCubeMesh(const VulkanContext& context, float half_extent) {
     };
 
     // +X
-    face(1, 0, 0, vtx(-h, -h, h, 1, 0, 0), vtx(h, -h, h, 1, 0, 0), vtx(h, h, h, 1, 0, 0),
-         vtx(-h, h, h, 1, 0, 0));
+    face(1, 0, 0, vtx(h, -h, h), vtx(h, -h, -h), vtx(h, h, -h), vtx(h, h, h));
     // -X
-    face(-1, 0, 0, vtx(h, -h, h, -1, 0, 0), vtx(h, -h, -h, -1, 0, 0), vtx(h, h, -h, -1, 0, 0),
-         vtx(h, h, h, -1, 0, 0));
+    face(-1, 0, 0, vtx(-h, -h, -h), vtx(-h, -h, h), vtx(-h, h, h), vtx(-h, h, -h));
     // +Y
-    face(0, 1, 0, vtx(-h, h, h, 0, 1, 0), vtx(h, h, h, 0, 1, 0), vtx(h, h, -h, 0, 1, 0),
-         vtx(-h, h, -h, 0, 1, 0));
+    face(0, 1, 0, vtx(-h, h, h), vtx(h, h, h), vtx(h, h, -h), vtx(-h, h, -h));
     // -Y
-    face(0, -1, 0, vtx(-h, -h, -h, 0, -1, 0), vtx(h, -h, -h, 0, -1, 0), vtx(h, -h, h, 0, -1, 0),
-         vtx(-h, -h, h, 0, -1, 0));
+    face(0, -1, 0, vtx(-h, -h, -h), vtx(h, -h, -h), vtx(h, -h, h), vtx(-h, -h, h));
     // +Z
-    face(0, 0, 1, vtx(-h, -h, h, 0, 0, 1), vtx(h, -h, h, 0, 0, 1), vtx(h, h, h, 0, 0, 1),
-         vtx(-h, h, h, 0, 0, 1));
+    face(0, 0, 1, vtx(-h, -h, h), vtx(h, -h, h), vtx(h, h, h), vtx(-h, h, h));
     // -Z
-    face(0, 0, -1, vtx(h, -h, -h, 0, 0, -1), vtx(-h, -h, -h, 0, 0, -1), vtx(-h, h, -h, 0, 0, -1),
-         vtx(h, h, -h, 0, 0, -1));
+    face(0, 0, -1, vtx(h, -h, -h), vtx(-h, -h, -h), vtx(-h, h, -h), vtx(h, h, -h));
 
     return uploadMesh(context, vertices, indices);
 }

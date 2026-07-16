@@ -138,10 +138,10 @@ std::optional<std::size_t> firstMaterialIndexForMesh(const fastgltf::Asset& asse
 
 void GltfLoader::loadTexturesForFile(const std::filesystem::path& path, const VulkanContext& context,
                                      std::vector<SceneMaterial>& materials,
-                                     std::vector<GpuTexture>& textures,
+                                     std::deque<GpuTexture>& textures,
                                      std::vector<std::string>& texture_names) {
     const fastgltf::Asset asset = loadAsset(path);
-    bindGltfBaseColorTextures(asset, path.parent_path(), context, materials, textures, texture_names);
+    bindGltfMaterialTextures(asset, path.parent_path(), context, materials, textures, texture_names);
 }
 
 Mesh GltfLoader::loadFirstMesh(const VulkanContext& context, const std::filesystem::path& path) {

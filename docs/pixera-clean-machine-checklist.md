@@ -48,13 +48,13 @@ ExtGenesis/
 
 - [ ] PIXERA loads `ExtGenesis.dll` without API version error
 - [ ] Layer shows **Main** stream at expected resolution
-- [ ] **Show Select** lists bundled scenes (`default`, `Scenes/*.gns`)
-- [ ] Selecting `Scenes/default.gns` renders a cube at the origin
+- [ ] **Show** dropdown lists files from `scenes/` and `assets/scenes/` next to the DLL
+- [ ] Selecting `scenes/default.gns` (or bundled default) renders a cube at the origin
 - [ ] Empty / transparent background composites over clips (no solid black clear)
 - [ ] **Position** / per-actor parameters move meshes in preview and output
 - [ ] **Reload Scene** picks up editor-saved changes without restarting PIXERA
 - [ ] Adapter LUID set correctly — output is not black
-- [ ] Adding a new `.gns` under `Scenes/` appears in **Show Select** after a frame (may require stream restart for new actor parameters)
+- [ ] Adding a new `.genesis` / `.gns` under `scenes/` appears in **Show** after a frame (may require stream restart for new actor parameters)
 
 ## Local RX.exe smoke test (optional)
 
@@ -73,7 +73,7 @@ Confirm log lines: `GENESIS loaded show`, `GENESIS target_node`, no load errors.
 | DLL won't load | Missing VC++ redistributable or wrong architecture (need x64) |
 | API version mismatch | Rebuild ExtGenesis from repo's vendored RenderBridge SDK 1.2 |
 | Black output | Wrong adapter LUID |
-| Scene not found | `Scenes/` folder missing next to DLL; check relative path in Show Select |
+| Scene not found | Ensure `scenes/` (and/or `assets/scenes/`) exists next to the DLL |
 | Parameters stale after new scene file | Restart stream — RenderBridge registers parameters at stream creation; new actors are added incrementally when possible |
 
 ---

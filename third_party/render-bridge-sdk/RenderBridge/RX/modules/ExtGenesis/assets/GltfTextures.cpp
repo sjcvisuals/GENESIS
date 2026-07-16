@@ -10,14 +10,16 @@
 
 #include <spdlog/spdlog.h>
 
+#include <deque>
 #include <fstream>
+#include <optional>
 #include <stdexcept>
 
 namespace genesis {
 
 namespace {
 
-std::uint32_t findOrAddTexture(std::vector<GpuTexture>& textures, std::vector<std::string>& names,
+std::uint32_t findOrAddTexture(std::deque<GpuTexture>& textures, std::vector<std::string>& names,
                                const std::string& label, GpuTexture&& texture) {
     for (std::size_t i = 0; i < names.size(); ++i) {
         if (names[i] == label) {
@@ -43,6 +45,58 @@ bool decodeImageBytes(const std::uint8_t* data, int size, DecodedImage& out) {
     out.rgba.assign(pixels, pixels + static_cast<std::size_t>(width * height * 4));
     stbi_image_free(pixels);
     return true;
+}
+
+std::optional<std::uint32_t> loadGltfTextureByIndex(const fastgltf::Asset& asset,
+                                                    const std::filesystem::path& base_dir,
+                                                    const VulkanContext& context,
+                                                    std::size_t texture_index,
+                                                    std::deque<GpuTexture>& textures,
+                                                    std::vector<std::string>& texture_names,
+                                                    TextureColorEncoding encoding) {
+    if (texture_index >= asset.textures.size()) {
+        return std::nullopt;
+    }
+    const fastgltf::Texture& texture = asset.textures[texture_index];
+    if (!texture.imageIndex.has_value()) {
+        return std::nullopt;
+    }
+
+    DecodedImage decoded{};
+    if (!decodeGltfImage(asset, *texture.imageIndex, base_dir, decoded)) {
+        return std::nullopt;
+    }
+
+    std::string label;
+    if (*texture.imageIndex < asset.images.size() && !asset.images[*texture.imageIndex].name.empty()) {
+        label = std::string(asset.images[*texture.imageIndex].name);
+    } else {
+        label = "image:" + std::to_string(*texture.imageIndex);
+    }
+
+    return findOrAddTexture(textures, texture_names, label,
+                            GpuTexture(context, decoded.rgba.data(), decoded.width, decoded.height, encoding));
+}
+
+template <typename TextureInfoT>
+void bindOptionalMap(const fastgltf::Asset& asset, const std::filesystem::path& base_dir,
+                     const VulkanContext& context, const TextureInfoT& info,
+                     std::optional<std::uint32_t>& out_resource, std::string& out_label,
+                     std::deque<GpuTexture>& textures, std::vector<std::string>& texture_names,
+                     const char* map_name, std::size_t material_index, TextureColorEncoding encoding) {
+    if (!info.has_value()) {
+        return;
+    }
+    const auto texture_id = loadGltfTextureByIndex(asset, base_dir, context, info->textureIndex, textures,
+                                                   texture_names, encoding);
+    if (!texture_id.has_value()) {
+        spdlog::warn("GENESIS failed to decode glTF {} image for material {}", map_name, material_index);
+        return;
+    }
+    out_resource = *texture_id;
+    if (out_label.empty()) {
+        out_label = texture_names[*texture_id];
+    }
 }
 
 } // namespace
@@ -92,48 +146,34 @@ bool decodeGltfImage(const fastgltf::Asset& asset, const std::size_t image_index
         image.data);
 }
 
-void bindGltfBaseColorTextures(const fastgltf::Asset& asset,
+void bindGltfMaterialTextures(const fastgltf::Asset& asset,
                                const std::filesystem::path& base_dir,
                                const VulkanContext& context,
                                std::vector<SceneMaterial>& materials,
-                               std::vector<GpuTexture>& textures,
+                               std::deque<GpuTexture>& textures,
                                std::vector<std::string>& texture_names) {
     for (std::size_t material_index = 0; material_index < asset.materials.size(); ++material_index) {
+        if (material_index >= materials.size()) {
+            break;
+        }
         const fastgltf::Material& src = asset.materials[material_index];
-        if (!src.pbrData.baseColorTexture.has_value()) {
-            continue;
-        }
-        const std::size_t texture_index = src.pbrData.baseColorTexture->textureIndex;
-        if (texture_index >= asset.textures.size()) {
-            continue;
-        }
-        const fastgltf::Texture& texture = asset.textures[texture_index];
-        if (!texture.imageIndex.has_value()) {
-            continue;
-        }
+        SceneMaterial& dst = materials[material_index];
 
-        DecodedImage decoded{};
-        if (!decodeGltfImage(asset, *texture.imageIndex, base_dir, decoded)) {
-            spdlog::warn("GENESIS failed to decode glTF base color image for material {}", material_index);
-            continue;
-        }
+        bindOptionalMap(asset, base_dir, context, src.pbrData.baseColorTexture,
+                        dst.base_color_texture_resource, dst.base_color_texture, textures, texture_names,
+                        "base color", material_index, TextureColorEncoding::sRGB);
+        bindOptionalMap(asset, base_dir, context, src.pbrData.metallicRoughnessTexture,
+                        dst.metallic_roughness_texture_resource, dst.metallic_roughness_texture, textures,
+                        texture_names, "metallic-roughness", material_index, TextureColorEncoding::Linear);
+        bindOptionalMap(asset, base_dir, context, src.normalTexture, dst.normal_texture_resource,
+                        dst.normal_texture, textures, texture_names, "normal", material_index,
+                        TextureColorEncoding::Linear);
+        bindOptionalMap(asset, base_dir, context, src.emissiveTexture, dst.emissive_texture_resource,
+                        dst.emissive_texture, textures, texture_names, "emissive", material_index,
+                        TextureColorEncoding::sRGB);
 
-        std::string label;
-        if (*texture.imageIndex < asset.images.size() && !asset.images[*texture.imageIndex].name.empty()) {
-            label = std::string(asset.images[*texture.imageIndex].name);
-        } else {
-            label = "image:" + std::to_string(*texture.imageIndex);
-        }
-
-        const std::uint32_t texture_id =
-            findOrAddTexture(textures, texture_names, label,
-                             GpuTexture(context, decoded.rgba.data(), decoded.width, decoded.height));
-
-        if (material_index < materials.size()) {
-            materials[material_index].base_color_texture_resource = texture_id;
-            if (materials[material_index].base_color_texture.empty()) {
-                materials[material_index].base_color_texture = label;
-            }
+        if (src.normalTexture.has_value()) {
+            dst.normal_scale = static_cast<float>(src.normalTexture->scale);
         }
     }
 }

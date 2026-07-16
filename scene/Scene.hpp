@@ -1,5 +1,6 @@
 #pragma once
 
+#include "particles/ParticleEmitter.hpp"
 #include "scene/SceneCamera.hpp"
 #include "scene/SceneLight.hpp"
 #include "scene/SceneMaterial.hpp"
@@ -32,12 +33,14 @@ struct Node {
 
     std::optional<SceneCamera> camera;
     std::optional<SceneLight> light;
+    std::optional<ParticleEmitter> particle_emitter;
 
     // Import hints / component flags (expanded in later milestones).
     bool has_mesh = false;
     bool has_material = false;
     bool has_camera = false;
     bool has_light = false;
+    bool has_particle_emitter = false;
 };
 
 struct Scene {
@@ -59,6 +62,9 @@ struct Scene {
     NodeId createCameraNode(const std::string& name, std::optional<NodeId> parent = std::nullopt);
     NodeId createLightNode(const std::string& name, SceneLightType type,
                            std::optional<NodeId> parent = std::nullopt);
+    NodeId createParticleEmitterNode(const std::string& name,
+                                     std::optional<NodeId> parent = std::nullopt,
+                                     ParticleEmitter emitter = {});
     void setActiveOutputCamera(std::optional<NodeId> node_id);
     const Node* activeOutputCameraNode() const;
     NodeId duplicateNode(NodeId id);
@@ -72,4 +78,3 @@ private:
 };
 
 } // namespace genesis
-

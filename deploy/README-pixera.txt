@@ -11,8 +11,8 @@ Required files
 --------------
   ExtGenesis.dll          (~3.5 MB Release; use Release builds for shows)
   Genesis.manifest.json
-  Scenes/   (show packages and scene documents)
-  Assets/   (meshes, textures, bundled resources)
+  scenes/   (drop your .genesis / .gns shows here — fills the Show dropdown)
+  assets/   (bundled resources; assets/scenes/ is also scanned into Show)
 
 Runtime dependency
 ------------------
@@ -22,20 +22,24 @@ on playback machines:
 
 The Genesis Editor is NOT required on playback machines.
 
-Topology examples (Assets/topology/) are included for reference. Multi-output
+Topology examples (assets/topology/) are included for reference. Multi-output
 simulation tools live with Genesis Player, not inside this PIXERA folder.
 
 Scene loading
 -------------
-- Select shows via the RenderBridge parameter "Show Select" (show_select).
+- Select shows via the RenderBridge parameter "Show" (show_select).
+- The dropdown is filled from folders next to ExtGenesis.dll:
+    scenes/
+    assets/scenes/
 - Paths are resolved relative to the extension DLL directory, not the process working directory.
 - Built-in demo is available when no scene files are present.
 
 Reload
 ------
-Change "Show Select" to load another scene. Toggle "Reload Scene" after saving in the editor.
-If loading fails, the previous scene stays active. New `.gns` files under Scenes/ appear in
-Show Select automatically; restart the stream if new actors need fresh parameters.
+Change "Show" to load another scene. Toggle "Reload Scene" after saving in the editor
+and copying the file into scenes/. If loading fails, the previous scene stays active.
+New .genesis / .gns files under scenes/ appear in Show automatically; restart the stream
+if new actors need fresh parameters.
 
 See docs/pixera-clean-machine-checklist.md for full verification steps.
 

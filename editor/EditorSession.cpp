@@ -14,7 +14,17 @@ namespace genesis {
 namespace {
 
 std::filesystem::path normalizePath(const std::filesystem::path& path) {
-    return std::filesystem::weakly_canonical(std::filesystem::absolute(path));
+    const std::filesystem::path absolute = std::filesystem::absolute(path);
+    try {
+        return std::filesystem::weakly_canonical(absolute);
+    } catch (const std::filesystem::filesystem_error&) {
+        return absolute.lexically_normal();
+    }
+}
+
+bool isGenesisPackageExtension(const std::filesystem::path& path) {
+    const std::string ext = path.extension().string();
+    return ext == ".gns" || ext == ".GNS" || ext == ".genesis" || ext == ".GENESIS";
 }
 
 } // namespace
@@ -85,8 +95,13 @@ void EditorSession::loadBundledScene(SceneRuntime& runtime, const char* file_nam
 }
 
 void EditorSession::loadDocument(SceneRuntime& runtime, const std::filesystem::path& path) {
-    runtime.loadDocument(path);
-    afterLoad(path);
+    const std::filesystem::path absolute = std::filesystem::absolute(path);
+    if (isGenesisPackageExtension(absolute)) {
+        runtime.loadGnsFile(absolute);
+    } else {
+        runtime.loadDocument(absolute);
+    }
+    afterLoad(absolute);
 }
 
 void EditorSession::saveDocument(SceneRuntime& runtime, const std::filesystem::path& path) {

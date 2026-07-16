@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <deque>
 #include <limits>
 #include <optional>
 #include <vector>
@@ -114,7 +115,7 @@ inline bool isScenePickCandidate(const Node& node, const ScenePickParams& params
 }
 
 inline std::optional<ScenePickResult> pickNodeAtRay(const Scene& scene,
-                                                    const std::vector<Mesh>& meshes,
+                                                    const std::deque<Mesh>& meshes,
                                                     const PickRay& ray,
                                                     const ScenePickParams& params = {}) {
     std::optional<ScenePickResult> best;
@@ -160,6 +161,122 @@ inline std::optional<ScenePickResult> pickNodeAtRay(const Scene& scene,
     }
 
     return best;
+}
+
+struct ScreenRect {
+    float min_x = 0.0f;
+    float min_y = 0.0f;
+    float max_x = 0.0f;
+    float max_y = 0.0f;
+
+    void normalize() {
+        if (min_x > max_x) {
+            std::swap(min_x, max_x);
+        }
+        if (min_y > max_y) {
+            std::swap(min_y, max_y);
+        }
+    }
+
+    bool intersects(const ScreenRect& other) const {
+        return !(max_x < other.min_x || min_x > other.max_x || max_y < other.min_y ||
+                 min_y > other.max_y);
+    }
+
+    bool containsPoint(float x, float y) const {
+        return x >= min_x && x <= max_x && y >= min_y && y <= max_y;
+    }
+};
+
+// Project world AABB to viewport-local pixels.
+// `view_proj` must use OpenGL-style clip Y (same as rayFromScreen / ImGuizmo — i.e. undo
+// the Vulkan Y flip on the projection before multiplying with the view matrix).
+inline bool projectWorldAabbToScreen(const glm::mat4& view_proj, const glm::vec3& aabb_min,
+                                     const glm::vec3& aabb_max, float viewport_w, float viewport_h,
+                                     ScreenRect& out_rect) {
+    const glm::vec3 corners[8] = {
+        {aabb_min.x, aabb_min.y, aabb_min.z}, {aabb_max.x, aabb_min.y, aabb_min.z},
+        {aabb_min.x, aabb_max.y, aabb_min.z}, {aabb_max.x, aabb_max.y, aabb_min.z},
+        {aabb_min.x, aabb_min.y, aabb_max.z}, {aabb_max.x, aabb_min.y, aabb_max.z},
+        {aabb_min.x, aabb_max.y, aabb_max.z}, {aabb_max.x, aabb_max.y, aabb_max.z},
+    };
+
+    bool any_visible = false;
+    float min_x = 0.0f;
+    float min_y = 0.0f;
+    float max_x = 0.0f;
+    float max_y = 0.0f;
+
+    for (const glm::vec3& corner : corners) {
+        const glm::vec4 clip = view_proj * glm::vec4(corner, 1.0f);
+        if (std::abs(clip.w) <= 1e-5f) {
+            continue;
+        }
+        const float inv_w = 1.0f / clip.w;
+        const float ndc_x = clip.x * inv_w;
+        const float ndc_y = clip.y * inv_w;
+        // Match rayFromScreen: ndc_y = 1 - 2*(mouse_y/h)  ⇒  mouse_y = (1 - ndc_y)*0.5*h
+        const float sx = (ndc_x * 0.5f + 0.5f) * viewport_w;
+        const float sy = (1.0f - ndc_y) * 0.5f * viewport_h;
+        if (!any_visible) {
+            min_x = max_x = sx;
+            min_y = max_y = sy;
+            any_visible = true;
+        } else {
+            min_x = std::min(min_x, sx);
+            min_y = std::min(min_y, sy);
+            max_x = std::max(max_x, sx);
+            max_y = std::max(max_y, sy);
+        }
+    }
+
+    if (!any_visible) {
+        return false;
+    }
+
+    out_rect = {min_x, min_y, max_x, max_y};
+    return true;
+}
+
+inline void pickNodesInScreenRect(const Scene& scene, const std::deque<Mesh>& meshes,
+                                  const glm::mat4& view_proj, float viewport_w, float viewport_h,
+                                  ScreenRect rect, const ScenePickParams& params,
+                                  std::vector<NodeId>& out_ids) {
+    out_ids.clear();
+    rect.normalize();
+    if (rect.max_x - rect.min_x < 1.0f && rect.max_y - rect.min_y < 1.0f) {
+        return;
+    }
+
+    for (const Node& node : scene.nodes) {
+        if (!isScenePickCandidate(node, params)) {
+            continue;
+        }
+
+        const Mesh* mesh = nullptr;
+        if (node.mesh_resource.has_value()) {
+            const std::uint32_t mesh_id = *node.mesh_resource;
+            if (mesh_id >= meshes.size()) {
+                continue;
+            }
+            mesh = &meshes[mesh_id];
+        }
+
+        glm::vec3 aabb_min{};
+        glm::vec3 aabb_max{};
+        if (!nodeWorldPickAabb(node, mesh, params, aabb_min, aabb_max)) {
+            continue;
+        }
+
+        ScreenRect node_rect{};
+        if (!projectWorldAabbToScreen(view_proj, aabb_min, aabb_max, viewport_w, viewport_h,
+                                      node_rect)) {
+            continue;
+        }
+        if (rect.intersects(node_rect)) {
+            out_ids.push_back(node.id);
+        }
+    }
 }
 
 } // namespace genesis

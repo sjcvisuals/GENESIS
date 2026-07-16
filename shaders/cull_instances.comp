@@ -5,6 +5,7 @@ struct MeshInstance {
     mat4 normalMatrix;
     vec4 boundsCenter;
     vec4 boundsExtent;
+    vec4 color;
 };
 
 struct BatchCullHeader {

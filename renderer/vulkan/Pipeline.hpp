@@ -30,6 +30,7 @@ struct GraphicsPipelineConfig {
                                              VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     VkDescriptorSetLayout set0_layout = VK_NULL_HANDLE;
     VkDescriptorSetLayout set1_layout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout set2_layout = VK_NULL_HANDLE;
 
     uint32_t vertex_stride = sizeof(float) * 6;
     std::vector<VertexAttributeDesc> vertex_attributes;

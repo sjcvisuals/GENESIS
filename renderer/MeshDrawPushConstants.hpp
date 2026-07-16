@@ -7,17 +7,27 @@
 
 namespace genesis {
 
+// Sentinel: no optional map bound (shader skips sampling).
+inline constexpr std::uint32_t kInvalidTextureIndex = 0xFFFFFFFFu;
+
 struct MeshMaterialPushConstants {
     float base_color[4];
     float emissive[4];
     float material_params[4]; // x metallic, y roughness, z alphaMode, w alphaCutoff
     std::uint32_t instance_base = 0;
-    std::uint32_t texture_index = 0;
-    std::uint32_t _pad1 = 0;
-    std::uint32_t _pad2 = 0;
+    std::uint32_t texture_index = 0; // base color (always valid bindless slot)
+    std::uint32_t mr_texture_index = kInvalidTextureIndex;
+    std::uint32_t packed_maps = kInvalidTextureIndex; // low16=normal, high16=emissive (0xFFFF = none)
 };
 
 static_assert(sizeof(MeshMaterialPushConstants) == 64, "MeshMaterialPushConstants size mismatch");
+
+inline std::uint32_t packMapIndices(std::uint32_t normal_index, std::uint32_t emissive_index) {
+    const std::uint32_t n = (normal_index == kInvalidTextureIndex) ? 0xFFFFu : (normal_index & 0xFFFFu);
+    const std::uint32_t e =
+        (emissive_index == kInvalidTextureIndex) ? 0xFFFFu : (emissive_index & 0xFFFFu);
+    return n | (e << 16);
+}
 
 inline MeshMaterialPushConstants makeMeshMaterialPushConstants(const SceneMaterial& material) {
     MeshMaterialPushConstants pc{};
@@ -29,7 +39,8 @@ inline MeshMaterialPushConstants makeMeshMaterialPushConstants(const SceneMateri
     pc.emissive[0] = material.emissive.r * material.emissive_strength;
     pc.emissive[1] = material.emissive.g * material.emissive_strength;
     pc.emissive[2] = material.emissive.b * material.emissive_strength;
-    pc.emissive[3] = material.emissive_strength;
+    // Pack normal scale into emissive.a (strength is already multiplied into rgb).
+    pc.emissive[3] = material.normal_scale;
 
     pc.material_params[0] = material.metallic;
     pc.material_params[1] = material.roughness;

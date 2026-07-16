@@ -165,7 +165,7 @@ std::string Input::selectedShowPath() const {
     if (show_paths_.empty()) {
         return "demo";
     }
-    const std::int32_t index = show_select_->value();
+    const std::int32_t index = show_select_ ? show_select_->value() : 0;
     const std::int32_t clamped =
         std::clamp(index, std::int32_t{0}, static_cast<std::int32_t>(show_paths_.size() - 1));
     return show_paths_[static_cast<std::size_t>(clamped)];
@@ -188,8 +188,11 @@ void Input::applyLoadedPixeraConfig() {
         use_scene_camera_->set_value(pixera->streams.front().use_scene_camera);
     }
 
-    const std::int32_t show_index = findSelectorIndex(show_paths_, loaded_scene_resource_, show_select_->value());
-    setShowEnumOptions(show_select_, show_paths_, show_index);
+    if (show_select_) {
+        const std::int32_t show_index =
+            findSelectorIndex(show_paths_, loaded_scene_resource_, show_select_->value());
+        setShowEnumOptions(show_select_, show_paths_, show_index);
+    }
 
     actor_bindings_.applyGnsBindings(pixera->bindings, session_->sceneRuntime());
     actor_bindings_.syncAllFromScene(session_->sceneRuntime());
@@ -207,8 +210,8 @@ void Input::reloadSceneIfNeeded() {
         return;
     }
 
-    const std::int32_t show_index = show_select_->value();
     const std::string resource = selectedShowPath();
+    const std::int32_t show_index = show_select_ ? show_select_->value() : 0;
     if (resource == loaded_scene_resource_ && show_index == loaded_show_index_) {
         return;
     }
@@ -225,6 +228,8 @@ void Input::reloadSceneIfNeeded() {
             host().log_error(std::format("GENESIS failed to load show '{}': {}", resource,
                                          session_->lastLoadError()));
         }
+    } else {
+        host().log_error(std::format("GENESIS could not resolve show '{}'", resource));
     }
 }
 

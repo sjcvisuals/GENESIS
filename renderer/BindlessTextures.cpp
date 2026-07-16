@@ -65,6 +65,12 @@ BindlessTextures::~BindlessTextures() {
     default_texture_.reset();
 }
 
+void BindlessTextures::resetFrame() {
+    textures_.clear();
+    lookup_.clear();
+    registerTexture(default_texture_.get());
+}
+
 std::uint32_t BindlessTextures::registerTexture(const GpuTexture* texture) {
     const GpuTexture& resolved = texture ? *texture : *default_texture_;
     const std::uint64_t key = reinterpret_cast<std::uint64_t>(resolved.view());

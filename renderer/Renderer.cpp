@@ -13,6 +13,8 @@
 #include "renderer/vulkan/VulkanContext.hpp"
 #include "renderer/MeshBatchDrawer.hpp"
 #include "renderer/BindlessTextures.hpp"
+#include "renderer/DisplayLutBinding.hpp"
+#include "color/ColorManagement.hpp"
 #include "renderer/Mesh.hpp"
 
 #include <imgui.h>
@@ -92,6 +94,7 @@ Renderer::~Renderer() {
     mesh_depth_pipeline_.reset();
     grid_pipeline_.reset();
     mesh_batch_drawer_.reset();
+    display_lut_.reset();
     bindless_textures_.reset();
     imgui_.reset();
     frame_ubo_.reset();
@@ -136,7 +139,15 @@ void Renderer::setFrameUniforms(const FrameUniforms& uniforms) {
 void Renderer::setViewProjection(const float* mat4_col_major) {
     FrameUniforms u{};
     std::memcpy(u.view_proj, mat4_col_major, sizeof(u.view_proj));
-    u.camera_pos[3] = 1.0f;
+    u.camera_pos[3] = 1.15f;
+    u.ibl_intensity = 0.55f;
+    u.fog_density = 0.0f;
+    u.ambient_sky[0] = 0.42f;
+    u.ambient_sky[1] = 0.52f;
+    u.ambient_sky[2] = 0.72f;
+    u.ambient_ground[0] = 0.18f;
+    u.ambient_ground[1] = 0.14f;
+    u.ambient_ground[2] = 0.10f;
     u.light_count = 0;
     setFrameUniforms(u);
 }
@@ -146,6 +157,12 @@ void Renderer::setClearColor(const float r, const float g, const float b, const 
     clear_color_[1] = g;
     clear_color_[2] = b;
     clear_color_[3] = a;
+}
+
+void Renderer::uploadDisplayLut(const ColorLut3D& lut) {
+    if (display_lut_) {
+        display_lut_->upload(lut);
+    }
 }
 
 void Renderer::setViewportDrawRegion(const float x, const float y, const float width, const float height) {
@@ -346,6 +363,7 @@ void Renderer::createTriangleResources() {
 
 void Renderer::createMeshResources() {
     bindless_textures_ = std::make_unique<BindlessTextures>(*context_);
+    display_lut_ = std::make_unique<DisplayLutBinding>(*context_);
     mesh_batch_drawer_ = std::make_unique<MeshBatchDrawer>(*context_);
 
     for (VkDescriptorSet frame_set : frame_descriptor_sets_) {
@@ -358,7 +376,7 @@ void Renderer::createMeshResources() {
 void Renderer::createMeshPipelines() {
     mesh_pipeline_.reset();
     mesh_depth_pipeline_.reset();
-    if (!bindless_textures_) {
+    if (!bindless_textures_ || !display_lut_) {
         return;
     }
 
@@ -370,6 +388,7 @@ void Renderer::createMeshPipelines() {
     pipeline_config.extent = swapchain_->extent();
     pipeline_config.set0_layout = frame_set_layout_;
     pipeline_config.set1_layout = bindless_textures_->layout();
+    pipeline_config.set2_layout = display_lut_ ? display_lut_->layout() : VK_NULL_HANDLE;
     pipeline_config = withMeshVertexLayout(pipeline_config);
     pipeline_config.depth_test = true;
     pipeline_config.depth_write = false;
@@ -381,10 +400,10 @@ void Renderer::createMeshPipelines() {
 
     GraphicsPipelineConfig depth_config = pipeline_config;
     depth_config.frag_shader = shader_dir / "mesh_depth.frag.spv";
-    depth_config.set1_layout = VK_NULL_HANDLE;
+    depth_config.set2_layout = VK_NULL_HANDLE;
     depth_config.depth_write = true;
     depth_config.color_write_mask = 0;
-    depth_config.push_constant_stages = VK_SHADER_STAGE_VERTEX_BIT;
+    depth_config.push_constant_stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     if (std::filesystem::exists(depth_config.vert_shader) && std::filesystem::exists(depth_config.frag_shader)) {
         mesh_depth_pipeline_ = std::make_unique<GraphicsPipeline>(*context_, depth_config);
     }
@@ -602,7 +621,8 @@ void Renderer::drawMeshBatches(const std::vector<SceneMeshBatch>& batches, const
                                              *bindless_textures_);
     }
     mesh_batch_drawer_->drawColorPass(cmd, *mesh_pipeline_, frame_descriptor_sets_[current_frame_],
-                                      *bindless_textures_);
+                                      *bindless_textures_,
+                                      display_lut_ ? display_lut_->descriptorSet() : VK_NULL_HANDLE);
 }
 
 void Renderer::drawGrid(const Mesh& mesh, const GridDrawPushConstants& draw_constants) {

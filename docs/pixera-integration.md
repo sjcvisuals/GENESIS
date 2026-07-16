@@ -7,7 +7,7 @@ GENESIS integrates with PIXERA the same way **Notch Blocks** and **TouchDesigner
 | **Renderer** (`ExtGenesis.dll`) | RenderBridge plugin — what PIXERA's **generic extension** file picker loads | Pick the `.dll` once per layer/device setup |
 | **Show** (`.gns`) | Scene + PIXERA bindings — what you author per project | Per show, like a Notch `.dfx` or TouchDesigner `.tox` |
 
-The generic extension slot in PIXERA is **not** where you import a `.gns`. It loads `ExtGenesis.dll` (must export `rxext_open` / `rxext_close`). The show is chosen on the layer via the **`show_select`** dropdown (no path typing).
+The generic extension slot in PIXERA is **not** where you import a `.gns` / `.genesis`. It loads `ExtGenesis.dll` (must export `rxext_open` / `rxext_close`). Shows are discovered from folders **next to the DLL** and chosen with the layer **Show** dropdown.
 
 ### Editor vs Player / PIXERA outputs
 
@@ -21,9 +21,9 @@ The generic extension slot in PIXERA is **not** where you import a `.gns`. It lo
    ```
    build\rxExt\ExtGenesis\Debug\ExtGenesis.dll
    ```
-   Keep an **`assets`** folder **next to that DLL** (CMake copies it there on build) so default scenes like `scenes/default.gns` resolve.
+   Keep **`scenes/`** and **`assets/`** next to that DLL (CMake copies them on build). Drop project shows into `scenes/`.
 3. Set device **adapter LUID** (hex) to the GPU PIXERA shares with GENESIS.
-4. On the layer, pick **Show** from the dropdown (no path typing).
+4. On the layer, pick **Show** from the dropdown (populated from `scenes/` and `assets/scenes/`).
 5. Animate actors via their **per-actor parameter groups** (Position, Rotation, Scale, Color, Visible for each mesh; Intensity for each light).
 
 You do **not** need to copy anything into `<PIXERA>/Program Files/.../data/rxExt/` for the generic extension workflow. PIXERA loads the DLL from wherever you browse.
@@ -33,15 +33,17 @@ You **do** need a proper **folder layout** next to the DLL:
 ```
 MyGenesis/                    ← PIXERA often remembers this folder, not just the DLL
   ExtGenesis.dll
+  scenes/                     ← drop your .genesis / .gns shows here (preferred)
+    MyShow.genesis
   assets/
-    scenes/
+    scenes/                   ← bundled defaults (also scanned into the dropdown)
       default.gns
       default.scene.json
 ```
 
-Recommended: copy `build\rxExt\ExtGenesis\Debug\` (DLL + `assets\`) into your **PIXERA project folder** or a fixed install path, then import **that** `ExtGenesis.dll`. Avoid pointing at paths inside the GENESIS git repo unless that repo will stay put on the show machine.
+Recommended: copy `build\rxExt\ExtGenesis\Debug\` (DLL + `scenes\` + `assets\`) into your **PIXERA project folder** or a fixed install path, then import **that** `ExtGenesis.dll`. Avoid pointing at paths inside the GENESIS git repo unless that repo will stay put on the show machine.
 
-After importing the DLL resource, drag it to the timeline. PIXERA should offer a **Main** stream (1920×1080). Pick **Show** from the `show_select` dropdown (e.g. `scenes/default.gns` when using bundled assets).
+After importing the DLL resource, drag it to the timeline. PIXERA should offer a **Main** stream (1920×1080). Pick a show from the **Show** dropdown — entries come from `scenes/` and `assets/scenes/` beside the DLL.
 
 ### API version
 
@@ -111,27 +113,32 @@ Example (`assets/scenes/default.gns`):
 
 When a `.gns` loads, ExtGenesis applies the embedded PIXERA bindings automatically (node paths, default camera mode, then syncs transform/color from the scene).
 
-**Workflow:** export or author a `.gns` in GENESIS, copy it into the extension `Scenes/` folder (or PIXERA project storage), then pick it from **`show_select`**.
+**Workflow:** save a `.genesis` or `.gns` from the GENESIS editor into the extension’s **`scenes/`** folder (next to `ExtGenesis.dll`), then pick it from the layer **Show** dropdown. Bundled defaults under `assets/scenes/` are scanned too.
 
 ## Scene resources (per show)
 
-Use **`show_select`** to choose what that layer loads:
+ExtGenesis scans these folders next to the DLL and fills **`show_select`**:
 
-| Value | Result |
+| Folder | Role |
+|--------|------|
+| `scenes/` | Project shows you drop next to the DLL (preferred) |
+| `assets/scenes/` | Bundled defaults shipped with the module |
+
+Supported files: `.genesis`, `.gns`, `.scene.json` / `.json`, `.gltf` / `.glb`.
+
+| Dropdown / resolve value | Result |
 |--------|--------|
-| `scenes/default.gns` | **Preferred** — show package with scene + PIXERA bindings |
-| `default`, `demo`, or `builtin` | Built-in cube + directional light (no `.gns` metadata) |
-| `scenes/default.scene.json` | Raw scene document |
-| Path in PIXERA storage | Resolved via `resolve_storage_filename` |
-| Absolute `.gltf` / `.glb` | Direct glTF load |
+| `scenes/MyShow.genesis` | Load from `scenes/` beside the DLL |
+| `assets/scenes/default.gns` | Bundled default package |
+| `default`, `demo`, or `builtin` | Built-in cube + directional light (no package metadata) |
 
-When `show_select` changes, the scene reloads on the next frame. Toggle **`reload_scene`** after saving a scene in the editor to force a refresh without restarting the stream.
+When **Show** changes, the scene reloads on the next frame. Toggle **`reload_scene`** after saving in the editor (and copying into `scenes/`) to force a refresh without restarting the stream.
 
 Bundled default assets live beside the extension DLL. **Project scenes** should live in PIXERA project storage and be referenced by path — the same idea as importing a Notch block file into the project bundle.
 
 ## What’s still missing for full Notch-like UX
 
-Today you add a GENESIS RenderBridge layer and pick a show from `show_select`. Notch goes further: PIXERA has a dedicated **import Block** flow in Compositing that auto-creates the layer and exposes parameters from the file.
+Today you add a GENESIS RenderBridge layer and pick a show from the **Show** dropdown (files under `scenes/` / `assets/scenes/`). Notch goes further: PIXERA has a dedicated **import Block** flow in Compositing that auto-creates the layer and exposes parameters from the file.
 
 To match that for GENESIS we still need (product + code):
 
@@ -151,7 +158,7 @@ Each actor uses a single PIXERA folder via `group_name` (e.g. **Sphere**, **Red 
 
 | Parameter | Effect |
 |-----------|--------|
-| `show_select` | Dropdown of available shows |
+| `show_select` | Dropdown of shows found in `scenes/` and `assets/scenes/` |
 | `use_scene_camera` | Use the scene output camera instead of view/proj matrices |
 
 Example groups for the bundled demo:
@@ -169,7 +176,7 @@ Global stream parameters:
 | `view_matrix` | ViewMatrix | Camera view (when not using scene camera) |
 | `projection_matrix` | ProjectionMatrix | Camera projection |
 | `use_scene_camera` | — | Use the scene’s output camera instead of view/proj |
-| `show_select` | — | Dropdown of available shows (`.gns`, `.scene.json`, built-in demo) |
+| `show_select` | — | Dropdown of shows from `scenes/` and `assets/scenes/` |
 | `reload_scene` | — | Force reload after editor save (clears on next frame) |
 | `position` | Position | Drives `target_node` from `.gns` bindings (for `run.lua` / keyframes) |
 | `time` | TimelineTime | Timeline clock |
@@ -206,7 +213,7 @@ SET_STREAM_INPUTS = function(stream)
 end
 ```
 
-To test a different show, change `show_select` in the RX layer UI or set it from Lua if your host exposes stream inputs by name.
+To test a different show, copy it into `scenes/` next to the DLL and pick it from **Show** (or toggle **Reload Scene**).
 
 ## Architecture
 
@@ -225,8 +232,8 @@ PIXERA compositor (sampler output)
 ## Troubleshooting
 
 - **Actor won't hide**: Do not use a parameter named or labeled **Visible** — PIXERA reserves that for layer visibility. Use **`Mesh Enabled`** (`actor_*_mesh_enabled`) for per-mesh show/hide. Rebuild and re-import the DLL after parameter schema changes.
-- **Nothing in preview**: Preview and output use the same extension render path; both need a valid **adapter LUID** (PIXERA usually injects this per engine). Ensure layer opacity is up and **`show_select`** points at a valid show (e.g. `scenes/default.gns`). Check PIXERA logs for `GENESIS` messages.
+- **Nothing in preview**: Preview and output use the same extension render path; both need a valid **adapter LUID** (PIXERA usually injects this per engine). Ensure layer opacity is up and **Show** points at a valid entry. Check PIXERA logs for `GENESIS` messages.
 - **Black output**: Confirm adapter LUID matches the GPU PIXERA uses for shared textures.
-- **Scene not found**: Check `show_select` value; prefer `.gns` in the extension `Scenes/` folder or PIXERA storage. If using `scene_ref`, keep the referenced scene next to the `.gns` file.
+- **Scene not found**: Put the `.genesis` / `.gns` under `scenes/` (or `assets/scenes/`) next to `ExtGenesis.dll`, then pick it from **Show**. If using `scene_ref`, keep the referenced scene next to the package file.
 - **Transforms have no effect**: Verify `target_node` matches a node path in the loaded scene (`Parent/Child` hierarchy).
 - **Wrong camera**: Enable `use_scene_camera` for scene-authored cameras, or drive `view_matrix` / `projection_matrix` from PIXERA tracking.
