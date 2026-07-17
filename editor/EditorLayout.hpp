@@ -46,13 +46,17 @@ inline void beginEditorDockSpace(ImGuiID dockspace_id, bool& first_time_setup) {
 
         ImGuiID dock_main = dockspace_id;
         const ImGuiID dock_left = ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Left, 0.18f, nullptr, &dock_main);
-        const ImGuiID dock_right =
+        ImGuiID dock_right =
             ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Right, 0.22f, nullptr, &dock_main);
         const ImGuiID dock_bottom =
             ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Down, 0.12f, nullptr, &dock_main);
 
+        const ImGuiID dock_protocol =
+            ImGui::DockBuilderSplitNode(dock_right, ImGuiDir_Down, 0.42f, nullptr, &dock_right);
+
         ImGui::DockBuilderDockWindow("Hierarchy", dock_left);
         ImGui::DockBuilderDockWindow("Inspector", dock_right);
+        ImGui::DockBuilderDockWindow("Protocol", dock_protocol);
         ImGui::DockBuilderDockWindow("Toolbar", dock_bottom);
         ImGui::DockBuilderDockWindow("Timeline", dock_bottom);
         // Leave dock_main (center) empty — scene renders in the passthrough hole.

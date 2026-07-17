@@ -7,6 +7,7 @@
 #include "color/ColorManagement.hpp"
 #include "editor/EditorLayout.hpp"
 #include "editor/EditorSession.hpp"
+#include "editor/OscProtocolUi.hpp"
 #include "editor/SceneViewport.hpp"
 #include "engine/Application.hpp"
 #include "platform/EditorPaths.hpp"
@@ -21,7 +22,8 @@
 #include "scene/SceneMaterial.hpp"
 #include "scene/SceneDrawBatch.hpp"
 #include "scene/ScenePicker.hpp"
-#include "scene/MeshBounds.hpp"
+#include "scene/ScenePath.hpp"
+#include "protocol/OscProtocol.hpp"
 
 #include <SDL3/SDL.h>
 #include <glm/glm.hpp>
@@ -126,6 +128,9 @@ protected:
         }
 
         runtime_.tickAnimations(dt);
+        osc_time_ += static_cast<double>(dt);
+        osc_protocol_.poll(osc_time_);
+        osc_protocol_.applyBindings(runtime_);
         runtime_.updateTransforms();
         runtime_.tickParticles(dt);
         handleEditorShortcuts();
@@ -258,6 +263,7 @@ protected:
         if (show_toolbar_) drawToolbarPanel(scene);
         if (show_viewport_help_) drawViewportHelpPanel();
         if (show_timeline_) drawTimelinePanel();
+        if (show_protocol_) drawProtocolPanel();
         if (show_animation_graph_) drawAnimationGraphPanel();
         if (show_debug_window_) drawDebugWindow();
 
@@ -417,6 +423,7 @@ private:
             ImGui::MenuItem("Toolbar", nullptr, &show_toolbar_);
             ImGui::MenuItem("Viewport Help", nullptr, &show_viewport_help_);
             ImGui::MenuItem("Timeline", nullptr, &show_timeline_);
+            ImGui::MenuItem("Protocol", nullptr, &show_protocol_);
             ImGui::MenuItem("Animation Graph", nullptr, &show_animation_graph_);
             ImGui::MenuItem("Show Grid", nullptr, &show_grid_);
             ImGui::Separator();
@@ -548,6 +555,10 @@ private:
         ImGui::End();
     }
 
+    void drawProtocolPanel() {
+        genesis::drawOscProtocolPanel(osc_protocol_, &show_protocol_);
+    }
+
     void drawInspectorPanel(genesis::Scene& scene) {
         ImGui::Begin("Inspector", &show_inspector_);
 
@@ -560,6 +571,15 @@ private:
             ImGui::TextDisabled("LMB pick / drag marquee");
             ImGui::TextDisabled("Shift/Ctrl multi  |  RMB+WASD fly  |  W/E/R gizmo");
         } else if (genesis::Node* n = scene.find(primarySelected())) {
+            const std::string node_path = genesis::nodePath(scene, n->id);
+            genesis::OscLinkUiContext link_ctx{&osc_protocol_};
+
+            if (osc_protocol_.isAwaitingParameterLink()) {
+                ImGui::TextColored(ImVec4(0.95f, 0.85f, 0.35f, 1.0f),
+                                   "OSC link active — click Link beside a parameter.");
+                ImGui::Separator();
+            }
+
             char name_buf[128]{};
             std::snprintf(name_buf, sizeof(name_buf), "%s", n->name.c_str());
             if (ImGui::InputText("Name", name_buf, sizeof(name_buf))) {
@@ -571,6 +591,8 @@ private:
 
             bool changed = false;
             if (ImGui::Checkbox("Visible", &n->visible)) changed = true;
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::NodeVisible, node_path, 0,
+                                       "visible");
             if (n->camera.has_value()) {
                 ImGui::BeginDisabled();
                 bool camera_pickable = false;
@@ -588,12 +610,24 @@ private:
                 n->local.position = pos_cm / genesis::kCentimetersPerUnit;
                 changed = true;
             }
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::NodePositionX, node_path, 0,
+                                       "pos_x");
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::NodePositionY, node_path, 0,
+                                       "pos_y");
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::NodePositionZ, node_path, 0,
+                                       "pos_z");
 
             glm::vec3 scale_pct = n->local.scale * 100.0f;
             if (ImGui::DragFloat3("Scale (%)", &scale_pct.x, 1.0f, 0.01f, 100000.0f, "%.1f")) {
                 n->local.scale = scale_pct / 100.0f;
                 changed = true;
             }
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::NodeScaleX, node_path, 0,
+                                       "scale_x");
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::NodeScaleY, node_path, 0,
+                                       "scale_y");
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::NodeScaleZ, node_path, 0,
+                                       "scale_z");
 
             if (rot_edit_node_ != primarySelected()) {
                 rot_edit_node_ = primarySelected();
@@ -613,6 +647,12 @@ private:
                 n->local.rotation = glm::normalize(qy * qx * qz);
                 changed = true;
             }
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::NodeRotationX, node_path, 0,
+                                       "rot_x");
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::NodeRotationY, node_path, 0,
+                                       "rot_y");
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::NodeRotationZ, node_path, 0,
+                                       "rot_z");
 
             if (changed) {
                 runtime_.updateTransforms();
@@ -627,10 +667,10 @@ private:
                 ImGui::SetTooltip("Stores Position/Rotation/Scale of the selection into the active clip.");
             }
 
-            drawMaterialInspector(*n);
-            drawCameraInspector(scene, *n);
-            drawLightInspector(*n);
-            drawParticleEmitterInspector(*n);
+            drawMaterialInspector(*n, node_path, link_ctx);
+            drawCameraInspector(scene, *n, node_path, link_ctx);
+            drawLightInspector(*n, node_path, link_ctx);
+            drawParticleEmitterInspector(*n, node_path, link_ctx);
         } else {
             ImGui::TextUnformatted("Selected node not found.");
         }
@@ -769,7 +809,8 @@ private:
             });
     }
 
-    void drawMaterialInspector(genesis::Node& n) {
+    void drawMaterialInspector(genesis::Node& n, const std::string& node_path,
+                               genesis::OscLinkUiContext& link_ctx) {
         if (!n.mesh_resource.has_value()) return;
         ImGui::Separator();
         ImGui::TextUnformatted("Material");
@@ -784,13 +825,28 @@ private:
         if (*n.material_resource >= runtime_.materials().size()) return;
 
         genesis::SceneMaterial& mat = *runtime_.material(*n.material_resource);
-        ImGui::Text("%s", runtime_.materialNames()[*n.material_resource].c_str());
+        const std::uint32_t material_id = *n.material_resource;
+        ImGui::Text("%s", runtime_.materialNames()[material_id].c_str());
         if (ImGui::ColorEdit4("Base color", &mat.base_color.x)) markDirty();
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialBaseColorR, node_path,
+                                   material_id, "base_r");
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialBaseColorG, node_path,
+                                   material_id, "base_g");
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialBaseColorB, node_path,
+                                   material_id, "base_b");
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialBaseColorA, node_path,
+                                   material_id, "base_a");
         if (ImGui::DragFloat("Metallic", &mat.metallic, 0.01f, 0.0f, 1.0f)) markDirty();
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialMetallic, node_path,
+                                   material_id, "metallic");
         if (ImGui::DragFloat("Roughness", &mat.roughness, 0.01f, 0.0f, 1.0f)) markDirty();
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialRoughness, node_path,
+                                   material_id, "roughness");
         if (ImGui::DragFloat("Normal scale", &mat.normal_scale, 0.01f, 0.0f, 4.0f)) markDirty();
         if (ImGui::ColorEdit3("Emissive", &mat.emissive.x)) markDirty();
         if (ImGui::DragFloat("Emissive strength", &mat.emissive_strength, 0.05f, 0.0f, 32.0f)) markDirty();
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialEmissiveStrength, node_path,
+                                   material_id, "emissive_strength");
 
         ImGui::Separator();
         ImGui::TextUnformatted("Textures");
@@ -816,7 +872,8 @@ private:
         mapRow("Emissive", "emissive", mat.emissive_texture, mat.emissive_texture_resource);
     }
 
-    void drawCameraInspector(genesis::Scene& scene, genesis::Node& n) {
+    void drawCameraInspector(genesis::Scene& scene, genesis::Node& n, const std::string& node_path,
+                             genesis::OscLinkUiContext& link_ctx) {
         if (!n.camera.has_value()) return;
         ImGui::Separator();
         ImGui::TextUnformatted("Camera");
@@ -826,23 +883,36 @@ private:
             cam.fov_y_radians = glm::radians(fov_deg);
             markDirty();
         }
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::CameraFov, node_path, 0, "fov");
         if (ImGui::Button("Use as Output Camera")) {
             use_editor_output_ = false;
             scene.setActiveOutputCamera(n.id);
         }
     }
 
-    void drawLightInspector(genesis::Node& n) {
+    void drawLightInspector(genesis::Node& n, const std::string& node_path,
+                            genesis::OscLinkUiContext& link_ctx) {
         if (!n.light.has_value()) return;
         ImGui::Separator();
         ImGui::TextUnformatted("Light");
         genesis::SceneLight& light = *n.light;
         if (ImGui::Checkbox("Enabled", &light.enabled)) markDirty();
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::LightEnabled, node_path, 0,
+                                   "light_enabled");
         if (ImGui::ColorEdit3("Color", &light.color.x)) markDirty();
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::LightColorR, node_path, 0,
+                                   "light_r");
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::LightColorG, node_path, 0,
+                                   "light_g");
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::LightColorB, node_path, 0,
+                                   "light_b");
         if (ImGui::DragFloat("Intensity", &light.intensity, 0.05f, 0.0f, 100.0f)) markDirty();
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::LightIntensity, node_path, 0,
+                                   "light_intensity");
     }
 
-    void drawParticleEmitterInspector(genesis::Node& n) {
+    void drawParticleEmitterInspector(genesis::Node& n, const std::string& node_path,
+                                      genesis::OscLinkUiContext& link_ctx) {
         if (!n.particle_emitter.has_value()) {
             return;
         }
@@ -856,6 +926,8 @@ private:
         dirty |= ImGui::Checkbox("World space", &e.world_space);
         dirty |= ImGui::Checkbox("Unlit", &e.unlit);
         dirty |= ImGui::DragFloat("Rate / s", &e.rate_per_second, 1.0f, 0.0f, 5000.0f);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleRate, node_path, 0,
+                                   "particle_rate");
         int burst = static_cast<int>(e.burst_count);
         if (ImGui::DragInt("Burst", &burst, 1, 0, 100000)) {
             e.burst_count = static_cast<std::uint32_t>(std::max(burst, 0));
@@ -1905,6 +1977,7 @@ private:
     bool show_toolbar_ = true;
     bool show_viewport_help_ = true;
     bool show_timeline_ = true;
+    bool show_protocol_ = true;
     bool show_animation_graph_ = false;
     bool auto_key_ = false;
     bool show_debug_window_ = false;
@@ -1915,6 +1988,9 @@ private:
     bool show_exit_confirm_ = false;
     bool exit_confirmed_ = false;
     int smoke_exit_frames_ = -1;
+
+    genesis::OscProtocol osc_protocol_{};
+    double osc_time_ = 0.0;
 };
 
 } // namespace

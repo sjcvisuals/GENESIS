@@ -180,6 +180,19 @@ target_link_libraries(genesis_engine PUBLIC
     genesis_renderer_windowed
 )
 
+# Editor protocol input (OSC) — editor-only for now.
+add_library(genesis_protocol STATIC
+    protocol/OscParser.cpp
+    protocol/OscUdpReceiver.cpp
+    protocol/OscProtocol.cpp
+    editor/OscProtocolUi.cpp
+)
+target_include_directories(genesis_protocol PUBLIC ${CMAKE_SOURCE_DIR})
+target_link_libraries(genesis_protocol PUBLIC genesis_runtime imgui_lib)
+if(WIN32)
+    target_link_libraries(genesis_protocol PRIVATE ws2_32)
+endif()
+
 # -----------------------------------------------------------------------------
 # Examples
 # -----------------------------------------------------------------------------
@@ -193,7 +206,7 @@ if(GENESIS_BUILD_EXAMPLES)
     add_dependencies(genesis_camera genesis_shaders)
 
     add_executable(genesis_gltf_viewer examples/gltf_viewer/main.cpp editor/EditorSession.cpp)
-    target_link_libraries(genesis_gltf_viewer PRIVATE genesis_engine imguizmo_lib)
+    target_link_libraries(genesis_gltf_viewer PRIVATE genesis_engine genesis_protocol imguizmo_lib)
     add_dependencies(genesis_gltf_viewer genesis_shaders)
 
     add_custom_command(TARGET genesis_gltf_viewer POST_BUILD
