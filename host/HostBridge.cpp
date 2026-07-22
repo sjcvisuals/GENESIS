@@ -4,6 +4,7 @@
 #include "platform/Window.hpp"
 #include "renderer/Renderer.hpp"
 #include "runtime/HostTimingAdapter.hpp"
+#include "runtime/ScenePlaybackPipeline.hpp"
 #include "host/HostFrameTiming.hpp"
 #include "runtime/RuntimeScene.hpp"
 #include "scene/Lighting.hpp"
@@ -256,6 +257,7 @@ void HostBridge::beginFrame(const HostFrameInput& input) {
     }
 
     current_frame_time_ = adaptHostFrameInput(production_clock_, input);
+    tickScenePlayback(*scene_, current_frame_time_);
 
     prepareFrameUniforms(input);
     renderer_->setFrameUniforms(frame_uniforms_);
@@ -263,12 +265,17 @@ void HostBridge::beginFrame(const HostFrameInput& input) {
 }
 
 void HostBridge::renderScene() {
+    const float fluid_dt = current_frame_time_.delta_time_seconds > 0.0
+                               ? static_cast<float>(current_frame_time_.delta_time_seconds)
+                               : 0.0f;
+    renderer_->simulateFluids(*scene_, fluid_dt);
+
     SceneRenderStats render_stats{};
     SceneDrawCollectParams collect_params{};
     collect_params.view_proj_col_major = frame_uniforms_.view_proj;
     collect_params.enable_cpu_culling = true;
     collect_params.enable_gpu_culling = false;
-    scene_->collectDrawCommands(draw_commands_, &render_stats, collect_params);
+    collectSceneDrawCommands(*scene_, draw_commands_, &render_stats, collect_params);
 
     frame_stats_.draw_calls = render_stats.draw_calls;
     frame_stats_.triangles = render_stats.triangles;
@@ -281,6 +288,7 @@ void HostBridge::renderScene() {
     MeshDrawOptions draw_options{};
     draw_options.view_proj_col_major = frame_uniforms_.view_proj;
     draw_options.enable_gpu_cull = false;
+    draw_options.enable_depth_prepass = true;
     renderer_->drawMeshBatches(draw_batches_, draw_options);
 }
 

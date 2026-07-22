@@ -23,6 +23,7 @@
 #include "scene/SceneDrawBatch.hpp"
 #include "scene/ScenePicker.hpp"
 #include "scene/ScenePath.hpp"
+#include "particles/FluidVolume.hpp"
 #include "protocol/OscProtocol.hpp"
 
 #include <SDL3/SDL.h>
@@ -41,6 +42,7 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #if defined(_WIN32)
@@ -127,12 +129,14 @@ protected:
             }
         }
 
+        processPendingDeletes();
         runtime_.tickAnimations(dt);
         osc_time_ += static_cast<double>(dt);
         osc_protocol_.poll(osc_time_);
         osc_protocol_.applyBindings(runtime_);
         runtime_.updateTransforms();
         runtime_.tickParticles(dt);
+        last_frame_dt_ = dt;
         handleEditorShortcuts();
 
         if (window().shouldClose() && session_.dirty && !exit_confirmed_) {
@@ -140,9 +144,10 @@ protected:
             show_exit_confirm_ = true;
         }
 
+        // Start fly when RMB begins over the viewport; keep flying while RMB is held
+        // even after relative-mouse capture moves the cursor off the hover rect.
         if (input().mouseButtonDown(SDL_BUTTON_RIGHT) && !ImGuizmo::IsUsing()) {
-            // Stay in fly mode while RMB is held even if capture moves the cursor off the rect.
-            if (viewport_hovered_) {
+            if (fly_camera_active_ || viewport_hovered_ || viewport_.contains(input().mouseX(), input().mouseY())) {
                 fly_camera_active_ = true;
             }
         } else {
@@ -150,7 +155,8 @@ protected:
         }
 
         if (fly_camera_active_) {
-            input().setMouseCaptured(true);
+            use_editor_output_ = true;
+            input().setMouseCaptured(window().handle(), true);
             const float sensitivity = 0.0025f;
             editor_camera_.yaw_radians += input().mouseDeltaX() * sensitivity;
             editor_camera_.pitch_radians += input().mouseDeltaY() * sensitivity;
@@ -169,7 +175,7 @@ protected:
                 editor_camera_.transform.position += glm::normalize(move) * speed * dt;
             }
         } else {
-            input().setMouseCaptured(false);
+            input().setMouseCaptured(window().handle(), false);
 
             // W/E/R switch tools even over the viewport; RMB+WASD is reserved for fly above.
             const bool typing = ImGui::GetIO().WantTextInput;
@@ -190,6 +196,7 @@ protected:
 
     void onDraw() override {
         runtime_.updateTransforms();
+        renderer().simulateFluids(runtime_, last_frame_dt_);
 
         if (show_viewport_ && viewport_.w > 1.0f && viewport_.h > 1.0f) {
             renderer().setViewportDrawRegion(viewport_.x, viewport_.y, viewport_.w, viewport_.h);
@@ -205,6 +212,7 @@ protected:
         collect_params.enable_cpu_culling = true;
         collect_params.enable_gpu_culling = false;
         runtime_.collectDrawCommands(draw_commands_, &render_stats, collect_params);
+        runtime_.appendFluidDrawCommands(draw_commands_);
         runtime_.appendParticleDrawCommands(draw_commands_);
         render_stats.draw_calls = static_cast<std::uint32_t>(draw_commands_.size());
         // Recount triangles roughly including particles.
@@ -318,6 +326,11 @@ private:
         }
         if (input().keyPressed(SDL_SCANCODE_F)) {
             focusEditorCameraOnSelection();
+        }
+        if (!selection_.empty() && !ImGuizmo::IsUsing()) {
+            if (input().keyPressed(SDL_SCANCODE_DELETE)) {
+                queueDeleteSelectedNodes();
+            }
         }
     }
 
@@ -460,7 +473,7 @@ private:
         ImGui::Separator();
         ImGui::TextUnformatted("Create");
         if (ImGui::Button("Empty", ImVec2(62, 0))) {
-            selectNode(scene.createEmptyNode("Empty Node", createParent()));
+            selectNode(scene.createEmptyNode("Empty Node"));
             markDirty();
         }
         ImGui::SameLine();
@@ -472,7 +485,7 @@ private:
             addPrimitiveMesh("Sphere", genesis::createSphereMesh(renderer().context()));
         }
         if (ImGui::Button("Camera", ImVec2(128, 0))) {
-            selectNode(scene.createCameraNode("Camera", createParent()));
+            selectNode(scene.createCameraNode("Camera"));
             markDirty();
         }
         ImGui::SameLine();
@@ -482,7 +495,16 @@ private:
         if (ImGui::Button("Particles", ImVec2(128, 0))) {
             genesis::ParticleEmitter emitter = genesis::makeDefaultParticleEmitter();
             emitter.burst_count = 24;
-            selectNode(scene.createParticleEmitterNode("Particle Emitter", createParent(), emitter));
+            selectNode(scene.createParticleEmitterNode("Particle Emitter", std::nullopt, emitter));
+            markDirty();
+        }
+        if (ImGui::Button("Fluid Volume", ImVec2(128, 0))) {
+            const genesis::NodeId id =
+                scene.createFluidVolumeNode("Lava Lamp", std::nullopt, genesis::makeLavaLampFluidVolume());
+            if (genesis::Node* node = scene.find(id)) {
+                node->local.position = glm::vec3(0.0f, 0.55f, 0.0f);
+            }
+            selectNode(id);
             markDirty();
         }
 
@@ -505,18 +527,7 @@ private:
         }
         ImGui::SameLine();
         if (ImGui::Button("Delete")) {
-            const bool clearing_output =
-                !use_editor_output_ && scene.active_output_camera.has_value() &&
-                isSelected(*scene.active_output_camera);
-            std::vector<genesis::NodeId> to_delete = selection_;
-            clearSelection();
-            for (const genesis::NodeId id : to_delete) {
-                scene.deleteNode(id);
-            }
-            if (clearing_output) {
-                use_editor_output_ = true;
-            }
-            markDirty();
+            queueDeleteSelectedNodes();
         }
         ImGui::EndDisabled();
 
@@ -535,6 +546,8 @@ private:
             if (n->mesh_resource.has_value()) label += "   M";
             if (n->camera.has_value()) label += "   C";
             if (n->light.has_value()) label += "   L";
+            if (n->particle_fluid.has_value()) label += "   F";
+            if (n->particle_emitter.has_value()) label += "   P";
 
             const bool open = ImGui::TreeNodeEx((void*)(uintptr_t)n->id, flags, "%s", label.c_str());
             if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) {
@@ -544,6 +557,61 @@ private:
                 } else {
                     selectNode(id);
                 }
+            }
+            if (ImGui::BeginPopupContextItem("HierarchyNodeMenu")) {
+                const bool can_parent_selection =
+                    !selection_.empty() &&
+                    std::none_of(selection_.begin(), selection_.end(),
+                                 [&](const genesis::NodeId sel) {
+                                     return sel == id || scene.isDescendantOf(id, sel);
+                                 });
+                ImGui::BeginDisabled(!can_parent_selection);
+                if (ImGui::MenuItem("Parent selection here")) {
+                    for (const genesis::NodeId sel : selection_) {
+                        if (scene.reparentNode(sel, id)) {
+                            markDirty();
+                        }
+                    }
+                    runtime_.updateTransforms();
+                }
+                ImGui::EndDisabled();
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && !can_parent_selection) {
+                    ImGui::SetTooltip("Select one or more actors first (cannot parent under itself).");
+                }
+
+                const bool can_unparent = n->parent.has_value();
+                ImGui::BeginDisabled(!can_unparent);
+                if (ImGui::MenuItem("Unparent (move to root)")) {
+                    if (scene.reparentNode(id, std::nullopt)) {
+                        markDirty();
+                        runtime_.updateTransforms();
+                    }
+                }
+                ImGui::EndDisabled();
+
+                if (!selection_.empty() && isSelected(id) && selection_.size() > 1) {
+                    ImGui::Separator();
+                    if (ImGui::BeginMenu("Parent selected to...")) {
+                        for (const genesis::Node& candidate : scene.nodes) {
+                            if (std::any_of(selection_.begin(), selection_.end(),
+                                            [&](const genesis::NodeId sel) {
+                                                return sel == candidate.id ||
+                                                       scene.isDescendantOf(candidate.id, sel);
+                                            })) {
+                                continue;
+                            }
+                            if (ImGui::MenuItem(candidate.name.c_str())) {
+                                for (const genesis::NodeId sel : selection_) {
+                                    scene.reparentNode(sel, candidate.id);
+                                }
+                                markDirty();
+                                runtime_.updateTransforms();
+                            }
+                        }
+                        ImGui::EndMenu();
+                    }
+                }
+                ImGui::EndPopup();
             }
             if (open) {
                 for (auto child : n->children) self(self, child);
@@ -671,6 +739,7 @@ private:
             drawCameraInspector(scene, *n, node_path, link_ctx);
             drawLightInspector(*n, node_path, link_ctx);
             drawParticleEmitterInspector(*n, node_path, link_ctx);
+            drawFluidVolumeInspector(*n);
         } else {
             ImGui::TextUnformatted("Selected node not found.");
         }
@@ -924,6 +993,10 @@ private:
         ImGui::SameLine();
         dirty |= ImGui::Checkbox("Looping", &e.looping);
         dirty |= ImGui::Checkbox("World space", &e.world_space);
+        dirty |= ImGui::Checkbox("Fluid coupled", &e.fluid_coupled);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Advect particles using a parent Fluid Volume velocity field.");
+        }
         dirty |= ImGui::Checkbox("Unlit", &e.unlit);
         dirty |= ImGui::DragFloat("Rate / s", &e.rate_per_second, 1.0f, 0.0f, 5000.0f);
         genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleRate, node_path, 0,
@@ -970,6 +1043,54 @@ private:
             runtime_.resetParticles();
         }
 
+        if (dirty) {
+            markDirty();
+        }
+    }
+
+    void drawFluidVolumeInspector(genesis::Node& n) {
+        if (!n.particle_fluid.has_value()) {
+            return;
+        }
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(0.45f, 0.75f, 1.0f, 1.0f), "GPU Fluid Simulation");
+        ImGui::TextDisabled("Lava-lamp preset: warm dye, tall volume, dual animated blobs.");
+        genesis::FluidVolume& f = *n.particle_fluid;
+        bool dirty = false;
+        dirty |= ImGui::Checkbox("Enabled", &f.enabled);
+        int grid = static_cast<int>(f.grid_resolution);
+        if (ImGui::SliderInt("Grid resolution", &grid, 64, 512)) {
+            f.grid_resolution = static_cast<std::uint32_t>(grid);
+            dirty = true;
+        }
+        dirty |= ImGui::DragFloat2("Extent (m)", &f.extent_meters.x, 0.05f, 0.1f, 32.0f);
+        dirty |= ImGui::DragFloat("Velocity dissipation", &f.velocity_dissipation, 0.001f, 0.9f, 1.0f);
+        dirty |= ImGui::DragFloat("Density dissipation", &f.density_dissipation, 0.001f, 0.9f, 1.0f);
+        int pressure = static_cast<int>(f.pressure_iterations);
+        if (ImGui::SliderInt("Pressure iterations", &pressure, 4, 64)) {
+            f.pressure_iterations = static_cast<std::uint32_t>(pressure);
+            dirty = true;
+        }
+        dirty |= ImGui::Checkbox("Drive particles", &f.drive_particles);
+        ImGui::Separator();
+        ImGui::TextUnformatted("Ink source");
+        dirty |= ImGui::Checkbox("Source enabled", &f.source_enabled);
+        dirty |= ImGui::DragFloat2("Source UV", &f.source_uv.x, 0.01f, 0.0f, 1.0f);
+        dirty |= ImGui::DragFloat("Source radius", &f.source_radius, 0.005f, 0.001f, 0.5f);
+        dirty |= ImGui::DragFloat("Source density", &f.source_density, 0.05f, 0.0f, 8.0f);
+        dirty |= ImGui::DragFloat2("Source velocity", &f.source_velocity.x, 0.05f, -20.0f, 20.0f);
+        ImGui::Separator();
+        ImGui::TextUnformatted("Secondary source");
+        dirty |= ImGui::Checkbox("Source 2 enabled", &f.source2_enabled);
+        dirty |= ImGui::DragFloat2("Source 2 UV", &f.source2_uv.x, 0.01f, 0.0f, 1.0f);
+        dirty |= ImGui::DragFloat("Source 2 radius", &f.source2_radius, 0.005f, 0.001f, 0.5f);
+        dirty |= ImGui::DragFloat("Source 2 density", &f.source2_density, 0.05f, 0.0f, 8.0f);
+        dirty |= ImGui::DragFloat2("Source 2 velocity", &f.source2_velocity.x, 0.05f, -20.0f, 20.0f);
+        dirty |= ImGui::Checkbox("Animate sources", &f.animate_sources);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Gentle wobble so blobs rise, merge, and split like a lava lamp.");
+        }
+        dirty |= ImGui::ColorEdit4("Dye color", &f.dye_color.x);
         if (dirty) {
             markDirty();
         }
@@ -1032,6 +1153,8 @@ private:
         ImGui::TextUnformatted("Shift or Ctrl + LMB: add / toggle");
         ImGui::TextUnformatted("Drag gizmo: transform (primary selection)");
         ImGui::TextUnformatted("RMB + WASD/QE: fly (in viewport)");
+        ImGui::TextUnformatted("Delete: remove selection (children stay, reparented)");
+        ImGui::TextUnformatted("Hierarchy RMB: parent / unparent");
         ImGui::TextUnformatted("F: focus camera on selection");
         const char* camera_label = use_editor_output_ ? "Editor Camera" : "Scene Camera";
         const glm::vec3 cam_pos = outputCameraPosition();
@@ -1600,6 +1723,85 @@ private:
         rot_edit_node_ = 0;
     }
 
+    void deleteSelectedNodes(genesis::Scene& scene) {
+        (void)scene;
+        queueDeleteSelectedNodes();
+    }
+
+    void queueDeleteSelectedNodes() {
+        if (selection_.empty()) {
+            return;
+        }
+        pending_delete_.insert(pending_delete_.end(), selection_.begin(), selection_.end());
+        clearSelection();
+        reparent_target_ = 0;
+        ImGuizmo::Enable(false);
+    }
+
+    static std::vector<genesis::NodeId> pruneDeletionTargets(const genesis::Scene& scene,
+                                                             const std::vector<genesis::NodeId>& ids) {
+        std::unordered_set<genesis::NodeId> unique(ids.begin(), ids.end());
+        std::vector<genesis::NodeId> targets;
+        targets.reserve(unique.size());
+        for (const genesis::NodeId id : unique) {
+            if (scene.find(id)) {
+                targets.push_back(id);
+            }
+        }
+        // Delete deepest nodes first so reparented children aren't deleted twice.
+        std::sort(targets.begin(), targets.end(), [&](const genesis::NodeId a, const genesis::NodeId b) {
+            auto depth = [&](genesis::NodeId id) {
+                int d = 0;
+                while (const genesis::Node* n = scene.find(id)) {
+                    if (!n->parent.has_value()) {
+                        break;
+                    }
+                    id = *n->parent;
+                    ++d;
+                }
+                return d;
+            };
+            return depth(a) > depth(b);
+        });
+        return targets;
+    }
+
+    void processPendingDeletes() {
+        if (pending_delete_.empty()) {
+            return;
+        }
+
+        genesis::Scene& scene = runtime_.scene();
+        const bool clearing_output =
+            !use_editor_output_ && scene.active_output_camera.has_value() &&
+            std::find(pending_delete_.begin(), pending_delete_.end(), *scene.active_output_camera) !=
+                pending_delete_.end();
+
+        const std::vector<genesis::NodeId> targets = pruneDeletionTargets(scene, pending_delete_);
+        pending_delete_.clear();
+        if (targets.empty()) {
+            return;
+        }
+
+        // GPU resources (fluid grids, bindless samples) may still be referenced by
+        // in-flight command buffers — drain the device before destroying them.
+        renderer().waitIdle();
+
+        for (const genesis::NodeId id : targets) {
+            scene.deleteNode(id);
+        }
+
+        runtime_.fluidWorld().sync(scene);
+        draw_commands_.clear();
+        draw_batches_.clear();
+        runtime_.updateTransforms();
+
+        if (clearing_output) {
+            use_editor_output_ = true;
+        }
+        markDirty();
+    }
+
     void setSelection(std::vector<genesis::NodeId> ids) {
         selection_ = std::move(ids);
         rot_edit_node_ = 0;
@@ -1827,9 +2029,9 @@ private:
     }
 
     std::optional<genesis::NodeId> createParent() const {
-        const genesis::NodeId primary = primarySelected();
-        if (primary == 0) return std::nullopt;
-        return primary;
+        // New actors always spawn at the scene root. Use Hierarchy right-click to parent.
+        (void)this;
+        return std::nullopt;
     }
 
     void addPrimitiveMesh(const char* prefix, genesis::Mesh mesh) {
@@ -1837,14 +2039,14 @@ private:
         const std::string name = std::string(prefix) + " " + std::to_string(counter++);
         const std::uint32_t mesh_id = runtime_.addMesh(name, std::move(mesh));
         const std::uint32_t material_id = runtime_.addMaterial(name + " Material", genesis::SceneMaterial{});
-        selectNode(runtime_.scene().createMeshNode(name, mesh_id, createParent(), material_id));
+        selectNode(runtime_.scene().createMeshNode(name, mesh_id, std::nullopt, material_id));
         markDirty();
     }
 
     void addLightNode(const char* prefix, genesis::SceneLightType type) {
         static int counter = 1;
         const std::string name = std::string(prefix) + " " + std::to_string(counter++);
-        selectNode(runtime_.scene().createLightNode(name, type, createParent()));
+        selectNode(runtime_.scene().createLightNode(name, type, std::nullopt));
         markDirty();
     }
 
@@ -1949,6 +2151,7 @@ private:
     bool fly_camera_active_ = false;
     bool ui_style_initialized_ = false;
     std::vector<genesis::NodeId> selection_;
+    std::vector<genesis::NodeId> pending_delete_;
     struct MarqueeState {
         bool active = false;
         bool dragging = false;
@@ -1991,6 +2194,7 @@ private:
 
     genesis::OscProtocol osc_protocol_{};
     double osc_time_ = 0.0;
+    float last_frame_dt_ = 1.0f / 60.0f;
 };
 
 } // namespace

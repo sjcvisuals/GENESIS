@@ -1,6 +1,7 @@
 #pragma once
 
 #include "animation/AnimationClip.hpp"
+#include "particles/FluidVolume.hpp"
 #include "particles/ParticleEmitter.hpp"
 #include "scene/SceneCamera.hpp"
 #include "scene/SceneLight.hpp"
@@ -27,6 +28,7 @@ struct SceneDocumentNode {
     std::optional<SceneCamera> camera;
     std::optional<SceneLight> light;
     std::optional<ParticleEmitter> particle_emitter;
+    std::optional<FluidVolume> particle_fluid;
 };
 
 struct SceneDocument {

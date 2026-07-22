@@ -31,6 +31,12 @@ genesis_compile_shaders(genesis_shaders
     shaders/grid.frag
     shaders/cull_instances.comp
     shaders/finalize_cull.comp
+    shaders/fluid_advect.comp
+    shaders/fluid_divergence.comp
+    shaders/fluid_jacobi.comp
+    shaders/fluid_gradient.comp
+    shaders/fluid_splat.comp
+    shaders/fluid_present.comp
 )
 
 # -----------------------------------------------------------------------------
@@ -136,6 +142,8 @@ add_library(genesis_engine_runtime STATIC
     animation/AnimationGraph.cpp
     animation/AnimationEvaluator.cpp
     particles/ParticleWorld.cpp
+    particles/FluidGpuGrid.cpp
+    particles/FluidWorld.cpp
     assets/GltfLoader.cpp
     assets/GltfTextures.cpp
     assets/TextureLoader.cpp
@@ -155,6 +163,7 @@ add_library(genesis_runtime STATIC
     runtime/GenesisSession.cpp
     runtime/GenesisFrameTime.cpp
     runtime/HostTimingAdapter.cpp
+    runtime/ScenePlaybackPipeline.cpp
     runtime/SceneStateHash.cpp
     runtime/DeterministicAnimation.cpp
     runtime/RuntimePaths.cpp

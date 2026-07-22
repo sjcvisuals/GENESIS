@@ -1,5 +1,7 @@
 #include "renderer/OffscreenRenderer.hpp"
 
+#include "scene/SceneRuntime.hpp"
+
 #include "platform/Paths.hpp"
 #include "renderer/Mesh.hpp"
 #include "renderer/MeshBatchDrawer.hpp"
@@ -247,6 +249,8 @@ void OffscreenRenderer::createMeshPipelines() {
     pipeline_config = withMeshVertexLayout(pipeline_config);
     pipeline_config.depth_test = true;
     pipeline_config.depth_write = false;
+    pipeline_config.alpha_blend = true;
+    pipeline_config.cull_mode = VK_CULL_MODE_NONE;
     pipeline_config.push_constant_size = sizeof(MeshMaterialPushConstants);
     pipeline_config.push_constant_stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
@@ -334,6 +338,13 @@ void OffscreenRenderer::beginFrame() {
     if (mesh_batch_drawer_) {
         mesh_batch_drawer_->resetFrame();
     }
+}
+
+void OffscreenRenderer::simulateFluids(SceneRuntime& runtime, const float dt_seconds) {
+    if (render_pass_active_) {
+        return;
+    }
+    runtime.simulateFluids(command_buffers_[current_frame_], dt_seconds);
 }
 
 void OffscreenRenderer::drawMesh(const Mesh& mesh, const MeshDrawPushConstants& draw_constants,

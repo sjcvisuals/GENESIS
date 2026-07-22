@@ -59,6 +59,9 @@ struct ParticleEmitter {
 
     // 0 = inherit scene_seed from ParticleWorld; otherwise overrides.
     std::uint64_t seed_override = 0;
+
+    // Advect using the nearest parent FluidVolume velocity field.
+    bool fluid_coupled = false;
 };
 
 inline ParticleEmitter makeDefaultParticleEmitter() {

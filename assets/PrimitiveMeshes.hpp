@@ -10,5 +10,7 @@ Mesh createSphereMesh(const VulkanContext& context, float radius = 0.5f, int seg
 Mesh createCylinderMesh(const VulkanContext& context, float radius = 0.5f, float height = 1.0f,
                         int segments = 32);
 Mesh createPlaneMesh(const VulkanContext& context, float half_extent = 0.5f);
+// Single quad in local XY (normal +Z) for GPU fluid presentation.
+Mesh createFluidDisplayQuadMesh(const VulkanContext& context, float half_extent = 0.5f);
 
 } // namespace genesis

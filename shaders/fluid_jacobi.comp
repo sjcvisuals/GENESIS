@@ -1,0 +1,27 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 4, r16f) uniform readonly image2D uPressureRead;
+layout(set = 0, binding = 5, r16f) uniform writeonly image2D uPressureWrite;
+layout(set = 0, binding = 6, r16f) uniform readonly image2D uDivergence;
+
+layout(push_constant) uniform Push {
+    ivec2 gridSize;
+} pc;
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    if (coord.x >= pc.gridSize.x || coord.y >= pc.gridSize.y) {
+        return;
+    }
+
+    float pL = imageLoad(uPressureRead, clamp(coord - ivec2(1, 0), ivec2(0), pc.gridSize - ivec2(1))).x;
+    float pR = imageLoad(uPressureRead, clamp(coord + ivec2(1, 0), ivec2(0), pc.gridSize - ivec2(1))).x;
+    float pB = imageLoad(uPressureRead, clamp(coord - ivec2(0, 1), ivec2(0), pc.gridSize - ivec2(1))).x;
+    float pT = imageLoad(uPressureRead, clamp(coord + ivec2(0, 1), ivec2(0), pc.gridSize - ivec2(1))).x;
+    float div = imageLoad(uDivergence, coord).x;
+
+    float pressure = (pL + pR + pB + pT - div) * 0.25;
+    imageStore(uPressureWrite, coord, vec4(pressure, 0.0, 0.0, 0.0));
+}

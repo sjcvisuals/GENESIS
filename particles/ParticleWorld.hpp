@@ -41,6 +41,8 @@ public:
     };
     void collectInstances(const Scene& scene, std::vector<ParticleInstanceBatch>& out) const;
 
+    void setFluidWorld(class FluidWorld* world) { fluid_world_ = world; }
+
     std::uint64_t stateHash() const;
 
 private:
@@ -83,6 +85,7 @@ private:
     std::vector<Particle> particles_;
     std::vector<std::size_t> free_list_;
     ParticleSimStats stats_{};
+    class FluidWorld* fluid_world_ = nullptr;
 };
 
 } // namespace genesis

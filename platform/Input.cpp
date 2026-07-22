@@ -71,7 +71,13 @@ void Input::resetMouseDelta() {
 }
 
 void Input::setMouseCaptured(bool captured) {
-  SDL_SetWindowRelativeMouseMode(SDL_GetMouseFocus(), captured);
+    setMouseCaptured(SDL_GetMouseFocus(), captured);
+}
+
+void Input::setMouseCaptured(SDL_Window* window, bool captured) {
+    if (window != nullptr) {
+        SDL_SetWindowRelativeMouseMode(window, captured);
+    }
 }
 
 } // namespace genesis

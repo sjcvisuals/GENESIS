@@ -39,6 +39,11 @@ public:
 
     static GpuTexture createSolid(const VulkanContext& context, std::uint8_t r, std::uint8_t g,
                                   std::uint8_t b, std::uint8_t a = 255);
+    // RGBA8 target for GPU fluid dye presentation (storage + sampled).
+    static GpuTexture createFluidDisplayTarget(const VulkanContext& context, std::uint32_t width,
+                                               std::uint32_t height);
+
+    VkImage nativeImage() const { return image_; }
 
 private:
     void destroy() noexcept;

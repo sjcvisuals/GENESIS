@@ -88,6 +88,23 @@ inline bool nodeWorldPickAabb(const Node& node, const Mesh* mesh, const ScenePic
         return true;
     }
 
+    if (node.particle_fluid.has_value()) {
+        const glm::vec2 extent = node.particle_fluid->extent_meters;
+        const glm::vec3 local_min(-0.5f * extent.x, -0.5f * extent.y, -0.05f);
+        const glm::vec3 local_max(0.5f * extent.x, 0.5f * extent.y, 0.05f);
+        worldAabbCorners(node.world, local_min, local_max, out_min, out_max);
+        expandThinWorldAabb(out_min, out_max, params.min_thin_extent_m, params.bounds_slack_m);
+        return true;
+    }
+
+    if (node.particle_emitter.has_value()) {
+        const glm::vec3 center = glm::vec3(node.world[3]);
+        const float half = 0.25f;
+        out_min = center - glm::vec3(half);
+        out_max = center + glm::vec3(half);
+        return true;
+    }
+
     if (!node.light.has_value() && !node.camera.has_value()) {
         return false;
     }
@@ -111,7 +128,8 @@ inline bool isScenePickCandidate(const Node& node, const ScenePickParams& params
     if (params.meshes_only) {
         return node.mesh_resource.has_value();
     }
-    return node.mesh_resource.has_value() || node.light.has_value() || node.camera.has_value();
+    return node.mesh_resource.has_value() || node.light.has_value() || node.camera.has_value() ||
+           node.particle_fluid.has_value() || node.particle_emitter.has_value();
 }
 
 inline std::optional<ScenePickResult> pickNodeAtRay(const Scene& scene,

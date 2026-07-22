@@ -1,0 +1,39 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rg16f) uniform image2D uVelocity;
+layout(set = 0, binding = 2, r16f) uniform image2D uDensity;
+
+layout(push_constant) uniform Push {
+    ivec2 gridSize;
+    vec2 point;
+    vec2 velocity;
+    float radius;
+    float density;
+    float addDensity;
+} pc;
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    if (coord.x >= pc.gridSize.x || coord.y >= pc.gridSize.y) {
+        return;
+    }
+
+    vec2 uv = (vec2(coord) + 0.5) / vec2(pc.gridSize);
+    vec2 delta = uv - pc.point;
+    float dist2 = dot(delta, delta);
+    float influence = exp(-dist2 / max(pc.radius * pc.radius, 1e-6));
+
+    if (influence > 1e-4) {
+        vec2 vel = imageLoad(uVelocity, coord).xy;
+        vel += pc.velocity * influence;
+        imageStore(uVelocity, coord, vec4(vel, 0.0, 0.0));
+
+        if (pc.addDensity > 0.5) {
+            float d = imageLoad(uDensity, coord).x;
+            d += pc.density * influence;
+            imageStore(uDensity, coord, vec4(d, 0.0, 0.0, 0.0));
+        }
+    }
+}

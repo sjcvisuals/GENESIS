@@ -136,6 +136,16 @@ NodeId Scene::createParticleEmitterNode(const std::string& name, std::optional<N
     return id;
 }
 
+NodeId Scene::createFluidVolumeNode(const std::string& name, std::optional<NodeId> parent,
+                                    FluidVolume fluid) {
+    const NodeId id = createEmptyNode(name, parent);
+    if (Node* node = find(id)) {
+        node->has_particle_fluid = true;
+        node->particle_fluid = std::move(fluid);
+    }
+    return id;
+}
+
 void Scene::setActiveOutputCamera(std::optional<NodeId> node_id) {
     if (!node_id.has_value()) {
         active_output_camera.reset();
@@ -221,45 +231,37 @@ NodeId Scene::duplicateNode(NodeId id) {
 }
 
 bool Scene::deleteNode(NodeId id) {
-    if (!find(id)) return false;
+    Node* node = find(id);
+    if (!node) return false;
 
-    std::unordered_set<NodeId> to_delete;
-    std::vector<NodeId> stack = {id};
-    while (!stack.empty()) {
-        const NodeId cur = stack.back();
-        stack.pop_back();
-        if (!to_delete.insert(cur).second) continue;
-        if (const Node* n = find(cur)) {
-            for (NodeId child : n->children) {
-                stack.push_back(child);
+    // Promote children to this node's parent (or scene root) instead of cascading delete.
+    const std::optional<NodeId> new_parent = node->parent;
+    const std::vector<NodeId> children = node->children;
+    node->children.clear();
+    for (const NodeId child_id : children) {
+        if (Node* child = find(child_id)) {
+            child->parent = new_parent;
+            if (new_parent.has_value()) {
+                if (Node* parent = find(*new_parent)) {
+                    parent->children.push_back(child_id);
+                }
+            } else {
+                roots.push_back(child_id);
             }
         }
     }
 
-    if (Node* node = find(id)) {
-        detachFromParent(*node);
-    }
+    detachFromParent(*node);
 
-    if (active_output_camera.has_value() && to_delete.contains(*active_output_camera)) {
+    if (active_output_camera.has_value() && *active_output_camera == id) {
         active_output_camera.reset();
     }
 
     nodes.erase(std::remove_if(nodes.begin(), nodes.end(),
-                               [&](const Node& n) { return to_delete.contains(n.id); }),
+                               [&](const Node& n) { return n.id == id; }),
                 nodes.end());
 
-    for (auto& n : nodes) {
-        n.children.erase(std::remove_if(n.children.begin(), n.children.end(),
-                                        [&](NodeId child) { return to_delete.contains(child); }),
-                         n.children.end());
-        if (n.parent.has_value() && to_delete.contains(*n.parent)) {
-            n.parent.reset();
-        }
-    }
-
-    roots.erase(std::remove_if(roots.begin(), roots.end(),
-                               [&](NodeId root) { return to_delete.contains(root); }),
-                roots.end());
+    roots.erase(std::remove(roots.begin(), roots.end(), id), roots.end());
 
     updateWorldTransforms();
     return true;

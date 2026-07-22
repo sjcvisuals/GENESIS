@@ -1,5 +1,7 @@
 #include "renderer/Renderer.hpp"
 
+#include "scene/SceneRuntime.hpp"
+
 #include "renderer/FrameUniforms.hpp"
 #include "renderer/GridDrawPushConstants.hpp"
 #include "renderer/MeshInstance.hpp"
@@ -392,6 +394,8 @@ void Renderer::createMeshPipelines() {
     pipeline_config = withMeshVertexLayout(pipeline_config);
     pipeline_config.depth_test = true;
     pipeline_config.depth_write = false;
+    pipeline_config.alpha_blend = true;
+    pipeline_config.cull_mode = VK_CULL_MODE_NONE;
     pipeline_config.push_constant_size = sizeof(MeshMaterialPushConstants);
     pipeline_config.push_constant_stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     if (std::filesystem::exists(pipeline_config.vert_shader) && std::filesystem::exists(pipeline_config.frag_shader)) {
@@ -498,6 +502,12 @@ void Renderer::onResize(int width, int height) {
     recreateSwapchain(width, height);
 }
 
+void Renderer::waitIdle() {
+    if (context_ && context_->device() != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(context_->device());
+    }
+}
+
 void Renderer::enableImGuiLayoutPersistence() {
     if (imgui_) {
         imgui_->enableLayoutPersistence();
@@ -593,6 +603,13 @@ void Renderer::drawMesh(const Mesh& mesh, const MeshDrawPushConstants& draw_cons
     fillGpuMeshInstance(instance, model, mesh.local_aabb_min, mesh.local_aabb_max);
     batch.instances.push_back(instance);
     drawMeshBatches({batch});
+}
+
+void Renderer::simulateFluids(SceneRuntime& runtime, const float dt_seconds) {
+    if (render_pass_active_) {
+        return;
+    }
+    runtime.simulateFluids(command_buffers_[current_frame_], dt_seconds);
 }
 
 void Renderer::drawMeshBatches(const std::vector<SceneMeshBatch>& batches, const MeshDrawOptions& options) {

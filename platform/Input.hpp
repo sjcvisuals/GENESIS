@@ -22,6 +22,7 @@ public:
     void resetMouseDelta();
 
     void setMouseCaptured(bool captured);
+    void setMouseCaptured(SDL_Window* window, bool captured);
 
 private:
     static constexpr int kKeyCount = SDL_SCANCODE_COUNT;

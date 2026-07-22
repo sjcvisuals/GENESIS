@@ -1,0 +1,26 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rg16f) uniform readonly image2D uVelocityRead;
+layout(set = 0, binding = 6, r16f) uniform writeonly image2D uDivergence;
+
+layout(push_constant) uniform Push {
+    ivec2 gridSize;
+    float cellSize;
+} pc;
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    if (coord.x >= pc.gridSize.x || coord.y >= pc.gridSize.y) {
+        return;
+    }
+
+    vec2 vL = imageLoad(uVelocityRead, clamp(coord - ivec2(1, 0), ivec2(0), pc.gridSize - ivec2(1))).xy;
+    vec2 vR = imageLoad(uVelocityRead, clamp(coord + ivec2(1, 0), ivec2(0), pc.gridSize - ivec2(1))).xy;
+    vec2 vB = imageLoad(uVelocityRead, clamp(coord - ivec2(0, 1), ivec2(0), pc.gridSize - ivec2(1))).xy;
+    vec2 vT = imageLoad(uVelocityRead, clamp(coord + ivec2(0, 1), ivec2(0), pc.gridSize - ivec2(1))).xy;
+
+    float div = 0.5 * ((vR.x - vL.x) + (vT.y - vB.y)) / pc.cellSize;
+    imageStore(uDivergence, coord, vec4(div, 0.0, 0.0, 0.0));
+}

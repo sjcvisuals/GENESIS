@@ -2,6 +2,7 @@
 
 #include "animation/AnimationClip.hpp"
 #include "animation/AnimationGraph.hpp"
+#include "particles/FluidWorld.hpp"
 #include "particles/ParticleWorld.hpp"
 #include "renderer/Mesh.hpp"
 #include "renderer/MeshDrawPushConstants.hpp"
@@ -134,10 +135,16 @@ public:
     // Fixed-step particle simulation (dt accumulated into 0.01s steps by default).
     void tickParticles(float dt_seconds, float fixed_step_seconds = 0.01f,
                        std::uint64_t max_steps = 8);
+    void tickParticlesSteps(std::uint64_t steps, float fixed_step_seconds);
     void resetParticles();
     ParticleWorld& particleWorld() { return particle_world_; }
     const ParticleWorld& particleWorld() const { return particle_world_; }
     void appendParticleDrawCommands(std::vector<SceneDrawCommand>& out);
+
+    FluidWorld& fluidWorld() { return fluid_world_; }
+    const FluidWorld& fluidWorld() const { return fluid_world_; }
+    void simulateFluids(VkCommandBuffer cmd, float dt_seconds);
+    void appendFluidDrawCommands(std::vector<SceneDrawCommand>& out);
 
 private:
     void loadGltfSource(const std::filesystem::path& path);
@@ -162,9 +169,12 @@ private:
     AnimationGraph animation_graph_{};
     AnimationPlayback animation_playback_{};
     ParticleWorld particle_world_{};
+    FluidWorld fluid_world_;
     double particle_step_accumulator_ = 0.0;
     std::optional<std::uint32_t> particle_cube_mesh_id_;
     std::optional<std::uint32_t> particle_sphere_mesh_id_;
+    std::optional<std::uint32_t> fluid_quad_mesh_id_;
+    std::optional<std::uint32_t> fluid_display_material_id_;
 };
 
 } // namespace genesis

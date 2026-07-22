@@ -179,4 +179,17 @@ Mesh createPlaneMesh(const VulkanContext& context, float half_extent) {
     return uploadMesh(context, vertices, indices);
 }
 
+Mesh createFluidDisplayQuadMesh(const VulkanContext& context, const float half_extent) {
+    const float h = half_extent;
+    // Same winding as the +Z face of createCubeMesh — matches fluid sim UV space (XY).
+    std::vector<MeshVertexPNU> vertices = {
+        vtx(-h, -h, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f),
+        vtx(h, -h, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f),
+        vtx(h, h, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f),
+        vtx(-h, h, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f),
+    };
+    const std::vector<std::uint32_t> indices = {0, 1, 2, 0, 2, 3};
+    return uploadMesh(context, vertices, indices);
+}
+
 } // namespace genesis

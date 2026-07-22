@@ -1,5 +1,6 @@
 #include "particles/ParticleWorld.hpp"
 
+#include "particles/FluidWorld.hpp"
 #include "particles/ParticleRng.hpp"
 
 #include <algorithm>
@@ -260,6 +261,31 @@ void ParticleWorld::stepOnce(Scene& scene, float dt) {
 
         p.velocity += desc.gravity * dt;
         p.velocity *= std::max(0.0f, 1.0f - desc.drag * dt);
+
+        if (desc.fluid_coupled && fluid_world_) {
+            NodeId fluid_node = 0;
+            for (NodeId cur = p.emitter_node; cur != 0;) {
+                const Node* fluid_candidate = scene.find(cur);
+                if (!fluid_candidate) {
+                    break;
+                }
+                if (fluid_candidate->particle_fluid.has_value() &&
+                    fluid_candidate->particle_fluid->drive_particles) {
+                    fluid_node = cur;
+                    break;
+                }
+                if (!fluid_candidate->parent.has_value()) {
+                    break;
+                }
+                cur = *fluid_candidate->parent;
+            }
+            if (fluid_node != 0 && node) {
+                const glm::vec3 world_pos =
+                    p.world_space ? p.position
+                                  : glm::vec3(node->world * glm::vec4(p.position, 1.0f));
+                p.velocity += fluid_world_->sampleFluidVelocity(scene, fluid_node, world_pos) * dt;
+            }
+        }
 
         if (desc.world_space || !node) {
             p.position += p.velocity * dt;

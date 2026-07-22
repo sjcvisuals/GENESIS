@@ -26,6 +26,8 @@ struct GraphicsPipelineConfig {
     VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     bool depth_test = false;
     bool depth_write = true;
+    bool alpha_blend = false;
+    VkCullModeFlags cull_mode = VK_CULL_MODE_BACK_BIT;
     VkColorComponentFlags color_write_mask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                                              VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     VkDescriptorSetLayout set0_layout = VK_NULL_HANDLE;

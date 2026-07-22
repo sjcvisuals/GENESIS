@@ -50,6 +50,7 @@ public:
                   const GpuTexture* base_color_texture = nullptr);
     void drawMeshBatches(const std::vector<SceneMeshBatch>& batches,
                          const MeshDrawOptions& options = {});
+    void simulateFluids(class SceneRuntime& runtime, float dt_seconds);
     void drawGrid(const Mesh& mesh, const GridDrawPushConstants& draw_constants);
     void endFrame();
 
@@ -68,6 +69,7 @@ public:
     void clearViewportDrawRegion();
 
     void onResize(int width, int height);
+    void waitIdle();
 
     void enableImGuiLayoutPersistence();
 

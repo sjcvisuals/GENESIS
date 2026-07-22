@@ -1,0 +1,28 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rg16f) uniform readonly image2D uVelocityRead;
+layout(set = 0, binding = 1, rg16f) uniform writeonly image2D uVelocityWrite;
+layout(set = 0, binding = 4, r16f) uniform readonly image2D uPressureRead;
+
+layout(push_constant) uniform Push {
+    ivec2 gridSize;
+    float cellSize;
+} pc;
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    if (coord.x >= pc.gridSize.x || coord.y >= pc.gridSize.y) {
+        return;
+    }
+
+    float pL = imageLoad(uPressureRead, clamp(coord - ivec2(1, 0), ivec2(0), pc.gridSize - ivec2(1))).x;
+    float pR = imageLoad(uPressureRead, clamp(coord + ivec2(1, 0), ivec2(0), pc.gridSize - ivec2(1))).x;
+    float pB = imageLoad(uPressureRead, clamp(coord - ivec2(0, 1), ivec2(0), pc.gridSize - ivec2(1))).x;
+    float pT = imageLoad(uPressureRead, clamp(coord + ivec2(0, 1), ivec2(0), pc.gridSize - ivec2(1))).x;
+
+    vec2 vel = imageLoad(uVelocityRead, coord).xy;
+    vel -= 0.5 * vec2(pR - pL, pT - pB) / pc.cellSize;
+    imageStore(uVelocityWrite, coord, vec4(vel, 0.0, 0.0));
+}

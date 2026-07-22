@@ -244,6 +244,62 @@ GpuTexture GpuTexture::createSolid(const VulkanContext& context, const std::uint
     return GpuTexture(context, pixel, 1, 1, TextureColorEncoding::Linear);
 }
 
+GpuTexture GpuTexture::createFluidDisplayTarget(const VulkanContext& context, const std::uint32_t width,
+                                                const std::uint32_t height) {
+    GpuTexture texture{};
+    texture.device_ = context.device();
+    texture.width_ = width;
+    texture.height_ = height;
+    texture.depth_ = 1;
+    texture.view_type_ = VK_IMAGE_VIEW_TYPE_2D;
+
+    VkImageCreateInfo image_info{};
+    image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_info.imageType = VK_IMAGE_TYPE_2D;
+    image_info.format = VK_FORMAT_R8G8B8A8_UNORM;
+    image_info.extent = {width, height, 1};
+    image_info.mipLevels = 1;
+    image_info.arrayLayers = 1;
+    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_info.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    if (vkCreateImage(texture.device_, &image_info, nullptr, &texture.image_) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create fluid display image");
+    }
+
+    VkMemoryRequirements requirements{};
+    vkGetImageMemoryRequirements(texture.device_, texture.image_, &requirements);
+
+    VkMemoryAllocateInfo alloc_info{};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = requirements.size;
+    alloc_info.memoryTypeIndex =
+        context.findMemoryType(requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    if (vkAllocateMemory(texture.device_, &alloc_info, nullptr, &texture.memory_) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to allocate fluid display image memory");
+    }
+    vkBindImageMemory(texture.device_, texture.image_, texture.memory_, 0);
+
+    VkImageViewCreateInfo view_info{};
+    view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_info.image = texture.image_;
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view_info.format = VK_FORMAT_R8G8B8A8_UNORM;
+    view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_info.subresourceRange.levelCount = 1;
+    view_info.subresourceRange.layerCount = 1;
+
+    if (vkCreateImageView(texture.device_, &view_info, nullptr, &texture.view_) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create fluid display image view");
+    }
+
+    texture.sampler_ = createDefaultSampler(texture.device_, true);
+    return texture;
+}
+
 GpuTexture::GpuTexture(GpuTexture&& other) noexcept
     : device_(other.device_), image_(other.image_), memory_(other.memory_), view_(other.view_),
       sampler_(other.sampler_), width_(other.width_), height_(other.height_), depth_(other.depth_),

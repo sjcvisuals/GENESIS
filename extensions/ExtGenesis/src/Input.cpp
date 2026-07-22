@@ -302,7 +302,7 @@ RenderResult Input::render() noexcept try {
     const ::genesis::HostTimingInput timing =
         ::genesis::hostTimingFromPixeraTimeline(time_->value());
     const ::genesis::GenesisFrameTime frame_time = session_->advanceProductionTime(timing);
-    session_->updateTransforms();
+    session_->tickFrame(frame_time);
     session_->render(view_matrix_->value(),
                      projection_matrix_->value(),
                      frame_time,

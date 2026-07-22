@@ -35,6 +35,8 @@ public:
     GenesisFrameTime advanceProductionTime(const HostTimingInput& input);
     const GenesisFrameTime& currentFrameTime() const { return current_frame_time_; }
 
+    void tickFrame(const GenesisFrameTime& frame_time);
+
     const std::optional<GnsPixeraConfig>& pixeraConfig() const { return last_pixera_config_; }
     const std::string& lastLoadError() const { return last_load_error_; }
 

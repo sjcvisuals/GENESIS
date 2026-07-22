@@ -110,7 +110,7 @@ GraphicsPipeline::GraphicsPipeline(const VulkanContext& context, const GraphicsP
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterizer.cullMode = config.cull_mode;
     // perspectiveMatrix flips clip Y for Vulkan NDC; that reverses winding, so front is clockwise.
     rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_FALSE;
@@ -135,7 +135,17 @@ GraphicsPipeline::GraphicsPipeline(const VulkanContext& context, const GraphicsP
 
     VkPipelineColorBlendAttachmentState color_blend_attachment{};
     color_blend_attachment.colorWriteMask = config.color_write_mask;
-    color_blend_attachment.blendEnable = VK_FALSE;
+    if (config.alpha_blend) {
+        color_blend_attachment.blendEnable = VK_TRUE;
+        color_blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        color_blend_attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        color_blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
+        color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        color_blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
+    } else {
+        color_blend_attachment.blendEnable = VK_FALSE;
+    }
 
     VkPipelineColorBlendStateCreateInfo color_blending{};
     color_blending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;

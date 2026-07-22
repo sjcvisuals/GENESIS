@@ -18,9 +18,12 @@ layout(location = 2) in vec2 vUv;
 
 void main() {
     int alphaMode = int(uPush.materialParams.z);
-    if (alphaMode == 1) {
+    if (alphaMode == 1 || alphaMode == 2) {
         float alpha = uPush.baseColor.a * texture(materialTextures[nonuniformEXT(uPush.textureIndex)], vUv).a;
-        if (alpha < uPush.materialParams.w) {
+        if (alphaMode == 1 && alpha < uPush.materialParams.w) {
+            discard;
+        }
+        if (alphaMode == 2 && alpha < 0.01) {
             discard;
         }
     }

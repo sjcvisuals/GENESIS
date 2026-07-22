@@ -1,6 +1,7 @@
 #include "runtime/GenesisSession.hpp"
 
 #include "runtime/RuntimeScene.hpp"
+#include "runtime/ScenePlaybackPipeline.hpp"
 #include "renderer/vulkan/ExternalSync.hpp"
 #include "scene/Lighting.hpp"
 #include "scene/Scene.hpp"
@@ -65,6 +66,10 @@ GenesisFrameTime GenesisSession::advanceProductionTime(const HostTimingInput& in
     return current_frame_time_;
 }
 
+void GenesisSession::tickFrame(const GenesisFrameTime& frame_time) {
+    tickScenePlayback(*scene_, frame_time);
+}
+
 void GenesisSession::prepareFrameUniforms(const glm::dmat4& view, const glm::dmat4& projection) {
     const glm::dmat4 view_proj = projection * view;
     glm::mat4 view_proj_f = glm::mat4(view_proj);
@@ -81,8 +86,6 @@ void GenesisSession::render(const glm::dmat4& view,
                             const glm::dmat4& projection,
                             const GenesisFrameTime& frame_time,
                             bool use_scene_camera) {
-    (void)frame_time;
-
     glm::dmat4 render_view = view;
     glm::dmat4 render_projection = projection;
 
@@ -102,16 +105,23 @@ void GenesisSession::render(const glm::dmat4& view,
     renderer_->setFrameUniforms(frame_uniforms_);
     renderer_->beginFrame();
 
+    const float fluid_dt =
+        frame_time.delta_time_seconds > 0.0 ? static_cast<float>(frame_time.delta_time_seconds) : 0.0f;
+    renderer_->simulateFluids(*scene_, fluid_dt);
+
+    draw_commands_.clear();
+    SceneRenderStats render_stats{};
     SceneDrawCollectParams collect_params{};
     collect_params.view_proj_col_major = frame_uniforms_.view_proj;
     collect_params.enable_cpu_culling = true;
     collect_params.enable_gpu_culling = false;
-    scene_->collectDrawCommands(draw_commands_, nullptr, collect_params);
-    buildDrawBatches(draw_commands_, draw_batches_);
+    collectSceneDrawCommands(*scene_, draw_commands_, &render_stats, collect_params);
+    buildDrawBatches(draw_commands_, draw_batches_, &render_stats);
 
     MeshDrawOptions draw_options{};
     draw_options.view_proj_col_major = frame_uniforms_.view_proj;
     draw_options.enable_gpu_cull = false;
+    draw_options.enable_depth_prepass = true;
     renderer_->drawMeshBatches(draw_batches_, draw_options);
 
     renderer_->endFrame(renderer_->sync().hostFinishedSemaphore());

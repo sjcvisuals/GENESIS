@@ -233,6 +233,21 @@ void main() {
 
     float metallic = uPush.materialParams.x;
     float roughness = uPush.materialParams.y;
+
+    // Pre-tonemapped display textures (fluid volumes, unlit particles): skip PBR.
+    if (alphaMode == 2 && metallic < 0.001 && roughness > 0.98) {
+        if (alpha < 0.01) {
+            discard;
+        }
+        const float exposure = max(uFrame.cameraPos.w, 0.01);
+        vec3 color = applyDisplayTransform(albedo * exposure);
+        outColor = vec4(color, alpha);
+        return;
+    }
+
+    if (alphaMode == 2 && alpha < 0.01) {
+        discard;
+    }
     if (uPush.mrTextureIndex != 0xFFFFFFFFu) {
         vec4 mr = texture(materialTextures[nonuniformEXT(uPush.mrTextureIndex)], vUv);
         // glTF metallic-roughness: B = metallic, G = roughness

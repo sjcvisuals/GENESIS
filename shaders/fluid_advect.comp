@@ -1,0 +1,63 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rg16f) uniform readonly image2D uVelocityRead;
+layout(set = 0, binding = 1, rg16f) uniform writeonly image2D uVelocityWrite;
+layout(set = 0, binding = 2, r16f) uniform readonly image2D uDensityRead;
+layout(set = 0, binding = 3, r16f) uniform writeonly image2D uDensityWrite;
+
+layout(push_constant) uniform Push {
+    ivec2 gridSize;
+    float dt;
+    float dissipation;
+    int advectDensity; // 0 = velocity, 1 = density
+} pc;
+
+vec2 sampleVelocity(ivec2 coord) {
+    coord = clamp(coord, ivec2(0), pc.gridSize - ivec2(1));
+    return imageLoad(uVelocityRead, coord).xy;
+}
+
+float sampleDensity(ivec2 coord) {
+    coord = clamp(coord, ivec2(0), pc.gridSize - ivec2(1));
+    return imageLoad(uDensityRead, coord).x;
+}
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    if (coord.x >= pc.gridSize.x || coord.y >= pc.gridSize.y) {
+        return;
+    }
+
+    vec2 uv = (vec2(coord) + 0.5) / vec2(pc.gridSize);
+    if (pc.advectDensity != 0) {
+        vec2 vel = sampleVelocity(coord);
+        vec2 back = uv - vel * pc.dt;
+        back *= vec2(pc.gridSize);
+        ivec2 src = ivec2(back - 0.5);
+        vec2 f = fract(back - 0.5);
+        float d00 = sampleDensity(src);
+        float d10 = sampleDensity(src + ivec2(1, 0));
+        float d01 = sampleDensity(src + ivec2(0, 1));
+        float d11 = sampleDensity(src + ivec2(1, 1));
+        float d0 = mix(d00, d10, f.x);
+        float d1 = mix(d01, d11, f.x);
+        float density = mix(d0, d1, f.y) * pc.dissipation;
+        imageStore(uDensityWrite, coord, vec4(density, 0.0, 0.0, 0.0));
+    } else {
+        vec2 vel = sampleVelocity(coord);
+        vec2 back = uv - vel * pc.dt;
+        back *= vec2(pc.gridSize);
+        ivec2 src = ivec2(back - 0.5);
+        vec2 f = fract(back - 0.5);
+        vec2 v00 = sampleVelocity(src);
+        vec2 v10 = sampleVelocity(src + ivec2(1, 0));
+        vec2 v01 = sampleVelocity(src + ivec2(0, 1));
+        vec2 v11 = sampleVelocity(src + ivec2(1, 1));
+        vec2 v0 = mix(v00, v10, f.x);
+        vec2 v1 = mix(v01, v11, f.x);
+        vec2 outVel = mix(v0, v1, f.y) * pc.dissipation;
+        imageStore(uVelocityWrite, coord, vec4(outVel, 0.0, 0.0));
+    }
+}

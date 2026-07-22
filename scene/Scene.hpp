@@ -1,5 +1,6 @@
 #pragma once
 
+#include "particles/FluidVolume.hpp"
 #include "particles/ParticleEmitter.hpp"
 #include "scene/SceneCamera.hpp"
 #include "scene/SceneLight.hpp"
@@ -34,6 +35,7 @@ struct Node {
     std::optional<SceneCamera> camera;
     std::optional<SceneLight> light;
     std::optional<ParticleEmitter> particle_emitter;
+    std::optional<FluidVolume> particle_fluid;
 
     // Import hints / component flags (expanded in later milestones).
     bool has_mesh = false;
@@ -41,6 +43,7 @@ struct Node {
     bool has_camera = false;
     bool has_light = false;
     bool has_particle_emitter = false;
+    bool has_particle_fluid = false;
 };
 
 struct Scene {
@@ -65,6 +68,8 @@ struct Scene {
     NodeId createParticleEmitterNode(const std::string& name,
                                      std::optional<NodeId> parent = std::nullopt,
                                      ParticleEmitter emitter = {});
+    NodeId createFluidVolumeNode(const std::string& name, std::optional<NodeId> parent = std::nullopt,
+                                 FluidVolume fluid = makeDefaultFluidVolume());
     void setActiveOutputCamera(std::optional<NodeId> node_id);
     const Node* activeOutputCameraNode() const;
     NodeId duplicateNode(NodeId id);

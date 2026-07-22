@@ -20,7 +20,8 @@
 
 namespace genesis {
 
-SceneRuntime::SceneRuntime(const VulkanContext& context) : context_(context) {
+SceneRuntime::SceneRuntime(const VulkanContext& context)
+    : context_(context), fluid_world_(context) {
     animation_graph_.ensureDefaults();
 }
 
@@ -43,9 +44,12 @@ void SceneRuntime::clear() {
     animation_playback_ = {};
     animation_graph_.ensureDefaults();
     particle_world_.clear();
+    fluid_world_.clear();
     particle_step_accumulator_ = 0.0;
     particle_cube_mesh_id_.reset();
     particle_sphere_mesh_id_.reset();
+    fluid_quad_mesh_id_.reset();
+    fluid_display_material_id_.reset();
 }
 
 void SceneRuntime::loadGltf(const std::filesystem::path& path) {
@@ -284,7 +288,54 @@ void SceneRuntime::tickParticles(float dt_seconds, float fixed_step_seconds, std
     if (steps >= max_steps) {
         particle_step_accumulator_ = 0.0;
     }
+    tickParticlesSteps(steps, fixed_step_seconds);
+}
+
+void SceneRuntime::tickParticlesSteps(const std::uint64_t steps, const float fixed_step_seconds) {
+    if (steps == 0 || fixed_step_seconds <= 1e-8f) {
+        return;
+    }
     particle_world_.simulate(scene_, steps, fixed_step_seconds);
+}
+
+void SceneRuntime::simulateFluids(VkCommandBuffer cmd, const float dt_seconds) {
+    fluid_world_.simulate(cmd, scene_, dt_seconds);
+    particle_world_.setFluidWorld(&fluid_world_);
+}
+
+void SceneRuntime::appendFluidDrawCommands(std::vector<SceneDrawCommand>& out) {
+    if (!fluid_quad_mesh_id_.has_value()) {
+        fluid_quad_mesh_id_ = addMesh("FluidQuad", createFluidDisplayQuadMesh(context_));
+    }
+    if (!fluid_display_material_id_.has_value()) {
+        SceneMaterial mat{};
+        mat.base_color = glm::vec4(1.0f);
+        mat.metallic = 0.0f;
+        mat.roughness = 1.0f;
+        mat.emissive = glm::vec3(0.0f);
+        mat.emissive_strength = 0.0f;
+        mat.alpha_mode = AlphaMode::Blend;
+        fluid_display_material_id_ = addMaterial("FluidDisplay", mat);
+    }
+
+    const Mesh* mesh = this->mesh(*fluid_quad_mesh_id_);
+    if (!mesh) {
+        return;
+    }
+
+    for (const FluidDrawItem& item : fluid_world_.drawItems()) {
+        if (!item.display_texture) {
+            continue;
+        }
+        SceneDrawCommand cmd{};
+        cmd.node_id = item.node_id;
+        cmd.mesh = mesh;
+        cmd.model = item.model;
+        cmd.base_color_texture = item.display_texture;
+        cmd.material = makeMeshMaterialPushConstants(*material(*fluid_display_material_id_));
+        cmd.instance_color = glm::vec4(1.0f);
+        out.push_back(cmd);
+    }
 }
 
 void SceneRuntime::resetParticles() {
@@ -552,6 +603,8 @@ void SceneRuntime::applyNodeEntry(const NodeId id, const SceneDocumentNode& entr
     node->has_light = entry.light.has_value();
     node->particle_emitter = entry.particle_emitter;
     node->has_particle_emitter = entry.particle_emitter.has_value();
+    node->particle_fluid = entry.particle_fluid;
+    node->has_particle_fluid = entry.particle_fluid.has_value();
 }
 
 void SceneRuntime::createNodeFromEntry(const SceneDocumentNode& entry) {
@@ -574,6 +627,8 @@ void SceneRuntime::createNodeFromEntry(const SceneDocumentNode& entry) {
         id = scene_.createLightNode(entry.name, entry.light->type, parent_id);
     } else if (entry.particle_emitter.has_value()) {
         id = scene_.createParticleEmitterNode(entry.name, parent_id, *entry.particle_emitter);
+    } else if (entry.particle_fluid.has_value()) {
+        id = scene_.createFluidVolumeNode(entry.name, parent_id, *entry.particle_fluid);
     } else {
         id = scene_.createEmptyNode(entry.name, parent_id);
     }
