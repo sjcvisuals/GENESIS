@@ -119,7 +119,7 @@ target_include_directories(genesis_renderer_windowed PUBLIC
     ${CMAKE_BINARY_DIR}
 )
 target_link_libraries(genesis_renderer_windowed PUBLIC genesis_renderer_core)
-target_link_libraries(genesis_renderer_windowed PRIVATE genesis_platform)
+target_link_libraries(genesis_renderer_windowed PRIVATE genesis_platform genesis_engine_runtime)
 
 add_library(genesis_renderer ALIAS genesis_renderer_windowed)
 
