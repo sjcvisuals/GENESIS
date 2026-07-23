@@ -267,15 +267,24 @@ vec4 raymarchFluidVolume() {
     vec3 rd = normalize(vLocalPos - vCamLocal);
     float tEnter;
     float tExit;
-    if (!intersectAabb(ro, rd, vec3(-0.5), vec3(0.5), tEnter, tExit)) {
+    // Slightly inflate the unit AABB so rasterized face fragments don't miss
+    // the analytical hit due to perspective interpolation / float error.
+    const vec3 bmin = vec3(-0.5005);
+    const vec3 bmax = vec3(0.5005);
+    if (!intersectAabb(ro, rd, bmin, bmax, tEnter, tExit)) {
         return vec4(0.0);
     }
     tEnter = max(tEnter, 0.0);
+    if (tExit <= tEnter) {
+        return vec4(0.0);
+    }
 
-    // Only the entry-face fragment should raymarch; other box faces discard so
-    // transparent blending does not stack the same volume multiple times.
+    // Keep only the *exit* (far) face. The mesh pipeline disables culling, so
+    // every box face would otherwise raymarch and stack. Matching against the
+    // near face with a tight epsilon caused jagged stair-step holes / garbage
+    // fragments on llvmpipe when interpolated surface depth drifted from tEnter.
     float tSurf = dot(vLocalPos - ro, rd);
-    if (abs(tSurf - tEnter) > 0.02) {
+    if (abs(tSurf - tExit) > abs(tSurf - tEnter) + 1e-3) {
         return vec4(0.0);
     }
 
@@ -320,11 +329,27 @@ vec4 raymarchFluidVolume() {
 }
 
 void main() {
+    int alphaMode = int(uPush.materialParams.z + 0.5);
+
+    // 3D fluid volumes: raymarch density atlas inside the box AABB.
+    // AlphaMode::Volume (3) must never fall through to sampling the Z-slice
+    // atlas as a face texture — that paints blocky tile stairs onto the box.
+    if (alphaMode == 3) {
+        vec4 vol = raymarchFluidVolume();
+        if (vol.a < 0.01) {
+            // Write transparent black before discard — some software drivers
+            // leave undefined color when discard is the first/only output.
+            outColor = vec4(0.0);
+            discard;
+        }
+        outColor = vec4(clamp(vol.rgb, 0.0, 1.0), clamp(vol.a, 0.0, 1.0));
+        return;
+    }
+
     vec4 baseSample = texture(materialTextures[nonuniformEXT(uPush.textureIndex)], vUv);
     vec3 albedo = uPush.baseColor.rgb * baseSample.rgb * vInstanceColor.rgb;
     float alpha = uPush.baseColor.a * baseSample.a * vInstanceColor.a;
 
-    int alphaMode = int(uPush.materialParams.z);
     float alphaCutoff = uPush.materialParams.w;
     if (alphaMode == 1 && alpha < alphaCutoff) {
         discard;
@@ -333,18 +358,7 @@ void main() {
     float metallic = uPush.materialParams.x;
     float roughness = uPush.materialParams.y;
 
-    // 3D fluid volumes: raymarch density atlas inside the box AABB.
-    // Marker: blend + unlit-like metal/rough + alphaCutoff >= 8 (grid resolution).
-    if (alphaMode == 2 && metallic < 0.001 && roughness > 0.98 && alphaCutoff >= 8.0) {
-        vec4 vol = raymarchFluidVolume();
-        if (vol.a < 0.01) {
-            discard;
-        }
-        outColor = vec4(clamp(vol.rgb, 0.0, 1.0), clamp(vol.a, 0.0, 1.0));
-        return;
-    }
-
-    // Pre-tonemapped display textures (legacy sheet / unlit particles): skip PBR
+    // Pre-tonemapped display textures / unlit particles: skip PBR
     // and skip a second display OETF — the source already encodes final RGB.
     if (alphaMode == 2 && metallic < 0.001 && roughness > 0.98) {
         if (alpha < 0.01) {

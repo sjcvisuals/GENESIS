@@ -38,6 +38,8 @@ const char* alphaModeName(AlphaMode mode) {
         return "mask";
     case AlphaMode::Blend:
         return "blend";
+    case AlphaMode::Volume:
+        return "volume";
     default:
         return "opaque";
     }
@@ -46,6 +48,7 @@ const char* alphaModeName(AlphaMode mode) {
 AlphaMode alphaModeFromName(const std::string& name) {
     if (name == "mask") return AlphaMode::Mask;
     if (name == "blend") return AlphaMode::Blend;
+    if (name == "volume") return AlphaMode::Volume;
     return AlphaMode::Opaque;
 }
 

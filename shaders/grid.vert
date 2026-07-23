@@ -23,11 +23,15 @@ layout(set = 0, binding = 0) uniform FrameUBO {
 
 layout(push_constant) uniform Push {
     mat4 model;
-    vec4 color;
+    vec4 color; // rgb line color, a = opacity
 } uPush;
 
 layout(location = 0) in vec3 inPosition;
 
+layout(location = 0) out vec3 vWorldPos;
+
 void main() {
-    gl_Position = uFrame.viewProj * uPush.model * vec4(inPosition, 1.0);
+    vec4 world = uPush.model * vec4(inPosition, 1.0);
+    vWorldPos = world.xyz;
+    gl_Position = uFrame.viewProj * world;
 }

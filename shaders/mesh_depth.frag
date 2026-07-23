@@ -18,12 +18,18 @@ layout(location = 2) in vec2 vUv;
 
 void main() {
     int alphaMode = int(uPush.materialParams.z);
-    if (alphaMode == 1 || alphaMode == 2) {
+
+    // Blended / volume materials must not write depth in the prepass.
+    // Fluid volumes especially: their base texture is a Z-slice atlas — sampling it
+    // with face UVs carves stair-step holes (and can paint the atlas onto faces).
+    if (alphaMode == 2 || alphaMode == 3) {
+        discard;
+    }
+
+    // Cutout / mask materials still participate so foliage etc. get correct depth.
+    if (alphaMode == 1) {
         float alpha = uPush.baseColor.a * texture(materialTextures[nonuniformEXT(uPush.textureIndex)], vUv).a;
-        if (alphaMode == 1 && alpha < uPush.materialParams.w) {
-            discard;
-        }
-        if (alphaMode == 2 && alpha < 0.01) {
+        if (alpha < uPush.materialParams.w) {
             discard;
         }
     }

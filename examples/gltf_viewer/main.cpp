@@ -247,8 +247,9 @@ protected:
         }
 
         if (show_grid_) {
+            // Soft graphite procedural grid (fragment-shaded ground plane).
             const genesis::GridDrawPushConstants grid_pc =
-                genesis::makeGridDrawPushConstants(nullptr, 0.28f, 0.32f, 0.38f, 0.95f);
+                genesis::makeGridDrawPushConstants(nullptr, 0.42f, 0.45f, 0.50f, 0.55f);
             renderer().drawGrid(grid_mesh_, grid_pc);
         }
 
@@ -338,54 +339,98 @@ private:
 
     void initEditorStyle() {
         ImGuiStyle& style = ImGui::GetStyle();
-        style.WindowRounding = 6.0f;
-        style.ChildRounding = 4.0f;
-        style.FrameRounding = 4.0f;
-        style.GrabRounding = 4.0f;
-        style.PopupRounding = 4.0f;
-        style.ScrollbarRounding = 4.0f;
-        style.WindowPadding = ImVec2(12.0f, 10.0f);
-        style.FramePadding = ImVec2(8.0f, 5.0f);
-        style.ItemSpacing = ImVec2(10.0f, 7.0f);
+
+        // Quiet, dense chrome — more Linear/Figma than classic DCC toolbars.
+        style.WindowRounding = 10.0f;
+        style.ChildRounding = 8.0f;
+        style.FrameRounding = 6.0f;
+        style.GrabRounding = 6.0f;
+        style.PopupRounding = 8.0f;
+        style.ScrollbarRounding = 8.0f;
+        style.TabRounding = 6.0f;
+        style.WindowBorderSize = 0.0f;
+        style.ChildBorderSize = 0.0f;
+        style.PopupBorderSize = 0.0f;
+        style.FrameBorderSize = 0.0f;
+        style.TabBorderSize = 0.0f;
+        style.WindowPadding = ImVec2(14.0f, 12.0f);
+        style.FramePadding = ImVec2(10.0f, 6.0f);
+        style.ItemSpacing = ImVec2(10.0f, 8.0f);
         style.ItemInnerSpacing = ImVec2(8.0f, 5.0f);
-        style.IndentSpacing = 18.0f;
+        style.IndentSpacing = 16.0f;
+        style.ScrollbarSize = 10.0f;
+        style.GrabMinSize = 10.0f;
+        style.WindowTitleAlign = ImVec2(0.0f, 0.5f);
+        style.ButtonTextAlign = ImVec2(0.5f, 0.5f);
 
         ImVec4* colors = style.Colors;
-        const ImVec4 bg_dark(0.09f, 0.10f, 0.12f, 1.0f);
-        const ImVec4 bg_panel(0.12f, 0.13f, 0.16f, 0.98f);
-        const ImVec4 accent(0.22f, 0.48f, 0.82f, 1.0f);
-        const ImVec4 accent_dim(0.18f, 0.36f, 0.62f, 1.0f);
 
-        colors[ImGuiCol_Text] = ImVec4(0.92f, 0.93f, 0.95f, 1.0f);
-        colors[ImGuiCol_TextDisabled] = ImVec4(0.50f, 0.54f, 0.60f, 1.0f);
+        // Near-black canvas with cool charcoal panels and a single teal accent.
+        const ImVec4 bg_app(0.055f, 0.057f, 0.062f, 1.0f);
+        const ImVec4 bg_panel(0.090f, 0.094f, 0.102f, 0.97f);
+        const ImVec4 bg_elevated(0.118f, 0.124f, 0.134f, 1.0f);
+        const ImVec4 bg_input(0.070f, 0.074f, 0.082f, 1.0f);
+        const ImVec4 border(0.160f, 0.168f, 0.180f, 1.0f);
+        const ImVec4 text(0.920f, 0.930f, 0.945f, 1.0f);
+        const ImVec4 text_muted(0.480f, 0.500f, 0.540f, 1.0f);
+        const ImVec4 accent(0.220f, 0.760f, 0.700f, 1.0f);       // teal
+        const ImVec4 accent_hover(0.280f, 0.820f, 0.760f, 1.0f);
+        const ImVec4 accent_dim(0.140f, 0.420f, 0.400f, 1.0f);
+        const ImVec4 accent_soft(0.220f, 0.760f, 0.700f, 0.18f);
+
+        colors[ImGuiCol_Text] = text;
+        colors[ImGuiCol_TextDisabled] = text_muted;
         colors[ImGuiCol_WindowBg] = bg_panel;
-        colors[ImGuiCol_ChildBg] = ImVec4(0.10f, 0.11f, 0.13f, 1.0f);
-        colors[ImGuiCol_PopupBg] = bg_panel;
-        colors[ImGuiCol_Border] = ImVec4(0.22f, 0.24f, 0.28f, 1.0f);
-        colors[ImGuiCol_FrameBg] = ImVec4(0.16f, 0.17f, 0.20f, 1.0f);
-        colors[ImGuiCol_FrameBgHovered] = ImVec4(0.20f, 0.22f, 0.26f, 1.0f);
-        colors[ImGuiCol_FrameBgActive] = ImVec4(0.24f, 0.26f, 0.30f, 1.0f);
-        colors[ImGuiCol_TitleBg] = bg_dark;
-        colors[ImGuiCol_TitleBgActive] = ImVec4(0.14f, 0.15f, 0.18f, 1.0f);
-        colors[ImGuiCol_MenuBarBg] = bg_dark;
-        colors[ImGuiCol_Header] = accent_dim;
-        colors[ImGuiCol_HeaderHovered] = accent;
-        colors[ImGuiCol_HeaderActive] = ImVec4(0.28f, 0.54f, 0.88f, 1.0f);
-        colors[ImGuiCol_Button] = ImVec4(0.18f, 0.20f, 0.24f, 1.0f);
-        colors[ImGuiCol_ButtonHovered] = accent_dim;
-        colors[ImGuiCol_ButtonActive] = accent;
+        colors[ImGuiCol_ChildBg] = bg_app;
+        colors[ImGuiCol_PopupBg] = bg_elevated;
+        colors[ImGuiCol_Border] = border;
+        colors[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+        colors[ImGuiCol_FrameBg] = bg_input;
+        colors[ImGuiCol_FrameBgHovered] = ImVec4(0.100f, 0.110f, 0.120f, 1.0f);
+        colors[ImGuiCol_FrameBgActive] = ImVec4(0.120f, 0.135f, 0.145f, 1.0f);
+        colors[ImGuiCol_TitleBg] = bg_app;
+        colors[ImGuiCol_TitleBgActive] = bg_app;
+        colors[ImGuiCol_TitleBgCollapsed] = bg_app;
+        colors[ImGuiCol_MenuBarBg] = bg_app;
+        colors[ImGuiCol_ScrollbarBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+        colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.22f, 0.24f, 0.26f, 1.0f);
+        colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.30f, 0.33f, 0.36f, 1.0f);
+        colors[ImGuiCol_ScrollbarGrabActive] = accent_dim;
         colors[ImGuiCol_CheckMark] = accent;
-        colors[ImGuiCol_SliderGrab] = accent_dim;
-        colors[ImGuiCol_SliderGrabActive] = accent;
-        colors[ImGuiCol_Separator] = ImVec4(0.24f, 0.26f, 0.30f, 1.0f);
-        colors[ImGuiCol_ResizeGrip] = accent_dim;
-        colors[ImGuiCol_ResizeGripHovered] = accent;
+        colors[ImGuiCol_SliderGrab] = accent;
+        colors[ImGuiCol_SliderGrabActive] = accent_hover;
+        colors[ImGuiCol_Button] = bg_elevated;
+        colors[ImGuiCol_ButtonHovered] = ImVec4(0.160f, 0.175f, 0.190f, 1.0f);
+        colors[ImGuiCol_ButtonActive] = accent_dim;
+        colors[ImGuiCol_Header] = accent_soft;
+        colors[ImGuiCol_HeaderHovered] = ImVec4(0.220f, 0.760f, 0.700f, 0.28f);
+        colors[ImGuiCol_HeaderActive] = ImVec4(0.220f, 0.760f, 0.700f, 0.40f);
+        colors[ImGuiCol_Separator] = ImVec4(0.140f, 0.148f, 0.160f, 1.0f);
+        colors[ImGuiCol_SeparatorHovered] = accent_dim;
+        colors[ImGuiCol_SeparatorActive] = accent;
+        colors[ImGuiCol_ResizeGrip] = ImVec4(0.22f, 0.24f, 0.26f, 0.4f);
+        colors[ImGuiCol_ResizeGripHovered] = accent_dim;
         colors[ImGuiCol_ResizeGripActive] = accent;
-        colors[ImGuiCol_Tab] = ImVec4(0.14f, 0.15f, 0.18f, 1.0f);
-        colors[ImGuiCol_TabHovered] = accent_dim;
-        colors[ImGuiCol_TabSelected] = ImVec4(0.20f, 0.38f, 0.64f, 1.0f);
-        colors[ImGuiCol_DockingPreview] = ImVec4(0.22f, 0.48f, 0.82f, 0.55f);
+        colors[ImGuiCol_Tab] = bg_app;
+        colors[ImGuiCol_TabHovered] = bg_elevated;
+        colors[ImGuiCol_TabSelected] = bg_panel;
+        colors[ImGuiCol_TabSelectedOverline] = accent;
+        colors[ImGuiCol_TabDimmed] = bg_app;
+        colors[ImGuiCol_TabDimmedSelected] = bg_panel;
+        colors[ImGuiCol_DockingPreview] = ImVec4(0.220f, 0.760f, 0.700f, 0.35f);
         colors[ImGuiCol_DockingEmptyBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+        colors[ImGuiCol_PlotLines] = accent;
+        colors[ImGuiCol_PlotHistogram] = accent;
+        colors[ImGuiCol_TableHeaderBg] = bg_elevated;
+        colors[ImGuiCol_TableBorderStrong] = border;
+        colors[ImGuiCol_TableBorderLight] = ImVec4(0.120f, 0.128f, 0.140f, 1.0f);
+        colors[ImGuiCol_TableRowBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+        colors[ImGuiCol_TableRowBgAlt] = ImVec4(1.0f, 1.0f, 1.0f, 0.02f);
+        colors[ImGuiCol_TextSelectedBg] = accent_soft;
+        colors[ImGuiCol_DragDropTarget] = accent;
+        colors[ImGuiCol_NavCursor] = accent;
+        colors[ImGuiCol_NavWindowingHighlight] = accent;
+        colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.02f, 0.02f, 0.03f, 0.55f);
     }
 
     void drawMenuBar(genesis::Scene& scene) {
@@ -436,7 +481,7 @@ private:
             ImGui::MenuItem("Inspector", nullptr, &show_inspector_);
             ImGui::MenuItem("Viewport", nullptr, &show_viewport_);
             ImGui::MenuItem("Toolbar", nullptr, &show_toolbar_);
-            ImGui::MenuItem("Viewport Help", nullptr, &show_viewport_help_);
+            ImGui::MenuItem("Shortcuts", nullptr, &show_viewport_help_);
             ImGui::MenuItem("Timeline", nullptr, &show_timeline_);
             ImGui::MenuItem("Protocol", nullptr, &show_protocol_);
             ImGui::MenuItem("Animation Graph", nullptr, &show_animation_graph_);
@@ -471,30 +516,40 @@ private:
     void drawHierarchyPanel(genesis::Scene& scene) {
         ImGui::Begin("Hierarchy", &show_hierarchy_);
 
-        ImGui::TextColored(ImVec4(0.55f, 0.70f, 0.95f, 1.0f), "SCENE");
-        ImGui::Separator();
-        ImGui::TextUnformatted("Create");
-        if (ImGui::Button("Empty", ImVec2(62, 0))) {
+        ImGui::TextDisabled("SCENE");
+        ImGui::Spacing();
+
+        const float full = ImGui::GetContentRegionAvail().x;
+        const float gap = ImGui::GetStyle().ItemSpacing.x;
+        const float half = (full - gap) * 0.5f;
+
+        auto createBtn = [&](const char* label, float width, auto&& fn) {
+            if (ImGui::Button(label, ImVec2(width, 0))) {
+                fn();
+            }
+        };
+
+        createBtn("Empty", half, [&] {
             selectNode(scene.createEmptyNode("Empty Node"));
             markDirty();
-        }
+        });
         ImGui::SameLine();
-        if (ImGui::Button("Cube", ImVec2(62, 0))) {
+        createBtn("Cube", half, [&] {
             addPrimitiveMesh("Cube", genesis::createCubeMesh(renderer().context()));
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Sphere", ImVec2(62, 0))) {
+        });
+        createBtn("Sphere", half, [&] {
             addPrimitiveMesh("Sphere", genesis::createSphereMesh(renderer().context()));
-        }
-        if (ImGui::Button("Camera", ImVec2(128, 0))) {
+        });
+        ImGui::SameLine();
+        createBtn("Camera", half, [&] {
             selectNode(scene.createCameraNode("Camera"));
             markDirty();
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Light", ImVec2(128, 0))) {
+        });
+        createBtn("Light", half, [&] {
             addLightNode("Directional Light", genesis::SceneLightType::Directional);
-        }
-        if (ImGui::Button("Particles", ImVec2(128, 0))) {
+        });
+        ImGui::SameLine();
+        createBtn("Particles", half, [&] {
             genesis::ParticleEmitter emitter = genesis::makeDefaultParticleEmitter();
             emitter.burst_count = 24;
             // If a fluid volume is selected, parent under it and enable coupling so
@@ -516,8 +571,8 @@ private:
             }
             selectNode(scene.createParticleEmitterNode("Particle Emitter", parent, emitter));
             markDirty();
-        }
-        if (ImGui::Button("Fluid Volume", ImVec2(128, 0))) {
+        });
+        if (ImGui::Button("Fluid Volume", ImVec2(full, 0))) {
             const genesis::NodeId id =
                 scene.createFluidVolumeNode("Lava Lamp", std::nullopt, genesis::makeLavaLampFluidVolume());
             if (genesis::Node* node = scene.find(id)) {
@@ -532,10 +587,13 @@ private:
         }
 
         ImGui::Spacing();
-        ImGui::TextUnformatted("Selection");
+        ImGui::Separator();
+        ImGui::Spacing();
+        ImGui::TextDisabled("ACTIONS");
+        ImGui::Spacing();
 
         ImGui::BeginDisabled(selection_.empty());
-        if (ImGui::Button("Duplicate")) {
+        if (ImGui::Button("Duplicate", ImVec2(half, 0))) {
             std::vector<genesis::NodeId> created;
             created.reserve(selection_.size());
             for (const genesis::NodeId id : selection_) {
@@ -549,13 +607,16 @@ private:
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Delete")) {
+        if (ImGui::Button("Delete", ImVec2(half, 0))) {
             queueDeleteSelectedNodes();
         }
         ImGui::EndDisabled();
 
+        ImGui::Spacing();
         ImGui::Separator();
-        ImGui::TextColored(ImVec4(0.55f, 0.70f, 0.95f, 1.0f), "OUTLINER");
+        ImGui::Spacing();
+        ImGui::TextDisabled("OUTLINER");
+        ImGui::Spacing();
 
         auto drawNode = [&](auto&& self, genesis::NodeId id) -> void {
             const genesis::Node* n = scene.find(id);
@@ -1077,8 +1138,8 @@ private:
             return;
         }
         ImGui::Separator();
-        ImGui::TextColored(ImVec4(0.45f, 0.75f, 1.0f, 1.0f), "GPU Fluid Simulation");
-        ImGui::TextDisabled("3D volumetric sim inside the box bounds (raymarched density).");
+        ImGui::TextDisabled("GPU Fluid");
+        ImGui::TextDisabled("3D volumetric sim inside the box bounds.");
         genesis::FluidVolume& f = *n.particle_fluid;
         bool dirty = false;
         dirty |= ImGui::Checkbox("Enabled", &f.enabled);
@@ -1129,77 +1190,60 @@ private:
     void drawToolbarPanel(genesis::Scene& scene) {
         ImGui::Begin("Toolbar", &show_toolbar_);
 
-        if (ImGui::RadioButton("Move (W)", gizmo_operation_ == ImGuizmo::TRANSLATE)) {
+        if (ImGui::RadioButton("Move", gizmo_operation_ == ImGuizmo::TRANSLATE)) {
             gizmo_operation_ = ImGuizmo::TRANSLATE;
         }
         ImGui::SameLine();
-        if (ImGui::RadioButton("Rotate (E)", gizmo_operation_ == ImGuizmo::ROTATE)) {
+        if (ImGui::RadioButton("Rotate", gizmo_operation_ == ImGuizmo::ROTATE)) {
             gizmo_operation_ = ImGuizmo::ROTATE;
         }
         ImGui::SameLine();
-        if (ImGui::RadioButton("Scale (R)", gizmo_operation_ == ImGuizmo::SCALE)) {
+        if (ImGui::RadioButton("Scale", gizmo_operation_ == ImGuizmo::SCALE)) {
             gizmo_operation_ = ImGuizmo::SCALE;
         }
-        ImGui::SameLine();
-        ImGui::TextDisabled("RMB+WASD fly");
-        ImGui::SameLine();
-        ImGui::TextUnformatted("|");
-        ImGui::SameLine();
+
+        ImGui::SameLine(0.0f, 16.0f);
         if (ImGui::RadioButton("Local", gizmo_mode_ == ImGuizmo::LOCAL)) gizmo_mode_ = ImGuizmo::LOCAL;
         ImGui::SameLine();
         if (ImGui::RadioButton("World", gizmo_mode_ == ImGuizmo::WORLD)) gizmo_mode_ = ImGuizmo::WORLD;
 
-        ImGui::SameLine();
-        ImGui::TextUnformatted("|");
-        ImGui::SameLine();
+        ImGui::SameLine(0.0f, 16.0f);
         ImGui::Checkbox("Grid", &show_grid_);
 
-        ImGui::SameLine();
-        ImGui::TextUnformatted("|");
-        ImGui::SameLine();
+        ImGui::SameLine(0.0f, 20.0f);
         if (!selection_.empty() && scene.find(primarySelected())) {
             if (selection_.size() == 1) {
-                ImGui::Text("Selected: %s", scene.find(primarySelected())->name.c_str());
+                ImGui::TextDisabled("%s", scene.find(primarySelected())->name.c_str());
             } else {
-                ImGui::Text("Selected: %zu objects", selection_.size());
+                ImGui::TextDisabled("%zu selected", selection_.size());
             }
         } else {
-            ImGui::TextUnformatted("No selection");
+            ImGui::TextDisabled("Nothing selected");
         }
 
-        ImGui::SameLine();
-        ImGui::TextUnformatted("|");
-        ImGui::SameLine();
         const genesis::FrameStats& stats = frameStats();
-        ImGui::Text("FPS %.0f  |  %u tris  |  %zu batches  |  %u culled", timer().fps(), stats.triangles,
-                    last_draw_batches_, last_culled_nodes_);
+        const char* fps_line = "  %.0f FPS · %u tris";
+        const ImVec2 fps_size = ImGui::CalcTextSize("  000 FPS · 00000 tris");
+        ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - fps_size.x);
+        ImGui::TextDisabled(fps_line, timer().fps(), stats.triangles);
 
         ImGui::End();
     }
 
     void drawViewportHelpPanel() {
-        ImGui::Begin("Viewport Help", &show_viewport_help_);
-        ImGui::TextUnformatted("LMB: click select / drag marquee");
-        ImGui::TextUnformatted("Shift or Ctrl + LMB: add / toggle");
-        ImGui::TextUnformatted("Drag gizmo: transform (primary selection)");
-        ImGui::TextUnformatted("RMB + WASD/QE: fly (in viewport)");
-        ImGui::TextUnformatted("Delete: remove selection (children stay, reparented)");
-        ImGui::TextUnformatted("Hierarchy RMB: parent / unparent");
-        ImGui::TextUnformatted("F: focus camera on selection");
-        const char* camera_label = use_editor_output_ ? "Editor Camera" : "Scene Camera";
-        const glm::vec3 cam_pos = outputCameraPosition();
-        ImGui::Text("Camera: %s", camera_label);
-        ImGui::Text("Eye: %.1f, %.1f, %.1f m", cam_pos.x, cam_pos.y, cam_pos.z);
-        if (!selection_.empty()) {
-            if (const genesis::Node* n = runtime_.scene().find(primarySelected())) {
-                if (selection_.size() == 1) {
-                    ImGui::Text("Active: %s", n->name.c_str());
-                } else {
-                    ImGui::Text("Active: %s (+%zu)", n->name.c_str(), selection_.size() - 1);
-                }
-            }
-        }
-        ImGui::TextDisabled("%u visible meshes", frameStats().visible_mesh_nodes);
+        ImGui::Begin("Shortcuts", &show_viewport_help_);
+        ImGui::TextDisabled("NAVIGATION");
+        ImGui::BulletText("RMB + WASD / QE — fly");
+        ImGui::BulletText("F — frame selection");
+        ImGui::Spacing();
+        ImGui::TextDisabled("SELECTION");
+        ImGui::BulletText("LMB — select / marquee");
+        ImGui::BulletText("Shift / Ctrl + LMB — multi");
+        ImGui::BulletText("Delete — remove (children reparent)");
+        ImGui::Spacing();
+        ImGui::TextDisabled("TRANSFORM");
+        ImGui::BulletText("W / E / R — move, rotate, scale");
+        ImGui::BulletText("Drag gizmo — edit primary");
         ImGui::End();
     }
 
@@ -1699,8 +1743,8 @@ private:
     void drawSelectionOverlays(genesis::Scene& scene) {
         ImDrawList* draw = ImGui::GetForegroundDrawList();
         if (marquee_.active && marquee_.dragging) {
-            draw->AddRectFilled(marquee_.start, marquee_.current, IM_COL32(64, 140, 255, 40));
-            draw->AddRect(marquee_.start, marquee_.current, IM_COL32(80, 160, 255, 220), 0.0f, 0, 1.5f);
+            draw->AddRectFilled(marquee_.start, marquee_.current, IM_COL32(56, 194, 178, 28));
+            draw->AddRect(marquee_.start, marquee_.current, IM_COL32(56, 194, 178, 200), 0.0f, 0, 1.25f);
         }
 
         if (selection_.empty() || viewport_.w < 2.0f) {
@@ -1735,8 +1779,8 @@ private:
             const ImVec2 a(viewport_.x + rect.min_x, viewport_.y + rect.min_y);
             const ImVec2 b(viewport_.x + rect.max_x, viewport_.y + rect.max_y);
             const bool primary = id == primarySelected();
-            draw->AddRect(a, b, primary ? IM_COL32(255, 196, 64, 230) : IM_COL32(80, 170, 255, 200), 0.0f,
-                          0, primary ? 2.0f : 1.25f);
+            draw->AddRect(a, b, primary ? IM_COL32(56, 194, 178, 220) : IM_COL32(56, 194, 178, 120), 3.0f,
+                          0, primary ? 1.5f : 1.0f);
         }
     }
 
@@ -2218,9 +2262,9 @@ private:
     bool show_inspector_ = true;
     bool show_viewport_ = true;
     bool show_toolbar_ = true;
-    bool show_viewport_help_ = true;
-    bool show_timeline_ = true;
-    bool show_protocol_ = true;
+    bool show_viewport_help_ = false;
+    bool show_timeline_ = false;
+    bool show_protocol_ = false;
     bool show_animation_graph_ = false;
     bool auto_key_ = false;
     bool show_debug_window_ = false;

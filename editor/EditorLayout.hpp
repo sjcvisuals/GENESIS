@@ -45,20 +45,16 @@ inline void beginEditorDockSpace(ImGuiID dockspace_id, bool& first_time_setup) {
         ImGui::DockBuilderSetNodeSize(dockspace_id, main_viewport->WorkSize);
 
         ImGuiID dock_main = dockspace_id;
-        const ImGuiID dock_left = ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Left, 0.18f, nullptr, &dock_main);
-        ImGuiID dock_right =
-            ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Right, 0.22f, nullptr, &dock_main);
+        const ImGuiID dock_left = ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Left, 0.20f, nullptr, &dock_main);
+        const ImGuiID dock_right =
+            ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Right, 0.24f, nullptr, &dock_main);
         const ImGuiID dock_bottom =
-            ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Down, 0.12f, nullptr, &dock_main);
-
-        const ImGuiID dock_protocol =
-            ImGui::DockBuilderSplitNode(dock_right, ImGuiDir_Down, 0.42f, nullptr, &dock_right);
+            ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Down, 0.08f, nullptr, &dock_main);
 
         ImGui::DockBuilderDockWindow("Hierarchy", dock_left);
         ImGui::DockBuilderDockWindow("Inspector", dock_right);
-        ImGui::DockBuilderDockWindow("Protocol", dock_protocol);
         ImGui::DockBuilderDockWindow("Toolbar", dock_bottom);
-        ImGui::DockBuilderDockWindow("Timeline", dock_bottom);
+        // Protocol / Timeline stay available via View menu — keep first launch uncluttered.
         // Leave dock_main (center) empty — scene renders in the passthrough hole.
         ImGui::DockBuilderFinish(dockspace_id);
     }
@@ -114,7 +110,7 @@ inline void drawViewportInputOverlay(const ImGuiID dockspace_id, bool enabled, I
     ImGui::PopStyleColor();
     ImGui::PopStyleVar();
 
-    ImGui::GetForegroundDrawList()->AddRect(out_rect_min, out_rect_max, IM_COL32(48, 52, 60, 255), 0.0f, 0,
+    ImGui::GetForegroundDrawList()->AddRect(out_rect_min, out_rect_max, IM_COL32(28, 30, 34, 180), 0.0f, 0,
                                             1.0f);
 }
 

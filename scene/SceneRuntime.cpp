@@ -314,7 +314,7 @@ void SceneRuntime::appendFluidDrawCommands(std::vector<SceneDrawCommand>& out) {
         mat.roughness = 1.0f;
         mat.emissive = glm::vec3(0.0f);
         mat.emissive_strength = 0.0f;
-        mat.alpha_mode = AlphaMode::Blend;
+        mat.alpha_mode = AlphaMode::Volume;
         fluid_display_material_id_ = addMaterial("FluidDisplay", mat);
     }
 
@@ -338,9 +338,10 @@ void SceneRuntime::appendFluidDrawCommands(std::vector<SceneDrawCommand>& out) {
         cmd.material.base_color[1] = item.dye_color.g;
         cmd.material.base_color[2] = item.dye_color.b;
         cmd.material.base_color[3] = item.dye_color.a;
-        // Volume raymarch marker: alphaCutoff >= 8 encodes grid resolution.
+        // Force Volume mode every draw (material template may be shared/cached).
+        cmd.material.material_params[2] = static_cast<float>(static_cast<int>(AlphaMode::Volume));
+        // Grid resolution + atlas tiles for the raymarcher.
         cmd.material.material_params[3] = static_cast<float>(std::max(item.grid_resolution, 8u));
-        // Atlas tiles-X packed into emissive.a (normally normalScale).
         cmd.material.emissive[3] = static_cast<float>(std::max(item.atlas_tiles_x, 1u));
         cmd.instance_color = glm::vec4(1.0f);
         out.push_back(cmd);
