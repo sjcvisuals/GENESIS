@@ -89,7 +89,7 @@
       },
       "particle_fluid": {
         "enabled": true,
-        "grid_resolution": 192,
+        "grid_resolution": 64,
         "extent_meters": [
           0.70,
           1.45,
@@ -100,26 +100,30 @@
         "velocity_dissipation": 0.992,
         "density_dissipation": 0.996,
         "source_enabled": true,
-        "source_uv": [
+        "source_uvw": [
           0.5,
-          0.1
+          0.1,
+          0.5
         ],
-        "source_radius": 0.1,
+        "source_radius": 0.09,
         "source_density": 4.2,
         "source_velocity": [
           0.0,
-          0.35
+          0.35,
+          0.0
         ],
         "source2_enabled": true,
-        "source2_uv": [
+        "source2_uvw": [
           0.4,
-          0.82
+          0.82,
+          0.55
         ],
-        "source2_radius": 0.12,
+        "source2_radius": 0.11,
         "source2_density": 3.0,
         "source2_velocity": [
           0.06,
-          -0.18
+          -0.18,
+          -0.04
         ],
         "animate_sources": true,
         "dye_color": [
@@ -129,7 +133,7 @@
           1.0
         ],
         "drive_particles": true,
-        "pressure_iterations": 28
+        "pressure_iterations": 16
       }
     },
     {

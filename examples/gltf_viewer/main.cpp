@@ -1078,14 +1078,17 @@ private:
         }
         ImGui::Separator();
         ImGui::TextColored(ImVec4(0.45f, 0.75f, 1.0f, 1.0f), "GPU Fluid Simulation");
-        ImGui::TextDisabled("Lava-lamp preset: warm dye, tall volume, dual animated blobs.");
+        ImGui::TextDisabled("3D volumetric sim inside the box bounds (raymarched density).");
         genesis::FluidVolume& f = *n.particle_fluid;
         bool dirty = false;
         dirty |= ImGui::Checkbox("Enabled", &f.enabled);
         int grid = static_cast<int>(f.grid_resolution);
-        if (ImGui::SliderInt("Grid resolution", &grid, 64, 512)) {
+        if (ImGui::SliderInt("Grid resolution", &grid, 32, 96)) {
             f.grid_resolution = static_cast<std::uint32_t>(grid);
             dirty = true;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Cubic N³ grid filling the volume. Higher is sharper but much heavier.");
         }
         dirty |= ImGui::DragFloat3("Extent (m)", &f.extent_meters.x, 0.05f, 0.1f, 32.0f);
         if (ImGui::IsItemHovered()) {
@@ -1102,17 +1105,17 @@ private:
         ImGui::Separator();
         ImGui::TextUnformatted("Ink source");
         dirty |= ImGui::Checkbox("Source enabled", &f.source_enabled);
-        dirty |= ImGui::DragFloat2("Source UV", &f.source_uv.x, 0.01f, 0.0f, 1.0f);
+        dirty |= ImGui::DragFloat3("Source UVW", &f.source_uvw.x, 0.01f, 0.0f, 1.0f);
         dirty |= ImGui::DragFloat("Source radius", &f.source_radius, 0.005f, 0.001f, 0.5f);
         dirty |= ImGui::DragFloat("Source density", &f.source_density, 0.05f, 0.0f, 8.0f);
-        dirty |= ImGui::DragFloat2("Source velocity", &f.source_velocity.x, 0.05f, -20.0f, 20.0f);
+        dirty |= ImGui::DragFloat3("Source velocity", &f.source_velocity.x, 0.05f, -20.0f, 20.0f);
         ImGui::Separator();
         ImGui::TextUnformatted("Secondary source");
         dirty |= ImGui::Checkbox("Source 2 enabled", &f.source2_enabled);
-        dirty |= ImGui::DragFloat2("Source 2 UV", &f.source2_uv.x, 0.01f, 0.0f, 1.0f);
+        dirty |= ImGui::DragFloat3("Source 2 UVW", &f.source2_uvw.x, 0.01f, 0.0f, 1.0f);
         dirty |= ImGui::DragFloat("Source 2 radius", &f.source2_radius, 0.005f, 0.001f, 0.5f);
         dirty |= ImGui::DragFloat("Source 2 density", &f.source2_density, 0.05f, 0.0f, 8.0f);
-        dirty |= ImGui::DragFloat2("Source 2 velocity", &f.source2_velocity.x, 0.05f, -20.0f, 20.0f);
+        dirty |= ImGui::DragFloat3("Source 2 velocity", &f.source2_velocity.x, 0.05f, -20.0f, 20.0f);
         dirty |= ImGui::Checkbox("Animate sources", &f.animate_sources);
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Gentle wobble so blobs rise, merge, and split like a lava lamp.");

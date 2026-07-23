@@ -52,6 +52,8 @@ layout(location = 0) in vec3 vWorldPos;
 layout(location = 1) in vec3 vWorldNormal;
 layout(location = 2) in vec2 vUv;
 layout(location = 3) in vec4 vInstanceColor;
+layout(location = 4) in vec3 vLocalPos;
+layout(location = 5) in vec3 vCamLocal;
 
 layout(location = 0) out vec4 outColor;
 
@@ -220,6 +222,103 @@ vec3 applyDisplayTransform(vec3 linearColor) {
     return vec3(linearToRec709(c.r), linearToRec709(c.g), linearToRec709(c.b));
 }
 
+vec2 sampleDensitySlice(vec3 uvw, int z, int gridN, int tilesX) {
+    int tilesY = (gridN + tilesX - 1) / tilesX;
+    vec2 atlasSize = vec2(float(tilesX * gridN), float(tilesY * gridN));
+    int tx = z % tilesX;
+    int ty = z / tilesX;
+    vec2 base = vec2(float(tx * gridN), float(ty * gridN));
+    vec2 pixel = base + uvw.xy * float(gridN);
+    return texture(materialTextures[nonuniformEXT(uPush.textureIndex)], (pixel + 0.5) / atlasSize).ra;
+}
+
+float sampleDensityAtlas(vec3 uvw, int gridN, int tilesX) {
+    uvw = clamp(uvw, vec3(0.0), vec3(1.0));
+    float zf = uvw.z * float(gridN - 1);
+    int z0 = int(floor(zf));
+    int z1 = min(z0 + 1, gridN - 1);
+    float fz = fract(zf);
+
+    vec2 s0 = sampleDensitySlice(uvw, z0, gridN, tilesX);
+    vec2 s1 = sampleDensitySlice(uvw, z1, gridN, tilesX);
+    // R stores density/4 for volume sampling.
+    float d0 = s0.x * 4.0;
+    float d1 = s1.x * 4.0;
+    return mix(d0, d1, fz);
+}
+
+bool intersectAabb(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax, out float t0, out float t1) {
+    vec3 invRd = 1.0 / rd;
+    vec3 tA = (bmin - ro) * invRd;
+    vec3 tB = (bmax - ro) * invRd;
+    vec3 tmin = min(tA, tB);
+    vec3 tmax = max(tA, tB);
+    t0 = max(max(tmin.x, tmin.y), tmin.z);
+    t1 = min(min(tmax.x, tmax.y), tmax.z);
+    return t1 >= max(t0, 0.0);
+}
+
+vec4 raymarchFluidVolume() {
+    int gridN = int(uPush.materialParams.w + 0.5);
+    int tilesX = max(int(uPush.emissive.a + 0.5), 1);
+    gridN = max(gridN, 8);
+
+    vec3 ro = vCamLocal;
+    vec3 rd = normalize(vLocalPos - vCamLocal);
+    float tEnter;
+    float tExit;
+    if (!intersectAabb(ro, rd, vec3(-0.5), vec3(0.5), tEnter, tExit)) {
+        return vec4(0.0);
+    }
+    tEnter = max(tEnter, 0.0);
+
+    // Only the entry-face fragment should raymarch; other box faces discard so
+    // transparent blending does not stack the same volume multiple times.
+    float tSurf = dot(vLocalPos - ro, rd);
+    if (abs(tSurf - tEnter) > 0.02) {
+        return vec4(0.0);
+    }
+
+    // Step count scales mildly with grid; keep realtime-friendly on software Vulkan.
+    const int kSteps = 48;
+    float span = max(tExit - tEnter, 1e-4);
+    float dt = span / float(kSteps);
+
+    vec3 dye = uPush.baseColor.rgb;
+    vec3 rgb = vec3(0.0);
+    float alpha = 0.0;
+
+    for (int i = 0; i < kSteps; ++i) {
+        float t = tEnter + (float(i) + 0.5) * dt;
+        if (t > tExit) {
+            break;
+        }
+        vec3 local = ro + rd * t;
+        vec3 uvw = local + vec3(0.5);
+        float density = sampleDensityAtlas(uvw, gridN, tilesX);
+        if (density < 0.02) {
+            continue;
+        }
+
+        float glow = clamp(density, 0.0, 5.0);
+        float core = smoothstep(0.35, 1.8, glow);
+        float rim = smoothstep(0.08, 0.55, glow);
+        vec3 hot = mix(dye, vec3(1.0, 0.85, 0.35), core * 0.55);
+        vec3 sampleRgb = hot * (rim * 0.55 + core * 1.35 + pow(glow, 1.35) * 0.35);
+        float sampleA = clamp((rim * 0.45 + core * 0.85) * max(uPush.baseColor.a, 1.0), 0.0, 1.0);
+        // Optical depth along the ray — denser regions occlude what is behind.
+        float absorb = 1.0 - exp(-density * dt * 6.5);
+        float a = clamp(sampleA * absorb, 0.0, 1.0);
+        rgb += (1.0 - alpha) * a * sampleRgb;
+        alpha += (1.0 - alpha) * a;
+        if (alpha > 0.97) {
+            break;
+        }
+    }
+
+    return vec4(rgb, alpha);
+}
+
 void main() {
     vec4 baseSample = texture(materialTextures[nonuniformEXT(uPush.textureIndex)], vUv);
     vec3 albedo = uPush.baseColor.rgb * baseSample.rgb * vInstanceColor.rgb;
@@ -234,7 +333,18 @@ void main() {
     float metallic = uPush.materialParams.x;
     float roughness = uPush.materialParams.y;
 
-    // Pre-tonemapped display textures (fluid volumes, unlit particles): skip PBR
+    // 3D fluid volumes: raymarch density atlas inside the box AABB.
+    // Marker: blend + unlit-like metal/rough + alphaCutoff >= 8 (grid resolution).
+    if (alphaMode == 2 && metallic < 0.001 && roughness > 0.98 && alphaCutoff >= 8.0) {
+        vec4 vol = raymarchFluidVolume();
+        if (vol.a < 0.01) {
+            discard;
+        }
+        outColor = vec4(clamp(vol.rgb, 0.0, 1.0), clamp(vol.a, 0.0, 1.0));
+        return;
+    }
+
+    // Pre-tonemapped display textures (legacy sheet / unlit particles): skip PBR
     // and skip a second display OETF — the source already encodes final RGB.
     if (alphaMode == 2 && metallic < 0.001 && roughness > 0.98) {
         if (alpha < 0.01) {

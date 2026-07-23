@@ -1,26 +1,29 @@
 #version 450
 
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
 
-layout(set = 0, binding = 0, rg16f) uniform readonly image2D uVelocityRead;
-layout(set = 0, binding = 6, r16f) uniform writeonly image2D uDivergence;
+layout(set = 0, binding = 0, rgba16f) uniform readonly image3D uVelocityRead;
+layout(set = 0, binding = 6, r16f) uniform writeonly image3D uDivergence;
 
 layout(push_constant) uniform Push {
-    ivec2 gridSize;
+    ivec3 gridSize;
     float cellSize;
 } pc;
 
 void main() {
-    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
-    if (coord.x >= pc.gridSize.x || coord.y >= pc.gridSize.y) {
+    ivec3 coord = ivec3(gl_GlobalInvocationID.xyz);
+    if (any(greaterThanEqual(coord, pc.gridSize))) {
         return;
     }
 
-    vec2 vL = imageLoad(uVelocityRead, clamp(coord - ivec2(1, 0), ivec2(0), pc.gridSize - ivec2(1))).xy;
-    vec2 vR = imageLoad(uVelocityRead, clamp(coord + ivec2(1, 0), ivec2(0), pc.gridSize - ivec2(1))).xy;
-    vec2 vB = imageLoad(uVelocityRead, clamp(coord - ivec2(0, 1), ivec2(0), pc.gridSize - ivec2(1))).xy;
-    vec2 vT = imageLoad(uVelocityRead, clamp(coord + ivec2(0, 1), ivec2(0), pc.gridSize - ivec2(1))).xy;
+    ivec3 maxC = pc.gridSize - ivec3(1);
+    vec3 vL = imageLoad(uVelocityRead, clamp(coord - ivec3(1, 0, 0), ivec3(0), maxC)).xyz;
+    vec3 vR = imageLoad(uVelocityRead, clamp(coord + ivec3(1, 0, 0), ivec3(0), maxC)).xyz;
+    vec3 vB = imageLoad(uVelocityRead, clamp(coord - ivec3(0, 1, 0), ivec3(0), maxC)).xyz;
+    vec3 vT = imageLoad(uVelocityRead, clamp(coord + ivec3(0, 1, 0), ivec3(0), maxC)).xyz;
+    vec3 vD = imageLoad(uVelocityRead, clamp(coord - ivec3(0, 0, 1), ivec3(0), maxC)).xyz;
+    vec3 vU = imageLoad(uVelocityRead, clamp(coord + ivec3(0, 0, 1), ivec3(0), maxC)).xyz;
 
-    float div = 0.5 * ((vR.x - vL.x) + (vT.y - vB.y)) / pc.cellSize;
+    float div = 0.5 * ((vR.x - vL.x) + (vT.y - vB.y) + (vU.z - vD.z)) / pc.cellSize;
     imageStore(uDivergence, coord, vec4(div, 0.0, 0.0, 0.0));
 }

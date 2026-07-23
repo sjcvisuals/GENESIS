@@ -51,6 +51,8 @@ layout(location = 0) out vec3 vWorldPos;
 layout(location = 1) out vec3 vWorldNormal;
 layout(location = 2) out vec2 vUv;
 layout(location = 3) out vec4 vInstanceColor;
+layout(location = 4) out vec3 vLocalPos;
+layout(location = 5) out vec3 vCamLocal;
 
 void main() {
     MeshInstance inst = uInstances.instances[uPush.instanceBase + gl_InstanceIndex];
@@ -60,4 +62,8 @@ void main() {
     vWorldNormal = mat3(inst.normalMatrix) * inNormal;
     vUv = inUv;
     vInstanceColor = inst.color;
+    // Local unit-box position + camera in local space for volume raymarching.
+    vLocalPos = inPosition;
+    mat4 invModel = inverse(inst.model);
+    vCamLocal = (invModel * vec4(uFrame.cameraPos.xyz, 1.0)).xyz;
 }

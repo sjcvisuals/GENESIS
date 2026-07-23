@@ -333,6 +333,15 @@ void SceneRuntime::appendFluidDrawCommands(std::vector<SceneDrawCommand>& out) {
         cmd.model = item.model;
         cmd.base_color_texture = item.display_texture;
         cmd.material = makeMeshMaterialPushConstants(*material(*fluid_display_material_id_));
+        // Dye tint for volumetric accumulation.
+        cmd.material.base_color[0] = item.dye_color.r;
+        cmd.material.base_color[1] = item.dye_color.g;
+        cmd.material.base_color[2] = item.dye_color.b;
+        cmd.material.base_color[3] = item.dye_color.a;
+        // Volume raymarch marker: alphaCutoff >= 8 encodes grid resolution.
+        cmd.material.material_params[3] = static_cast<float>(std::max(item.grid_resolution, 8u));
+        // Atlas tiles-X packed into emissive.a (normally normalScale).
+        cmd.material.emissive[3] = static_cast<float>(std::max(item.atlas_tiles_x, 1u));
         cmd.instance_color = glm::vec4(1.0f);
         out.push_back(cmd);
     }

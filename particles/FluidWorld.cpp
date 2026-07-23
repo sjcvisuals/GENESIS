@@ -25,8 +25,6 @@ void FluidWorld::sync(Scene& scene) {
             next.emplace(node.id, std::make_unique<FluidGpuGrid>(context_));
         }
     }
-    // Destroying grids releases Vulkan images; only safe after GPU idle (caller
-    // should wait, but also guard here if any grids are being dropped).
     if (next.size() < grids_.size()) {
         vkDeviceWaitIdle(context_.device());
     }
@@ -51,9 +49,11 @@ void FluidWorld::simulate(VkCommandBuffer cmd, Scene& scene, const float dt_seco
         FluidDrawItem item{};
         item.node_id = node.id;
         item.display_texture = &it->second->displayTexture();
-
-        // Unit box [-0.5,0.5]^3 scaled by extent XYZ so the lamp reads as a 3D volume.
+        item.grid_resolution = it->second->stats().grid_resolution;
+        item.atlas_tiles_x = it->second->stats().atlas_tiles_x;
+        // Unit box [-0.5,0.5]^3 scaled by extent — sim domain fills this AABB.
         item.model = node.world * glm::scale(glm::mat4(1.0f), volume.extent_meters);
+        item.dye_color = volume.dye_color;
         draw_items_.push_back(item);
     }
 }
@@ -73,19 +73,18 @@ glm::vec3 FluidWorld::sampleFluidVelocity(const Scene& scene, const NodeId fluid
         return glm::vec3(0.0f);
     }
 
-    // 2D sim in local XY; reject samples outside the full 3D box (including depth).
-    if (std::abs(local.z) > 0.5f * extent.z) {
-        return glm::vec3(0.0f);
-    }
-    const float u = local.x / extent.x + 0.5f;
-    const float v = local.y / extent.y + 0.5f;
-    if (u < 0.0f || u > 1.0f || v < 0.0f || v > 1.0f) {
+    // Reject outside the full 3D box domain.
+    if (std::abs(local.x) > 0.5f * extent.x || std::abs(local.y) > 0.5f * extent.y ||
+        std::abs(local.z) > 0.5f * extent.z) {
         return glm::vec3(0.0f);
     }
 
-    const glm::vec2 vel_uv = grid_it->second->sampleVelocityUv(u, v);
-    // Convert UV-space velocity (fraction of extent / second) into local meters/second.
-    const glm::vec3 local_vel(vel_uv.x * extent.x, vel_uv.y * extent.y, 0.0f);
+    const float u = local.x / extent.x + 0.5f;
+    const float v = local.y / extent.y + 0.5f;
+    const float w = local.z / extent.z + 0.5f;
+    const glm::vec3 vel_uvw = grid_it->second->sampleVelocityUvw(u, v, w);
+    // Convert UVW/s → local meters/s.
+    const glm::vec3 local_vel(vel_uvw.x * extent.x, vel_uvw.y * extent.y, vel_uvw.z * extent.z);
     return glm::mat3(node->world) * local_vel;
 }
 

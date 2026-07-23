@@ -16,6 +16,9 @@ struct FluidDrawItem {
     NodeId node_id = 0;
     glm::mat4 model{1.0f};
     const GpuTexture* display_texture = nullptr;
+    std::uint32_t grid_resolution = 0;
+    std::uint32_t atlas_tiles_x = 0;
+    glm::vec4 dye_color{1.0f};
 };
 
 class FluidWorld {
