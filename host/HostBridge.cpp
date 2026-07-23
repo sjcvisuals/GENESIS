@@ -95,6 +95,11 @@ void HostBridge::loadDocument(const std::filesystem::path& path) {
     scene_->updateTransforms();
 }
 
+void HostBridge::loadGns(const std::filesystem::path& path) {
+    scene_->loadGnsFile(path);
+    scene_->updateTransforms();
+}
+
 bool HostBridge::tryLoadRuntimeResource(const RuntimeSceneResource& resource, std::string* out_error) {
     return tryLoadRuntimeScene(*scene_, resource, out_error);
 }
@@ -116,6 +121,10 @@ bool HostBridge::applyCommand(const HostSceneCommand& command, std::string* out_
 
         case HostSceneCommandType::LoadDocument:
             loadDocument(resolveAssetPath(command.path));
+            return true;
+
+        case HostSceneCommandType::LoadGns:
+            loadGns(resolveAssetPath(command.path));
             return true;
 
         case HostSceneCommandType::SaveDocument:

@@ -540,7 +540,8 @@ private:
             const genesis::Node* n = scene.find(id);
             if (!n) return;
 
-            ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanFullWidth;
+            ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanFullWidth |
+                                       ImGuiTreeNodeFlags_DefaultOpen;
             if (n->children.empty()) flags |= ImGuiTreeNodeFlags_Leaf;
             if (isSelected(id)) flags |= ImGuiTreeNodeFlags_Selected;
 

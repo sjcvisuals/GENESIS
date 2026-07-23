@@ -37,9 +37,10 @@ struct Vertex {
 };
 
 const std::array<Vertex, 3> kTriangleVertices = {{
+    // CCW when viewed from +Z so Vulkan back-face culling keeps the face.
     {{0.0f, -0.5f, 0.0f}, {1.0f, 0.2f, 0.3f}},
-    {{0.5f, 0.5f, 0.0f}, {0.2f, 1.0f, 0.4f}},
     {{-0.5f, 0.5f, 0.0f}, {0.3f, 0.4f, 1.0f}},
+    {{0.5f, 0.5f, 0.0f}, {0.2f, 1.0f, 0.4f}},
 }};
 
 } // namespace

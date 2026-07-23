@@ -17,6 +17,7 @@ enum class HostSceneCommandType : std::uint8_t {
     LoadDemo,
     LoadGltf,
     LoadDocument,
+    LoadGns,
     SaveDocument,
     SetOutputCamera,
     ClearOutputCamera,

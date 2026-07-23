@@ -9,7 +9,10 @@ namespace {
 
 class CameraApp final : public genesis::Application {
 public:
-    using genesis::Application::Application;
+    explicit CameraApp(const genesis::ApplicationConfig& config) : genesis::Application(config) {
+        // Start behind the demo triangle so it is immediately visible.
+        camera_.transform.position = {0.0f, 0.0f, 2.0f};
+    }
 
 protected:
     void onUpdate(float dt) override {
@@ -69,4 +72,3 @@ int main() {
     CameraApp app(config);
     return app.run();
 }
-

@@ -239,6 +239,9 @@ if(GENESIS_BUILD_EXAMPLES)
     add_executable(genesis_determinism_harness examples/determinism_harness/main.cpp)
     target_link_libraries(genesis_determinism_harness PRIVATE genesis_runtime nlohmann_json::nlohmann_json)
 
+    add_executable(genesis_osc_smoke examples/osc_smoke/main.cpp)
+    target_link_libraries(genesis_osc_smoke PRIVATE genesis_protocol)
+
     add_executable(genesis_multiview_player examples/multiview_player/main.cpp)
     target_link_libraries(genesis_multiview_player PRIVATE genesis_engine)
     add_dependencies(genesis_multiview_player genesis_shaders)

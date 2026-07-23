@@ -6,8 +6,10 @@
 #include "scene/ScenePath.hpp"
 
 #include <SDL3/SDL.h>
+#include <glm/gtc/matrix_transform.hpp>
 #include <spdlog/spdlog.h>
 
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -22,7 +24,7 @@ std::filesystem::path playerModuleDirectory() {
     return {};
 }
 
-void trySetSceneOutputCamera(genesis::HostBridge& bridge) {
+bool trySetSceneOutputCamera(genesis::HostBridge& bridge) {
     for (const genesis::Node& node : bridge.sceneRuntime().scene().nodes) {
         if (!node.camera.has_value()) {
             continue;
@@ -31,9 +33,23 @@ void trySetSceneOutputCamera(genesis::HostBridge& bridge) {
         camera_cmd.type = genesis::HostSceneCommandType::SetOutputCamera;
         camera_cmd.path = genesis::nodePath(bridge.sceneRuntime().scene(), node.id);
         if (bridge.applyCommand(camera_cmd)) {
-            return;
+            return true;
         }
     }
+    return false;
+}
+
+void fillFallbackLookAtViewProjection(genesis::HostFrameInput& frame, const float aspect) {
+    const glm::vec3 eye(8.0f, 4.5f, 9.0f);
+    const glm::vec3 target(0.0f, 0.0f, 0.0f);
+    const glm::mat4 view = glm::lookAtRH(eye, target, glm::vec3(0.0f, 1.0f, 0.0f));
+    const glm::mat4 proj = glm::perspectiveRH_ZO(glm::radians(55.0f), aspect, 0.1f, 200.0f);
+    glm::mat4 vulkan_proj = proj;
+    vulkan_proj[1][1] *= -1.0f;
+    const glm::mat4 view_proj = vulkan_proj * view;
+    std::memcpy(frame.view_projection, &view_proj[0][0], sizeof(float) * 16);
+    frame.camera_position = eye;
+    frame.camera_mode = genesis::HostFrameInput::CameraMode::HostMatrix;
 }
 
 void printUsage() {
@@ -77,8 +93,9 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        trySetSceneOutputCamera(bridge);
-        spdlog::info("Genesis Player loaded '{}'", resource);
+        const bool has_output_camera = trySetSceneOutputCamera(bridge);
+        spdlog::info("Genesis Player loaded '{}' (output camera: {})", resource,
+                     has_output_camera ? "yes" : "fallback look-at");
 
         double production_time_seconds = 0.0;
         std::uint64_t production_frame_number = 0;
@@ -90,9 +107,18 @@ int main(int argc, char** argv) {
             ++production_frame_number;
 
             genesis::HostFrameInput frame{};
-            frame.camera_mode = genesis::HostFrameInput::CameraMode::SceneOutput;
             frame.production_time_seconds = production_time_seconds;
             frame.production_frame_number = production_frame_number;
+
+            if (bridge.sceneRuntime().scene().active_output_camera.has_value()) {
+                frame.camera_mode = genesis::HostFrameInput::CameraMode::SceneOutput;
+            } else {
+                const float aspect =
+                    bridge.height() > 0
+                        ? static_cast<float>(bridge.width()) / static_cast<float>(bridge.height())
+                        : 1.0f;
+                fillFallbackLookAtViewProjection(frame, aspect);
+            }
 
             bridge.beginFrame(frame);
             bridge.renderScene();
