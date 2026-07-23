@@ -2164,6 +2164,16 @@ private:
         use_editor_output_ = true;
         orientSceneOutputCameras(runtime_.scene());
         resetEditorCamera();
+
+        // Auto-frame the first Fluid Volume so lava-lamp / splash demos open usable.
+        for (const genesis::Node& node : runtime_.scene().nodes) {
+            if (!node.particle_fluid.has_value()) {
+                continue;
+            }
+            selectNode(node.id);
+            focusEditorCameraOnSelection();
+            break;
+        }
     }
 
     genesis::EditorSession session_;
