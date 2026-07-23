@@ -105,11 +105,11 @@
           0.1,
           0.5
         ],
-        "source_radius": 0.09,
-        "source_density": 4.2,
+        "source_radius": 0.12,
+        "source_density": 5.5,
         "source_velocity": [
           0.0,
-          0.35,
+          0.4,
           0.0
         ],
         "source2_enabled": true,
@@ -118,8 +118,8 @@
           0.82,
           0.55
         ],
-        "source2_radius": 0.11,
-        "source2_density": 3.0,
+        "source2_radius": 0.14,
+        "source2_density": 4.0,
         "source2_velocity": [
           0.06,
           -0.18,
@@ -161,7 +161,7 @@
         ]
       },
       "particle_emitter": {
-        "enabled": true,
+        "enabled": false,
         "looping": true,
         "world_space": true,
         "duration": 0.0,

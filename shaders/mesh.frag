@@ -280,7 +280,7 @@ vec4 raymarchFluidVolume() {
     }
 
     // Step count scales mildly with grid; keep realtime-friendly on software Vulkan.
-    const int kSteps = 48;
+    const int kSteps = 64;
     float span = max(tExit - tEnter, 1e-4);
     float dt = span / float(kSteps);
 

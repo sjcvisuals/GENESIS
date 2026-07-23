@@ -63,15 +63,15 @@ inline FluidVolume makeLavaLampFluidVolume() {
     // Bottom heater: warm wax rises as distinct blobs near the center column.
     f.source_enabled = true;
     f.source_uvw = {0.50f, 0.10f, 0.50f};
-    f.source_radius = 0.09f;
-    f.source_density = 4.2f;
-    f.source_velocity = {0.0f, 0.35f, 0.0f};
+    f.source_radius = 0.12f;
+    f.source_density = 5.5f;
+    f.source_velocity = {0.0f, 0.40f, 0.0f};
 
     // Top cooler: descending wax with a slight Z offset for 3D circulation.
     f.source2_enabled = true;
     f.source2_uvw = {0.40f, 0.82f, 0.55f};
-    f.source2_radius = 0.11f;
-    f.source2_density = 3.0f;
+    f.source2_radius = 0.14f;
+    f.source2_density = 4.0f;
     f.source2_velocity = {0.06f, -0.18f, -0.04f};
 
     f.animate_sources = true;
