@@ -234,14 +234,13 @@ void main() {
     float metallic = uPush.materialParams.x;
     float roughness = uPush.materialParams.y;
 
-    // Pre-tonemapped display textures (fluid volumes, unlit particles): skip PBR.
+    // Pre-tonemapped display textures (fluid volumes, unlit particles): skip PBR
+    // and skip a second display OETF — the source already encodes final RGB.
     if (alphaMode == 2 && metallic < 0.001 && roughness > 0.98) {
         if (alpha < 0.01) {
             discard;
         }
-        const float exposure = max(uFrame.cameraPos.w, 0.01);
-        vec3 color = applyDisplayTransform(albedo * exposure);
-        outColor = vec4(color, alpha);
+        outColor = vec4(clamp(albedo, 0.0, 1.0), alpha);
         return;
     }
 

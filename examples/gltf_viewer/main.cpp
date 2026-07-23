@@ -504,10 +504,14 @@ private:
             const genesis::NodeId id =
                 scene.createFluidVolumeNode("Lava Lamp", std::nullopt, genesis::makeLavaLampFluidVolume());
             if (genesis::Node* node = scene.find(id)) {
+                // Lift so the tall lamp sits above the grid and is easy to see.
                 node->local.position = glm::vec3(0.0f, 0.55f, 0.0f);
             }
             selectNode(id);
             markDirty();
+            // Ensure world matrices exist before framing (create does not refresh them).
+            runtime_.updateTransforms();
+            focusEditorCameraOnSelection();
         }
 
         ImGui::Spacing();
@@ -2098,7 +2102,7 @@ private:
         if (!any) return;
 
         const glm::vec3 target = (bounds_min + bounds_max) * 0.5f;
-        const float focus_distance = std::max(glm::length(bounds_max - bounds_min) * 1.75f, 1.5f);
+        const float focus_distance = std::max(glm::length(bounds_max - bounds_min) * 1.35f, 1.15f);
 
         glm::vec3 offset = editor_camera_.transform.position - target;
         if (glm::length(offset) < 0.25f) {

@@ -51,26 +51,28 @@ struct FluidVolume {
 inline FluidVolume makeLavaLampFluidVolume() {
     FluidVolume f{};
     f.grid_resolution = 192;
-    f.extent_meters = {0.55f, 1.1f};
-    f.velocity_dissipation = 0.990f;
-    f.density_dissipation = 0.994f;
+    f.extent_meters = {0.75f, 1.35f};
+    f.velocity_dissipation = 0.992f;
+    f.density_dissipation = 0.996f;
     f.pressure_iterations = 28;
+    f.vorticity_strength = 0.45f;
 
+    // Bottom heater: warm wax rises as distinct blobs.
     f.source_enabled = true;
-    f.source_uv = {0.5f, 0.12f};
-    f.source_radius = 0.11f;
-    f.source_density = 3.5f;
-    // UV-space velocity so dye rises through the lamp in ~2–3 seconds.
-    f.source_velocity = {0.0f, 0.28f};
+    f.source_uv = {0.50f, 0.10f};
+    f.source_radius = 0.10f;
+    f.source_density = 4.2f;
+    f.source_velocity = {0.0f, 0.35f};
 
+    // Top cooler: descending wax for circulation / merge-split.
     f.source2_enabled = true;
-    f.source2_uv = {0.42f, 0.78f};
-    f.source2_radius = 0.13f;
-    f.source2_density = 2.8f;
-    f.source2_velocity = {0.05f, -0.12f};
+    f.source2_uv = {0.40f, 0.82f};
+    f.source2_radius = 0.12f;
+    f.source2_density = 3.0f;
+    f.source2_velocity = {0.06f, -0.18f};
 
     f.animate_sources = true;
-    f.dye_color = {1.0f, 0.42f, 0.08f, 1.0f};
+    f.dye_color = {1.0f, 0.38f, 0.06f, 1.0f};
     f.drive_particles = true;
     return f;
 }

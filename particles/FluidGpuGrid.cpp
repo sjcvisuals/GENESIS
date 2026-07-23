@@ -46,8 +46,11 @@ struct SplatPush {
 
 struct PresentPush {
     std::int32_t grid_size[2];
+    // GLSL push constants align vec4 to 16 bytes after ivec2 — match that padding.
+    std::int32_t _pad_align_vec4[2]{};
     float dye_color[4];
 };
+static_assert(sizeof(PresentPush) == 32, "PresentPush must match fluid_present.comp push layout");
 
 std::uint32_t nextPowerOfTwo(std::uint32_t value) {
     if (value < 64) {
@@ -385,8 +388,8 @@ void FluidGpuGrid::simulate(VkCommandBuffer cmd, const FluidVolume& volume, cons
 
     sim_time_ += dt_seconds;
 
-    const auto applySource = [&](const bool enabled, glm::vec2 uv, glm::vec2 velocity, const float radius,
-                                 const float density, const float phase) {
+    const auto applySource = [&](const bool enabled, glm::vec2 uv, glm::vec2 velocity, float radius,
+                                 float density, const float phase) {
         if (!enabled) {
             return;
         }
@@ -395,6 +398,12 @@ void FluidGpuGrid::simulate(VkCommandBuffer cmd, const FluidVolume& volume, cons
             uv.y += 0.04f * std::sin(sim_time_ * 1.05f + phase * 1.7f);
             velocity.x += 0.08f * std::sin(sim_time_ * 0.58f + phase * 0.5f);
             velocity.y += 0.05f * std::cos(sim_time_ * 0.71f + phase);
+            // Burst the ink so dye forms discrete rising/falling blobs instead of a continuous plume.
+            const float pulse = 0.5f + 0.5f * std::sin(sim_time_ * 1.15f + phase * 1.3f);
+            const float gate = glm::smoothstep(0.42f, 0.78f, pulse);
+            density *= 0.15f + 0.85f * gate;
+            radius *= 0.75f + 0.35f * gate;
+            velocity.y *= 0.55f + 0.75f * gate;
         }
         uv.x = glm::clamp(uv.x, 0.05f, 0.95f);
         uv.y = glm::clamp(uv.y, 0.05f, 0.95f);
