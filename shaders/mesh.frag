@@ -222,8 +222,8 @@ vec3 applyDisplayTransform(vec3 linearColor) {
     return vec3(linearToRec709(c.r), linearToRec709(c.g), linearToRec709(c.b));
 }
 
-// Single atlas fetch (nearest Z). Avoids the 2× z-lerp tax on every ray step.
-float sampleDensityAtlas(vec3 uvw, int gridN, int tilesX) {
+// Fast nearest-Z atlas sample for empty-space probes.
+float sampleDensityAtlasFast(vec3 uvw, int gridN, int tilesX) {
     uvw = clamp(uvw, vec3(0.0), vec3(1.0));
     int z = int(uvw.z * float(gridN - 1) + 0.5);
     int tilesY = (gridN + tilesX - 1) / tilesX;
@@ -233,6 +233,28 @@ float sampleDensityAtlas(vec3 uvw, int gridN, int tilesX) {
     vec2 base = vec2(float(tx * gridN), float(ty * gridN));
     vec2 pixel = base + uvw.xy * float(gridN);
     return texture(materialTextures[nonuniformEXT(uPush.textureIndex)], (pixel + 0.5) / atlasSize).r * 4.0;
+}
+
+// Z-lerp only once density is found — keeps empty leaps cheap, softens slice seams.
+float sampleDensityAtlas(vec3 uvw, int gridN, int tilesX) {
+    uvw = clamp(uvw, vec3(0.0), vec3(1.0));
+    float zf = uvw.z * float(gridN - 1);
+    int z0 = int(floor(zf));
+    int z1 = min(z0 + 1, gridN - 1);
+    float fz = fract(zf);
+    int tilesY = (gridN + tilesX - 1) / tilesX;
+    vec2 atlasSize = vec2(float(tilesX * gridN), float(tilesY * gridN));
+    vec2 xy = uvw.xy * float(gridN);
+
+    int tx0 = z0 % tilesX;
+    int ty0 = z0 / tilesX;
+    int tx1 = z1 % tilesX;
+    int ty1 = z1 / tilesX;
+    float d0 = texture(materialTextures[nonuniformEXT(uPush.textureIndex)],
+                       (vec2(float(tx0 * gridN), float(ty0 * gridN)) + xy + 0.5) / atlasSize).r;
+    float d1 = texture(materialTextures[nonuniformEXT(uPush.textureIndex)],
+                       (vec2(float(tx1 * gridN), float(ty1 * gridN)) + xy + 0.5) / atlasSize).r;
+    return mix(d0, d1, fz) * 4.0;
 }
 
 bool intersectAabb(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax, out float t0, out float t1) {
@@ -291,14 +313,15 @@ vec4 raymarchFluidVolume() {
     while (t < tExit && i < steps * 2 && alpha < 0.96) {
         ++i;
         vec3 uvw = (ro + rd * t) + vec3(0.5);
-        float density = sampleDensityAtlas(uvw, gridN, tilesX);
+        float density = sampleDensityAtlasFast(uvw, gridN, tilesX);
         if (density < 0.03) {
             t += stride;
             stride = min(stride * 1.15, dt * 3.0);
             continue;
         }
-        // Found matter — refine with smaller steps.
+        // Found matter — refine with smaller steps and soft Z sampling.
         stride = dt;
+        density = sampleDensityAtlas(uvw, gridN, tilesX);
 
         float glow = clamp(density, 0.0, 4.0);
         float heat = smoothstep(0.25, 1.5, glow);
