@@ -161,7 +161,7 @@
         ]
       },
       "particle_emitter": {
-        "enabled": false,
+        "enabled": true,
         "looping": true,
         "world_space": true,
         "duration": 0.0,
