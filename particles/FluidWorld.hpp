@@ -34,9 +34,14 @@ public:
     glm::vec3 sampleFluidVelocity(const Scene& scene, NodeId fluid_node, const glm::vec3& world_pos) const;
 
 private:
+    void rebuildDrawItems(Scene& scene);
+
     const VulkanContext& context_;
     std::unordered_map<NodeId, std::unique_ptr<FluidGpuGrid>> grids_;
     std::vector<FluidDrawItem> draw_items_;
+    // Cap simulation to ~30 Hz — lava blobs don't need a full solve every display frame.
+    double sim_accumulator_ = 0.0;
+    bool has_simulated_once_ = false;
 };
 
 } // namespace genesis

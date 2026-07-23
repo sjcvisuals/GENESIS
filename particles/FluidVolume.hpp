@@ -10,11 +10,15 @@ namespace genesis {
 // GPU stable-fluids volume authored on a scene node.
 // Simulation is a 3D grid filling local UVW [0,1]^3, mapped to extent_meters
 // (width × height × depth). Rendering raymarches the density field inside the box.
+//
+// Design goal: stay lightweight. Prefer lower grids + fewer pressure passes +
+// cheap raymarch over cinematic quality knobs that tank realtime budgets.
 struct FluidVolume {
     bool enabled = true;
 
-    // Cubic simulation resolution (power-of-two, clamped 32–96). Higher = sharper, more GPU cost.
-    std::uint32_t grid_resolution = 64;
+    // Cubic simulation resolution (multiple of 4, clamped 24–64). Default is tuned
+    // for realtime; raise only when you need sharper blobs.
+    std::uint32_t grid_resolution = 40;
 
     // World-space extent of the fluid domain (meters): X=width, Y=height, Z=depth.
     glm::vec3 extent_meters{2.0f, 2.0f, 2.0f};
@@ -46,18 +50,19 @@ struct FluidVolume {
     // When true, child/neighbor particle emitters inherit velocity from this field.
     bool drive_particles = true;
 
-    std::uint32_t pressure_iterations = 16;
+    // Jacobi projection passes. 6–8 is enough for lamp blobs; higher is costly.
+    std::uint32_t pressure_iterations = 8;
 };
 
 // Tall cube volume with two animated blobs — default for new fluid volumes.
 inline FluidVolume makeLavaLampFluidVolume() {
     FluidVolume f{};
-    f.grid_resolution = 64;
+    f.grid_resolution = 40;
     // Tall rectangular prism (lamp body) — equal width/depth so orbiting reads as a 3D volume.
     f.extent_meters = {0.70f, 1.45f, 0.70f};
     f.velocity_dissipation = 0.992f;
     f.density_dissipation = 0.996f;
-    f.pressure_iterations = 16;
+    f.pressure_iterations = 8;
     f.vorticity_strength = 0.45f;
 
     // Bottom heater: warm wax rises as distinct blobs near the center column.

@@ -222,29 +222,17 @@ vec3 applyDisplayTransform(vec3 linearColor) {
     return vec3(linearToRec709(c.r), linearToRec709(c.g), linearToRec709(c.b));
 }
 
-vec2 sampleDensitySlice(vec3 uvw, int z, int gridN, int tilesX) {
+// Single atlas fetch (nearest Z). Avoids the 2× z-lerp tax on every ray step.
+float sampleDensityAtlas(vec3 uvw, int gridN, int tilesX) {
+    uvw = clamp(uvw, vec3(0.0), vec3(1.0));
+    int z = int(uvw.z * float(gridN - 1) + 0.5);
     int tilesY = (gridN + tilesX - 1) / tilesX;
     vec2 atlasSize = vec2(float(tilesX * gridN), float(tilesY * gridN));
     int tx = z % tilesX;
     int ty = z / tilesX;
     vec2 base = vec2(float(tx * gridN), float(ty * gridN));
     vec2 pixel = base + uvw.xy * float(gridN);
-    return texture(materialTextures[nonuniformEXT(uPush.textureIndex)], (pixel + 0.5) / atlasSize).ra;
-}
-
-float sampleDensityAtlas(vec3 uvw, int gridN, int tilesX) {
-    uvw = clamp(uvw, vec3(0.0), vec3(1.0));
-    float zf = uvw.z * float(gridN - 1);
-    int z0 = int(floor(zf));
-    int z1 = min(z0 + 1, gridN - 1);
-    float fz = fract(zf);
-
-    vec2 s0 = sampleDensitySlice(uvw, z0, gridN, tilesX);
-    vec2 s1 = sampleDensitySlice(uvw, z1, gridN, tilesX);
-    // R stores density/4 for volume sampling.
-    float d0 = s0.x * 4.0;
-    float d1 = s1.x * 4.0;
-    return mix(d0, d1, fz);
+    return texture(materialTextures[nonuniformEXT(uPush.textureIndex)], (pixel + 0.5) / atlasSize).r * 4.0;
 }
 
 bool intersectAabb(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax, out float t0, out float t1) {
@@ -288,41 +276,39 @@ vec4 raymarchFluidVolume() {
         return vec4(0.0);
     }
 
-    // Step count scales mildly with grid; keep realtime-friendly on software Vulkan.
-    const int kSteps = 64;
+    // Budget steps by path length — never a fixed 64. Early-out on empty / opaque.
     float span = max(tExit - tEnter, 1e-4);
-    float dt = span / float(kSteps);
+    int steps = int(clamp(span * 40.0, 16.0, 32.0));
+    float dt = span / float(steps);
 
     vec3 dye = uPush.baseColor.rgb;
     vec3 rgb = vec3(0.0);
     float alpha = 0.0;
-
-    for (int i = 0; i < kSteps; ++i) {
-        float t = tEnter + (float(i) + 0.5) * dt;
-        if (t > tExit) {
-            break;
-        }
-        vec3 local = ro + rd * t;
-        vec3 uvw = local + vec3(0.5);
+    // Empty-space leap: take larger strides until density appears.
+    float stride = dt * 2.0;
+    float t = tEnter + 0.5 * dt;
+    int i = 0;
+    while (t < tExit && i < steps * 2 && alpha < 0.96) {
+        ++i;
+        vec3 uvw = (ro + rd * t) + vec3(0.5);
         float density = sampleDensityAtlas(uvw, gridN, tilesX);
-        if (density < 0.02) {
+        if (density < 0.03) {
+            t += stride;
+            stride = min(stride * 1.15, dt * 3.0);
             continue;
         }
+        // Found matter — refine with smaller steps.
+        stride = dt;
 
-        float glow = clamp(density, 0.0, 5.0);
-        float core = smoothstep(0.35, 1.8, glow);
-        float rim = smoothstep(0.08, 0.55, glow);
-        vec3 hot = mix(dye, vec3(1.0, 0.85, 0.35), core * 0.55);
-        vec3 sampleRgb = hot * (rim * 0.55 + core * 1.35 + pow(glow, 1.35) * 0.35);
-        float sampleA = clamp((rim * 0.45 + core * 0.85) * max(uPush.baseColor.a, 1.0), 0.0, 1.0);
-        // Optical depth along the ray — denser regions occlude what is behind.
-        float absorb = 1.0 - exp(-density * dt * 6.5);
-        float a = clamp(sampleA * absorb, 0.0, 1.0);
+        float glow = clamp(density, 0.0, 4.0);
+        float heat = smoothstep(0.25, 1.5, glow);
+        vec3 hot = mix(dye, vec3(1.0, 0.82, 0.32), heat * 0.55);
+        vec3 sampleRgb = hot * (0.55 + glow * 0.95);
+        float absorb = 1.0 - exp(-density * dt * 5.5);
+        float a = clamp(absorb * (0.35 + heat * 0.75), 0.0, 1.0);
         rgb += (1.0 - alpha) * a * sampleRgb;
         alpha += (1.0 - alpha) * a;
-        if (alpha > 0.97) {
-            break;
-        }
+        t += stride;
     }
 
     return vec4(rgb, alpha);

@@ -61,19 +61,14 @@ struct PresentPush {
 };
 static_assert(sizeof(PresentPush) == 32, "PresentPush must match fluid_present.comp");
 
-std::uint32_t nextPowerOfTwoClamped(std::uint32_t value) {
-    if (value < 32) {
-        return 32;
-    }
-    value--;
-    value |= value >> 1;
-    value |= value >> 2;
-    value |= value >> 4;
-    value |= value >> 8;
-    value |= value >> 16;
-    value++;
-    // Keep 3D grids modest — N³ grows fast (especially on software Vulkan).
-    return std::min(value, 96u);
+// Snap to the 4³ compute workgroup size. Prefer multiples of 4 over power-of-two
+// so authors can pick 40/48 without jumping straight to 64³.
+std::uint32_t snapFluidGridResolution(std::uint32_t value) {
+    constexpr std::uint32_t kMin = 24;
+    constexpr std::uint32_t kMax = 64; // realtime budget; N³ grows fast
+    value = std::max(value, kMin);
+    value = std::min(value, kMax);
+    return (value + 3u) & ~3u;
 }
 
 std::uint32_t atlasTilesX(std::uint32_t grid) {
@@ -254,7 +249,7 @@ void FluidGpuGrid::createPipelines() {
 }
 
 void FluidGpuGrid::ensureResolution(const std::uint32_t resolution) {
-    const std::uint32_t size = nextPowerOfTwoClamped(resolution);
+    const std::uint32_t size = snapFluidGridResolution(resolution);
     if (size == grid_size_ && display_texture_) {
         return;
     }
@@ -478,7 +473,8 @@ void FluidGpuGrid::simulate(VkCommandBuffer cmd, const FluidVolume& volume, cons
 
     JacobiPush jacobi{};
     fillGrid(jacobi.grid_size);
-    const std::uint32_t iterations = std::max(volume.pressure_iterations, 4u);
+    // Cap projection work — more iterations are rarely worth the N³ cost for lamp blobs.
+    const std::uint32_t iterations = std::clamp(volume.pressure_iterations, 4u, 16u);
     for (std::uint32_t i = 0; i < iterations; ++i) {
         bindSimDescriptors();
         dispatchPass3D(cmd, *jacobi_pipeline_, grid_size_, &jacobi, sizeof(jacobi));

@@ -1,16 +1,25 @@
 #include "particles/FluidWorld.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <glm/gtc/matrix_transform.hpp>
 #include <volk.h>
 
 namespace genesis {
 
+namespace {
+constexpr double kFluidSimHz = 30.0;
+constexpr double kFluidSimStep = 1.0 / kFluidSimHz;
+constexpr float kFluidMaxStepSeconds = 1.0f / 20.0f; // avoid huge catch-up steps
+} // namespace
+
 FluidWorld::FluidWorld(const VulkanContext& context) : context_(context) {}
 
 void FluidWorld::clear() {
     grids_.clear();
     draw_items_.clear();
+    sim_accumulator_ = 0.0;
+    has_simulated_once_ = false;
 }
 
 void FluidWorld::sync(Scene& scene) {
@@ -31,31 +40,61 @@ void FluidWorld::sync(Scene& scene) {
     grids_ = std::move(next);
 }
 
-void FluidWorld::simulate(VkCommandBuffer cmd, Scene& scene, const float dt_seconds) {
-    sync(scene);
+void FluidWorld::rebuildDrawItems(Scene& scene) {
     draw_items_.clear();
-
     for (Node& node : scene.nodes) {
         if (!node.visible || !node.particle_fluid.has_value()) {
             continue;
         }
         const FluidVolume& volume = *node.particle_fluid;
         auto it = grids_.find(node.id);
-        if (it == grids_.end()) {
+        if (it == grids_.end() || !volume.enabled) {
             continue;
         }
-        it->second->simulate(cmd, volume, dt_seconds);
-
+        // Ensure display target exists even on skipped sim frames.
+        it->second->ensureResolution(volume.grid_resolution);
         FluidDrawItem item{};
         item.node_id = node.id;
         item.display_texture = &it->second->displayTexture();
         item.grid_resolution = it->second->stats().grid_resolution;
         item.atlas_tiles_x = it->second->stats().atlas_tiles_x;
-        // Unit box [-0.5,0.5]^3 scaled by extent — sim domain fills this AABB.
         item.model = node.world * glm::scale(glm::mat4(1.0f), volume.extent_meters);
         item.dye_color = volume.dye_color;
         draw_items_.push_back(item);
     }
+}
+
+void FluidWorld::simulate(VkCommandBuffer cmd, Scene& scene, const float dt_seconds) {
+    sync(scene);
+
+    sim_accumulator_ += static_cast<double>(std::max(dt_seconds, 0.0f));
+    const bool need_bootstrap = !has_simulated_once_;
+    const bool due = sim_accumulator_ >= kFluidSimStep || need_bootstrap;
+    if (due) {
+        float step = static_cast<float>(std::min(sim_accumulator_, static_cast<double>(kFluidMaxStepSeconds)));
+        if (need_bootstrap) {
+            step = std::max(step, static_cast<float>(kFluidSimStep));
+        }
+        sim_accumulator_ = std::max(0.0, sim_accumulator_ - static_cast<double>(step));
+        // Keep at most one pending step so hitch recovery doesn't stack solves.
+        if (sim_accumulator_ > kFluidSimStep) {
+            sim_accumulator_ = kFluidSimStep;
+        }
+
+        for (Node& node : scene.nodes) {
+            if (!node.visible || !node.particle_fluid.has_value()) {
+                continue;
+            }
+            auto it = grids_.find(node.id);
+            if (it == grids_.end()) {
+                continue;
+            }
+            it->second->simulate(cmd, *node.particle_fluid, step);
+        }
+        has_simulated_once_ = true;
+    }
+
+    rebuildDrawItems(scene);
 }
 
 glm::vec3 FluidWorld::sampleFluidVelocity(const Scene& scene, const NodeId fluid_node,

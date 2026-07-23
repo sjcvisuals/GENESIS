@@ -1,6 +1,7 @@
 #version 450
 
-// Pack the 3D density field into a 2D Z-slice atlas for volumetric raymarching in mesh.frag.
+// Pack the 3D density field into a 2D Z-slice atlas for volumetric raymarching.
+// Density-only — coloring happens in the raymarcher so this pass stays cheap.
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(set = 0, binding = 2, r16f) uniform readonly image3D uDensity;
@@ -9,7 +10,7 @@ layout(set = 0, binding = 7, rgba8) uniform writeonly image2D uDisplay;
 layout(push_constant) uniform Push {
     ivec3 gridSize;
     int tilesX;
-    vec4 dyeColor;
+    vec4 dyeColor; // unused in the hot path; kept for push-constant layout stability
 } pc;
 
 void main() {
@@ -33,19 +34,6 @@ void main() {
     int y = pixel.y - tileY * pc.gridSize.y;
     float density = max(imageLoad(uDensity, ivec3(x, y, z)).x, 0.0);
 
-    // Store linear density in R (raymarch samples this) and a warm preview in GBA.
-    float glow = clamp(density, 0.0, 5.0);
-    float core = smoothstep(0.35, 1.8, glow);
-    float rim = smoothstep(0.08, 0.55, glow);
-    vec3 warm = pc.dyeColor.rgb;
-    vec3 hot = mix(warm, vec3(1.0, 0.85, 0.35), core * 0.55);
-    vec3 rgb = hot * (rim * 0.55 + core * 1.35 + pow(glow, 1.35) * 0.35);
-    float alpha = clamp((rim * 0.45 + core * 0.85) * max(pc.dyeColor.a, 1.0), 0.0, 1.0);
-    if (alpha < 0.02) {
-        rgb = vec3(0.0);
-        alpha = 0.0;
-    }
-
-    // R = density/4 for volume sampling, GBA = warm preview.
-    imageStore(uDisplay, pixel, vec4(clamp(density * 0.25, 0.0, 1.0), rgb.g, rgb.b, alpha));
+    // R = density/4 for volume sampling (matches mesh.frag unpack).
+    imageStore(uDisplay, pixel, vec4(clamp(density * 0.25, 0.0, 1.0), 0.0, 0.0, 0.0));
 }

@@ -89,7 +89,7 @@
       },
       "particle_fluid": {
         "enabled": true,
-        "grid_resolution": 64,
+        "grid_resolution": 40,
         "extent_meters": [
           0.70,
           1.45,
@@ -133,7 +133,7 @@
           1.0
         ],
         "drive_particles": true,
-        "pressure_iterations": 16
+        "pressure_iterations": 8
       }
     },
     {

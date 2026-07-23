@@ -1139,17 +1139,17 @@ private:
         }
         ImGui::Separator();
         ImGui::TextDisabled("GPU Fluid");
-        ImGui::TextDisabled("3D volumetric sim inside the box bounds.");
+        ImGui::TextDisabled("3D volumetric sim — kept light for realtime.");
         genesis::FluidVolume& f = *n.particle_fluid;
         bool dirty = false;
         dirty |= ImGui::Checkbox("Enabled", &f.enabled);
         int grid = static_cast<int>(f.grid_resolution);
-        if (ImGui::SliderInt("Grid resolution", &grid, 32, 96)) {
+        if (ImGui::SliderInt("Grid resolution", &grid, 24, 64)) {
             f.grid_resolution = static_cast<std::uint32_t>(grid);
             dirty = true;
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Cubic N³ grid filling the volume. Higher is sharper but much heavier.");
+            ImGui::SetTooltip("Cubic N³ voxels. 40 is the realtime default; 64 is the soft ceiling.");
         }
         dirty |= ImGui::DragFloat3("Extent (m)", &f.extent_meters.x, 0.05f, 0.1f, 32.0f);
         if (ImGui::IsItemHovered()) {
@@ -1158,9 +1158,12 @@ private:
         dirty |= ImGui::DragFloat("Velocity dissipation", &f.velocity_dissipation, 0.001f, 0.9f, 1.0f);
         dirty |= ImGui::DragFloat("Density dissipation", &f.density_dissipation, 0.001f, 0.9f, 1.0f);
         int pressure = static_cast<int>(f.pressure_iterations);
-        if (ImGui::SliderInt("Pressure iterations", &pressure, 4, 64)) {
+        if (ImGui::SliderInt("Pressure iterations", &pressure, 4, 16)) {
             f.pressure_iterations = static_cast<std::uint32_t>(pressure);
             dirty = true;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Jacobi projection passes. 8 is usually enough; each pass is a full N³ dispatch.");
         }
         dirty |= ImGui::Checkbox("Drive particles", &f.drive_particles);
         ImGui::Separator();
