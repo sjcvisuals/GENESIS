@@ -23,7 +23,6 @@ class BindlessTextures;
 class DisplayLutBinding;
 class MeshBatchDrawer;
 class GpuTexture;
-class SceneRuntime;
 struct Mesh;
 struct ColorLut3D;
 
@@ -48,7 +47,8 @@ public:
     void resize(std::uint32_t width, std::uint32_t height);
 
     void beginFrame();
-    void simulateFluids(SceneRuntime& runtime, float dt_seconds);
+    bool canDispatchCompute() const { return !render_pass_active_; }
+    VkCommandBuffer currentCommandBuffer() const { return command_buffers_[current_frame_]; }
     void drawMesh(const Mesh& mesh, const MeshDrawPushConstants& draw_constants,
                   const GpuTexture* base_color_texture = nullptr);
     void drawMeshBatches(const std::vector<SceneMeshBatch>& batches,

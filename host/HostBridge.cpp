@@ -268,7 +268,9 @@ void HostBridge::renderScene() {
     const float fluid_dt = current_frame_time_.delta_time_seconds > 0.0
                                ? static_cast<float>(current_frame_time_.delta_time_seconds)
                                : 0.0f;
-    renderer_->simulateFluids(*scene_, fluid_dt);
+    if (renderer_->canDispatchCompute()) {
+        scene_->simulateFluids(renderer_->currentCommandBuffer(), fluid_dt);
+    }
 
     SceneRenderStats render_stats{};
     SceneDrawCollectParams collect_params{};

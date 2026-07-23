@@ -1,7 +1,5 @@
 #include "renderer/Renderer.hpp"
 
-#include "scene/SceneRuntime.hpp"
-
 #include "renderer/FrameUniforms.hpp"
 #include "renderer/GridDrawPushConstants.hpp"
 #include "renderer/MeshInstance.hpp"
@@ -603,13 +601,6 @@ void Renderer::drawMesh(const Mesh& mesh, const MeshDrawPushConstants& draw_cons
     fillGpuMeshInstance(instance, model, mesh.local_aabb_min, mesh.local_aabb_max);
     batch.instances.push_back(instance);
     drawMeshBatches({batch});
-}
-
-void Renderer::simulateFluids(SceneRuntime& runtime, const float dt_seconds) {
-    if (render_pass_active_) {
-        return;
-    }
-    runtime.simulateFluids(command_buffers_[current_frame_], dt_seconds);
 }
 
 void Renderer::drawMeshBatches(const std::vector<SceneMeshBatch>& batches, const MeshDrawOptions& options) {

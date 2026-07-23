@@ -10,13 +10,15 @@ namespace genesis {
 namespace {
 
 VkSemaphore createExportableSemaphore(VkDevice device) {
+    VkSemaphoreCreateInfo create_info{};
+    create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+#ifdef _WIN32
     VkExportSemaphoreCreateInfo export_info{};
     export_info.sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO;
     export_info.handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR;
-
-    VkSemaphoreCreateInfo create_info{};
-    create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
     create_info.pNext = &export_info;
+#endif
 
     VkSemaphore semaphore = VK_NULL_HANDLE;
     if (vkCreateSemaphore(device, &create_info, nullptr, &semaphore) != VK_SUCCESS) {

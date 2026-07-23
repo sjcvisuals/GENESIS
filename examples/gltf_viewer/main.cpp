@@ -196,7 +196,9 @@ protected:
 
     void onDraw() override {
         runtime_.updateTransforms();
-        renderer().simulateFluids(runtime_, last_frame_dt_);
+        if (renderer().canDispatchCompute()) {
+            runtime_.simulateFluids(renderer().currentCommandBuffer(), last_frame_dt_);
+        }
 
         if (show_viewport_ && viewport_.w > 1.0f && viewport_.h > 1.0f) {
             renderer().setViewportDrawRegion(viewport_.x, viewport_.y, viewport_.w, viewport_.h);

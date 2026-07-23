@@ -56,18 +56,18 @@ VkDeviceMemory allocateExportableImageMemory(VkDevice device, VkPhysicalDevice p
         throw std::runtime_error("Failed to find device-local memory type for external image");
     }
 
+    VkMemoryAllocateInfo alloc_info{};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = mem_reqs.memoryRequirements.size;
+    alloc_info.memoryTypeIndex = type_index;
+
+#ifdef _WIN32
     VkExportMemoryAllocateInfo export_info{};
     export_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
     export_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR;
 
-    VkMemoryAllocateInfo alloc_info{};
-    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    alloc_info.pNext = &export_info;
-    alloc_info.allocationSize = mem_reqs.memoryRequirements.size;
-    alloc_info.memoryTypeIndex = type_index;
-
+    VkMemoryDedicatedAllocateInfo dedicated_info{};
     if (dedicated_reqs.requiresDedicatedAllocation) {
-        VkMemoryDedicatedAllocateInfo dedicated_info{};
         dedicated_info.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
         dedicated_info.image = image;
         dedicated_info.pNext = &export_info;
@@ -77,6 +77,10 @@ VkDeviceMemory allocateExportableImageMemory(VkDevice device, VkPhysicalDevice p
         alloc_info.pNext = &export_info;
         out_export.dedicated = false;
     }
+#else
+    (void)dedicated_reqs;
+    out_export.dedicated = false;
+#endif
 
     VkDeviceMemory memory = VK_NULL_HANDLE;
     if (vkAllocateMemory(device, &alloc_info, nullptr, &memory) != VK_SUCCESS) {
@@ -188,13 +192,8 @@ void ExternalRenderTarget::recreate(std::uint32_t width, std::uint32_t height) {
 }
 
 void ExternalRenderTarget::createImages() {
-    VkExternalMemoryImageCreateInfo external_info{};
-    external_info.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
-    external_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR;
-
     VkImageCreateInfo color_info{};
     color_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    color_info.pNext = &external_info;
     color_info.imageType = VK_IMAGE_TYPE_2D;
     color_info.format = color_format_;
     color_info.extent = {extent_.width, extent_.height, 1};
@@ -204,6 +203,13 @@ void ExternalRenderTarget::createImages() {
     color_info.tiling = VK_IMAGE_TILING_OPTIMAL;
     color_info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     color_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+#ifdef _WIN32
+    VkExternalMemoryImageCreateInfo external_info{};
+    external_info.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+    external_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR;
+    color_info.pNext = &external_info;
+#endif
 
     if (vkCreateImage(context_.device(), &color_info, nullptr, &color_image_) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create external color image");

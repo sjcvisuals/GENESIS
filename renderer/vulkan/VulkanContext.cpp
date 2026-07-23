@@ -273,6 +273,8 @@ void VulkanContext::createLogicalDevice(const VulkanContextConfig& config) {
     }
 
     if (headless_) {
+#ifdef _WIN32
+        // PIXERA shared-texture path: exportable Win32 handles for color + sync.
         device_extensions_ = {
             VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
             VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
@@ -280,6 +282,10 @@ void VulkanContext::createLogicalDevice(const VulkanContextConfig& config) {
             VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME,
             VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME,
         };
+#else
+        // Linux offscreen path renders locally; no host texture export required.
+        device_extensions_ = {};
+#endif
     } else {
         device_extensions_ = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
     }
