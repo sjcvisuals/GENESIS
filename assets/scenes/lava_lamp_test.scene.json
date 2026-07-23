@@ -91,8 +91,9 @@
         "enabled": true,
         "grid_resolution": 192,
         "extent_meters": [
-          0.75,
-          1.35
+          0.70,
+          1.45,
+          0.70
         ],
         "viscosity": 0.0002,
         "vorticity_strength": 0.45,
@@ -129,6 +130,60 @@
         ],
         "drive_particles": true,
         "pressure_iterations": 28
+      }
+    },
+    {
+      "path": "Scene/Lava Lamp/Particle Emitter",
+      "name": "Particle Emitter",
+      "parent": "Scene/Lava Lamp",
+      "visible": true,
+      "pickable": true,
+      "transform": {
+        "position": [
+          0.0,
+          -0.55,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "particle_emitter": {
+        "enabled": true,
+        "looping": true,
+        "world_space": true,
+        "duration_seconds": 0.0,
+        "start_delay_seconds": 0.0,
+        "rate_per_second": 28.0,
+        "burst_count": 24,
+        "max_particles": 512,
+        "lifetime_min": 1.5,
+        "lifetime_max": 3.0,
+        "speed_min": 0.15,
+        "speed_max": 0.45,
+        "size_min": 0.04,
+        "size_max": 0.08,
+        "size_end_multiplier": 0.25,
+        "color_start": [1.0, 0.55, 0.15, 1.0],
+        "color_end": [1.0, 0.15, 0.02, 0.0],
+        "gravity": [0.0, -0.35, 0.0],
+        "drag": 0.2,
+        "spawn_shape": "cone",
+        "spawn_radius": 0.08,
+        "spawn_box_height": 0.1,
+        "cone_angle_degrees": 25.0,
+        "render_mesh": "cube",
+        "unlit": true,
+        "seed_override": 0,
+        "fluid_coupled": true
       }
     }
   ],

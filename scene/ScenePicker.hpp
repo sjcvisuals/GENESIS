@@ -89,9 +89,9 @@ inline bool nodeWorldPickAabb(const Node& node, const Mesh* mesh, const ScenePic
     }
 
     if (node.particle_fluid.has_value()) {
-        const glm::vec2 extent = node.particle_fluid->extent_meters;
-        const glm::vec3 local_min(-0.5f * extent.x, -0.5f * extent.y, -0.05f);
-        const glm::vec3 local_max(0.5f * extent.x, 0.5f * extent.y, 0.05f);
+        const glm::vec3 extent = node.particle_fluid->extent_meters;
+        const glm::vec3 local_min(-0.5f * extent.x, -0.5f * extent.y, -0.5f * extent.z);
+        const glm::vec3 local_max(0.5f * extent.x, 0.5f * extent.y, 0.5f * extent.z);
         worldAabbCorners(node.world, local_min, local_max, out_min, out_max);
         expandThinWorldAabb(out_min, out_max, params.min_thin_extent_m, params.bounds_slack_m);
         return true;

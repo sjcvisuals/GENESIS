@@ -48,7 +48,7 @@ void SceneRuntime::clear() {
     particle_step_accumulator_ = 0.0;
     particle_cube_mesh_id_.reset();
     particle_sphere_mesh_id_.reset();
-    fluid_quad_mesh_id_.reset();
+    fluid_box_mesh_id_.reset();
     fluid_display_material_id_.reset();
 }
 
@@ -304,8 +304,8 @@ void SceneRuntime::simulateFluids(VkCommandBuffer cmd, const float dt_seconds) {
 }
 
 void SceneRuntime::appendFluidDrawCommands(std::vector<SceneDrawCommand>& out) {
-    if (!fluid_quad_mesh_id_.has_value()) {
-        fluid_quad_mesh_id_ = addMesh("FluidQuad", createFluidDisplayQuadMesh(context_));
+    if (!fluid_box_mesh_id_.has_value()) {
+        fluid_box_mesh_id_ = addMesh("FluidBox", createFluidDisplayBoxMesh(context_));
     }
     if (!fluid_display_material_id_.has_value()) {
         SceneMaterial mat{};
@@ -318,7 +318,7 @@ void SceneRuntime::appendFluidDrawCommands(std::vector<SceneDrawCommand>& out) {
         fluid_display_material_id_ = addMaterial("FluidDisplay", mat);
     }
 
-    const Mesh* mesh = this->mesh(*fluid_quad_mesh_id_);
+    const Mesh* mesh = this->mesh(*fluid_box_mesh_id_);
     if (!mesh) {
         return;
     }

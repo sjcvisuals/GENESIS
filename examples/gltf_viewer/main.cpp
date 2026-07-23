@@ -497,7 +497,24 @@ private:
         if (ImGui::Button("Particles", ImVec2(128, 0))) {
             genesis::ParticleEmitter emitter = genesis::makeDefaultParticleEmitter();
             emitter.burst_count = 24;
-            selectNode(scene.createParticleEmitterNode("Particle Emitter", std::nullopt, emitter));
+            // If a fluid volume is selected, parent under it and enable coupling so
+            // particles ride the lava-lamp velocity field by default.
+            std::optional<genesis::NodeId> parent;
+            if (selection_.size() == 1) {
+                if (const genesis::Node* sel = scene.find(selection_.front())) {
+                    if (sel->particle_fluid.has_value()) {
+                        parent = sel->id;
+                        emitter.fluid_coupled = true;
+                        emitter.world_space = true;
+                        emitter.gravity = glm::vec3(0.0f, -0.35f, 0.0f);
+                        emitter.rate_per_second = 28.0f;
+                        emitter.lifetime_min = 1.5f;
+                        emitter.lifetime_max = 3.0f;
+                        emitter.spawn_radius = 0.08f;
+                    }
+                }
+            }
+            selectNode(scene.createParticleEmitterNode("Particle Emitter", parent, emitter));
             markDirty();
         }
         if (ImGui::Button("Fluid Volume", ImVec2(128, 0))) {
@@ -1070,7 +1087,10 @@ private:
             f.grid_resolution = static_cast<std::uint32_t>(grid);
             dirty = true;
         }
-        dirty |= ImGui::DragFloat2("Extent (m)", &f.extent_meters.x, 0.05f, 0.1f, 32.0f);
+        dirty |= ImGui::DragFloat3("Extent (m)", &f.extent_meters.x, 0.05f, 0.1f, 32.0f);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Width × Height × Depth of the 3D fluid volume (meters).");
+        }
         dirty |= ImGui::DragFloat("Velocity dissipation", &f.velocity_dissipation, 0.001f, 0.9f, 1.0f);
         dirty |= ImGui::DragFloat("Density dissipation", &f.density_dissipation, 0.001f, 0.9f, 1.0f);
         int pressure = static_cast<int>(f.pressure_iterations);

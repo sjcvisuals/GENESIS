@@ -492,7 +492,8 @@ void FluidGpuGrid::simulate(VkCommandBuffer cmd, const FluidVolume& volume, cons
 }
 
 void FluidGpuGrid::readbackVelocityField() {
-    // Downsampled CPU cache for particle coupling (every 4th texel).
+    // GPU→CPU velocity readback is not wired yet. Keep the buffer allocated so the
+    // coupling path can fall back to a synthetic circulation field below.
     (void)velocity_readback_;
 }
 
@@ -500,18 +501,31 @@ glm::vec2 FluidGpuGrid::sampleVelocityUv(const float u, const float v) const {
     if (grid_size_ == 0) {
         return glm::vec2(0.0f);
     }
-    const float x = glm::clamp(u, 0.0f, 1.0f) * static_cast<float>(grid_size_ - 1);
-    const float y = glm::clamp(v, 0.0f, 1.0f) * static_cast<float>(grid_size_ - 1);
-    const std::size_t ix = static_cast<std::size_t>(x);
-    const std::size_t iy = static_cast<std::size_t>(y);
-    if (velocity_readback_.empty()) {
-        return glm::vec2(0.0f, (0.5f - u) * 2.0f);
+
+    // Prefer real readback when any non-zero sample exists; otherwise approximate
+    // lava-lamp circulation so particle coupling still feels intuitive.
+    if (!velocity_readback_.empty()) {
+        const float x = glm::clamp(u, 0.0f, 1.0f) * static_cast<float>(grid_size_ - 1);
+        const float y = glm::clamp(v, 0.0f, 1.0f) * static_cast<float>(grid_size_ - 1);
+        const std::size_t ix = static_cast<std::size_t>(x);
+        const std::size_t iy = static_cast<std::size_t>(y);
+        const std::size_t idx = (iy * grid_size_ + ix) * 2;
+        if (idx + 1 < velocity_readback_.size()) {
+            const glm::vec2 sampled(velocity_readback_[idx], velocity_readback_[idx + 1]);
+            if (sampled.x != 0.0f || sampled.y != 0.0f) {
+                return sampled;
+            }
+        }
     }
-    const std::size_t idx = (iy * grid_size_ + ix) * 2;
-    if (idx + 1 >= velocity_readback_.size()) {
-        return glm::vec2(0.0f);
-    }
-    return glm::vec2(velocity_readback_[idx], velocity_readback_[idx + 1]);
+
+    // Synthetic UV-space field: rising plume in the center, descending return flow
+    // near the sides (matches the default dual-source lava lamp).
+    const float dx = u - 0.5f;
+    const float plume = (1.0f - std::min(1.0f, std::abs(dx) * 3.0f)) * 0.55f;
+    const float return_flow = (std::abs(dx) > 0.22f) ? -0.28f : 0.0f;
+    const float vertical = plume + return_flow + (0.5f - v) * 0.08f;
+    const float horizontal = -dx * 0.45f;
+    return glm::vec2(horizontal, vertical);
 }
 
 } // namespace genesis

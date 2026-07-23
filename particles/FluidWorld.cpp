@@ -1,5 +1,6 @@
 #include "particles/FluidWorld.hpp"
 
+#include <cmath>
 #include <glm/gtc/matrix_transform.hpp>
 #include <volk.h>
 
@@ -51,9 +52,8 @@ void FluidWorld::simulate(VkCommandBuffer cmd, Scene& scene, const float dt_seco
         item.node_id = node.id;
         item.display_texture = &it->second->displayTexture();
 
-        // Quad spans [-0.5, 0.5]; scale by extent so world size matches extent_meters.
-        const glm::vec3 scale(volume.extent_meters.x, volume.extent_meters.y, 0.02f);
-        item.model = node.world * glm::scale(glm::mat4(1.0f), scale);
+        // Unit box [-0.5,0.5]^3 scaled by extent XYZ so the lamp reads as a 3D volume.
+        item.model = node.world * glm::scale(glm::mat4(1.0f), volume.extent_meters);
         draw_items_.push_back(item);
     }
 }
@@ -68,11 +68,15 @@ glm::vec3 FluidWorld::sampleFluidVelocity(const Scene& scene, const NodeId fluid
 
     const glm::mat4 inv = glm::inverse(node->world);
     const glm::vec3 local = glm::vec3(inv * glm::vec4(world_pos, 1.0f));
-    const glm::vec2 extent = node->particle_fluid->extent_meters;
-    if (extent.x <= 0.0f || extent.y <= 0.0f) {
+    const glm::vec3 extent = node->particle_fluid->extent_meters;
+    if (extent.x <= 0.0f || extent.y <= 0.0f || extent.z <= 0.0f) {
         return glm::vec3(0.0f);
     }
 
+    // 2D sim in local XY; reject samples outside the full 3D box (including depth).
+    if (std::abs(local.z) > 0.5f * extent.z) {
+        return glm::vec3(0.0f);
+    }
     const float u = local.x / extent.x + 0.5f;
     const float v = local.y / extent.y + 0.5f;
     if (u < 0.0f || u > 1.0f || v < 0.0f || v > 1.0f) {
@@ -80,7 +84,8 @@ glm::vec3 FluidWorld::sampleFluidVelocity(const Scene& scene, const NodeId fluid
     }
 
     const glm::vec2 vel_uv = grid_it->second->sampleVelocityUv(u, v);
-    const glm::vec3 local_vel(vel_uv.x, vel_uv.y, 0.0f);
+    // Convert UV-space velocity (fraction of extent / second) into local meters/second.
+    const glm::vec3 local_vel(vel_uv.x * extent.x, vel_uv.y * extent.y, 0.0f);
     return glm::mat3(node->world) * local_vel;
 }
 

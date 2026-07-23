@@ -275,7 +275,7 @@ json fluidVolumeToJson(const FluidVolume& f) {
     return json{
         {"enabled", f.enabled},
         {"grid_resolution", f.grid_resolution},
-        {"extent_meters", {f.extent_meters.x, f.extent_meters.y}},
+        {"extent_meters", {f.extent_meters.x, f.extent_meters.y, f.extent_meters.z}},
         {"viscosity", f.viscosity},
         {"vorticity_strength", f.vorticity_strength},
         {"velocity_dissipation", f.velocity_dissipation},
@@ -304,6 +304,9 @@ FluidVolume fluidVolumeFromJson(const json& j) {
     if (j.contains("extent_meters") && j["extent_meters"].is_array() && j["extent_meters"].size() >= 2) {
         f.extent_meters.x = j["extent_meters"][0];
         f.extent_meters.y = j["extent_meters"][1];
+        // Legacy 2-component scenes: match depth to width for a square footprint.
+        f.extent_meters.z = j["extent_meters"].size() >= 3 ? static_cast<float>(j["extent_meters"][2])
+                                                           : f.extent_meters.x;
     }
     f.viscosity = j.value("viscosity", f.viscosity);
     f.vorticity_strength = j.value("vorticity_strength", f.vorticity_strength);
