@@ -96,9 +96,25 @@ Transform transformFromJson(const json& j) {
 json materialToJson(const std::string& name, const SceneMaterial& material) {
     json j{
         {"name", name},
+        {"shading_model", "OpenPBR"},
+        {"base_weight", material.base_weight},
         {"base_color", vec4ToJson(material.base_color)},
         {"metallic", material.metallic},
+        {"base_metalness", material.metallic},
+        {"base_diffuse_roughness", material.base_diffuse_roughness},
+        {"specular_weight", material.specular_weight},
+        {"specular_color", vec3ToJson(material.specular_color)},
         {"roughness", material.roughness},
+        {"specular_roughness", material.roughness},
+        {"specular_ior", material.specular_ior},
+        {"coat_weight", material.coat_weight},
+        {"coat_color", vec3ToJson(material.coat_color)},
+        {"coat_roughness", material.coat_roughness},
+        {"coat_ior", material.coat_ior},
+        {"coat_darkening", material.coat_darkening},
+        {"fuzz_weight", material.fuzz_weight},
+        {"fuzz_color", vec3ToJson(material.fuzz_color)},
+        {"fuzz_roughness", material.fuzz_roughness},
         {"emissive", vec3ToJson(material.emissive)},
         {"emissive_strength", material.emissive_strength},
         {"alpha_mode", alphaModeName(material.alpha_mode)},
@@ -116,9 +132,33 @@ json materialToJson(const std::string& name, const SceneMaterial& material) {
 
 SceneMaterial materialFromJson(const json& j) {
     SceneMaterial material{};
+    if (j.contains("base_weight")) material.base_weight = j["base_weight"].get<float>();
     if (j.contains("base_color")) material.base_color = vec4FromJson(j["base_color"]);
-    if (j.contains("metallic")) material.metallic = j["metallic"].get<float>();
-    if (j.contains("roughness")) material.roughness = j["roughness"].get<float>();
+    // OpenPBR base_metalness with legacy metallic fallback.
+    if (j.contains("base_metalness")) {
+        material.metallic = j["base_metalness"].get<float>();
+    } else if (j.contains("metallic")) {
+        material.metallic = j["metallic"].get<float>();
+    }
+    if (j.contains("base_diffuse_roughness")) {
+        material.base_diffuse_roughness = j["base_diffuse_roughness"].get<float>();
+    }
+    if (j.contains("specular_weight")) material.specular_weight = j["specular_weight"].get<float>();
+    if (j.contains("specular_color")) material.specular_color = vec3FromJson(j["specular_color"]);
+    if (j.contains("specular_roughness")) {
+        material.roughness = j["specular_roughness"].get<float>();
+    } else if (j.contains("roughness")) {
+        material.roughness = j["roughness"].get<float>();
+    }
+    if (j.contains("specular_ior")) material.specular_ior = j["specular_ior"].get<float>();
+    if (j.contains("coat_weight")) material.coat_weight = j["coat_weight"].get<float>();
+    if (j.contains("coat_color")) material.coat_color = vec3FromJson(j["coat_color"]);
+    if (j.contains("coat_roughness")) material.coat_roughness = j["coat_roughness"].get<float>();
+    if (j.contains("coat_ior")) material.coat_ior = j["coat_ior"].get<float>();
+    if (j.contains("coat_darkening")) material.coat_darkening = j["coat_darkening"].get<float>();
+    if (j.contains("fuzz_weight")) material.fuzz_weight = j["fuzz_weight"].get<float>();
+    if (j.contains("fuzz_color")) material.fuzz_color = vec3FromJson(j["fuzz_color"]);
+    if (j.contains("fuzz_roughness")) material.fuzz_roughness = j["fuzz_roughness"].get<float>();
     if (j.contains("emissive")) material.emissive = vec3FromJson(j["emissive"]);
     if (j.contains("emissive_strength")) material.emissive_strength = j["emissive_strength"].get<float>();
     if (j.contains("alpha_mode")) material.alpha_mode = alphaModeFromName(j["alpha_mode"].get<std::string>());

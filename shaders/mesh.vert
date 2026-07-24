@@ -33,6 +33,7 @@ layout(set = 0, binding = 1) readonly buffer InstanceBuffer {
     MeshInstance instances[];
 } uInstances;
 
+// Must match MeshMaterialPushConstants (128 bytes). Vertex stage reads instanceBase only.
 layout(push_constant) uniform Push {
     vec4 baseColor;
     vec4 emissive;
@@ -41,6 +42,16 @@ layout(push_constant) uniform Push {
     uint textureIndex;
     uint mrTextureIndex;
     uint packedMaps;
+    float specularWeight;
+    float specularIor;
+    float coatWeight;
+    float coatRoughness;
+    vec3 specularColor;
+    float coatIor;
+    vec3 coatColor;
+    float fuzzWeight;
+    vec3 fuzzColor;
+    float fuzzRoughness;
 } uPush;
 
 layout(location = 0) in vec3 inPosition;

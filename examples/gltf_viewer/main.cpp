@@ -896,26 +896,59 @@ private:
         genesis::SceneMaterial& mat = *runtime_.material(*n.material_resource);
         const std::uint32_t material_id = *n.material_resource;
         ImGui::Text("%s", runtime_.materialNames()[material_id].c_str());
-        if (ImGui::ColorEdit4("Base color", &mat.base_color.x)) markDirty();
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialBaseColorR, node_path,
-                                   material_id, "base_r");
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialBaseColorG, node_path,
-                                   material_id, "base_g");
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialBaseColorB, node_path,
-                                   material_id, "base_b");
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialBaseColorA, node_path,
-                                   material_id, "base_a");
-        if (ImGui::DragFloat("Metallic", &mat.metallic, 0.01f, 0.0f, 1.0f)) markDirty();
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialMetallic, node_path,
-                                   material_id, "metallic");
-        if (ImGui::DragFloat("Roughness", &mat.roughness, 0.01f, 0.0f, 1.0f)) markDirty();
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialRoughness, node_path,
-                                   material_id, "roughness");
-        if (ImGui::DragFloat("Normal scale", &mat.normal_scale, 0.01f, 0.0f, 4.0f)) markDirty();
-        if (ImGui::ColorEdit3("Emissive", &mat.emissive.x)) markDirty();
-        if (ImGui::DragFloat("Emissive strength", &mat.emissive_strength, 0.05f, 0.0f, 32.0f)) markDirty();
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialEmissiveStrength, node_path,
-                                   material_id, "emissive_strength");
+        ImGui::TextDisabled("OpenPBR Surface");
+
+        if (ImGui::CollapsingHeader("Base", ImGuiTreeNodeFlags_DefaultOpen)) {
+            if (ImGui::DragFloat("Base weight", &mat.base_weight, 0.01f, 0.0f, 1.0f)) markDirty();
+            if (ImGui::ColorEdit4("Base color", &mat.base_color.x)) markDirty();
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialBaseColorR, node_path,
+                                       material_id, "base_r");
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialBaseColorG, node_path,
+                                       material_id, "base_g");
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialBaseColorB, node_path,
+                                       material_id, "base_b");
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialBaseColorA, node_path,
+                                       material_id, "base_a");
+            if (ImGui::DragFloat("Metalness", &mat.metallic, 0.01f, 0.0f, 1.0f)) markDirty();
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialMetallic, node_path,
+                                       material_id, "metallic");
+            if (ImGui::DragFloat("Diffuse roughness", &mat.base_diffuse_roughness, 0.01f, 0.0f, 1.0f)) {
+                markDirty();
+            }
+        }
+
+        if (ImGui::CollapsingHeader("Specular", ImGuiTreeNodeFlags_DefaultOpen)) {
+            if (ImGui::DragFloat("Specular weight", &mat.specular_weight, 0.01f, 0.0f, 1.0f)) markDirty();
+            if (ImGui::ColorEdit3("Specular color", &mat.specular_color.x)) markDirty();
+            if (ImGui::DragFloat("Roughness", &mat.roughness, 0.01f, 0.0f, 1.0f)) markDirty();
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialRoughness, node_path,
+                                       material_id, "roughness");
+            if (ImGui::DragFloat("IOR", &mat.specular_ior, 0.01f, 1.0f, 3.0f)) markDirty();
+        }
+
+        if (ImGui::CollapsingHeader("Coat")) {
+            if (ImGui::DragFloat("Coat weight", &mat.coat_weight, 0.01f, 0.0f, 1.0f)) markDirty();
+            if (ImGui::ColorEdit3("Coat color", &mat.coat_color.x)) markDirty();
+            if (ImGui::DragFloat("Coat roughness", &mat.coat_roughness, 0.01f, 0.0f, 1.0f)) markDirty();
+            if (ImGui::DragFloat("Coat IOR", &mat.coat_ior, 0.01f, 1.0f, 3.0f)) markDirty();
+            if (ImGui::DragFloat("Coat darkening", &mat.coat_darkening, 0.01f, 0.0f, 1.0f)) markDirty();
+        }
+
+        if (ImGui::CollapsingHeader("Fuzz")) {
+            if (ImGui::DragFloat("Fuzz weight", &mat.fuzz_weight, 0.01f, 0.0f, 1.0f)) markDirty();
+            if (ImGui::ColorEdit3("Fuzz color", &mat.fuzz_color.x)) markDirty();
+            if (ImGui::DragFloat("Fuzz roughness", &mat.fuzz_roughness, 0.01f, 0.0f, 1.0f)) markDirty();
+        }
+
+        if (ImGui::CollapsingHeader("Emission", ImGuiTreeNodeFlags_DefaultOpen)) {
+            if (ImGui::ColorEdit3("Emissive", &mat.emissive.x)) markDirty();
+            if (ImGui::DragFloat("Emissive strength", &mat.emissive_strength, 0.05f, 0.0f, 32.0f)) {
+                markDirty();
+            }
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialEmissiveStrength, node_path,
+                                       material_id, "emissive_strength");
+            if (ImGui::DragFloat("Normal scale", &mat.normal_scale, 0.01f, 0.0f, 4.0f)) markDirty();
+        }
 
         ImGui::Separator();
         ImGui::TextUnformatted("Textures");
