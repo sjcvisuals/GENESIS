@@ -485,7 +485,6 @@ private:
         if (ImGui::Button("Sphere", ImVec2(62, 0))) {
             addPrimitiveMesh("Sphere", genesis::createSphereMesh(renderer().context()));
         }
-        ImGui::SameLine();
         if (ImGui::Button("Cylinder", ImVec2(70, 0))) {
             addPrimitiveMesh("Cylinder", genesis::createCylinderMesh(renderer().context()));
         }
