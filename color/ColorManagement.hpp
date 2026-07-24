@@ -29,6 +29,10 @@ struct ColorManagementSettings {
     std::string ocio_view = "ACES 2.0 - Rec.709";
     float exposure = 1.0f;
     bool use_filmic_pre_display = true; // soft highlight compression before OETF (non-OCIO modes)
+    // Notch/Unreal-inspired finishing — all evaluated in-shader (no HDR post cost).
+    float bloom_strength = 0.55f;    // dual-lobe specular glow (Physical Glow stand-in)
+    float vignette_strength = 0.32f; // lens falloff
+    float grain_strength = 0.028f;   // film grain (hides banding)
 };
 
 struct ColorLut3D {

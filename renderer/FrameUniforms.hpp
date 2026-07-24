@@ -23,7 +23,7 @@ struct FrameUniforms {
     float ambient_sky[4];
     float ambient_ground[4];
     float fog_color[4];
-    float display_params[4]; // x = display mode (0 Rec709, 1 sRGB, 2 OCIO LUT)
+    float display_params[4]; // x=mode, y=bloom, z=vignette, w=time(+grain via settings)
 };
 
 static_assert(sizeof(GpuLight) == 64, "GpuLight std140 size mismatch");

@@ -55,7 +55,7 @@ void writeVec4(float* out, float x, float y, float z, float w) {
 
 FrameUniforms buildFrameUniforms(const Scene& scene, const float* view_proj_col_major,
                                  const glm::vec3& camera_position,
-                                 const ColorManagementSettings* color) {
+                                 const ColorManagementSettings* color, float time_seconds) {
     FrameUniforms u{};
     std::memcpy(u.view_proj, view_proj_col_major, sizeof(u.view_proj));
     u.camera_pos[0] = camera_position.x;
@@ -63,17 +63,21 @@ FrameUniforms buildFrameUniforms(const Scene& scene, const float* view_proj_col_
     u.camera_pos[2] = camera_position.z;
     u.camera_pos[3] = color ? std::max(color->exposure, 0.01f) : 1.0f;
 
-    // Studio + window window ambient: cooler sky, warmer ground bounce.
-    // Direct lights still carry form; IBL fills cavities without washing out.
+    // Studio + window ambient: cooler sky, warmer ground bounce.
     u.ibl_intensity = 1.05f;
     writeVec4(u.ambient_sky, 0.20f, 0.24f, 0.32f, 1.0f);
     writeVec4(u.ambient_ground, 0.065f, 0.055f, 0.048f, 1.0f);
 
     u.fog_density = 0.0032f;
     u.fog_height = 0.04f;
-    writeVec4(u.fog_color, 0.18f, 0.20f, 0.24f, 1.0f);
+    // fog_color.a carries film-grain strength (keeps FrameUniforms at 672 bytes).
+    const float grain = color ? std::clamp(color->grain_strength, 0.0f, 0.2f) : 0.028f;
+    writeVec4(u.fog_color, 0.18f, 0.20f, 0.24f, grain);
 
     u.display_params[0] = color ? static_cast<float>(static_cast<int>(color->display)) : 0.0f;
+    u.display_params[1] = color ? std::clamp(color->bloom_strength, 0.0f, 2.0f) : 0.55f;
+    u.display_params[2] = color ? std::clamp(color->vignette_strength, 0.0f, 1.0f) : 0.32f;
+    u.display_params[3] = time_seconds;
 
     int count = 0;
     for (const Node& node : scene.nodes) {

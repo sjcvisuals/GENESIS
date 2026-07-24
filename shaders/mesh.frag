@@ -413,6 +413,19 @@ vec3 evalOpenPbrLight(Light light, vec3 N, vec3 V, vec3 worldPos, vec3 baseColor
     // Specular only on front-facing light; diffuse/SSS may wrap.
     vec3 base = diffuse * radiance + specular * radiance * max(NdotL, 0.0);
 
+    // Dual-lobe “Physical Glow” stand-in (Notch/Unreal bloom energy without a post pass).
+    float bloomStrength = uFrame.displayParams.y;
+    if (bloomStrength > 1e-4 && NdotL > 0.0) {
+        float bloomRough = clamp(mix(0.55, 0.82, roughness), 0.4, 0.9);
+        vec3 bloomF;
+        vec3 bloomSpec = evalMicrofacet(N, V, L, bloomRough, F0, bloomF);
+        float glow = bloomStrength * mix(0.12, 0.28, metalness) * (0.55 + 0.45 * max(F0.r, max(F0.g, F0.b)));
+        base += bloomSpec * radiance * NdotL * glow;
+        // Tiny additive haze around hot specular peaks.
+        float peak = pow(max(dot(N, H), 0.0), mix(12.0, 3.0, bloomRough));
+        base += F0 * radiance * NdotL * peak * glow * 0.35;
+    }
+
     // Single-bounce ground fill from the key — warm floor reflection without GI.
     if (type == 0) {
         float sunToGround = max(L.y, 0.0);
@@ -490,6 +503,15 @@ vec3 evalOpenPbrAmbient(vec3 N, vec3 V, vec3 baseColor, float metalness, float r
     float horizon = pow(clamp(1.0 - abs(R.y), 0.0, 1.0), 2.0);
     specular += F0 * horizon * mix(0.22, 0.04, roughness) * mix(uFrame.ambientGround.rgb, uFrame.ambientSky.rgb, 0.65) * ao;
 
+    // Wide ambient glow lobe (same Physical Glow idea for IBL).
+    float bloomStrength = uFrame.displayParams.y;
+    if (bloomStrength > 1e-4) {
+        float bloomRough = clamp(mix(0.5, 0.85, roughness), 0.4, 0.9);
+        specular += envSpecular(F0, bloomRough, NdotV, envRadiance) * ao * bloomStrength * 0.22;
+        float softSun = pow(max(dot(R, sunDir), 0.0), mix(10.0, 2.5, bloomRough));
+        specular += F0 * softSun * sunVis * bloomStrength * 0.06 * sunRad * ao;
+    }
+
     vec3 color = (diffuse + specular) * uFrame.iblIntensity;
     color += evalTransmission(N, V, metalness, NdotV, F, uFrame.iblIntensity) * ao;
 
@@ -509,7 +531,7 @@ vec3 evalOpenPbrAmbient(vec3 N, vec3 V, vec3 baseColor, float metalness, float r
     return color;
 }
 
-// Khronos PBR Neutral — designed for attractive realtime PBR without wash-out.
+// Khronos PBR Neutral — attractive midtones without wash-out.
 vec3 pbrNeutralTonemap(vec3 color) {
     const float startCompression = 0.8 - 0.04;
     const float desaturation = 0.15;
@@ -527,15 +549,55 @@ vec3 pbrNeutralTonemap(vec3 color) {
     return mix(color, vec3(newPeak), g);
 }
 
-vec3 gradeContrastSat(vec3 c) {
-    // Mild photographic grade: lift shadows slightly, keep midtone density, preserve hue.
+// Narkowicz ACES fit — the “Unreal look” shoulder/desat in highlights.
+vec3 acesFitted(vec3 x) {
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
+vec3 cinematicGrade(vec3 c) {
+    // Mild teal-shadow / warm-highlight split (Notch colour-grade DNA, kept subtle).
     c = max(c, vec3(0.0));
-    c = (c - 0.18) * 1.12 + 0.18;
-    // Soft toe so dark metals keep some albedo instead of crushing to black.
-    c = c + (1.0 - exp(-c * 1.15)) * 0.035;
-    float luma = dot(max(c, 0.0), vec3(0.2126, 0.7152, 0.0722));
-    c = mix(vec3(luma), c, 1.12);
+    float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    vec3 shadows = c * vec3(0.92, 0.97, 1.06);
+    vec3 highlights = c * vec3(1.05, 1.01, 0.96);
+    float w = smoothstep(0.12, 0.55, luma);
+    c = mix(shadows, highlights, w);
+    // Pivot contrast — denser midtones, open toe.
+    c = (c - 0.18) * 1.1 + 0.18;
+    c = c + (1.0 - exp(-c * 1.1)) * 0.03;
+    luma = dot(max(c, 0.0), vec3(0.2126, 0.7152, 0.0722));
+    c = mix(vec3(luma), c, 1.1);
     return clamp(c, 0.0, 1.0);
+}
+
+float hash12(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+vec3 applyLensFinish(vec3 color, vec3 worldPos) {
+    // Reconstruct NDC for vignette / grain without a post pass.
+    vec4 clip = uFrame.viewProj * vec4(worldPos, 1.0);
+    vec2 ndc = clip.xy / max(abs(clip.w), 1e-4);
+    float vignetteStrength = uFrame.displayParams.z;
+    if (vignetteStrength > 1e-4) {
+        float r = dot(ndc, ndc);
+        float vig = 1.0 - smoothstep(0.35, 1.55, r) * vignetteStrength;
+        color *= vig;
+    }
+    float grainStrength = uFrame.fogColor.a;
+    if (grainStrength > 1e-5) {
+        float t = uFrame.displayParams.w;
+        float n = hash12(ndc * vec2(1920.0, 1080.0) + vec2(t * 37.1, t * 19.7));
+        color += (n - 0.5) * grainStrength;
+    }
+    return color;
 }
 
 float linearToRec709(float v) {
@@ -554,13 +616,18 @@ float linearToSrgb(float v) {
     return 1.055 * pow(v, 1.0 / 2.4) - 0.055;
 }
 
-vec3 applyDisplayTransform(vec3 linearColor) {
+vec3 applyDisplayTransform(vec3 linearColor, vec3 worldPos) {
     int mode = int(uFrame.displayParams.x + 0.5);
     if (mode == 2) {
         return texture(displayLut, clamp(linearColor, 0.0, 1.0)).rgb;
     }
-    vec3 c = pbrNeutralTonemap(max(linearColor, vec3(0.0)));
-    c = gradeContrastSat(c);
+    // Blend ACES (UE shoulder) with PBR Neutral (midtone fidelity) — looks “expensive”
+    // without crushing albedo the way pure ACES can.
+    vec3 aces = acesFitted(max(linearColor, vec3(0.0)) * 0.6);
+    vec3 neutral = pbrNeutralTonemap(max(linearColor, vec3(0.0)));
+    vec3 c = mix(neutral, aces, 0.55);
+    c = cinematicGrade(c);
+    c = applyLensFinish(c, worldPos);
     if (mode == 1) {
         return vec3(linearToSrgb(c.r), linearToSrgb(c.g), linearToSrgb(c.b));
     }
@@ -587,7 +654,7 @@ void main() {
             discard;
         }
         const float exposure = max(uFrame.cameraPos.w, 0.01);
-        outColor = vec4(applyDisplayTransform(baseColor * exposure), alpha);
+        outColor = vec4(applyDisplayTransform(baseColor * exposure, vWorldPos), alpha);
         return;
     }
 
@@ -635,11 +702,17 @@ void main() {
         float heightFactor = exp(-uFrame.fogHeight * max(vWorldPos.y, 0.0));
         float fogFactor = 1.0 - exp(-uFrame.fogDensity * dist * heightFactor);
         fogFactor = clamp(fogFactor, 0.0, 1.0);
-        color = mix(color, uFrame.fogColor.rgb, fogFactor);
+        // Atmospheric inscatter toward the key — cheap volumetric feel.
+        vec3 sunDir = primaryLightDir();
+        vec3 viewDir = normalize(uFrame.cameraPos.xyz - vWorldPos);
+        float mie = pow(max(dot(-viewDir, sunDir), 0.0), 8.0);
+        vec3 fogCol = mix(uFrame.fogColor.rgb, uFrame.ambientSky.rgb, 0.35);
+        fogCol += primaryLightRadiance() * mie * 0.015;
+        color = mix(color, fogCol, fogFactor);
     }
 
     float exposure = max(uFrame.cameraPos.w, 0.01);
-    color = applyDisplayTransform(color * exposure);
+    color = applyDisplayTransform(color * exposure, vWorldPos);
 
     // Transmission drives transparency (thin-walled stronger).
     if (uPush.transmissionWeight > 1e-4 && metalness < 0.999) {

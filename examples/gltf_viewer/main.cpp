@@ -192,8 +192,9 @@ protected:
         const glm::mat4 vp = outputViewProjection(renderAspect());
         const genesis::FrameUniforms frame =
             genesis::buildFrameUniforms(runtime_.scene(), &vp[0][0], outputCameraPosition(),
-                                        &color_mgmt_.settings());
+                                        &color_mgmt_.settings(), look_time_seconds_);
         renderer().setFrameUniforms(frame);
+        look_time_seconds_ += last_frame_dt_;
     }
 
     void onDraw() override {
@@ -775,6 +776,18 @@ private:
         }
 
         if (ImGui::DragFloat("Exposure", &settings.exposure, 0.01f, 0.05f, 8.0f)) {
+            dirty = true;
+        }
+        ImGui::Separator();
+        ImGui::TextUnformatted("Look (Notch / Unreal inspired)");
+        ImGui::TextDisabled("In-shader finishing — no HDR post cost");
+        if (ImGui::DragFloat("Bloom / glow", &settings.bloom_strength, 0.01f, 0.0f, 2.0f)) {
+            dirty = true;
+        }
+        if (ImGui::DragFloat("Vignette", &settings.vignette_strength, 0.01f, 0.0f, 1.0f)) {
+            dirty = true;
+        }
+        if (ImGui::DragFloat("Film grain", &settings.grain_strength, 0.001f, 0.0f, 0.15f)) {
             dirty = true;
         }
 
@@ -2289,6 +2302,7 @@ private:
     genesis::OscProtocol osc_protocol_{};
     double osc_time_ = 0.0;
     float last_frame_dt_ = 1.0f / 60.0f;
+    float look_time_seconds_ = 0.0f;
 };
 
 } // namespace
