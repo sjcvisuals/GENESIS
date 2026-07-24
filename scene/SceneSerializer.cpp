@@ -2,12 +2,14 @@
 
 #include "particles/FluidVolume.hpp"
 #include "scene/ScenePath.hpp"
+#include <cctype>
 #include <fstream>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/constants.hpp>
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 #include <stdexcept>
+#include <string>
 
 namespace genesis {
 
@@ -44,8 +46,12 @@ const char* alphaModeName(AlphaMode mode) {
 }
 
 AlphaMode alphaModeFromName(const std::string& name) {
-    if (name == "mask") return AlphaMode::Mask;
-    if (name == "blend") return AlphaMode::Blend;
+    std::string lower = name;
+    for (char& c : lower) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    if (lower == "mask") return AlphaMode::Mask;
+    if (lower == "blend") return AlphaMode::Blend;
     return AlphaMode::Opaque;
 }
 
@@ -107,6 +113,18 @@ json materialToJson(const std::string& name, const SceneMaterial& material) {
         {"roughness", material.roughness},
         {"specular_roughness", material.roughness},
         {"specular_ior", material.specular_ior},
+        {"transmission_weight", material.transmission_weight},
+        {"transmission_color", vec3ToJson(material.transmission_color)},
+        {"transmission_depth", material.transmission_depth},
+        {"transmission_scatter", vec3ToJson(material.transmission_scatter)},
+        {"transmission_scatter_anisotropy", material.transmission_scatter_anisotropy},
+        {"transmission_dispersion_scale", material.transmission_dispersion_scale},
+        {"transmission_dispersion_abbe", material.transmission_dispersion_abbe},
+        {"subsurface_weight", material.subsurface_weight},
+        {"subsurface_color", vec3ToJson(material.subsurface_color)},
+        {"subsurface_radius", material.subsurface_radius},
+        {"subsurface_radius_scale", vec3ToJson(material.subsurface_radius_scale)},
+        {"subsurface_scatter_anisotropy", material.subsurface_scatter_anisotropy},
         {"coat_weight", material.coat_weight},
         {"coat_color", vec3ToJson(material.coat_color)},
         {"coat_roughness", material.coat_roughness},
@@ -115,8 +133,12 @@ json materialToJson(const std::string& name, const SceneMaterial& material) {
         {"fuzz_weight", material.fuzz_weight},
         {"fuzz_color", vec3ToJson(material.fuzz_color)},
         {"fuzz_roughness", material.fuzz_roughness},
+        {"thin_film_weight", material.thin_film_weight},
+        {"thin_film_thickness", material.thin_film_thickness},
+        {"thin_film_ior", material.thin_film_ior},
         {"emissive", vec3ToJson(material.emissive)},
         {"emissive_strength", material.emissive_strength},
+        {"thin_walled", material.thin_walled},
         {"alpha_mode", alphaModeName(material.alpha_mode)},
         {"alpha_cutoff", material.alpha_cutoff},
         {"normal_scale", material.normal_scale},
@@ -134,7 +156,6 @@ SceneMaterial materialFromJson(const json& j) {
     SceneMaterial material{};
     if (j.contains("base_weight")) material.base_weight = j["base_weight"].get<float>();
     if (j.contains("base_color")) material.base_color = vec4FromJson(j["base_color"]);
-    // OpenPBR base_metalness with legacy metallic fallback.
     if (j.contains("base_metalness")) {
         material.metallic = j["base_metalness"].get<float>();
     } else if (j.contains("metallic")) {
@@ -151,6 +172,36 @@ SceneMaterial materialFromJson(const json& j) {
         material.roughness = j["roughness"].get<float>();
     }
     if (j.contains("specular_ior")) material.specular_ior = j["specular_ior"].get<float>();
+    if (j.contains("transmission_weight")) {
+        material.transmission_weight = j["transmission_weight"].get<float>();
+    }
+    if (j.contains("transmission_color")) {
+        material.transmission_color = vec3FromJson(j["transmission_color"]);
+    }
+    if (j.contains("transmission_depth")) {
+        material.transmission_depth = j["transmission_depth"].get<float>();
+    }
+    if (j.contains("transmission_scatter")) {
+        material.transmission_scatter = vec3FromJson(j["transmission_scatter"]);
+    }
+    if (j.contains("transmission_scatter_anisotropy")) {
+        material.transmission_scatter_anisotropy = j["transmission_scatter_anisotropy"].get<float>();
+    }
+    if (j.contains("transmission_dispersion_scale")) {
+        material.transmission_dispersion_scale = j["transmission_dispersion_scale"].get<float>();
+    }
+    if (j.contains("transmission_dispersion_abbe")) {
+        material.transmission_dispersion_abbe = j["transmission_dispersion_abbe"].get<float>();
+    }
+    if (j.contains("subsurface_weight")) material.subsurface_weight = j["subsurface_weight"].get<float>();
+    if (j.contains("subsurface_color")) material.subsurface_color = vec3FromJson(j["subsurface_color"]);
+    if (j.contains("subsurface_radius")) material.subsurface_radius = j["subsurface_radius"].get<float>();
+    if (j.contains("subsurface_radius_scale")) {
+        material.subsurface_radius_scale = vec3FromJson(j["subsurface_radius_scale"]);
+    }
+    if (j.contains("subsurface_scatter_anisotropy")) {
+        material.subsurface_scatter_anisotropy = j["subsurface_scatter_anisotropy"].get<float>();
+    }
     if (j.contains("coat_weight")) material.coat_weight = j["coat_weight"].get<float>();
     if (j.contains("coat_color")) material.coat_color = vec3FromJson(j["coat_color"]);
     if (j.contains("coat_roughness")) material.coat_roughness = j["coat_roughness"].get<float>();
@@ -159,8 +210,14 @@ SceneMaterial materialFromJson(const json& j) {
     if (j.contains("fuzz_weight")) material.fuzz_weight = j["fuzz_weight"].get<float>();
     if (j.contains("fuzz_color")) material.fuzz_color = vec3FromJson(j["fuzz_color"]);
     if (j.contains("fuzz_roughness")) material.fuzz_roughness = j["fuzz_roughness"].get<float>();
+    if (j.contains("thin_film_weight")) material.thin_film_weight = j["thin_film_weight"].get<float>();
+    if (j.contains("thin_film_thickness")) {
+        material.thin_film_thickness = j["thin_film_thickness"].get<float>();
+    }
+    if (j.contains("thin_film_ior")) material.thin_film_ior = j["thin_film_ior"].get<float>();
     if (j.contains("emissive")) material.emissive = vec3FromJson(j["emissive"]);
     if (j.contains("emissive_strength")) material.emissive_strength = j["emissive_strength"].get<float>();
+    if (j.contains("thin_walled")) material.thin_walled = j["thin_walled"].get<bool>();
     if (j.contains("alpha_mode")) material.alpha_mode = alphaModeFromName(j["alpha_mode"].get<std::string>());
     if (j.contains("alpha_cutoff")) material.alpha_cutoff = j["alpha_cutoff"].get<float>();
     if (j.contains("normal_scale")) material.normal_scale = j["normal_scale"].get<float>();

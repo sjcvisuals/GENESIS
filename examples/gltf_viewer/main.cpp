@@ -926,6 +926,44 @@ private:
             if (ImGui::DragFloat("IOR", &mat.specular_ior, 0.01f, 1.0f, 3.0f)) markDirty();
         }
 
+        if (ImGui::CollapsingHeader("Transmission")) {
+            if (ImGui::DragFloat("Transmission weight", &mat.transmission_weight, 0.01f, 0.0f, 1.0f)) {
+                markDirty();
+            }
+            if (ImGui::ColorEdit3("Transmission color", &mat.transmission_color.x)) markDirty();
+            if (ImGui::DragFloat("Transmission depth", &mat.transmission_depth, 0.01f, 0.0f, 10.0f)) {
+                markDirty();
+            }
+            if (ImGui::ColorEdit3("Transmission scatter", &mat.transmission_scatter.x)) markDirty();
+            if (ImGui::DragFloat("Scatter anisotropy", &mat.transmission_scatter_anisotropy, 0.01f, -1.0f,
+                                1.0f)) {
+                markDirty();
+            }
+            if (ImGui::DragFloat("Dispersion scale", &mat.transmission_dispersion_scale, 0.01f, 0.0f,
+                                1.0f)) {
+                markDirty();
+            }
+            if (ImGui::DragFloat("Abbe number", &mat.transmission_dispersion_abbe, 0.5f, 9.0f, 91.0f)) {
+                markDirty();
+            }
+            if (ImGui::Checkbox("Thin walled", &mat.thin_walled)) markDirty();
+        }
+
+        if (ImGui::CollapsingHeader("Subsurface")) {
+            if (ImGui::DragFloat("Subsurface weight", &mat.subsurface_weight, 0.01f, 0.0f, 1.0f)) {
+                markDirty();
+            }
+            if (ImGui::ColorEdit3("Subsurface color", &mat.subsurface_color.x)) markDirty();
+            if (ImGui::DragFloat("Subsurface radius", &mat.subsurface_radius, 0.01f, 0.0f, 10.0f)) {
+                markDirty();
+            }
+            if (ImGui::ColorEdit3("Radius scale", &mat.subsurface_radius_scale.x)) markDirty();
+            if (ImGui::DragFloat("SSS anisotropy", &mat.subsurface_scatter_anisotropy, 0.01f, -1.0f,
+                                1.0f)) {
+                markDirty();
+            }
+        }
+
         if (ImGui::CollapsingHeader("Coat")) {
             if (ImGui::DragFloat("Coat weight", &mat.coat_weight, 0.01f, 0.0f, 1.0f)) markDirty();
             if (ImGui::ColorEdit3("Coat color", &mat.coat_color.x)) markDirty();
@@ -938,6 +976,16 @@ private:
             if (ImGui::DragFloat("Fuzz weight", &mat.fuzz_weight, 0.01f, 0.0f, 1.0f)) markDirty();
             if (ImGui::ColorEdit3("Fuzz color", &mat.fuzz_color.x)) markDirty();
             if (ImGui::DragFloat("Fuzz roughness", &mat.fuzz_roughness, 0.01f, 0.0f, 1.0f)) markDirty();
+        }
+
+        if (ImGui::CollapsingHeader("Thin Film")) {
+            if (ImGui::DragFloat("Thin film weight", &mat.thin_film_weight, 0.01f, 0.0f, 1.0f)) {
+                markDirty();
+            }
+            if (ImGui::DragFloat("Thickness (um)", &mat.thin_film_thickness, 0.01f, 0.0f, 2.0f)) {
+                markDirty();
+            }
+            if (ImGui::DragFloat("Thin film IOR", &mat.thin_film_ior, 0.01f, 1.0f, 3.0f)) markDirty();
         }
 
         if (ImGui::CollapsingHeader("Emission", ImGuiTreeNodeFlags_DefaultOpen)) {

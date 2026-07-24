@@ -2,9 +2,9 @@
 
 #extension GL_EXT_nonuniform_qualifier : require
 
-// Realtime OpenPBR Surface shading (ASWF / Adobe / Autodesk).
-// Implements the high-value lobes: base (metal/dielectric), specular, coat, fuzz, emission.
+// Realtime OpenPBR Surface (ASWF / Adobe / Autodesk).
 // Spec: https://academysoftwarefoundation.github.io/OpenPBR/
+// Optional lobes (transmission / SSS / thin-film / coat / fuzz) are weight-gated.
 
 struct Light {
     vec4 position;
@@ -43,14 +43,13 @@ layout(set = 1, binding = 0) uniform sampler2D materialTextures[256];
 layout(set = 2, binding = 0) uniform sampler3D displayLut;
 
 layout(push_constant) uniform Push {
-    vec4 baseColor;       // base_color.rgb + geometry_opacity
-    vec4 emissive;        // emission * luminance, a = normal_scale
-    vec4 materialParams;  // metalness, specular_roughness, alphaMode, alphaCutoff
+    vec4 baseColor;
+    vec4 emissive;
+    vec4 materialParams;
     uint instanceBase;
     uint textureIndex;
     uint mrTextureIndex;
     uint packedMaps;
-    // OpenPBR lobes (128-byte push block)
     float specularWeight;
     float specularIor;
     float coatWeight;
@@ -61,6 +60,31 @@ layout(push_constant) uniform Push {
     float fuzzWeight;
     vec3 fuzzColor;
     float fuzzRoughness;
+    // Extended OpenPBR (offset 128)
+    float transmissionWeight;
+    float transmissionDepth;
+    float subsurfaceWeight;
+    float subsurfaceRadius;
+    vec3 transmissionColor;
+    float thinFilmWeight;
+    vec3 subsurfaceColor;
+    float thinFilmThickness;
+    vec3 transmissionScatter;
+    float thinFilmIor;
+    vec3 subsurfaceRadiusScale;
+    float transmissionScatterAnisotropy;
+    float transmissionDispersionScale;
+    float transmissionDispersionAbbe;
+    float subsurfaceScatterAnisotropy;
+    float thinWalled;
+    float baseDiffuseRoughness;
+    float coatDarkening;
+    float pad0;
+    float pad1;
+    float pad2;
+    float pad3;
+    float pad4;
+    float pad5;
 } uPush;
 
 layout(location = 0) in vec3 vWorldPos;
@@ -103,7 +127,6 @@ float iorToF0(float ior) {
     return r * r;
 }
 
-// Charlie sheen NDF — efficient fuzz / cloth lobe used by OpenPBR-style realtime ports.
 float distributionCharlie(float NdotH, float roughness) {
     float invR = 1.0 / max(roughness, 0.04);
     float cos2h = NdotH * NdotH;
@@ -112,7 +135,6 @@ float distributionCharlie(float NdotH, float roughness) {
 }
 
 float geometrySheen(float NdotV, float NdotL, float roughness) {
-    // Ashikhmin-style shadowing for sheen.
     float a = max(roughness, 0.04);
     float V = NdotL * (NdotV * (1.0 - a) + a);
     float L = NdotV * (NdotL * (1.0 - a) + a);
@@ -154,11 +176,103 @@ vec3 evalMicrofacet(vec3 N, vec3 V, vec3 L, float roughness, vec3 F0, out vec3 F
     return (D * G * F) / max(4.0 * NdotV * NdotL, 1e-4);
 }
 
-// OpenPBR-inspired direct lighting: base diffuse/specular + optional coat + fuzz.
+// Cheap thin-film iridescence — Airy phase modulation of F0 (weight-gated).
+vec3 evalThinFilmF0(vec3 F0, float cosTheta, float thicknessUm, float filmIor, float weight) {
+    if (weight < 1e-4) {
+        return F0;
+    }
+    float eta = max(filmIor, 1.01);
+    float sin2t = (1.0 - cosTheta * cosTheta) / (eta * eta);
+    float cosBeta = sqrt(max(1.0 - sin2t, 0.0));
+    float tNm = max(thicknessUm, 0.0) * 1000.0;
+    vec3 lambda = vec3(650.0, 510.0, 475.0);
+    vec3 phase = (4.0 * kPi * eta * tNm * cosBeta) / lambda;
+    vec3 irid = 0.5 + 0.5 * cos(phase);
+    return mix(F0, mix(F0, irid, 0.85), weight);
+}
+
+// Oren-Nayar-ish diffuse response from base_diffuse_roughness (cheap).
+float diffuseResponse(float NdotL, float NdotV, float diffuseRoughness) {
+    if (diffuseRoughness < 1e-4) {
+        return NdotL;
+    }
+    float sigma = diffuseRoughness;
+    float sigma2 = sigma * sigma;
+    float A = 1.0 - (sigma2 / (2.0 * (sigma2 + 0.33)));
+    float B = 0.45 * sigma2 / (sigma2 + 0.09);
+    float cosPhi = 1.0; // omit azimuth term for speed
+    float sinAlpha = sqrt(max(1.0 - min(NdotL, NdotV) * min(NdotL, NdotV), 0.0));
+    float tanBeta = sqrt(max(1.0 - max(NdotL, NdotV) * max(NdotL, NdotV), 0.0)) /
+                    max(max(NdotL, NdotV), 1e-4);
+    return max(NdotL * (A + B * cosPhi * sinAlpha * tanBeta), 0.0);
+}
+
+// Wrap-lighting SSS — no diffusion profile / no screen-space blur.
+vec3 evalSubsurface(vec3 N, vec3 L, vec3 V, vec3 albedo, float weight, float radius,
+                     vec3 radiusScale, float aniso) {
+    if (weight < 1e-4) {
+        return vec3(0.0);
+    }
+    float wrap = clamp(radius * 0.35, 0.0, 1.0);
+    float NdotL = dot(N, L);
+    float wrapped = clamp((NdotL + wrap) / (1.0 + wrap), 0.0, 1.0);
+    // Mild forward/back scatter tilt from anisotropy (Henye–Greenstein stand-in).
+    float phase = 1.0 + aniso * 0.35 * NdotL;
+    vec3 sssAlbedo = mix(albedo, uPush.subsurfaceColor, 0.65) * radiusScale;
+    return sssAlbedo * (wrapped * phase) / kPi * weight;
+}
+
+vec3 beerExtinction(vec3 transmissionColor, float depth, float pathLen) {
+    if (depth < 1e-5) {
+        return transmissionColor;
+    }
+    vec3 sigmaA = -log(max(transmissionColor, vec3(1e-4))) / depth;
+    return exp(-sigmaA * max(pathLen, 0.0));
+}
+
+vec3 evalTransmission(vec3 N, vec3 V, float metalness, float NdotV, vec3 F,
+                      float iblIntensity) {
+    float T = uPush.transmissionWeight * (1.0 - metalness);
+    if (T < 1e-4) {
+        return vec3(0.0);
+    }
+    float fresnelBlock = max(F.r, max(F.g, F.b));
+    float transmit = (1.0 - fresnelBlock) * T;
+
+    bool thin = uPush.thinWalled > 0.5;
+    float pathLen = thin ? 0.0 : max(uPush.transmissionDepth * 0.65, 0.0);
+    vec3 beer = beerExtinction(uPush.transmissionColor, uPush.transmissionDepth, pathLen);
+
+    // Fake refracted ambient (no SSR / no mesh refraction — stays cheap).
+    vec3 refrDir = thin ? -V : refract(-V, N, 1.0 / max(uPush.specularIor, 1.01));
+    if (dot(refrDir, refrDir) < 1e-6) {
+        refrDir = -V;
+    }
+    float hemi = refrDir.y * 0.5 + 0.5;
+    vec3 transmittedAmbient = mix(uFrame.ambientGround.rgb, uFrame.ambientSky.rgb, hemi);
+
+    float scatterAmt = max(max(uPush.transmissionScatter.r, uPush.transmissionScatter.g),
+                           uPush.transmissionScatter.b);
+    if (scatterAmt > 1e-4) {
+        float g = uPush.transmissionScatterAnisotropy;
+        float scatterMix = scatterAmt * (0.35 + 0.25 * abs(g));
+        transmittedAmbient = mix(transmittedAmbient, uPush.transmissionScatter * transmittedAmbient,
+                                 clamp(scatterMix, 0.0, 1.0));
+    }
+
+    // Cheap dispersion: slight RGB phase of transmitted color when scale > 0.
+    if (uPush.transmissionDispersionScale > 1e-4) {
+        float abbe = max(uPush.transmissionDispersionAbbe, 1.0);
+        float spread = uPush.transmissionDispersionScale * (30.0 / abbe);
+        vec3 disp = vec3(1.0 + spread, 1.0, 1.0 - spread * 0.8);
+        beer *= mix(vec3(1.0), disp, uPush.transmissionDispersionScale);
+    }
+
+    return transmittedAmbient * beer * transmit * iblIntensity;
+}
+
 vec3 evalOpenPbrLight(Light light, vec3 N, vec3 V, vec3 worldPos, vec3 baseColor, float metalness,
-                      float roughness, float specularWeight, float specularIor, vec3 specularColor,
-                      float coatWeight, float coatRoughness, float coatIor, vec3 coatColor,
-                      float fuzzWeight, float fuzzRoughness, vec3 fuzzColor) {
+                      float roughness, float opaqueWeight) {
     int type = int(light.params.x);
     float range = light.params.y;
     float innerCos = light.params.z;
@@ -185,76 +299,89 @@ vec3 evalOpenPbrLight(Light light, vec3 N, vec3 V, vec3 worldPos, vec3 baseColor
     }
 
     float NdotL = max(dot(N, L), 0.0);
-    if (NdotL <= 0.0) {
-        return vec3(0.0);
-    }
-
-    vec3 radiance = light.color.rgb * light.color.a * attenuation;
     float NdotV = max(dot(N, V), 0.0);
     vec3 H = normalize(V + L);
     float VdotH = max(dot(V, H), 0.0);
+    vec3 radiance = light.color.rgb * light.color.a * attenuation;
 
-    // Dielectric F0 from IOR; metals use base_color (face) with specular_color edge tint.
-    float dielectricF0 = iorToF0(specularIor) * specularWeight;
-    vec3 F0_diel = specularColor * dielectricF0;
-    vec3 F0_metal = mix(baseColor, specularColor, pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0));
+    float dielectricF0 = iorToF0(uPush.specularIor) * uPush.specularWeight;
+    vec3 F0_diel = uPush.specularColor * dielectricF0;
+    vec3 F0_metal = mix(baseColor, uPush.specularColor, pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0));
     vec3 F0 = mix(F0_diel, F0_metal, metalness);
+    F0 = evalThinFilmF0(F0, VdotH, uPush.thinFilmThickness, uPush.thinFilmIor, uPush.thinFilmWeight);
 
     vec3 F;
     vec3 specular = evalMicrofacet(N, V, L, max(roughness, 0.04), F0, F);
-    vec3 kD = (vec3(1.0) - F) * (1.0 - metalness);
-    vec3 diffuse = kD * baseColor / kPi;
-    vec3 base = (diffuse + specular) * radiance * NdotL;
+    float diffResp = diffuseResponse(NdotL, NdotV, uPush.baseDiffuseRoughness);
+    vec3 kD = (vec3(1.0) - F) * (1.0 - metalness) * opaqueWeight;
+    vec3 diffuse = kD * baseColor / kPi * diffResp;
 
-    // Coat: dielectric GGX layered over the base (OpenPBR coat slab).
-    if (coatWeight > 1e-4) {
-        float coatF0 = iorToF0(coatIor);
-        vec3 coatF;
-        vec3 coatSpec = evalMicrofacet(N, V, L, max(coatRoughness, 0.04), vec3(coatF0), coatF);
-        // Absorption / darkening through the coat medium (coat_darkening authored via coatColor intensity).
-        vec3 coatAbsorb = mix(vec3(1.0), coatColor, coatWeight);
-        float fresnelCoat = coatF.x;
-        base *= mix(vec3(1.0), coatAbsorb * (1.0 - fresnelCoat), coatWeight);
-        base += coatSpec * radiance * NdotL * coatWeight;
+    // Mix in wrap SSS under the opaque dielectric path (weight-gated).
+    if (uPush.subsurfaceWeight > 1e-4 && metalness < 0.999) {
+        vec3 sss = evalSubsurface(N, L, V, baseColor, 1.0, uPush.subsurfaceRadius,
+                                  uPush.subsurfaceRadiusScale, uPush.subsurfaceScatterAnisotropy);
+        float sssW = uPush.subsurfaceWeight * opaqueWeight;
+        diffuse = mix(diffuse, sss, sssW);
     }
 
-    // Fuzz: outermost Charlie sheen lobe (cloth / peach fuzz).
-    if (fuzzWeight > 1e-4) {
+    vec3 base = (diffuse + specular * NdotL) * radiance;
+
+    if (uPush.coatWeight > 1e-4) {
+        float coatF0 = iorToF0(uPush.coatIor);
+        vec3 coatF;
+        vec3 coatSpec = evalMicrofacet(N, V, L, max(uPush.coatRoughness, 0.04), vec3(coatF0), coatF);
+        vec3 coatAbsorb = mix(vec3(1.0), uPush.coatColor, uPush.coatWeight);
+        float dark = mix(1.0, uPush.coatDarkening, uPush.coatWeight);
+        base *= mix(vec3(1.0), coatAbsorb * (1.0 - coatF.x) * dark, uPush.coatWeight);
+        base += coatSpec * radiance * NdotL * uPush.coatWeight;
+    }
+
+    if (uPush.fuzzWeight > 1e-4 && NdotL > 0.0) {
         float NdotH = max(dot(N, H), 0.0);
-        float D = distributionCharlie(NdotH, max(fuzzRoughness, 0.04));
-        float G = geometrySheen(NdotV, NdotL, max(fuzzRoughness, 0.04));
-        vec3 fuzz = fuzzColor * (D * G) * radiance * NdotL;
-        base = mix(base, base + fuzz, fuzzWeight);
+        float D = distributionCharlie(NdotH, max(uPush.fuzzRoughness, 0.04));
+        float G = geometrySheen(NdotV, NdotL, max(uPush.fuzzRoughness, 0.04));
+        vec3 fuzz = uPush.fuzzColor * (D * G) * radiance * NdotL;
+        base = mix(base, base + fuzz, uPush.fuzzWeight);
     }
 
     return base;
 }
 
 vec3 evalOpenPbrAmbient(vec3 N, vec3 V, vec3 baseColor, float metalness, float roughness,
-                        float specularWeight, float specularIor, vec3 specularColor, float coatWeight,
-                        float coatIor, float fuzzWeight, vec3 fuzzColor) {
+                        float opaqueWeight) {
     float hemi = N.y * 0.5 + 0.5;
     vec3 irradiance = mix(uFrame.ambientGround.rgb, uFrame.ambientSky.rgb, hemi);
     float NdotV = max(dot(N, V), 0.0);
 
-    float dielectricF0 = iorToF0(specularIor) * specularWeight;
-    vec3 F0 = mix(specularColor * dielectricF0, baseColor, metalness);
+    float dielectricF0 = iorToF0(uPush.specularIor) * uPush.specularWeight;
+    vec3 F0 = mix(uPush.specularColor * dielectricF0, baseColor, metalness);
+    F0 = evalThinFilmF0(F0, NdotV, uPush.thinFilmThickness, uPush.thinFilmIor, uPush.thinFilmWeight);
     vec3 F = fresnelSchlickRoughness(NdotV, F0, roughness);
-    vec3 kD = (1.0 - F) * (1.0 - metalness);
+    vec3 kD = (1.0 - F) * (1.0 - metalness) * opaqueWeight;
     vec3 diffuse = kD * baseColor * irradiance;
+
+    if (uPush.subsurfaceWeight > 1e-4 && metalness < 0.999) {
+        vec3 sss = mix(baseColor, uPush.subsurfaceColor, 0.65) * uPush.subsurfaceRadiusScale;
+        float wrapHemi = hemi * 0.65 + 0.35;
+        diffuse = mix(diffuse, sss * irradiance * wrapHemi, uPush.subsurfaceWeight * opaqueWeight);
+    }
+
     float specStrength = mix(0.35, 0.05, roughness * roughness);
     vec3 specular = F * mix(uFrame.ambientSky.rgb, irradiance, roughness) * specStrength;
     vec3 color = (diffuse + specular) * uFrame.iblIntensity;
 
-    if (coatWeight > 1e-4) {
-        float coatF0 = iorToF0(coatIor);
+    color += evalTransmission(N, V, metalness, NdotV, F, uFrame.iblIntensity);
+
+    if (uPush.coatWeight > 1e-4) {
+        float coatF0 = iorToF0(uPush.coatIor);
         vec3 coatF = fresnelSchlickRoughness(NdotV, vec3(coatF0), 0.1);
-        color *= mix(1.0, 1.0 - coatF.x * 0.85, coatWeight);
-        color += coatF * uFrame.ambientSky.rgb * (0.25 * coatWeight) * uFrame.iblIntensity;
+        float dark = mix(1.0, uPush.coatDarkening, uPush.coatWeight);
+        color *= mix(1.0, (1.0 - coatF.x * 0.85) * dark, uPush.coatWeight);
+        color += coatF * uFrame.ambientSky.rgb * (0.25 * uPush.coatWeight) * uFrame.iblIntensity;
     }
-    if (fuzzWeight > 1e-4) {
+    if (uPush.fuzzWeight > 1e-4) {
         float rim = pow(1.0 - NdotV, 2.0);
-        color += fuzzColor * rim * fuzzWeight * 0.35 * irradiance * uFrame.iblIntensity;
+        color += uPush.fuzzColor * rim * uPush.fuzzWeight * 0.35 * irradiance * uFrame.iblIntensity;
     }
     return color;
 }
@@ -339,17 +466,15 @@ void main() {
 
     vec3 V = normalize(uFrame.cameraPos.xyz - vWorldPos);
 
-    vec3 color = evalOpenPbrAmbient(N, V, baseColor, metalness, roughness, uPush.specularWeight,
-                                    uPush.specularIor, uPush.specularColor, uPush.coatWeight,
-                                    uPush.coatIor, uPush.fuzzWeight, uPush.fuzzColor);
+    // Opaque dielectric fraction after transmission mix (OpenPBR tree).
+    float opaqueWeight = 1.0 - uPush.transmissionWeight * (1.0 - metalness);
+
+    vec3 color = evalOpenPbrAmbient(N, V, baseColor, metalness, roughness, opaqueWeight);
     for (int i = 0; i < uFrame.lightCount; ++i) {
         color += evalOpenPbrLight(uFrame.lights[i], N, V, vWorldPos, baseColor, metalness, roughness,
-                                  uPush.specularWeight, uPush.specularIor, uPush.specularColor,
-                                  uPush.coatWeight, uPush.coatRoughness, uPush.coatIor, uPush.coatColor,
-                                  uPush.fuzzWeight, uPush.fuzzRoughness, uPush.fuzzColor);
+                                  opaqueWeight);
     }
 
-    // Emission sits under the coat in OpenPBR — apply a light coat tint.
     vec3 emissive = uPush.emissive.rgb;
     uint emissiveIdx = (uPush.packedMaps >> 16) & kNoMap;
     if (emissiveIdx != kNoMap) {
@@ -370,6 +495,14 @@ void main() {
 
     float exposure = max(uFrame.cameraPos.w, 0.01);
     color = applyDisplayTransform(color * exposure);
+
+    // Transmission drives transparency (thin-walled stronger).
+    if (uPush.transmissionWeight > 1e-4 && metalness < 0.999) {
+        float t = uPush.transmissionWeight * (uPush.thinWalled > 0.5 ? 0.85 : 0.45);
+        alpha = mix(alpha, alpha * (1.0 - t), 1.0);
+        alpha = max(alpha, 0.04);
+        alphaMode = 2;
+    }
 
     if (alphaMode == 0) {
         alpha = 1.0;

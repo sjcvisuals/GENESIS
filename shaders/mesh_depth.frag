@@ -4,7 +4,7 @@
 
 layout(set = 1, binding = 0) uniform sampler2D materialTextures[256];
 
-// Must match MeshMaterialPushConstants (128 bytes). Depth pass uses alpha clip fields.
+// Must match MeshMaterialPushConstants (256 bytes). Depth pass uses alpha clip fields.
 layout(push_constant) uniform Push {
     vec4 baseColor;
     vec4 emissive;
@@ -23,6 +23,30 @@ layout(push_constant) uniform Push {
     float fuzzWeight;
     vec3 fuzzColor;
     float fuzzRoughness;
+    float transmissionWeight;
+    float transmissionDepth;
+    float subsurfaceWeight;
+    float subsurfaceRadius;
+    vec3 transmissionColor;
+    float thinFilmWeight;
+    vec3 subsurfaceColor;
+    float thinFilmThickness;
+    vec3 transmissionScatter;
+    float thinFilmIor;
+    vec3 subsurfaceRadiusScale;
+    float transmissionScatterAnisotropy;
+    float transmissionDispersionScale;
+    float transmissionDispersionAbbe;
+    float subsurfaceScatterAnisotropy;
+    float thinWalled;
+    float baseDiffuseRoughness;
+    float coatDarkening;
+    float pad0;
+    float pad1;
+    float pad2;
+    float pad3;
+    float pad4;
+    float pad5;
 } uPush;
 
 layout(location = 2) in vec2 vUv;

@@ -13,15 +13,12 @@ enum class AlphaMode : int {
     Blend = 2,
 };
 
-// Authoring material aligned with OpenPBR Surface (ASWF / Adobe / Autodesk).
+// Full OpenPBR Surface authoring model (ASWF / Adobe / Autodesk).
 // Spec: https://academysoftwarefoundation.github.io/OpenPBR/
 //
-// glTF metallic-roughness maps directly onto:
-//   metallic  -> base_metalness
-//   roughness -> specular_roughness
-//   emissive * emissive_strength -> emission_color * emission_luminance
-// Extra OpenPBR lobes (specular weight/IOR/color, coat, fuzz) make materials
-// match Substance / other OpenPBR apps more closely in realtime.
+// Realtime evaluation uses cheap, weight-gated approximations for transmission,
+// subsurface, and thin-film — optional lobes cost almost nothing when weight == 0.
+// Anisotropic roughness is omitted (mesh vertex format has no tangents yet).
 struct SceneMaterial {
     // --- Base substrate ---
     float base_weight = 1.0f;
@@ -32,8 +29,24 @@ struct SceneMaterial {
     // --- Specular (microfacet; shared by dielectric + metal) ---
     float specular_weight = 1.0f;
     glm::vec3 specular_color{1.0f};
-    float roughness = 0.5f; // OpenPBR specular_roughness (glTF roughnessFactor)
+    float roughness = 0.5f; // OpenPBR specular_roughness
     float specular_ior = 1.5f;
+
+    // --- Transmission (translucent dielectric base) ---
+    float transmission_weight = 0.0f;
+    glm::vec3 transmission_color{1.0f};
+    float transmission_depth = 0.0f; // 0 = constant tint
+    glm::vec3 transmission_scatter{0.0f};
+    float transmission_scatter_anisotropy = 0.0f;
+    float transmission_dispersion_scale = 0.0f;
+    float transmission_dispersion_abbe = 20.0f;
+
+    // --- Subsurface (opaque dielectric mix) ---
+    float subsurface_weight = 0.0f;
+    glm::vec3 subsurface_color{0.8f, 0.8f, 0.8f};
+    float subsurface_radius = 1.0f;
+    glm::vec3 subsurface_radius_scale{1.0f, 0.5f, 0.25f};
+    float subsurface_scatter_anisotropy = 0.0f;
 
     // --- Coat ---
     float coat_weight = 0.0f;
@@ -47,12 +60,18 @@ struct SceneMaterial {
     glm::vec3 fuzz_color{1.0f};
     float fuzz_roughness = 0.5f;
 
+    // --- Thin film (iridescence) ---
+    float thin_film_weight = 0.0f;
+    float thin_film_thickness = 0.5f; // micrometers
+    float thin_film_ior = 1.4f;
+
     // --- Emission (below coat) ---
-    glm::vec3 emissive{0.0f}; // OpenPBR emission_color
-    float emissive_strength = 1.0f; // OpenPBR emission_luminance scale
+    glm::vec3 emissive{0.0f};
+    float emissive_strength = 1.0f;
 
     // --- Geometry ---
     float normal_scale = 1.0f;
+    bool thin_walled = false;
     AlphaMode alpha_mode = AlphaMode::Opaque;
     float alpha_cutoff = 0.5f;
 
