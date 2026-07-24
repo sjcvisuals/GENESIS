@@ -3,6 +3,7 @@
 #include "runtime/GenesisFrameTime.hpp"
 #include "runtime/RuntimeScene.hpp"
 #include "renderer/OffscreenRenderer.hpp"
+#include "color/ColorManagement.hpp"
 #include "scene/GnsPackage.hpp"
 #include "scene/SceneDrawBatch.hpp"
 #include "scene/SceneRuntime.hpp"
@@ -45,19 +46,27 @@ public:
                 const GenesisFrameTime& frame_time,
                 bool use_scene_camera);
 
+    // Shared look / display settings (bloom, vignette, grain, exposure, display space).
+    ColorManagementSettings& lookSettings() { return look_settings_; }
+    const ColorManagementSettings& lookSettings() const { return look_settings_; }
+    void applyLookSettings();
+
     OffscreenRenderer& renderer() { return *renderer_; }
     const OffscreenRenderer& renderer() const { return *renderer_; }
     SceneRuntime& sceneRuntime() { return *scene_; }
     const SceneRuntime& sceneRuntime() const { return *scene_; }
 
 private:
-    void prepareFrameUniforms(const glm::dmat4& view, const glm::dmat4& projection);
+    void prepareFrameUniforms(const glm::dmat4& view, const glm::dmat4& projection,
+                              const GenesisFrameTime& frame_time);
 
     std::unique_ptr<OffscreenRenderer> renderer_;
     std::unique_ptr<SceneRuntime> scene_;
     std::vector<SceneDrawCommand> draw_commands_;
     std::vector<SceneMeshBatch> draw_batches_;
     FrameUniforms frame_uniforms_{};
+    ColorManagementSettings look_settings_{};
+    ColorManagement color_mgmt_{};
     std::uint32_t width_ = 1920;
     std::uint32_t height_ = 1080;
     std::optional<GnsPixeraConfig> last_pixera_config_;

@@ -150,6 +150,12 @@ void Renderer::setViewProjection(const float* mat4_col_major) {
     u.ambient_ground[0] = 0.065f;
     u.ambient_ground[1] = 0.055f;
     u.ambient_ground[2] = 0.048f;
+    // Match buildFrameUniforms cinematic defaults (bloom / vignette / grain).
+    u.display_params[0] = 0.0f;
+    u.display_params[1] = 0.55f;
+    u.display_params[2] = 0.32f;
+    u.display_params[3] = 0.0f;
+    u.fog_color[3] = 0.028f;
     u.light_count = 0;
     setFrameUniforms(u);
 }

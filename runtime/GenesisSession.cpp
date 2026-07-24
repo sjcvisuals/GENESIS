@@ -16,9 +16,19 @@ GenesisSession::GenesisSession(const OffscreenRendererConfig& config) {
     scene_ = std::make_unique<SceneRuntime>(renderer_->context());
     width_ = config.width;
     height_ = config.height;
+    // PIXERA composites over clips — keep target clear transparent.
+    renderer_->setClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    // PIXERA-friendly Rec.709 display by default; cinematic bloom/vignette/grain still apply.
+    look_settings_.display = DisplayColorSpace::Rec709;
+    applyLookSettings();
 }
 
 GenesisSession::~GenesisSession() = default;
+
+void GenesisSession::applyLookSettings() {
+    color_mgmt_.settings() = look_settings_;
+    renderer_->uploadDisplayLut(color_mgmt_.rebuildDisplayLut());
+}
 
 void GenesisSession::resize(std::uint32_t width, std::uint32_t height) {
     width_ = width;
@@ -70,7 +80,8 @@ void GenesisSession::tickFrame(const GenesisFrameTime& frame_time) {
     tickScenePlayback(*scene_, frame_time);
 }
 
-void GenesisSession::prepareFrameUniforms(const glm::dmat4& view, const glm::dmat4& projection) {
+void GenesisSession::prepareFrameUniforms(const glm::dmat4& view, const glm::dmat4& projection,
+                                          const GenesisFrameTime& frame_time) {
     const glm::dmat4 view_proj = projection * view;
     glm::mat4 view_proj_f = glm::mat4(view_proj);
 
@@ -79,13 +90,17 @@ void GenesisSession::prepareFrameUniforms(const glm::dmat4& view, const glm::dma
         camera_pos = *pos;
     }
 
-    frame_uniforms_ = buildFrameUniforms(scene_->scene(), glm::value_ptr(view_proj_f), camera_pos);
+    frame_uniforms_ = buildFrameUniforms(scene_->scene(), glm::value_ptr(view_proj_f), camera_pos,
+                                         &look_settings_,
+                                         static_cast<float>(frame_time.production_time_seconds));
 }
 
 void GenesisSession::render(const glm::dmat4& view,
                             const glm::dmat4& projection,
                             const GenesisFrameTime& frame_time,
                             bool use_scene_camera) {
+    current_frame_time_ = frame_time;
+
     glm::dmat4 render_view = view;
     glm::dmat4 render_projection = projection;
 
@@ -101,7 +116,7 @@ void GenesisSession::render(const glm::dmat4& view,
         }
     }
 
-    prepareFrameUniforms(render_view, render_projection);
+    prepareFrameUniforms(render_view, render_projection, frame_time);
     renderer_->setFrameUniforms(frame_uniforms_);
     renderer_->beginFrame();
 
