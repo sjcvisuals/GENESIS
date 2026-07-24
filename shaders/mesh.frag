@@ -202,11 +202,15 @@ float applySpecularAA(vec3 N, float roughness) {
 }
 
 // View/horizon AO — free depth cue, kills flat ambient fill.
-float cheapAmbientOcclusion(vec3 N, float NdotV) {
+float cheapAmbientOcclusion(vec3 N, float NdotV, vec3 worldPos) {
     float hemi = clamp(N.y * 0.5 + 0.5, 0.0, 1.0);
     float horizon = mix(0.38, 1.0, hemi * hemi * (3.0 - 2.0 * hemi));
     float cavity = mix(0.62, 1.0, pow(clamp(NdotV, 0.0, 1.0), 0.4));
-    return horizon * cavity;
+    // Fake contact shadow near the ground plane — grounds props without a shadow map.
+    float height = max(worldPos.y, 0.0);
+    float contact = mix(0.52, 1.0, smoothstep(0.0, 0.75, height));
+    float under = mix(0.7, 1.0, clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
+    return horizon * cavity * mix(contact, 1.0, 0.35 * under);
 }
 
 // Analytic env BRDF stand-in (no split-sum LUT) — roughness fades specular energy.
@@ -238,6 +242,13 @@ vec3 primaryLightRadiance() {
         return uFrame.lights[0].color.rgb * uFrame.lights[0].color.a;
     }
     return uFrame.ambientSky.rgb * 2.5;
+}
+
+// Height contact term reused on direct light for grounding.
+float contactShadow(vec3 worldPos, vec3 N) {
+    float height = max(worldPos.y, 0.0);
+    float contact = mix(0.62, 1.0, smoothstep(0.0, 0.55, height));
+    return mix(contact, 1.0, clamp(N.y * 0.35 + 0.65, 0.0, 1.0));
 }
 
 // Cheap thin-film iridescence — Airy phase modulation of F0 (weight-gated).
@@ -364,7 +375,7 @@ vec3 evalOpenPbrLight(Light light, vec3 N, vec3 V, vec3 worldPos, vec3 baseColor
 
     float rawNdotL = dot(N, L);
     // Directional lights get a soft sun disk; points/spots stay hard for locality.
-    float NdotL = (type == 0) ? softNdotL(rawNdotL, 0.035) : max(rawNdotL, 0.0);
+    float NdotL = (type == 0) ? softNdotL(rawNdotL, 0.055) : max(rawNdotL, 0.0);
     if (NdotL <= 0.0 && uPush.subsurfaceWeight < 1e-4) {
         return vec3(0.0);
     }
@@ -380,7 +391,13 @@ vec3 evalOpenPbrLight(Light light, vec3 N, vec3 V, vec3 worldPos, vec3 baseColor
     F0 = evalThinFilmF0(F0, VdotH, uPush.thinFilmThickness, uPush.thinFilmIor, uPush.thinFilmWeight);
 
     vec3 F;
-    vec3 specular = evalMicrofacet(N, V, L, max(roughness, 0.04), F0, F);
+    float shadeRoughness = max(roughness, 0.04);
+    if (type == 0) {
+        // Soften the specular lobe for a distant sun disk (matches softNdotL).
+        const float sunDisk = 0.055;
+        shadeRoughness = clamp(sqrt(shadeRoughness * shadeRoughness + sunDisk * sunDisk * 3.5), 0.04, 1.0);
+    }
+    vec3 specular = evalMicrofacet(N, V, L, shadeRoughness, F0, F);
     float diffResp = diffuseResponse(max(NdotL, 0.0), NdotV, uPush.baseDiffuseRoughness);
     vec3 kD = (vec3(1.0) - F) * (1.0 - metalness) * opaqueWeight;
     vec3 diffuse = kD * baseColor / kPi * diffResp;
@@ -422,7 +439,7 @@ vec3 evalOpenPbrLight(Light light, vec3 N, vec3 V, vec3 worldPos, vec3 baseColor
         base = mix(base, base + fuzz, uPush.fuzzWeight);
     }
 
-    return base;
+    return base * contactShadow(worldPos, N);
 }
 
 vec3 evalOpenPbrAmbient(vec3 N, vec3 V, vec3 baseColor, float metalness, float roughness,
@@ -436,7 +453,7 @@ vec3 evalOpenPbrAmbient(vec3 N, vec3 V, vec3 baseColor, float metalness, float r
     bentHemi = bentHemi * bentHemi * (3.0 - 2.0 * bentHemi);
     vec3 irradiance = mix(uFrame.ambientGround.rgb, uFrame.ambientSky.rgb, mix(hemi, bentHemi, 0.35));
     float NdotV = max(dot(N, V), 0.001);
-    float ao = cheapAmbientOcclusion(N, NdotV);
+    float ao = cheapAmbientOcclusion(N, NdotV, vWorldPos);
 
     float dielectricF0 = iorToF0(uPush.specularIor) * uPush.specularWeight;
     vec3 F0 = mix(uPush.specularColor * dielectricF0, baseColor, metalness);

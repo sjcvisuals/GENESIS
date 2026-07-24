@@ -39,8 +39,8 @@ inline SceneMaterial makeDefaultPlasticMaterial() {
     material.specular_color = glm::vec3(1.0f);
     material.specular_ior = 1.55f;
     material.normal_scale = 1.0f;
-    material.coat_weight = 0.55f;
-    material.coat_roughness = 0.06f;
+    material.coat_weight = 0.28f;
+    material.coat_roughness = 0.2f;
     material.coat_ior = 1.5f;
     material.coat_darkening = 0.9f;
     material.base_color_texture = "default_pbr_plastic/base_color.jpg";
