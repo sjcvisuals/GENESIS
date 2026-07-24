@@ -27,7 +27,7 @@ struct ColorManagementSettings {
     std::string ocio_input_space = "Linear Rec.709";
     std::string ocio_display = "Rec.709";
     std::string ocio_view = "ACES 2.0 - Rec.709";
-    float exposure = 1.15f;
+    float exposure = 1.0f;
     bool use_filmic_pre_display = true; // soft highlight compression before OETF (non-OCIO modes)
 };
 

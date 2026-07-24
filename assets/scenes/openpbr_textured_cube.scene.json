@@ -21,7 +21,7 @@
       "light": {
         "type": "directional",
         "color": [1.0, 0.97, 0.92],
-        "intensity": 3.2,
+        "intensity": 3.5,
         "enabled": true,
         "range": 10.0,
         "inner_cone_degrees": 20.0,
@@ -29,7 +29,7 @@
       },
       "transform": {
         "position": [0.0, 0.0, 0.0],
-        "rotation": [-0.383493, 0.30204, 0.131901, 0.864788],
+        "rotation": [-0.25, 0.45, 0.1, 0.85],
         "scale": [1.0, 1.0, 1.0]
       }
     },
@@ -40,8 +40,8 @@
       "visible": true,
       "light": {
         "type": "directional",
-        "color": [0.55, 0.7, 1.0],
-        "intensity": 0.85,
+        "color": [0.45, 0.55, 0.85],
+        "intensity": 0.45,
         "enabled": true,
         "range": 10.0,
         "inner_cone_degrees": 20.0,
@@ -49,7 +49,27 @@
       },
       "transform": {
         "position": [0.0, 0.0, 0.0],
-        "rotation": [0.15, -0.6, 0.05, 0.78],
+        "rotation": [0.2, -0.65, 0.05, 0.73],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Rim Light",
+      "name": "Rim Light",
+      "parent": "Scene",
+      "visible": true,
+      "light": {
+        "type": "directional",
+        "color": [0.75, 0.85, 1.0],
+        "intensity": 0.9,
+        "enabled": true,
+        "range": 10.0,
+        "inner_cone_degrees": 20.0,
+        "outer_cone_degrees": 30.0
+      },
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.05, 0.9, 0.2, 0.35],
         "scale": [1.0, 1.0, 1.0]
       }
     },
@@ -78,29 +98,29 @@
       "base_diffuse_roughness": 0.2,
       "specular_weight": 1.0,
       "specular_color": [1.0, 1.0, 1.0],
-      "specular_roughness": 0.35,
+      "specular_roughness": 0.22,
       "specular_ior": 1.5,
       "transmission_weight": 0.0,
       "transmission_color": [1.0, 1.0, 1.0],
       "transmission_depth": 0.0,
-      "subsurface_weight": 0.45,
+      "subsurface_weight": 0.28,
       "subsurface_color": [0.95, 0.4, 0.28],
       "subsurface_radius": 1.0,
       "subsurface_radius_scale": [1.0, 0.45, 0.2],
       "subsurface_scatter_anisotropy": 0.2,
-      "coat_weight": 0.75,
+      "coat_weight": 1.0,
       "coat_color": [1.0, 1.0, 1.0],
-      "coat_roughness": 0.05,
+      "coat_roughness": 0.03,
       "coat_ior": 1.6,
-      "coat_darkening": 0.85,
-      "fuzz_weight": 0.18,
+      "coat_darkening": 0.9,
+      "fuzz_weight": 0.12,
       "fuzz_color": [0.9, 0.8, 0.75],
-      "fuzz_roughness": 0.4,
-      "thin_film_weight": 0.55,
-      "thin_film_thickness": 0.5,
+      "fuzz_roughness": 0.35,
+      "thin_film_weight": 0.4,
+      "thin_film_thickness": 0.45,
       "thin_film_ior": 1.4,
       "emissive": [1.0, 1.0, 1.0],
-      "emissive_strength": 2.2,
+      "emissive_strength": 1.6,
       "thin_walled": false,
       "normal_scale": 1.0,
       "alpha_mode": "opaque",

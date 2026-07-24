@@ -61,15 +61,16 @@ FrameUniforms buildFrameUniforms(const Scene& scene, const float* view_proj_col_
     u.camera_pos[0] = camera_position.x;
     u.camera_pos[1] = camera_position.y;
     u.camera_pos[2] = camera_position.z;
-    u.camera_pos[3] = color ? std::max(color->exposure, 0.01f) : 1.15f;
+    u.camera_pos[3] = color ? std::max(color->exposure, 0.01f) : 1.0f;
 
-    u.ibl_intensity = 0.55f;
-    writeVec4(u.ambient_sky, 0.42f, 0.52f, 0.72f, 1.0f);
-    writeVec4(u.ambient_ground, 0.18f, 0.14f, 0.10f, 1.0f);
+    // Contrast-forward ambient: dark ground, cooler dim sky — direct lights carry the look.
+    u.ibl_intensity = 0.9f;
+    writeVec4(u.ambient_sky, 0.14f, 0.18f, 0.26f, 1.0f);
+    writeVec4(u.ambient_ground, 0.035f, 0.03f, 0.028f, 1.0f);
 
-    u.fog_density = 0.012f;
-    u.fog_height = 0.08f;
-    writeVec4(u.fog_color, 0.55f, 0.62f, 0.72f, 1.0f);
+    u.fog_density = 0.0045f;
+    u.fog_height = 0.05f;
+    writeVec4(u.fog_color, 0.22f, 0.26f, 0.32f, 1.0f);
 
     u.display_params[0] = color ? static_cast<float>(static_cast<int>(color->display)) : 0.0f;
 

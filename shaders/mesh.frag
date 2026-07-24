@@ -182,7 +182,29 @@ vec3 evalMicrofacet(vec3 N, vec3 V, vec3 L, float roughness, vec3 F0, out vec3 F
     float D = distributionGGX(NdotH, roughness);
     float G = geometrySmith(NdotV, NdotL, roughness);
     F = fresnelSchlick(VdotH, F0);
-    return (D * G * F) / max(4.0 * NdotV * NdotL, 1e-4);
+    vec3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 1e-4);
+    // Cheap multi-scatter energy compensation (keeps metals rich without LUTs).
+    float a = max(roughness * roughness, 0.04);
+    vec3 energyComp = vec3(1.0) + F0 * min(1.0 / a - 1.0, 3.5);
+    return specular * energyComp;
+}
+
+// View/horizon AO — free depth cue, kills flat ambient fill.
+float cheapAmbientOcclusion(vec3 N, float NdotV) {
+    float hemi = clamp(N.y * 0.5 + 0.5, 0.0, 1.0);
+    float horizon = mix(0.45, 1.0, hemi);
+    float cavity = mix(0.55, 1.0, pow(clamp(NdotV, 0.0, 1.0), 0.35));
+    return horizon * cavity;
+}
+
+// Analytic env BRDF stand-in (no split-sum LUT).
+vec3 envSpecular(vec3 F0, float roughness, float NdotV, vec3 radiance) {
+    float a = max(roughness, 0.04);
+    // Roughness softens and fades specular response toward albedo-neutral.
+    float fresnelFade = pow(1.0 - NdotV, 5.0);
+    vec3 f = F0 + (max(vec3(1.0 - a), F0) - F0) * fresnelFade;
+    float lobe = mix(1.0, 0.12, a * a);
+    return f * radiance * lobe;
 }
 
 // Cheap thin-film iridescence — Airy phase modulation of F0 (weight-gated).
@@ -308,7 +330,10 @@ vec3 evalOpenPbrLight(Light light, vec3 N, vec3 V, vec3 worldPos, vec3 baseColor
     }
 
     float NdotL = max(dot(N, L), 0.0);
-    float NdotV = max(dot(N, V), 0.0);
+    if (NdotL <= 0.0 && uPush.subsurfaceWeight < 1e-4) {
+        return vec3(0.0);
+    }
+    float NdotV = max(dot(N, V), 0.001);
     vec3 H = normalize(V + L);
     float VdotH = max(dot(V, H), 0.0);
     vec3 radiance = light.color.rgb * light.color.a * attenuation;
@@ -321,7 +346,7 @@ vec3 evalOpenPbrLight(Light light, vec3 N, vec3 V, vec3 worldPos, vec3 baseColor
 
     vec3 F;
     vec3 specular = evalMicrofacet(N, V, L, max(roughness, 0.04), F0, F);
-    float diffResp = diffuseResponse(NdotL, NdotV, uPush.baseDiffuseRoughness);
+    float diffResp = diffuseResponse(max(NdotL, 0.0), NdotV, uPush.baseDiffuseRoughness);
     vec3 kD = (vec3(1.0) - F) * (1.0 - metalness) * opaqueWeight;
     vec3 diffuse = kD * baseColor / kPi * diffResp;
 
@@ -333,9 +358,10 @@ vec3 evalOpenPbrLight(Light light, vec3 N, vec3 V, vec3 worldPos, vec3 baseColor
         diffuse = mix(diffuse, sss, sssW);
     }
 
-    vec3 base = (diffuse + specular * NdotL) * radiance;
+    // Specular only on front-facing light; diffuse/SSS may wrap.
+    vec3 base = diffuse * radiance + specular * radiance * max(NdotL, 0.0);
 
-    if (uPush.coatWeight > 1e-4) {
+    if (uPush.coatWeight > 1e-4 && NdotL > 0.0) {
         float coatF0 = iorToF0(uPush.coatIor);
         vec3 coatF;
         vec3 coatSpec = evalMicrofacet(N, V, L, max(uPush.coatRoughness, 0.04), vec3(coatF0), coatF);
@@ -359,49 +385,79 @@ vec3 evalOpenPbrLight(Light light, vec3 N, vec3 V, vec3 worldPos, vec3 baseColor
 vec3 evalOpenPbrAmbient(vec3 N, vec3 V, vec3 baseColor, float metalness, float roughness,
                         float opaqueWeight) {
     float hemi = N.y * 0.5 + 0.5;
+    // Sharper sky/ground split for readable form (still a cheap hemi).
+    hemi = hemi * hemi * (3.0 - 2.0 * hemi);
     vec3 irradiance = mix(uFrame.ambientGround.rgb, uFrame.ambientSky.rgb, hemi);
-    float NdotV = max(dot(N, V), 0.0);
+    float NdotV = max(dot(N, V), 0.001);
+    float ao = cheapAmbientOcclusion(N, NdotV);
 
     float dielectricF0 = iorToF0(uPush.specularIor) * uPush.specularWeight;
     vec3 F0 = mix(uPush.specularColor * dielectricF0, baseColor, metalness);
     F0 = evalThinFilmF0(F0, NdotV, uPush.thinFilmThickness, uPush.thinFilmIor, uPush.thinFilmWeight);
     vec3 F = fresnelSchlickRoughness(NdotV, F0, roughness);
     vec3 kD = (1.0 - F) * (1.0 - metalness) * opaqueWeight;
-    vec3 diffuse = kD * baseColor * irradiance;
+    // Match direct-light energy (/Pi) so ambient no longer flattens the image.
+    vec3 diffuse = kD * baseColor * (irradiance / kPi) * ao;
 
     if (uPush.subsurfaceWeight > 1e-4 && metalness < 0.999) {
         vec3 sss = mix(baseColor, uPush.subsurfaceColor, 0.65) * uPush.subsurfaceRadiusScale;
-        float wrapHemi = hemi * 0.65 + 0.35;
-        diffuse = mix(diffuse, sss * irradiance * wrapHemi, uPush.subsurfaceWeight * opaqueWeight);
+        float wrapHemi = hemi * 0.55 + 0.2;
+        diffuse = mix(diffuse, sss * (irradiance / kPi) * wrapHemi * ao,
+                      uPush.subsurfaceWeight * opaqueWeight);
     }
 
-    float specStrength = mix(0.35, 0.05, roughness * roughness);
-    vec3 specular = F * mix(uFrame.ambientSky.rgb, irradiance, roughness) * specStrength;
-    vec3 color = (diffuse + specular) * uFrame.iblIntensity;
+    vec3 envRadiance = mix(uFrame.ambientSky.rgb * 1.8, irradiance, roughness * roughness);
+    vec3 specular = envSpecular(F0, roughness, NdotV, envRadiance) * ao;
+    // Specular occlusion for rough cavities.
+    float specOcclusion = clamp(pow(NdotV + ao, exp2(-16.0 * roughness - 1.0)) - 1.0 + ao, 0.0, 1.0);
+    specular *= specOcclusion;
+    // Analytic directional “sun” highlight in ambient — free gloss cue without IBL maps.
+    vec3 fakeSunDir = normalize(vec3(0.35, 0.8, 0.45));
+    float sun = pow(max(dot(reflect(-V, N), fakeSunDir), 0.0), mix(64.0, 8.0, roughness));
+    specular += F0 * sun * mix(0.55, 0.08, roughness) * uFrame.ambientSky.rgb * ao;
 
-    color += evalTransmission(N, V, metalness, NdotV, F, uFrame.iblIntensity);
+    vec3 color = (diffuse + specular) * uFrame.iblIntensity;
+    color += evalTransmission(N, V, metalness, NdotV, F, uFrame.iblIntensity) * ao;
 
     if (uPush.coatWeight > 1e-4) {
         float coatF0 = iorToF0(uPush.coatIor);
-        vec3 coatF = fresnelSchlickRoughness(NdotV, vec3(coatF0), 0.1);
+        vec3 coatF = fresnelSchlickRoughness(NdotV, vec3(coatF0), max(uPush.coatRoughness, 0.04));
         float dark = mix(1.0, uPush.coatDarkening, uPush.coatWeight);
-        color *= mix(1.0, (1.0 - coatF.x * 0.85) * dark, uPush.coatWeight);
-        color += coatF * uFrame.ambientSky.rgb * (0.25 * uPush.coatWeight) * uFrame.iblIntensity;
+        color *= mix(1.0, (1.0 - coatF.x * 0.9) * dark, uPush.coatWeight);
+        color += coatF * uFrame.ambientSky.rgb * (0.45 * uPush.coatWeight) * uFrame.iblIntensity * ao;
     }
     if (uPush.fuzzWeight > 1e-4) {
-        float rim = pow(1.0 - NdotV, 2.0);
-        color += uPush.fuzzColor * rim * uPush.fuzzWeight * 0.35 * irradiance * uFrame.iblIntensity;
+        float rim = pow(1.0 - NdotV, 2.5);
+        color += uPush.fuzzColor * rim * uPush.fuzzWeight * 0.4 * irradiance * uFrame.iblIntensity;
     }
     return color;
 }
 
-vec3 filmicCompress(vec3 x) {
-    const float a = 2.51;
-    const float b = 0.03;
-    const float c = 2.43;
-    const float d = 0.59;
-    const float e = 0.14;
-    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+// Khronos PBR Neutral — designed for attractive realtime PBR without wash-out.
+vec3 pbrNeutralTonemap(vec3 color) {
+    const float startCompression = 0.8 - 0.04;
+    const float desaturation = 0.15;
+    float x = min(color.r, min(color.g, color.b));
+    float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
+    color -= offset;
+    float peak = max(color.r, max(color.g, color.b));
+    if (peak < startCompression) {
+        return color;
+    }
+    const float d = 1.0 - startCompression;
+    float newPeak = 1.0 - d * d / (peak + d - startCompression);
+    color *= newPeak / peak;
+    float g = 1.0 - 1.0 / (desaturation * (peak - newPeak) + 1.0);
+    return mix(color, vec3(newPeak), g);
+}
+
+vec3 gradeContrastSat(vec3 c) {
+    // Gentle pivot contrast + saturation — avoid S-curve crush of specular peaks.
+    c = max(c, vec3(0.0));
+    c = (c - 0.18) * 1.18 + 0.18;
+    float luma = dot(max(c, 0.0), vec3(0.2126, 0.7152, 0.0722));
+    c = mix(vec3(luma), c, 1.16);
+    return clamp(c, 0.0, 1.0);
 }
 
 float linearToRec709(float v) {
@@ -425,7 +481,8 @@ vec3 applyDisplayTransform(vec3 linearColor) {
     if (mode == 2) {
         return texture(displayLut, clamp(linearColor, 0.0, 1.0)).rgb;
     }
-    vec3 c = filmicCompress(linearColor);
+    vec3 c = pbrNeutralTonemap(max(linearColor, vec3(0.0)));
+    c = gradeContrastSat(c);
     if (mode == 1) {
         return vec3(linearToSrgb(c.r), linearToSrgb(c.g), linearToSrgb(c.b));
     }
