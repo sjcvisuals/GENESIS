@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "source": "builtin",
+  "nodes": [
+    {
+      "path": "Scene",
+      "name": "Scene",
+      "parent": null,
+      "visible": true,
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Key Light",
+      "name": "Key Light",
+      "parent": "Scene",
+      "visible": true,
+      "light": {
+        "type": "directional",
+        "color": [1.0, 0.97, 0.92],
+        "intensity": 3.6,
+        "enabled": true,
+        "range": 10.0,
+        "inner_cone_degrees": 20.0,
+        "outer_cone_degrees": 30.0
+      },
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [-0.25, 0.45, 0.1, 0.85],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Fill Light",
+      "name": "Fill Light",
+      "parent": "Scene",
+      "visible": true,
+      "light": {
+        "type": "directional",
+        "color": [0.45, 0.55, 0.85],
+        "intensity": 0.55,
+        "enabled": true,
+        "range": 10.0,
+        "inner_cone_degrees": 20.0,
+        "outer_cone_degrees": 30.0
+      },
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.2, -0.65, 0.05, 0.73],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Rim Light",
+      "name": "Rim Light",
+      "parent": "Scene",
+      "visible": true,
+      "light": {
+        "type": "directional",
+        "color": [0.75, 0.85, 1.0],
+        "intensity": 0.85,
+        "enabled": true,
+        "range": 10.0,
+        "inner_cone_degrees": 20.0,
+        "outer_cone_degrees": 30.0
+      },
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.05, 0.9, 0.2, 0.35],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Cube",
+      "name": "Cube",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "Cube",
+      "material": "Default PBR",
+      "transform": {
+        "position": [-2.4, 0.75, 0.0],
+        "rotation": [-0.1, 0.35, 0.08, 0.93],
+        "scale": [1.2, 1.2, 1.2]
+      }
+    },
+    {
+      "path": "Scene/Sphere",
+      "name": "Sphere",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "Sphere",
+      "material": "Default PBR",
+      "transform": {
+        "position": [-0.8, 0.75, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.35, 1.35, 1.35]
+      }
+    },
+    {
+      "path": "Scene/Cylinder",
+      "name": "Cylinder",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "Cylinder",
+      "material": "Default PBR",
+      "transform": {
+        "position": [0.85, 0.75, 0.0],
+        "rotation": [0.0, 0.25, 0.0, 0.97],
+        "scale": [1.15, 1.35, 1.15]
+      }
+    },
+    {
+      "path": "Scene/Plane",
+      "name": "Plane",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "Plane",
+      "material": "Default PBR",
+      "transform": {
+        "position": [2.55, 0.35, 0.15],
+        "rotation": [-0.35, 0.2, 0.1, 0.9],
+        "scale": [1.8, 1.8, 1.8]
+      }
+    }
+  ],
+  "materials": [
+    {
+      "name": "Default PBR",
+      "shading_model": "OpenPBR",
+      "base_weight": 1.0,
+      "base_color": [1.0, 1.0, 1.0, 1.0],
+      "base_metalness": 1.0,
+      "specular_weight": 1.0,
+      "specular_color": [1.0, 1.0, 1.0],
+      "specular_roughness": 1.0,
+      "specular_ior": 1.5,
+      "normal_scale": 1.0,
+      "alpha_mode": "opaque",
+      "base_color_texture": "default_pbr/base_color.jpg",
+      "metallic_roughness_texture": "default_pbr/metallic_roughness.jpg",
+      "normal_texture": "default_pbr/normal.jpg"
+    }
+  ]
+}

@@ -102,7 +102,7 @@ Mesh createSphereMesh(const VulkanContext& context, float radius, int segments, 
             const float ny = cos_phi;
             const float nz = sin_theta * sin_phi;
 
-            vertices.push_back(vtx(nx * radius, ny * radius, nz * radius, nx, ny, nz));
+            vertices.push_back(vtx(nx * radius, ny * radius, nz * radius, nx, ny, nz, u, v));
         }
     }
 
@@ -134,6 +134,7 @@ Mesh createCylinderMesh(const VulkanContext& context, float radius, float height
     segments = std::max(segments, 3);
     const float half_height = height * 0.5f;
 
+    // Side wall: seamless U wrap, V from bottom (0) to top (1).
     for (int seg = 0; seg <= segments; ++seg) {
         const float u = static_cast<float>(seg) / static_cast<float>(segments);
         const float theta = u * 2.0f * kPi;
@@ -142,14 +143,43 @@ Mesh createCylinderMesh(const VulkanContext& context, float radius, float height
         const float px = nx * radius;
         const float pz = nz * radius;
 
-        vertices.push_back(vtx(px, -half_height, pz, nx, 0.0f, nz));
-        vertices.push_back(vtx(px, half_height, pz, nx, 0.0f, nz));
+        vertices.push_back(vtx(px, -half_height, pz, nx, 0.0f, nz, u, 1.0f));
+        vertices.push_back(vtx(px, half_height, pz, nx, 0.0f, nz, u, 0.0f));
     }
 
-    const std::uint32_t top_center = static_cast<std::uint32_t>(vertices.size());
-    vertices.push_back(vtx(0.0f, half_height, 0.0f, 0.0f, 1.0f, 0.0f));
-    const std::uint32_t bottom_center = static_cast<std::uint32_t>(vertices.size());
-    vertices.push_back(vtx(0.0f, -half_height, 0.0f, 0.0f, -1.0f, 0.0f));
+    const std::uint32_t side_count = static_cast<std::uint32_t>((segments + 1) * 2);
+
+    // Caps use dedicated verts so normals and radial UVs are correct.
+    const std::uint32_t top_center = side_count;
+    vertices.push_back(vtx(0.0f, half_height, 0.0f, 0.0f, 1.0f, 0.0f, 0.5f, 0.5f));
+    const std::uint32_t bottom_center = top_center + 1;
+    vertices.push_back(vtx(0.0f, -half_height, 0.0f, 0.0f, -1.0f, 0.0f, 0.5f, 0.5f));
+
+    const std::uint32_t top_rim0 = bottom_center + 1;
+    for (int seg = 0; seg <= segments; ++seg) {
+        const float t = static_cast<float>(seg) / static_cast<float>(segments);
+        const float theta = t * 2.0f * kPi;
+        const float nx = std::cos(theta);
+        const float nz = std::sin(theta);
+        const float px = nx * radius;
+        const float pz = nz * radius;
+        const float u = nx * 0.5f + 0.5f;
+        const float v = nz * 0.5f + 0.5f;
+        vertices.push_back(vtx(px, half_height, pz, 0.0f, 1.0f, 0.0f, u, v));
+    }
+
+    const std::uint32_t bottom_rim0 = top_rim0 + static_cast<std::uint32_t>(segments + 1);
+    for (int seg = 0; seg <= segments; ++seg) {
+        const float t = static_cast<float>(seg) / static_cast<float>(segments);
+        const float theta = t * 2.0f * kPi;
+        const float nx = std::cos(theta);
+        const float nz = std::sin(theta);
+        const float px = nx * radius;
+        const float pz = nz * radius;
+        const float u = nx * 0.5f + 0.5f;
+        const float v = 1.0f - (nz * 0.5f + 0.5f);
+        vertices.push_back(vtx(px, -half_height, pz, 0.0f, -1.0f, 0.0f, u, v));
+    }
 
     for (int seg = 0; seg < segments; ++seg) {
         const std::uint32_t bottom0 = static_cast<std::uint32_t>(seg * 2);
@@ -164,13 +194,17 @@ Mesh createCylinderMesh(const VulkanContext& context, float radius, float height
         indices.push_back(top0);
         indices.push_back(top1);
 
+        const std::uint32_t top_a = top_rim0 + static_cast<std::uint32_t>(seg);
+        const std::uint32_t top_b = top_a + 1;
         indices.push_back(top_center);
-        indices.push_back(top0);
-        indices.push_back(top1);
+        indices.push_back(top_a);
+        indices.push_back(top_b);
 
+        const std::uint32_t bottom_a = bottom_rim0 + static_cast<std::uint32_t>(seg);
+        const std::uint32_t bottom_b = bottom_a + 1;
         indices.push_back(bottom_center);
-        indices.push_back(bottom1);
-        indices.push_back(bottom0);
+        indices.push_back(bottom_b);
+        indices.push_back(bottom_a);
     }
 
     return uploadMesh(context, vertices, indices);
@@ -178,11 +212,12 @@ Mesh createCylinderMesh(const VulkanContext& context, float radius, float height
 
 Mesh createPlaneMesh(const VulkanContext& context, float half_extent) {
     const float h = half_extent;
+    // +Y facing, full 0-1 UV square (matches cube +Y face orientation).
     std::vector<MeshVertexPNU> vertices = {
-        vtx(-h, 0.0f, -h, 0.0f, 1.0f, 0.0f),
-        vtx(h, 0.0f, -h, 0.0f, 1.0f, 0.0f),
-        vtx(h, 0.0f, h, 0.0f, 1.0f, 0.0f),
-        vtx(-h, 0.0f, h, 0.0f, 1.0f, 0.0f),
+        vtx(-h, 0.0f, h, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f),
+        vtx(h, 0.0f, h, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f),
+        vtx(h, 0.0f, -h, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f),
+        vtx(-h, 0.0f, -h, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f),
     };
     std::vector<std::uint32_t> indices = {0, 1, 2, 0, 2, 3};
     return uploadMesh(context, vertices, indices);

@@ -81,7 +81,11 @@ public:
 
     std::uint32_t addMesh(std::string name, Mesh mesh);
     std::uint32_t addMaterial(std::string name, SceneMaterial material);
+    // Adds makeDefaultPbrMaterial() and loads its maps from assets/textures/default_pbr/.
+    std::uint32_t addDefaultPbrMaterial(std::string name = "Default PBR");
     std::uint32_t addTexture(std::string name, GpuTexture texture);
+    // Resolve any material texture paths that are not yet bound to GPU resources.
+    void ensureMaterialTexturesLoaded();
 
     Mesh* mesh(std::uint32_t id);
     const Mesh* mesh(std::uint32_t id) const;

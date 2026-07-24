@@ -20,6 +20,7 @@
 #include "scene/SceneCamera.hpp"
 #include "scene/SceneLight.hpp"
 #include "scene/SceneMaterial.hpp"
+#include "scene/DefaultMaterial.hpp"
 #include "scene/SceneDrawBatch.hpp"
 #include "scene/ScenePicker.hpp"
 #include "scene/ScenePath.hpp"
@@ -484,6 +485,14 @@ private:
         if (ImGui::Button("Sphere", ImVec2(62, 0))) {
             addPrimitiveMesh("Sphere", genesis::createSphereMesh(renderer().context()));
         }
+        ImGui::SameLine();
+        if (ImGui::Button("Cylinder", ImVec2(70, 0))) {
+            addPrimitiveMesh("Cylinder", genesis::createCylinderMesh(renderer().context()));
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Plane", ImVec2(62, 0))) {
+            addPrimitiveMesh("Plane", genesis::createPlaneMesh(renderer().context()));
+        }
         if (ImGui::Button("Camera", ImVec2(128, 0))) {
             selectNode(scene.createCameraNode("Camera"));
             markDirty();
@@ -886,7 +895,7 @@ private:
         if (!n.material_resource.has_value()) {
             if (ImGui::Button("Assign Default Material")) {
                 n.has_material = true;
-                n.material_resource = 0;
+                n.material_resource = runtime_.addDefaultPbrMaterial("Default PBR");
                 markDirty();
             }
             return;
@@ -1955,12 +1964,7 @@ private:
         }
 
         const std::uint32_t cube_mesh = runtime_.addMesh("Cube", genesis::createCubeMesh(renderer().context()));
-        const std::uint32_t cube_mat = runtime_.addMaterial("Cube Material", genesis::SceneMaterial{});
-        if (genesis::SceneMaterial* mat = runtime_.material(cube_mat)) {
-            mat->base_color = glm::vec4(0.82f, 0.38f, 0.26f, 1.0f);
-            mat->roughness = 0.38f;
-            mat->metallic = 0.12f;
-        }
+        const std::uint32_t cube_mat = runtime_.addDefaultPbrMaterial("Cube Material");
         const genesis::NodeId cube = runtime_.scene().createMeshNode("Cube", cube_mesh, root, cube_mat);
         if (genesis::Node* n = runtime_.scene().find(cube)) {
             n->local.position = glm::vec3(0.0f, 0.0f, 0.0f);
@@ -2119,7 +2123,7 @@ private:
         static int counter = 1;
         const std::string name = std::string(prefix) + " " + std::to_string(counter++);
         const std::uint32_t mesh_id = runtime_.addMesh(name, std::move(mesh));
-        const std::uint32_t material_id = runtime_.addMaterial(name + " Material", genesis::SceneMaterial{});
+        const std::uint32_t material_id = runtime_.addDefaultPbrMaterial(name + " Material");
         selectNode(runtime_.scene().createMeshNode(name, mesh_id, std::nullopt, material_id));
         markDirty();
     }

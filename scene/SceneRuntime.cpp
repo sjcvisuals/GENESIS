@@ -9,6 +9,7 @@
 #include "assets/PrimitiveMeshes.hpp"
 #include "assets/TextureLoader.hpp"
 #include "platform/Paths.hpp"
+#include "scene/DefaultMaterial.hpp"
 #include "scene/ScenePath.hpp"
 #include "scene/SceneSerializer.hpp"
 #include "scene/GnsPackage.hpp"
@@ -16,6 +17,7 @@
 #include <algorithm>
 #include <cstring>
 #include <system_error>
+#include <unordered_map>
 #include <vector>
 #include <glm/gtc/quaternion.hpp>
 #include <spdlog/spdlog.h>
@@ -163,12 +165,7 @@ void SceneRuntime::loadDemo() {
     }
 
     const std::uint32_t cube_mesh = addMesh("Cube", createCubeMesh(context_));
-    const std::uint32_t cube_mat = addMaterial("Cube Material", SceneMaterial{});
-    if (SceneMaterial* mat = material(cube_mat)) {
-        mat->base_color = glm::vec4(0.82f, 0.38f, 0.26f, 1.0f);
-        mat->roughness = 0.38f;
-        mat->metallic = 0.12f;
-    }
+    const std::uint32_t cube_mat = addDefaultPbrMaterial("Cube Material");
 
     const NodeId cube = scene_.createMeshNode("Cube", cube_mesh, root, cube_mat);
     if (Node* n = scene_.find(cube)) {
@@ -204,6 +201,16 @@ std::uint32_t SceneRuntime::addMaterial(std::string name, SceneMaterial material
     materials_.push_back(std::move(material));
     material_names_.push_back(std::move(name));
     return static_cast<std::uint32_t>(materials_.size() - 1);
+}
+
+std::uint32_t SceneRuntime::addDefaultPbrMaterial(std::string name) {
+    const std::uint32_t id = addMaterial(std::move(name), makeDefaultPbrMaterial());
+    ensureMaterialTexturesLoaded();
+    return id;
+}
+
+void SceneRuntime::ensureMaterialTexturesLoaded() {
+    resolveMaterialTextures(std::filesystem::path("."));
 }
 
 std::uint32_t SceneRuntime::addTexture(std::string name, GpuTexture texture) {
@@ -707,12 +714,14 @@ std::uint32_t SceneRuntime::resolveMaterialRef(const std::string& ref) {
         if (material_names_[i] == ref) return static_cast<std::uint32_t>(i);
     }
     if (materials_.empty()) {
-        return addMaterial(ref, SceneMaterial{});
+        return addDefaultPbrMaterial(ref);
     }
     return 0;
 }
 
 void SceneRuntime::resolveMaterialTextures(const std::filesystem::path& asset_root) {
+    std::unordered_map<std::string, std::uint32_t> loaded_by_path;
+
     auto find_texture = [&](const std::string& ref) -> std::filesystem::path {
         if (ref.empty()) {
             return {};
@@ -756,9 +765,24 @@ void SceneRuntime::resolveMaterialTextures(const std::filesystem::path& asset_ro
             spdlog::warn("Material texture not found: {}", name);
             return;
         }
+        const std::string key = path.string();
+        if (const auto it = loaded_by_path.find(key); it != loaded_by_path.end()) {
+            resource = it->second;
+            name = path.filename().string();
+            return;
+        }
+        for (std::size_t i = 0; i < texture_names_.size(); ++i) {
+            if (texture_names_[i] == key) {
+                resource = static_cast<std::uint32_t>(i);
+                loaded_by_path[key] = *resource;
+                name = path.filename().string();
+                return;
+            }
+        }
         try {
             auto loaded = loadImageTexture(context_, path, TextureColorSpace::Auto, color_map);
-            resource = addTexture(loaded.label, std::move(loaded.texture));
+            resource = addTexture(key, std::move(loaded.texture));
+            loaded_by_path[key] = *resource;
             name = path.filename().string();
             spdlog::info("Loaded material texture {} -> {}", path.string(), *resource);
         } catch (const std::exception& ex) {
