@@ -65,6 +65,7 @@ public:
         setRenderStatsEnabled(true);
         genesis::ensureEditorDataDirs();
         session_.loadRecentList();
+        renderer().setClearColor(0.035f, 0.038f, 0.045f, 1.0f);
 
         grid_mesh_ = genesis::createEditorGridMesh(renderer().context(), kGridHalfExtentM, kGridDivisions);
         if (color_mgmt_.lutDirty()) {
@@ -1956,10 +1957,19 @@ private:
             runtime_.scene().createLightNode("Directional Light", genesis::SceneLightType::Directional, root);
         if (genesis::Node* n = runtime_.scene().find(light)) {
             n->local.rotation =
-                glm::angleAxis(glm::radians(-50.0f), glm::vec3(1.0f, 0.0f, 0.0f)) *
-                glm::angleAxis(glm::radians(40.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-            n->light->color = glm::vec3(1.0f, 0.97f, 0.92f);
-            n->light->intensity = 2.4f;
+                glm::angleAxis(glm::radians(-52.0f), glm::vec3(1.0f, 0.0f, 0.0f)) *
+                glm::angleAxis(glm::radians(38.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+            n->light->color = glm::vec3(1.0f, 0.96f, 0.88f);
+            n->light->intensity = 3.8f;
+        }
+        const genesis::NodeId fill =
+            runtime_.scene().createLightNode("Sky Fill", genesis::SceneLightType::Directional, root);
+        if (genesis::Node* n = runtime_.scene().find(fill)) {
+            n->local.rotation =
+                glm::angleAxis(glm::radians(-25.0f), glm::vec3(1.0f, 0.0f, 0.0f)) *
+                glm::angleAxis(glm::radians(-130.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+            n->light->color = glm::vec3(0.55f, 0.65f, 0.95f);
+            n->light->intensity = 0.7f;
         }
 
         const std::uint32_t cube_mesh = runtime_.addMesh("Cube", genesis::createCubeMesh(renderer().context()));
@@ -2142,8 +2152,8 @@ private:
     }
 
     void resetEditorCamera() {
-        const glm::vec3 target(0.0f, 0.75f, 0.0f);
-        const glm::vec3 eye(3.4f, 2.15f, 4.1f);
+        const glm::vec3 target(0.0f, 0.7f, 0.0f);
+        const glm::vec3 eye(4.2f, 2.55f, 5.4f);
         editor_camera_.transform.position = eye;
         editor_camera_.setRotation(genesis::cameraRotationFromLookAt(eye, target));
         genesis::extractYawPitchFromForward(editor_camera_.forward(), editor_camera_.yaw_radians,

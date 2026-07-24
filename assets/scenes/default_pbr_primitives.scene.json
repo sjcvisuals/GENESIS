@@ -8,110 +8,39 @@
       "parent": null,
       "visible": true,
       "transform": {
-        "position": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "rotation": [
-          0.0,
-          0.0,
-          0.0,
-          1.0
-        ],
-        "scale": [
-          1.0,
-          1.0,
-          1.0
-        ]
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
       }
     },
     {
-      "path": "Scene/Key Light",
-      "name": "Key Light",
+      "path": "Scene/Sun Key",
+      "name": "Sun Key",
       "parent": "Scene",
       "visible": true,
       "light": {
         "type": "directional",
-        "color": [
-          1.0,
-          0.97,
-          0.92
-        ],
-        "intensity": 3.6,
+        "color": [1.0, 0.96, 0.88],
+        "intensity": 4.2,
         "enabled": true,
         "range": 10.0,
         "inner_cone_degrees": 20.0,
         "outer_cone_degrees": 30.0
       },
       "transform": {
-        "position": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "rotation": [
-          -0.25,
-          0.45,
-          0.1,
-          0.85
-        ],
-        "scale": [
-          1.0,
-          1.0,
-          1.0
-        ]
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [-0.28, 0.42, 0.12, 0.85],
+        "scale": [1.0, 1.0, 1.0]
       }
     },
     {
-      "path": "Scene/Fill Light",
-      "name": "Fill Light",
+      "path": "Scene/Sky Fill",
+      "name": "Sky Fill",
       "parent": "Scene",
       "visible": true,
       "light": {
         "type": "directional",
-        "color": [
-          0.45,
-          0.55,
-          0.85
-        ],
-        "intensity": 0.55,
-        "enabled": true,
-        "range": 10.0,
-        "inner_cone_degrees": 20.0,
-        "outer_cone_degrees": 30.0
-      },
-      "transform": {
-        "position": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "rotation": [
-          0.2,
-          -0.65,
-          0.05,
-          0.73
-        ],
-        "scale": [
-          1.0,
-          1.0,
-          1.0
-        ]
-      }
-    },
-    {
-      "path": "Scene/Rim Light",
-      "name": "Rim Light",
-      "parent": "Scene",
-      "visible": true,
-      "light": {
-        "type": "directional",
-        "color": [
-          0.75,
-          0.85,
-          1.0
-        ],
+        "color": [0.55, 0.65, 0.95],
         "intensity": 0.85,
         "enabled": true,
         "range": 10.0,
@@ -119,158 +48,179 @@
         "outer_cone_degrees": 30.0
       },
       "transform": {
-        "position": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "rotation": [
-          0.05,
-          0.9,
-          0.2,
-          0.35
-        ],
-        "scale": [
-          1.0,
-          1.0,
-          1.0
-        ]
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.15, -0.72, 0.08, 0.67],
+        "scale": [1.0, 1.0, 1.0]
       }
     },
     {
-      "path": "Scene/Cube",
-      "name": "Cube",
+      "path": "Scene/Rim",
+      "name": "Rim",
+      "parent": "Scene",
+      "visible": true,
+      "light": {
+        "type": "directional",
+        "color": [0.85, 0.9, 1.0],
+        "intensity": 1.15,
+        "enabled": true,
+        "range": 10.0,
+        "inner_cone_degrees": 20.0,
+        "outer_cone_degrees": 30.0
+      },
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.08, 0.92, 0.18, 0.34],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Warm Bounce",
+      "name": "Warm Bounce",
+      "parent": "Scene",
+      "visible": true,
+      "light": {
+        "type": "directional",
+        "color": [1.0, 0.72, 0.48],
+        "intensity": 0.35,
+        "enabled": true,
+        "range": 10.0,
+        "inner_cone_degrees": 20.0,
+        "outer_cone_degrees": 30.0
+      },
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.65, 0.05, -0.1, 0.75],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Floor",
+      "name": "Floor",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "GroundPlane",
+      "material": "Concrete Floor",
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Metal Cube",
+      "name": "Metal Cube",
       "parent": "Scene",
       "visible": true,
       "pickable": true,
       "mesh": "Cube",
-      "material": "Default PBR",
+      "material": "Default Metal",
       "transform": {
-        "position": [
-          -2.9,
-          0.9,
-          0.0
-        ],
-        "rotation": [
-          -0.15,
-          0.4,
-          0.1,
-          0.9
-        ],
-        "scale": [
-          1.35,
-          1.35,
-          1.35
-        ]
+        "position": [-2.35, 0.85, 0.15],
+        "rotation": [-0.12, 0.38, 0.08, 0.91],
+        "scale": [1.25, 1.25, 1.25]
       }
     },
     {
-      "path": "Scene/Sphere",
-      "name": "Sphere",
+      "path": "Scene/Plastic Sphere",
+      "name": "Plastic Sphere",
       "parent": "Scene",
       "visible": true,
       "pickable": true,
       "mesh": "Sphere",
-      "material": "Default PBR",
+      "material": "Default Plastic",
       "transform": {
-        "position": [
-          -0.95,
-          0.9,
-          0.0
-        ],
-        "rotation": [
-          0.0,
-          0.0,
-          0.0,
-          1.0
-        ],
-        "scale": [
-          1.5,
-          1.5,
-          1.5
-        ]
+        "position": [-0.35, 0.85, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.45, 1.45, 1.45]
       }
     },
     {
-      "path": "Scene/Cylinder",
-      "name": "Cylinder",
+      "path": "Scene/Metal Cylinder",
+      "name": "Metal Cylinder",
       "parent": "Scene",
       "visible": true,
       "pickable": true,
       "mesh": "Cylinder",
-      "material": "Default PBR",
+      "material": "Default Metal",
       "transform": {
-        "position": [
-          0.95,
-          0.9,
-          0.0
-        ],
-        "rotation": [
-          0.0,
-          0.3,
-          0.0,
-          0.95
-        ],
-        "scale": [
-          1.25,
-          1.5,
-          1.25
-        ]
+        "position": [1.55, 0.9, 0.05],
+        "rotation": [0.0, 0.28, 0.0, 0.96],
+        "scale": [1.15, 1.45, 1.15]
       }
     },
     {
-      "path": "Scene/Plane",
-      "name": "Plane",
+      "path": "Scene/Plastic Plane",
+      "name": "Plastic Plane",
       "parent": "Scene",
       "visible": true,
       "pickable": true,
       "mesh": "Plane",
-      "material": "Default PBR",
+      "material": "Default Plastic",
       "transform": {
-        "position": [
-          2.85,
-          1.0,
-          0.2
-        ],
-        "rotation": [
-          0.7071068,
-          0.0,
-          0.0,
-          0.7071068
-        ],
-        "scale": [
-          1.55,
-          1.55,
-          1.55
-        ]
+        "position": [3.15, 1.05, 0.25],
+        "rotation": [0.7071068, 0.0, 0.0, 0.7071068],
+        "scale": [1.45, 1.45, 1.45]
       }
     }
   ],
   "materials": [
     {
-      "name": "Default PBR",
+      "name": "Default Metal",
       "shading_model": "OpenPBR",
       "base_weight": 1.0,
-      "base_color": [
-        1.0,
-        1.0,
-        1.0,
-        1.0
-      ],
+      "base_color": [1.0, 1.0, 1.0, 1.0],
       "base_metalness": 1.0,
       "specular_weight": 1.0,
-      "specular_color": [
-        1.0,
-        1.0,
-        1.0
-      ],
+      "specular_color": [1.0, 1.0, 1.0],
       "specular_roughness": 1.0,
-      "specular_ior": 1.5,
+      "specular_ior": 1.45,
+      "coat_weight": 0.35,
+      "coat_color": [1.0, 1.0, 1.0],
+      "coat_roughness": 0.08,
+      "coat_ior": 1.5,
+      "coat_darkening": 0.85,
       "normal_scale": 1.0,
       "alpha_mode": "opaque",
       "base_color_texture": "default_pbr/base_color.jpg",
       "metallic_roughness_texture": "default_pbr/metallic_roughness.jpg",
       "normal_texture": "default_pbr/normal.jpg"
+    },
+    {
+      "name": "Default Plastic",
+      "shading_model": "OpenPBR",
+      "base_weight": 1.0,
+      "base_color": [1.0, 1.0, 1.0, 1.0],
+      "base_metalness": 0.0,
+      "specular_weight": 1.0,
+      "specular_color": [1.0, 1.0, 1.0],
+      "specular_roughness": 1.0,
+      "specular_ior": 1.55,
+      "coat_weight": 0.55,
+      "coat_roughness": 0.06,
+      "coat_ior": 1.5,
+      "coat_darkening": 0.9,
+      "normal_scale": 1.0,
+      "alpha_mode": "opaque",
+      "base_color_texture": "default_pbr_plastic/base_color.jpg",
+      "metallic_roughness_texture": "default_pbr_plastic/metallic_roughness.jpg",
+      "normal_texture": "default_pbr_plastic/normal.jpg"
+    },
+    {
+      "name": "Concrete Floor",
+      "shading_model": "OpenPBR",
+      "base_weight": 1.0,
+      "base_color": [1.0, 1.0, 1.0, 1.0],
+      "base_metalness": 0.0,
+      "base_diffuse_roughness": 0.35,
+      "specular_weight": 1.0,
+      "specular_roughness": 1.0,
+      "specular_ior": 1.5,
+      "normal_scale": 1.15,
+      "alpha_mode": "opaque",
+      "base_color_texture": "default_pbr_floor/base_color.jpg",
+      "metallic_roughness_texture": "default_pbr_floor/metallic_roughness.jpg",
+      "normal_texture": "default_pbr_floor/normal.jpg"
     }
   ]
 }

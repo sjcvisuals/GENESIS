@@ -101,7 +101,7 @@ private:
     size_t current_frame_ = 0;
     bool render_pass_active_ = false;
     FrameUniforms frame_uniforms_{};
-    float clear_color_[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    float clear_color_[4] = {0.035f, 0.038f, 0.045f, 1.0f};
     std::string device_name_;
 };
 

@@ -142,14 +142,14 @@ void Renderer::setViewProjection(const float* mat4_col_major) {
     FrameUniforms u{};
     std::memcpy(u.view_proj, mat4_col_major, sizeof(u.view_proj));
     u.camera_pos[3] = 1.0f;
-    u.ibl_intensity = 0.9f;
+    u.ibl_intensity = 1.05f;
     u.fog_density = 0.0f;
-    u.ambient_sky[0] = 0.14f;
-    u.ambient_sky[1] = 0.18f;
-    u.ambient_sky[2] = 0.26f;
-    u.ambient_ground[0] = 0.035f;
-    u.ambient_ground[1] = 0.03f;
-    u.ambient_ground[2] = 0.028f;
+    u.ambient_sky[0] = 0.20f;
+    u.ambient_sky[1] = 0.24f;
+    u.ambient_sky[2] = 0.32f;
+    u.ambient_ground[0] = 0.065f;
+    u.ambient_ground[1] = 0.055f;
+    u.ambient_ground[2] = 0.048f;
     u.light_count = 0;
     setFrameUniforms(u);
 }

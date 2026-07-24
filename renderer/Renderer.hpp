@@ -124,7 +124,8 @@ private:
     bool framebuffer_resized_ = false;
     bool render_pass_active_ = false;
     FrameUniforms frame_uniforms_{};
-    float clear_color_[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    // Soft studio backdrop — reads better than pure black with PBR materials.
+    float clear_color_[4] = {0.035f, 0.038f, 0.045f, 1.0f};
     std::string device_name_;
 
     bool draw_region_enabled_ = false;

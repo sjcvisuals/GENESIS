@@ -183,28 +183,61 @@ vec3 evalMicrofacet(vec3 N, vec3 V, vec3 L, float roughness, vec3 F0, out vec3 F
     float G = geometrySmith(NdotV, NdotL, roughness);
     F = fresnelSchlick(VdotH, F0);
     vec3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 1e-4);
-    // Cheap multi-scatter energy compensation (keeps metals rich without LUTs).
-    float a = max(roughness * roughness, 0.04);
-    vec3 energyComp = vec3(1.0) + F0 * min(1.0 / a - 1.0, 3.5);
-    return specular * energyComp;
+    // Multi-scatter energy compensation (Lagarde/Karis-style, no LUT).
+    float a = max(roughness * roughness, 0.0016);
+    float Ess = clamp(1.0 - 1.459208852 * a + 0.842559 * a * a, 0.0, 1.0);
+    float Ems = 1.0 - Ess;
+    vec3 Favg = F0 + (1.0 - F0) / 21.0;
+    vec3 energyComp = 1.0 + Favg * (Ems / max(Ess, 1e-3));
+    return specular * clamp(energyComp, vec3(1.0), vec3(2.75));
+}
+
+// Specular anti-aliasing from normal-map / silhouette variance.
+float applySpecularAA(vec3 N, float roughness) {
+    vec3 dNdx = dFdx(N);
+    vec3 dNdy = dFdy(N);
+    float variance = 0.25 * (dot(dNdx, dNdx) + dot(dNdy, dNdy));
+    float kappa = 0.35;
+    return clamp(sqrt(max(roughness * roughness + kappa * variance, 1e-4)), 0.04, 1.0);
 }
 
 // View/horizon AO — free depth cue, kills flat ambient fill.
 float cheapAmbientOcclusion(vec3 N, float NdotV) {
     float hemi = clamp(N.y * 0.5 + 0.5, 0.0, 1.0);
-    float horizon = mix(0.45, 1.0, hemi);
-    float cavity = mix(0.55, 1.0, pow(clamp(NdotV, 0.0, 1.0), 0.35));
+    float horizon = mix(0.38, 1.0, hemi * hemi * (3.0 - 2.0 * hemi));
+    float cavity = mix(0.62, 1.0, pow(clamp(NdotV, 0.0, 1.0), 0.4));
     return horizon * cavity;
 }
 
-// Analytic env BRDF stand-in (no split-sum LUT).
+// Analytic env BRDF stand-in (no split-sum LUT) — roughness fades specular energy.
 vec3 envSpecular(vec3 F0, float roughness, float NdotV, vec3 radiance) {
     float a = max(roughness, 0.04);
-    // Roughness softens and fades specular response toward albedo-neutral.
     float fresnelFade = pow(1.0 - NdotV, 5.0);
     vec3 f = F0 + (max(vec3(1.0 - a), F0) - F0) * fresnelFade;
-    float lobe = mix(1.0, 0.12, a * a);
+    // Match GGX integrated energy falloff more closely than a linear mix.
+    float lobe = mix(1.05, 0.08, a) * mix(1.0, 0.55, a * a);
     return f * radiance * lobe;
+}
+
+// Soften directional lights like a distant area sun (cheap angular diameter).
+float softNdotL(float NdotL, float angularRadius) {
+    float soft = max(angularRadius, 0.0);
+    return clamp((NdotL + soft) / (1.0 + soft), 0.0, 1.0);
+}
+
+// First directional light drives ambient “sun” / bounce when present.
+vec3 primaryLightDir() {
+    if (uFrame.lightCount > 0 && int(uFrame.lights[0].params.x) == 0) {
+        return normalize(-uFrame.lights[0].direction.xyz);
+    }
+    return normalize(vec3(0.42, 0.78, 0.38));
+}
+
+vec3 primaryLightRadiance() {
+    if (uFrame.lightCount > 0 && int(uFrame.lights[0].params.x) == 0) {
+        return uFrame.lights[0].color.rgb * uFrame.lights[0].color.a;
+    }
+    return uFrame.ambientSky.rgb * 2.5;
 }
 
 // Cheap thin-film iridescence — Airy phase modulation of F0 (weight-gated).
@@ -329,7 +362,9 @@ vec3 evalOpenPbrLight(Light light, vec3 N, vec3 V, vec3 worldPos, vec3 baseColor
         }
     }
 
-    float NdotL = max(dot(N, L), 0.0);
+    float rawNdotL = dot(N, L);
+    // Directional lights get a soft sun disk; points/spots stay hard for locality.
+    float NdotL = (type == 0) ? softNdotL(rawNdotL, 0.035) : max(rawNdotL, 0.0);
     if (NdotL <= 0.0 && uPush.subsurfaceWeight < 1e-4) {
         return vec3(0.0);
     }
@@ -361,6 +396,14 @@ vec3 evalOpenPbrLight(Light light, vec3 N, vec3 V, vec3 worldPos, vec3 baseColor
     // Specular only on front-facing light; diffuse/SSS may wrap.
     vec3 base = diffuse * radiance + specular * radiance * max(NdotL, 0.0);
 
+    // Single-bounce ground fill from the key — warm floor reflection without GI.
+    if (type == 0) {
+        float sunToGround = max(L.y, 0.0);
+        float facingDown = clamp(-N.y * 0.55 + 0.35, 0.0, 1.0);
+        vec3 groundAlbedo = mix(uFrame.ambientGround.rgb, vec3(0.22, 0.19, 0.16), 0.55);
+        base += kD * groundAlbedo / kPi * radiance * sunToGround * facingDown * 0.28;
+    }
+
     if (uPush.coatWeight > 1e-4 && NdotL > 0.0) {
         float coatF0 = iorToF0(uPush.coatIor);
         vec3 coatF;
@@ -387,7 +430,11 @@ vec3 evalOpenPbrAmbient(vec3 N, vec3 V, vec3 baseColor, float metalness, float r
     float hemi = N.y * 0.5 + 0.5;
     // Sharper sky/ground split for readable form (still a cheap hemi).
     hemi = hemi * hemi * (3.0 - 2.0 * hemi);
-    vec3 irradiance = mix(uFrame.ambientGround.rgb, uFrame.ambientSky.rgb, hemi);
+    // Mild bent-normal bias toward sky for softer self-shadowing in ambient.
+    vec3 bent = normalize(N + vec3(0.0, 0.15, 0.0));
+    float bentHemi = bent.y * 0.5 + 0.5;
+    bentHemi = bentHemi * bentHemi * (3.0 - 2.0 * bentHemi);
+    vec3 irradiance = mix(uFrame.ambientGround.rgb, uFrame.ambientSky.rgb, mix(hemi, bentHemi, 0.35));
     float NdotV = max(dot(N, V), 0.001);
     float ao = cheapAmbientOcclusion(N, NdotV);
 
@@ -406,15 +453,25 @@ vec3 evalOpenPbrAmbient(vec3 N, vec3 V, vec3 baseColor, float metalness, float r
                       uPush.subsurfaceWeight * opaqueWeight);
     }
 
-    vec3 envRadiance = mix(uFrame.ambientSky.rgb * 1.8, irradiance, roughness * roughness);
+    // Roughness blurs env toward irradiance; gloss keeps a brighter sky lobe.
+    vec3 envRadiance = mix(uFrame.ambientSky.rgb * 2.15, irradiance, roughness * roughness);
     vec3 specular = envSpecular(F0, roughness, NdotV, envRadiance) * ao;
     // Specular occlusion for rough cavities.
     float specOcclusion = clamp(pow(NdotV + ao, exp2(-16.0 * roughness - 1.0)) - 1.0 + ao, 0.0, 1.0);
     specular *= specOcclusion;
-    // Analytic directional “sun” highlight in ambient — free gloss cue without IBL maps.
-    vec3 fakeSunDir = normalize(vec3(0.35, 0.8, 0.45));
-    float sun = pow(max(dot(reflect(-V, N), fakeSunDir), 0.0), mix(64.0, 8.0, roughness));
-    specular += F0 * sun * mix(0.55, 0.08, roughness) * uFrame.ambientSky.rgb * ao;
+
+    // Key-driven gloss cue + soft horizon reflection (no IBL maps).
+    vec3 sunDir = primaryLightDir();
+    vec3 sunRad = primaryLightRadiance();
+    vec3 R = reflect(-V, N);
+    float glossExp = mix(96.0, 6.0, roughness);
+    float sun = pow(max(dot(R, sunDir), 0.0), glossExp);
+    float sunVis = softNdotL(dot(N, sunDir), 0.05);
+    specular += F0 * sun * sunVis * mix(0.12, 0.018, roughness) * sunRad * ao;
+
+    // Horizon “environment strip” for metals — reads as a room/window reflection.
+    float horizon = pow(clamp(1.0 - abs(R.y), 0.0, 1.0), 2.0);
+    specular += F0 * horizon * mix(0.22, 0.04, roughness) * mix(uFrame.ambientGround.rgb, uFrame.ambientSky.rgb, 0.65) * ao;
 
     vec3 color = (diffuse + specular) * uFrame.iblIntensity;
     color += evalTransmission(N, V, metalness, NdotV, F, uFrame.iblIntensity) * ao;
@@ -424,7 +481,9 @@ vec3 evalOpenPbrAmbient(vec3 N, vec3 V, vec3 baseColor, float metalness, float r
         vec3 coatF = fresnelSchlickRoughness(NdotV, vec3(coatF0), max(uPush.coatRoughness, 0.04));
         float dark = mix(1.0, uPush.coatDarkening, uPush.coatWeight);
         color *= mix(1.0, (1.0 - coatF.x * 0.9) * dark, uPush.coatWeight);
-        color += coatF * uFrame.ambientSky.rgb * (0.45 * uPush.coatWeight) * uFrame.iblIntensity * ao;
+        color += coatF * uFrame.ambientSky.rgb * (0.55 * uPush.coatWeight) * uFrame.iblIntensity * ao;
+        float coatSun = pow(max(dot(R, sunDir), 0.0), mix(220.0, 24.0, uPush.coatRoughness));
+        color += coatF * coatSun * sunVis * 0.35 * uPush.coatWeight * uFrame.iblIntensity * ao;
     }
     if (uPush.fuzzWeight > 1e-4) {
         float rim = pow(1.0 - NdotV, 2.5);
@@ -452,11 +511,13 @@ vec3 pbrNeutralTonemap(vec3 color) {
 }
 
 vec3 gradeContrastSat(vec3 c) {
-    // Gentle pivot contrast + saturation — avoid S-curve crush of specular peaks.
+    // Mild photographic grade: lift shadows slightly, keep midtone density, preserve hue.
     c = max(c, vec3(0.0));
-    c = (c - 0.18) * 1.18 + 0.18;
+    c = (c - 0.18) * 1.12 + 0.18;
+    // Soft toe so dark metals keep some albedo instead of crushing to black.
+    c = c + (1.0 - exp(-c * 1.15)) * 0.035;
     float luma = dot(max(c, 0.0), vec3(0.2126, 0.7152, 0.0722));
-    c = mix(vec3(luma), c, 1.16);
+    c = mix(vec3(luma), c, 1.12);
     return clamp(c, 0.0, 1.0);
 }
 
@@ -529,6 +590,7 @@ void main() {
         vec3 nSample = texture(materialTextures[nonuniformEXT(normalIdx)], vUv).xyz;
         N = applyNormalMap(N, vWorldPos, vUv, nSample, max(uPush.emissive.a, 0.0));
     }
+    roughness = applySpecularAA(N, roughness);
 
     vec3 V = normalize(uFrame.cameraPos.xyz - vWorldPos);
 

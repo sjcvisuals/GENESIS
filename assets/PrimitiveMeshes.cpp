@@ -210,13 +210,14 @@ Mesh createCylinderMesh(const VulkanContext& context, float radius, float height
     return uploadMesh(context, vertices, indices);
 }
 
-Mesh createPlaneMesh(const VulkanContext& context, float half_extent) {
+Mesh createPlaneMesh(const VulkanContext& context, float half_extent, float uv_tiles) {
     const float h = half_extent;
-    // +Y facing, full 0-1 UV square (matches cube +Y face orientation).
+    const float uv = std::max(uv_tiles, 0.01f);
+    // +Y facing; uv_tiles > 1 repeats seamless PBR maps across large floors.
     std::vector<MeshVertexPNU> vertices = {
-        vtx(-h, 0.0f, h, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f),
-        vtx(h, 0.0f, h, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f),
-        vtx(h, 0.0f, -h, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f),
+        vtx(-h, 0.0f, h, 0.0f, 1.0f, 0.0f, 0.0f, uv),
+        vtx(h, 0.0f, h, 0.0f, 1.0f, 0.0f, uv, uv),
+        vtx(h, 0.0f, -h, 0.0f, 1.0f, 0.0f, uv, 0.0f),
         vtx(-h, 0.0f, -h, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f),
     };
     std::vector<std::uint32_t> indices = {0, 1, 2, 0, 2, 3};

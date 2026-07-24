@@ -158,10 +158,19 @@ void SceneRuntime::loadDemo() {
         scene_.createLightNode("Directional Light", SceneLightType::Directional, root);
     if (Node* n = scene_.find(dir_light)) {
         n->local.rotation =
-            glm::angleAxis(glm::radians(-50.0f), glm::vec3(1.0f, 0.0f, 0.0f)) *
-            glm::angleAxis(glm::radians(40.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-        n->light->color = glm::vec3(1.0f, 0.97f, 0.92f);
-        n->light->intensity = 2.4f;
+            glm::angleAxis(glm::radians(-52.0f), glm::vec3(1.0f, 0.0f, 0.0f)) *
+            glm::angleAxis(glm::radians(38.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        n->light->color = glm::vec3(1.0f, 0.96f, 0.88f);
+        n->light->intensity = 3.8f;
+    }
+    const NodeId fill_light =
+        scene_.createLightNode("Sky Fill", SceneLightType::Directional, root);
+    if (Node* n = scene_.find(fill_light)) {
+        n->local.rotation =
+            glm::angleAxis(glm::radians(-25.0f), glm::vec3(1.0f, 0.0f, 0.0f)) *
+            glm::angleAxis(glm::radians(-130.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        n->light->color = glm::vec3(0.55f, 0.65f, 0.95f);
+        n->light->intensity = 0.7f;
     }
 
     const std::uint32_t cube_mesh = addMesh("Cube", createCubeMesh(context_));
@@ -701,6 +710,9 @@ std::uint32_t SceneRuntime::resolveMeshRef(const std::string& ref) {
     }
     if (ref == "Plane") {
         return addMesh(ref, createPlaneMesh(context_));
+    }
+    if (ref == "GroundPlane") {
+        return addMesh(ref, createPlaneMesh(context_, 4.0f, 8.0f));
     }
     if (ref == "ImportedMesh" && !gltf_source_path_.empty()) {
         return addMesh(ref, GltfLoader::loadFirstMesh(context_, gltf_source_path_));
