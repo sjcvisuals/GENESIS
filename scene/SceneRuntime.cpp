@@ -7,6 +7,7 @@
 #include "animation/AnimationEvaluator.hpp"
 #include "assets/GltfLoader.hpp"
 #include "assets/PrimitiveMeshes.hpp"
+#include "assets/TextureLoader.hpp"
 #include "platform/Paths.hpp"
 #include "scene/ScenePath.hpp"
 #include "scene/SceneSerializer.hpp"
@@ -14,6 +15,8 @@
 
 #include <algorithm>
 #include <cstring>
+#include <system_error>
+#include <vector>
 #include <glm/gtc/quaternion.hpp>
 #include <spdlog/spdlog.h>
 #include <stdexcept>
@@ -63,12 +66,15 @@ void SceneRuntime::loadGltfFile(const std::filesystem::path& absolute_path) {
 
 void SceneRuntime::loadDocument(const std::filesystem::path& path) {
     const SceneDocument document = SceneSerializer::load(path);
+    const std::filesystem::path resolved = resolveAssetPath(path);
+    const std::filesystem::path asset_root = resolved.parent_path();
     if (document.source == "builtin") {
         buildFromDocument(document);
     } else {
         loadGltfSource(resolveAssetPath(document.source));
         applyDocumentOverrides(document);
     }
+    resolveMaterialTextures(asset_root);
     document_path_ = path.string();
 }
 
@@ -87,6 +93,7 @@ void SceneRuntime::loadDocumentData(const SceneDocument& document,
         loadGltfSource(gltf_path);
         applyDocumentOverrides(document);
     }
+    resolveMaterialTextures(asset_root);
 }
 
 void SceneRuntime::loadDocumentFile(const std::filesystem::path& absolute_path) {
@@ -703,6 +710,69 @@ std::uint32_t SceneRuntime::resolveMaterialRef(const std::string& ref) {
         return addMaterial(ref, SceneMaterial{});
     }
     return 0;
+}
+
+void SceneRuntime::resolveMaterialTextures(const std::filesystem::path& asset_root) {
+    auto find_texture = [&](const std::string& ref) -> std::filesystem::path {
+        if (ref.empty()) {
+            return {};
+        }
+        const std::filesystem::path as_path(ref);
+        std::vector<std::filesystem::path> candidates = {
+            as_path,
+            asset_root / as_path,
+            asset_root / ".." / as_path,
+            asset_root / ".." / "textures" / as_path,
+            asset_root / "textures" / as_path,
+            std::filesystem::path("assets") / as_path,
+            std::filesystem::path("assets/textures") / as_path,
+            std::filesystem::path("build/assets/textures") / as_path,
+            std::filesystem::path("build/assets") / as_path,
+        };
+        for (const std::filesystem::path& candidate : candidates) {
+            std::error_code ec;
+            if (!candidate.empty() && std::filesystem::exists(candidate, ec) && !ec) {
+                return std::filesystem::absolute(candidate);
+            }
+        }
+        // Last resort: resolveAssetPath may search configured roots (throws if missing).
+        try {
+            return resolveAssetPath(std::filesystem::path("assets/textures") / as_path);
+        } catch (const std::exception&) {
+        }
+        try {
+            return resolveAssetPath(as_path);
+        } catch (const std::exception&) {
+        }
+        return {};
+    };
+
+    auto load_slot = [&](std::string& name, std::optional<std::uint32_t>& resource, bool color_map) {
+        if (name.empty() || resource.has_value()) {
+            return;
+        }
+        const std::filesystem::path path = find_texture(name);
+        if (path.empty()) {
+            spdlog::warn("Material texture not found: {}", name);
+            return;
+        }
+        try {
+            auto loaded = loadImageTexture(context_, path, TextureColorSpace::Auto, color_map);
+            resource = addTexture(loaded.label, std::move(loaded.texture));
+            name = path.filename().string();
+            spdlog::info("Loaded material texture {} -> {}", path.string(), *resource);
+        } catch (const std::exception& ex) {
+            spdlog::error("Failed to load material texture {}: {}", path.string(), ex.what());
+        }
+    };
+
+    for (SceneMaterial& material : materials_) {
+        load_slot(material.base_color_texture, material.base_color_texture_resource, true);
+        load_slot(material.metallic_roughness_texture, material.metallic_roughness_texture_resource,
+                  false);
+        load_slot(material.normal_texture, material.normal_texture_resource, false);
+        load_slot(material.emissive_texture, material.emissive_texture_resource, true);
+    }
 }
 
 } // namespace genesis

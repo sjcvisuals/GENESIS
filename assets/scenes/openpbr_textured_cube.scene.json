@@ -1,0 +1,113 @@
+{
+  "version": 1,
+  "source": "builtin",
+  "nodes": [
+    {
+      "path": "Scene",
+      "name": "Scene",
+      "parent": null,
+      "visible": true,
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Key Light",
+      "name": "Key Light",
+      "parent": "Scene",
+      "visible": true,
+      "light": {
+        "type": "directional",
+        "color": [1.0, 0.97, 0.92],
+        "intensity": 3.2,
+        "enabled": true,
+        "range": 10.0,
+        "inner_cone_degrees": 20.0,
+        "outer_cone_degrees": 30.0
+      },
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [-0.383493, 0.30204, 0.131901, 0.864788],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Fill Light",
+      "name": "Fill Light",
+      "parent": "Scene",
+      "visible": true,
+      "light": {
+        "type": "directional",
+        "color": [0.55, 0.7, 1.0],
+        "intensity": 0.85,
+        "enabled": true,
+        "range": 10.0,
+        "inner_cone_degrees": 20.0,
+        "outer_cone_degrees": 30.0
+      },
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.15, -0.6, 0.05, 0.78],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/OpenPBR Cube",
+      "name": "OpenPBR Cube",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "Cube",
+      "material": "OpenPBR Textured Full",
+      "transform": {
+        "position": [0.0, 0.75, 0.0],
+        "rotation": [-0.12, 0.42, 0.1, 0.89],
+        "scale": [1.6, 1.6, 1.6]
+      }
+    }
+  ],
+  "materials": [
+    {
+      "name": "OpenPBR Textured Full",
+      "shading_model": "OpenPBR",
+      "base_weight": 1.0,
+      "base_color": [1.0, 1.0, 1.0, 1.0],
+      "base_metalness": 0.15,
+      "base_diffuse_roughness": 0.2,
+      "specular_weight": 1.0,
+      "specular_color": [1.0, 1.0, 1.0],
+      "specular_roughness": 0.35,
+      "specular_ior": 1.5,
+      "transmission_weight": 0.0,
+      "transmission_color": [1.0, 1.0, 1.0],
+      "transmission_depth": 0.0,
+      "subsurface_weight": 0.45,
+      "subsurface_color": [0.95, 0.4, 0.28],
+      "subsurface_radius": 1.0,
+      "subsurface_radius_scale": [1.0, 0.45, 0.2],
+      "subsurface_scatter_anisotropy": 0.2,
+      "coat_weight": 0.75,
+      "coat_color": [1.0, 1.0, 1.0],
+      "coat_roughness": 0.05,
+      "coat_ior": 1.6,
+      "coat_darkening": 0.85,
+      "fuzz_weight": 0.18,
+      "fuzz_color": [0.9, 0.8, 0.75],
+      "fuzz_roughness": 0.4,
+      "thin_film_weight": 0.55,
+      "thin_film_thickness": 0.5,
+      "thin_film_ior": 1.4,
+      "emissive": [1.0, 1.0, 1.0],
+      "emissive_strength": 2.2,
+      "thin_walled": false,
+      "normal_scale": 1.0,
+      "alpha_mode": "opaque",
+      "base_color_texture": "openpbr_cube/base_color.png",
+      "metallic_roughness_texture": "openpbr_cube/metallic_roughness.png",
+      "normal_texture": "openpbr_cube/normal.png",
+      "emissive_texture": "openpbr_cube/emissive.png"
+    }
+  ]
+}

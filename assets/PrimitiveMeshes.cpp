@@ -27,20 +27,29 @@ Mesh createCubeMesh(const VulkanContext& context, float half_extent) {
     indices.reserve(36);
 
     // Outward CCW winding (Vulkan front face = counter-clockwise).
+    // Each face gets a full 0-1 UV square so albedo / MR / normal maps read correctly.
     auto face = [&](float nx, float ny, float nz, MeshVertexPNU v0, MeshVertexPNU v1, MeshVertexPNU v2,
                     MeshVertexPNU v3) {
         v0.nx = nx;
         v0.ny = ny;
         v0.nz = nz;
+        v0.u = 0.0f;
+        v0.v = 1.0f;
         v1.nx = nx;
         v1.ny = ny;
         v1.nz = nz;
+        v1.u = 1.0f;
+        v1.v = 1.0f;
         v2.nx = nx;
         v2.ny = ny;
         v2.nz = nz;
+        v2.u = 1.0f;
+        v2.v = 0.0f;
         v3.nx = nx;
         v3.ny = ny;
         v3.nz = nz;
+        v3.u = 0.0f;
+        v3.v = 0.0f;
         const std::uint32_t base = static_cast<std::uint32_t>(vertices.size());
         vertices.push_back(v0);
         vertices.push_back(v1);

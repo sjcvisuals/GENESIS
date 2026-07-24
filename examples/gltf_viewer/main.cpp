@@ -2139,13 +2139,13 @@ private:
     }
 
     void resetEditorCamera() {
-        const glm::vec3 target(0.0f, 0.8f, 0.0f);
-        const glm::vec3 eye(8.0f, 4.5f, 9.0f);
+        const glm::vec3 target(0.0f, 0.75f, 0.0f);
+        const glm::vec3 eye(3.4f, 2.15f, 4.1f);
         editor_camera_.transform.position = eye;
         editor_camera_.setRotation(genesis::cameraRotationFromLookAt(eye, target));
         genesis::extractYawPitchFromForward(editor_camera_.forward(), editor_camera_.yaw_radians,
                                             editor_camera_.pitch_radians);
-        editor_camera_.fov_y_radians = glm::radians(55.0f);
+        editor_camera_.fov_y_radians = glm::radians(42.0f);
         editor_camera_.near_plane = 0.1f;
         editor_camera_.far_plane = 250.0f;
     }

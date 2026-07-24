@@ -144,6 +144,10 @@ float geometrySheen(float NdotV, float NdotL, float roughness) {
 vec3 applyNormalMap(vec3 N, vec3 worldPos, vec2 uv, vec3 tangentNormal, float scale) {
     vec3 mapN = tangentNormal * 2.0 - 1.0;
     mapN.xy *= scale;
+    float mapLen2 = dot(mapN, mapN);
+    if (mapLen2 < 1e-6) {
+        return N;
+    }
     mapN = normalize(mapN);
 
     vec3 dp1 = dFdx(worldPos);
@@ -156,11 +160,16 @@ vec3 applyNormalMap(vec3 N, vec3 worldPos, vec2 uv, vec3 tangentNormal, float sc
     vec3 T = dp2perp * duv1.x + dp1perp * duv2.x;
     vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;
 
-    float invMax = inversesqrt(max(dot(T, T), dot(B, B)));
+    float maxTB = max(dot(T, T), dot(B, B));
+    if (maxTB < 1e-8) {
+        return N;
+    }
+    float invMax = inversesqrt(maxTB);
     T *= invMax;
     B *= invMax;
     mat3 TBN = mat3(T, B, N);
-    return normalize(TBN * mapN);
+    vec3 outN = normalize(TBN * mapN);
+    return any(isnan(outN)) ? N : outN;
 }
 
 vec3 evalMicrofacet(vec3 N, vec3 V, vec3 L, float roughness, vec3 F0, out vec3 F) {

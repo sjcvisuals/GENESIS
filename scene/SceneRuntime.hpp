@@ -153,6 +153,7 @@ private:
     void applyNodeEntry(NodeId id, const SceneDocumentNode& entry);
     void createNodeFromEntry(const SceneDocumentNode& entry);
     void finishDocumentLoad(const SceneDocument& document);
+    void resolveMaterialTextures(const std::filesystem::path& asset_root);
 
     const VulkanContext& context_;
     Scene scene_{};
