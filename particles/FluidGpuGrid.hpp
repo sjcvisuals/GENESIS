@@ -15,11 +15,13 @@ class ComputePipeline;
 
 struct FluidSimStats {
     std::uint32_t grid_resolution = 0;
+    std::uint32_t atlas_tiles_x = 0;
     std::uint32_t pressure_iterations = 0;
     float last_step_ms = 0.0f;
 };
 
-// GPU stable-fluids grid (2D, semi-Lagrangian + Jacobi pressure).
+// GPU stable-fluids grid (3D, semi-Lagrangian + Jacobi pressure).
+// Domain is UVW [0,1]^3 mapped to FluidVolume::extent_meters.
 class FluidGpuGrid {
 public:
     explicit FluidGpuGrid(const VulkanContext& context);
@@ -34,8 +36,8 @@ public:
     const GpuTexture& displayTexture() const { return *display_texture_; }
     FluidSimStats stats() const { return stats_; }
 
-    // Bilinear sample of velocity field in volume UV [0,1] (CPU readback cache).
-    glm::vec2 sampleVelocityUv(float u, float v) const;
+    // Trilinear/synthetic sample of velocity in volume UVW [0,1].
+    glm::vec3 sampleVelocityUvw(float u, float v, float w) const;
 
 private:
     struct StorageImage {
@@ -46,21 +48,24 @@ private:
     };
 
     void destroyImages();
-    StorageImage createImage(std::uint32_t size, VkFormat format);
+    StorageImage createImage3D(std::uint32_t size, VkFormat format);
     void destroyImage(StorageImage& image);
     void createPipelines();
     void bindSimDescriptors();
 
-    void dispatchPass(VkCommandBuffer cmd, ComputePipeline& pipeline, std::uint32_t size,
-                      const void* push_data, std::uint32_t push_size);
+    void dispatchPass3D(VkCommandBuffer cmd, ComputePipeline& pipeline, std::uint32_t size,
+                        const void* push_data, std::uint32_t push_size);
+    void dispatchPresent(VkCommandBuffer cmd, const void* push_data, std::uint32_t push_size,
+                         std::uint32_t atlas_w, std::uint32_t atlas_h);
     void swapVelocity();
     void swapDensity();
     void readbackVelocityField();
-    void injectSplat(VkCommandBuffer cmd, glm::vec2 uv, glm::vec2 velocity, float radius, float density);
+    void injectSplat(VkCommandBuffer cmd, glm::vec3 uvw, glm::vec3 velocity, float radius, float density);
 
     const VulkanContext& context_;
     VkDevice device_ = VK_NULL_HANDLE;
     std::uint32_t grid_size_ = 0;
+    std::uint32_t atlas_tiles_x_ = 0;
     float sim_time_ = 0.0f;
 
     StorageImage velocity_[2]{};

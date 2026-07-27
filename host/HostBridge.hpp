@@ -43,6 +43,7 @@ public:
     void loadDemo();
     void loadGltf(const std::filesystem::path& path);
     void loadDocument(const std::filesystem::path& path);
+    void loadGns(const std::filesystem::path& path);
     void saveDocument(const std::filesystem::path& path);
     bool tryLoadRuntimeResource(const RuntimeSceneResource& resource, std::string* out_error = nullptr);
 

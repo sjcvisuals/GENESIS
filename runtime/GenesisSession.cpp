@@ -122,7 +122,9 @@ void GenesisSession::render(const glm::dmat4& view,
 
     const float fluid_dt =
         frame_time.delta_time_seconds > 0.0 ? static_cast<float>(frame_time.delta_time_seconds) : 0.0f;
-    renderer_->simulateFluids(*scene_, fluid_dt);
+    if (renderer_->canDispatchCompute()) {
+        scene_->simulateFluids(renderer_->currentCommandBuffer(), fluid_dt);
+    }
 
     draw_commands_.clear();
     SceneRenderStats render_stats{};

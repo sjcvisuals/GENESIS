@@ -53,7 +53,7 @@ void SceneRuntime::clear() {
     particle_step_accumulator_ = 0.0;
     particle_cube_mesh_id_.reset();
     particle_sphere_mesh_id_.reset();
-    fluid_quad_mesh_id_.reset();
+    fluid_box_mesh_id_.reset();
     fluid_display_material_id_.reset();
 }
 
@@ -327,8 +327,8 @@ void SceneRuntime::simulateFluids(VkCommandBuffer cmd, const float dt_seconds) {
 }
 
 void SceneRuntime::appendFluidDrawCommands(std::vector<SceneDrawCommand>& out) {
-    if (!fluid_quad_mesh_id_.has_value()) {
-        fluid_quad_mesh_id_ = addMesh("FluidQuad", createFluidDisplayQuadMesh(context_));
+    if (!fluid_box_mesh_id_.has_value()) {
+        fluid_box_mesh_id_ = addMesh("FluidBox", createFluidDisplayBoxMesh(context_));
     }
     if (!fluid_display_material_id_.has_value()) {
         SceneMaterial mat{};
@@ -337,11 +337,11 @@ void SceneRuntime::appendFluidDrawCommands(std::vector<SceneDrawCommand>& out) {
         mat.roughness = 1.0f;
         mat.emissive = glm::vec3(0.0f);
         mat.emissive_strength = 0.0f;
-        mat.alpha_mode = AlphaMode::Blend;
+        mat.alpha_mode = AlphaMode::Volume;
         fluid_display_material_id_ = addMaterial("FluidDisplay", mat);
     }
 
-    const Mesh* mesh = this->mesh(*fluid_quad_mesh_id_);
+    const Mesh* mesh = this->mesh(*fluid_box_mesh_id_);
     if (!mesh) {
         return;
     }
@@ -356,6 +356,16 @@ void SceneRuntime::appendFluidDrawCommands(std::vector<SceneDrawCommand>& out) {
         cmd.model = item.model;
         cmd.base_color_texture = item.display_texture;
         cmd.material = makeMeshMaterialPushConstants(*material(*fluid_display_material_id_));
+        // Dye tint for volumetric accumulation.
+        cmd.material.base_color[0] = item.dye_color.r;
+        cmd.material.base_color[1] = item.dye_color.g;
+        cmd.material.base_color[2] = item.dye_color.b;
+        cmd.material.base_color[3] = item.dye_color.a;
+        // Force Volume mode every draw (material template may be shared/cached).
+        cmd.material.material_params[2] = static_cast<float>(static_cast<int>(AlphaMode::Volume));
+        // Grid resolution + atlas tiles for the raymarcher.
+        cmd.material.material_params[3] = static_cast<float>(std::max(item.grid_resolution, 8u));
+        cmd.material.emissive[3] = static_cast<float>(std::max(item.atlas_tiles_x, 1u));
         cmd.instance_color = glm::vec4(1.0f);
         out.push_back(cmd);
     }

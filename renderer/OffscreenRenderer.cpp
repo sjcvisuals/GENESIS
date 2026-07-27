@@ -1,7 +1,5 @@
 #include "renderer/OffscreenRenderer.hpp"
 
-#include "scene/SceneRuntime.hpp"
-
 #include "platform/Paths.hpp"
 #include "renderer/Mesh.hpp"
 #include "renderer/MeshBatchDrawer.hpp"
@@ -338,13 +336,6 @@ void OffscreenRenderer::beginFrame() {
     if (mesh_batch_drawer_) {
         mesh_batch_drawer_->resetFrame();
     }
-}
-
-void OffscreenRenderer::simulateFluids(SceneRuntime& runtime, const float dt_seconds) {
-    if (render_pass_active_) {
-        return;
-    }
-    runtime.simulateFluids(command_buffers_[current_frame_], dt_seconds);
 }
 
 void OffscreenRenderer::drawMesh(const Mesh& mesh, const MeshDrawPushConstants& draw_constants,

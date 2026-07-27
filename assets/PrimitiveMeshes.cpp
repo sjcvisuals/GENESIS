@@ -224,6 +224,92 @@ Mesh createPlaneMesh(const VulkanContext& context, float half_extent, float uv_t
     return uploadMesh(context, vertices, indices);
 }
 
+Mesh createFluidDisplayBoxMesh(const VulkanContext& context) {
+    const float h = 0.5f;
+    std::vector<MeshVertexPNU> vertices;
+    std::vector<std::uint32_t> indices;
+    vertices.reserve(24);
+    indices.reserve(36);
+
+    auto pushFace = [&](float nx, float ny, float nz, MeshVertexPNU v0, MeshVertexPNU v1, MeshVertexPNU v2,
+                        MeshVertexPNU v3) {
+        v0.nx = nx;
+        v0.ny = ny;
+        v0.nz = nz;
+        v1.nx = nx;
+        v1.ny = ny;
+        v1.nz = nz;
+        v2.nx = nx;
+        v2.ny = ny;
+        v2.nz = nz;
+        v3.nx = nx;
+        v3.ny = ny;
+        v3.nz = nz;
+        const std::uint32_t base = static_cast<std::uint32_t>(vertices.size());
+        vertices.push_back(v0);
+        vertices.push_back(v1);
+        vertices.push_back(v2);
+        vertices.push_back(v3);
+        indices.push_back(base);
+        indices.push_back(base + 1);
+        indices.push_back(base + 2);
+        indices.push_back(base);
+        indices.push_back(base + 2);
+        indices.push_back(base + 3);
+    };
+
+    // Map each face into fluid UV space so vertical rise stays on the tall axis.
+    // Front/back: XY (sim plane). Sides: ZY. Top/bottom: XZ.
+    auto uvXY = [](float x, float y) { return std::pair<float, float>{x + 0.5f, y + 0.5f}; };
+    auto uvZY = [](float z, float y) { return std::pair<float, float>{z + 0.5f, y + 0.5f}; };
+    auto uvXZ = [](float x, float z) { return std::pair<float, float>{x + 0.5f, z + 0.5f}; };
+
+    // +Z (front)
+    {
+        const auto a = uvXY(-h, -h), b = uvXY(h, -h), c = uvXY(h, h), d = uvXY(-h, h);
+        pushFace(0, 0, 1, vtx(-h, -h, h, 0, 0, 1, a.first, a.second),
+                 vtx(h, -h, h, 0, 0, 1, b.first, b.second), vtx(h, h, h, 0, 0, 1, c.first, c.second),
+                 vtx(-h, h, h, 0, 0, 1, d.first, d.second));
+    }
+    // -Z (back) — mirror U so winding stays consistent when viewed from -Z
+    {
+        const auto a = uvXY(h, -h), b = uvXY(-h, -h), c = uvXY(-h, h), d = uvXY(h, h);
+        pushFace(0, 0, -1, vtx(h, -h, -h, 0, 0, -1, a.first, a.second),
+                 vtx(-h, -h, -h, 0, 0, -1, b.first, b.second), vtx(-h, h, -h, 0, 0, -1, c.first, c.second),
+                 vtx(h, h, -h, 0, 0, -1, d.first, d.second));
+    }
+    // +X (right)
+    {
+        const auto a = uvZY(h, -h), b = uvZY(-h, -h), c = uvZY(-h, h), d = uvZY(h, h);
+        pushFace(1, 0, 0, vtx(h, -h, h, 1, 0, 0, a.first, a.second),
+                 vtx(h, -h, -h, 1, 0, 0, b.first, b.second), vtx(h, h, -h, 1, 0, 0, c.first, c.second),
+                 vtx(h, h, h, 1, 0, 0, d.first, d.second));
+    }
+    // -X (left)
+    {
+        const auto a = uvZY(-h, -h), b = uvZY(h, -h), c = uvZY(h, h), d = uvZY(-h, h);
+        pushFace(-1, 0, 0, vtx(-h, -h, -h, -1, 0, 0, a.first, a.second),
+                 vtx(-h, -h, h, -1, 0, 0, b.first, b.second), vtx(-h, h, h, -1, 0, 0, c.first, c.second),
+                 vtx(-h, h, -h, -1, 0, 0, d.first, d.second));
+    }
+    // +Y (top)
+    {
+        const auto a = uvXZ(-h, h), b = uvXZ(h, h), c = uvXZ(h, -h), d = uvXZ(-h, -h);
+        pushFace(0, 1, 0, vtx(-h, h, h, 0, 1, 0, a.first, a.second),
+                 vtx(h, h, h, 0, 1, 0, b.first, b.second), vtx(h, h, -h, 0, 1, 0, c.first, c.second),
+                 vtx(-h, h, -h, 0, 1, 0, d.first, d.second));
+    }
+    // -Y (bottom)
+    {
+        const auto a = uvXZ(-h, -h), b = uvXZ(h, -h), c = uvXZ(h, h), d = uvXZ(-h, h);
+        pushFace(0, -1, 0, vtx(-h, -h, -h, 0, -1, 0, a.first, a.second),
+                 vtx(h, -h, -h, 0, -1, 0, b.first, b.second), vtx(h, -h, h, 0, -1, 0, c.first, c.second),
+                 vtx(-h, -h, h, 0, -1, 0, d.first, d.second));
+    }
+
+    return uploadMesh(context, vertices, indices);
+}
+
 Mesh createFluidDisplayQuadMesh(const VulkanContext& context, const float half_extent) {
     const float h = half_extent;
     // Same winding as the +Z face of createCubeMesh — matches fluid sim UV space (XY).

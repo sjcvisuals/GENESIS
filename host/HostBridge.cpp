@@ -104,6 +104,11 @@ void HostBridge::loadDocument(const std::filesystem::path& path) {
     scene_->updateTransforms();
 }
 
+void HostBridge::loadGns(const std::filesystem::path& path) {
+    scene_->loadGnsFile(path);
+    scene_->updateTransforms();
+}
+
 bool HostBridge::tryLoadRuntimeResource(const RuntimeSceneResource& resource, std::string* out_error) {
     return tryLoadRuntimeScene(*scene_, resource, out_error);
 }
@@ -125,6 +130,10 @@ bool HostBridge::applyCommand(const HostSceneCommand& command, std::string* out_
 
         case HostSceneCommandType::LoadDocument:
             loadDocument(resolveAssetPath(command.path));
+            return true;
+
+        case HostSceneCommandType::LoadGns:
+            loadGns(resolveAssetPath(command.path));
             return true;
 
         case HostSceneCommandType::SaveDocument:
@@ -279,7 +288,9 @@ void HostBridge::renderScene() {
     const float fluid_dt = current_frame_time_.delta_time_seconds > 0.0
                                ? static_cast<float>(current_frame_time_.delta_time_seconds)
                                : 0.0f;
-    renderer_->simulateFluids(*scene_, fluid_dt);
+    if (renderer_->canDispatchCompute()) {
+        scene_->simulateFluids(renderer_->currentCommandBuffer(), fluid_dt);
+    }
 
     SceneRenderStats render_stats{};
     SceneDrawCollectParams collect_params{};

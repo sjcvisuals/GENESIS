@@ -178,7 +178,7 @@ private:
     double particle_step_accumulator_ = 0.0;
     std::optional<std::uint32_t> particle_cube_mesh_id_;
     std::optional<std::uint32_t> particle_sphere_mesh_id_;
-    std::optional<std::uint32_t> fluid_quad_mesh_id_;
+    std::optional<std::uint32_t> fluid_box_mesh_id_;
     std::optional<std::uint32_t> fluid_display_material_id_;
 };
 

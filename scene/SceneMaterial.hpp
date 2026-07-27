@@ -11,6 +11,7 @@ enum class AlphaMode : int {
     Opaque = 0,
     Mask = 1,
     Blend = 2,
+    Volume = 3, // Raymarched volumetric (fluid) — never treat base texture as surface albedo
 };
 
 // Full OpenPBR Surface authoring model (ASWF / Adobe / Autodesk).

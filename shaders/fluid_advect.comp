@@ -1,63 +1,87 @@
 #version 450
 
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
 
-layout(set = 0, binding = 0, rg16f) uniform readonly image2D uVelocityRead;
-layout(set = 0, binding = 1, rg16f) uniform writeonly image2D uVelocityWrite;
-layout(set = 0, binding = 2, r16f) uniform readonly image2D uDensityRead;
-layout(set = 0, binding = 3, r16f) uniform writeonly image2D uDensityWrite;
+layout(set = 0, binding = 0, rgba16f) uniform readonly image3D uVelocityRead;
+layout(set = 0, binding = 1, rgba16f) uniform writeonly image3D uVelocityWrite;
+layout(set = 0, binding = 2, r16f) uniform readonly image3D uDensityRead;
+layout(set = 0, binding = 3, r16f) uniform writeonly image3D uDensityWrite;
 
 layout(push_constant) uniform Push {
-    ivec2 gridSize;
+    ivec3 gridSize;
     float dt;
     float dissipation;
     int advectDensity; // 0 = velocity, 1 = density
+    float _pad0;
+    float _pad1;
 } pc;
 
-vec2 sampleVelocity(ivec2 coord) {
-    coord = clamp(coord, ivec2(0), pc.gridSize - ivec2(1));
-    return imageLoad(uVelocityRead, coord).xy;
+vec3 sampleVelocity(ivec3 coord) {
+    coord = clamp(coord, ivec3(0), pc.gridSize - ivec3(1));
+    return imageLoad(uVelocityRead, coord).xyz;
 }
 
-float sampleDensity(ivec2 coord) {
-    coord = clamp(coord, ivec2(0), pc.gridSize - ivec2(1));
+float sampleDensity(ivec3 coord) {
+    coord = clamp(coord, ivec3(0), pc.gridSize - ivec3(1));
     return imageLoad(uDensityRead, coord).x;
 }
 
+vec3 trilinearVelocity(vec3 pos) {
+    vec3 f = fract(pos);
+    ivec3 s = ivec3(floor(pos));
+    vec3 v000 = sampleVelocity(s);
+    vec3 v100 = sampleVelocity(s + ivec3(1, 0, 0));
+    vec3 v010 = sampleVelocity(s + ivec3(0, 1, 0));
+    vec3 v110 = sampleVelocity(s + ivec3(1, 1, 0));
+    vec3 v001 = sampleVelocity(s + ivec3(0, 0, 1));
+    vec3 v101 = sampleVelocity(s + ivec3(1, 0, 1));
+    vec3 v011 = sampleVelocity(s + ivec3(0, 1, 1));
+    vec3 v111 = sampleVelocity(s + ivec3(1, 1, 1));
+    vec3 v00 = mix(v000, v100, f.x);
+    vec3 v10 = mix(v010, v110, f.x);
+    vec3 v01 = mix(v001, v101, f.x);
+    vec3 v11 = mix(v011, v111, f.x);
+    vec3 v0 = mix(v00, v10, f.y);
+    vec3 v1 = mix(v01, v11, f.y);
+    return mix(v0, v1, f.z);
+}
+
+float trilinearDensity(vec3 pos) {
+    vec3 f = fract(pos);
+    ivec3 s = ivec3(floor(pos));
+    float d000 = sampleDensity(s);
+    float d100 = sampleDensity(s + ivec3(1, 0, 0));
+    float d010 = sampleDensity(s + ivec3(0, 1, 0));
+    float d110 = sampleDensity(s + ivec3(1, 1, 0));
+    float d001 = sampleDensity(s + ivec3(0, 0, 1));
+    float d101 = sampleDensity(s + ivec3(1, 0, 1));
+    float d011 = sampleDensity(s + ivec3(0, 1, 1));
+    float d111 = sampleDensity(s + ivec3(1, 1, 1));
+    float d00 = mix(d000, d100, f.x);
+    float d10 = mix(d010, d110, f.x);
+    float d01 = mix(d001, d101, f.x);
+    float d11 = mix(d011, d111, f.x);
+    float d0 = mix(d00, d10, f.y);
+    float d1 = mix(d01, d11, f.y);
+    return mix(d0, d1, f.z);
+}
+
 void main() {
-    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
-    if (coord.x >= pc.gridSize.x || coord.y >= pc.gridSize.y) {
+    ivec3 coord = ivec3(gl_GlobalInvocationID.xyz);
+    if (any(greaterThanEqual(coord, pc.gridSize))) {
         return;
     }
 
-    vec2 uv = (vec2(coord) + 0.5) / vec2(pc.gridSize);
+    vec3 uvw = (vec3(coord) + 0.5) / vec3(pc.gridSize);
+    vec3 vel = sampleVelocity(coord);
+    vec3 back = uvw - vel * pc.dt;
+    vec3 pos = back * vec3(pc.gridSize) - 0.5;
+
     if (pc.advectDensity != 0) {
-        vec2 vel = sampleVelocity(coord);
-        vec2 back = uv - vel * pc.dt;
-        back *= vec2(pc.gridSize);
-        ivec2 src = ivec2(back - 0.5);
-        vec2 f = fract(back - 0.5);
-        float d00 = sampleDensity(src);
-        float d10 = sampleDensity(src + ivec2(1, 0));
-        float d01 = sampleDensity(src + ivec2(0, 1));
-        float d11 = sampleDensity(src + ivec2(1, 1));
-        float d0 = mix(d00, d10, f.x);
-        float d1 = mix(d01, d11, f.x);
-        float density = mix(d0, d1, f.y) * pc.dissipation;
+        float density = trilinearDensity(pos) * pc.dissipation;
         imageStore(uDensityWrite, coord, vec4(density, 0.0, 0.0, 0.0));
     } else {
-        vec2 vel = sampleVelocity(coord);
-        vec2 back = uv - vel * pc.dt;
-        back *= vec2(pc.gridSize);
-        ivec2 src = ivec2(back - 0.5);
-        vec2 f = fract(back - 0.5);
-        vec2 v00 = sampleVelocity(src);
-        vec2 v10 = sampleVelocity(src + ivec2(1, 0));
-        vec2 v01 = sampleVelocity(src + ivec2(0, 1));
-        vec2 v11 = sampleVelocity(src + ivec2(1, 1));
-        vec2 v0 = mix(v00, v10, f.x);
-        vec2 v1 = mix(v01, v11, f.x);
-        vec2 outVel = mix(v0, v1, f.y) * pc.dissipation;
-        imageStore(uVelocityWrite, coord, vec4(outVel, 0.0, 0.0));
+        vec3 outVel = trilinearVelocity(pos) * pc.dissipation;
+        imageStore(uVelocityWrite, coord, vec4(outVel, 0.0));
     }
 }

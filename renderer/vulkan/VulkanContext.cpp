@@ -282,6 +282,7 @@ void VulkanContext::createLogicalDevice(const VulkanContextConfig& config) {
 
     if (headless_) {
 #ifdef _WIN32
+        // PIXERA shared-texture path: exportable Win32 handles for color + sync.
         device_extensions_ = {
             VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
             VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
@@ -290,6 +291,7 @@ void VulkanContext::createLogicalDevice(const VulkanContextConfig& config) {
             VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME,
         };
 #else
+        // Linux/headless: FD external memory/semaphore for PIXERA-style export.
         device_extensions_ = {
             VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
             VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,

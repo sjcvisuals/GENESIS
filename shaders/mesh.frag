@@ -91,6 +91,8 @@ layout(location = 0) in vec3 vWorldPos;
 layout(location = 1) in vec3 vWorldNormal;
 layout(location = 2) in vec2 vUv;
 layout(location = 3) in vec4 vInstanceColor;
+layout(location = 4) in vec3 vLocalPos;
+layout(location = 5) in vec3 vCamLocal;
 
 layout(location = 0) out vec4 outColor;
 
@@ -634,12 +636,143 @@ vec3 applyDisplayTransform(vec3 linearColor, vec3 worldPos) {
     return vec3(linearToRec709(c.r), linearToRec709(c.g), linearToRec709(c.b));
 }
 
+// Fast nearest-Z atlas sample for empty-space probes.
+float sampleDensityAtlasFast(vec3 uvw, int gridN, int tilesX) {
+    uvw = clamp(uvw, vec3(0.0), vec3(1.0));
+    int z = int(uvw.z * float(gridN - 1) + 0.5);
+    int tilesY = (gridN + tilesX - 1) / tilesX;
+    vec2 atlasSize = vec2(float(tilesX * gridN), float(tilesY * gridN));
+    int tx = z % tilesX;
+    int ty = z / tilesX;
+    vec2 base = vec2(float(tx * gridN), float(ty * gridN));
+    vec2 pixel = base + uvw.xy * float(gridN);
+    return texture(materialTextures[nonuniformEXT(uPush.textureIndex)], (pixel + 0.5) / atlasSize).r * 4.0;
+}
+
+// Z-lerp only once density is found — keeps empty leaps cheap, softens slice seams.
+float sampleDensityAtlas(vec3 uvw, int gridN, int tilesX) {
+    uvw = clamp(uvw, vec3(0.0), vec3(1.0));
+    float zf = uvw.z * float(gridN - 1);
+    int z0 = int(floor(zf));
+    int z1 = min(z0 + 1, gridN - 1);
+    float fz = fract(zf);
+    int tilesY = (gridN + tilesX - 1) / tilesX;
+    vec2 atlasSize = vec2(float(tilesX * gridN), float(tilesY * gridN));
+    vec2 xy = uvw.xy * float(gridN);
+
+    int tx0 = z0 % tilesX;
+    int ty0 = z0 / tilesX;
+    int tx1 = z1 % tilesX;
+    int ty1 = z1 / tilesX;
+    float d0 = texture(materialTextures[nonuniformEXT(uPush.textureIndex)],
+                       (vec2(float(tx0 * gridN), float(ty0 * gridN)) + xy + 0.5) / atlasSize).r;
+    float d1 = texture(materialTextures[nonuniformEXT(uPush.textureIndex)],
+                       (vec2(float(tx1 * gridN), float(ty1 * gridN)) + xy + 0.5) / atlasSize).r;
+    return mix(d0, d1, fz) * 4.0;
+}
+
+bool intersectAabb(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax, out float t0, out float t1) {
+    vec3 invRd = 1.0 / rd;
+    vec3 tA = (bmin - ro) * invRd;
+    vec3 tB = (bmax - ro) * invRd;
+    vec3 tmin = min(tA, tB);
+    vec3 tmax = max(tA, tB);
+    t0 = max(max(tmin.x, tmin.y), tmin.z);
+    t1 = min(min(tmax.x, tmax.y), tmax.z);
+    return t1 >= max(t0, 0.0);
+}
+
+vec4 raymarchFluidVolume() {
+    int gridN = int(uPush.materialParams.w + 0.5);
+    int tilesX = max(int(uPush.emissive.a + 0.5), 1);
+    gridN = max(gridN, 8);
+
+    vec3 ro = vCamLocal;
+    vec3 rd = normalize(vLocalPos - vCamLocal);
+    float tEnter;
+    float tExit;
+    // Slightly inflate the unit AABB so rasterized face fragments don't miss
+    // the analytical hit due to perspective interpolation / float error.
+    const vec3 bmin = vec3(-0.5005);
+    const vec3 bmax = vec3(0.5005);
+    if (!intersectAabb(ro, rd, bmin, bmax, tEnter, tExit)) {
+        return vec4(0.0);
+    }
+    tEnter = max(tEnter, 0.0);
+    if (tExit <= tEnter) {
+        return vec4(0.0);
+    }
+
+    // Keep only the *exit* (far) face. The mesh pipeline disables culling, so
+    // every box face would otherwise raymarch and stack. Matching against the
+    // near face with a tight epsilon caused jagged stair-step holes / garbage
+    // fragments on llvmpipe when interpolated surface depth drifted from tEnter.
+    float tSurf = dot(vLocalPos - ro, rd);
+    if (abs(tSurf - tExit) > abs(tSurf - tEnter) + 1e-3) {
+        return vec4(0.0);
+    }
+
+    // Budget steps by path length — never a fixed 64. Early-out on empty / opaque.
+    float span = max(tExit - tEnter, 1e-4);
+    int steps = int(clamp(span * 40.0, 16.0, 32.0));
+    float dt = span / float(steps);
+
+    vec3 dye = uPush.baseColor.rgb;
+    vec3 rgb = vec3(0.0);
+    float alpha = 0.0;
+    // Empty-space leap: take larger strides until density appears.
+    float stride = dt * 2.0;
+    float t = tEnter + 0.5 * dt;
+    int i = 0;
+    while (t < tExit && i < steps * 2 && alpha < 0.96) {
+        ++i;
+        vec3 uvw = (ro + rd * t) + vec3(0.5);
+        float density = sampleDensityAtlasFast(uvw, gridN, tilesX);
+        if (density < 0.03) {
+            t += stride;
+            stride = min(stride * 1.15, dt * 3.0);
+            continue;
+        }
+        // Found matter — refine with smaller steps and soft Z sampling.
+        stride = dt;
+        density = sampleDensityAtlas(uvw, gridN, tilesX);
+
+        float glow = clamp(density, 0.0, 4.0);
+        float heat = smoothstep(0.25, 1.5, glow);
+        vec3 hot = mix(dye, vec3(1.0, 0.82, 0.32), heat * 0.55);
+        vec3 sampleRgb = hot * (0.55 + glow * 0.95);
+        float absorb = 1.0 - exp(-density * dt * 5.5);
+        float a = clamp(absorb * (0.35 + heat * 0.75), 0.0, 1.0);
+        rgb += (1.0 - alpha) * a * sampleRgb;
+        alpha += (1.0 - alpha) * a;
+        t += stride;
+    }
+
+    return vec4(rgb, alpha);
+}
+
 void main() {
+    int alphaMode = int(uPush.materialParams.z + 0.5);
+
+    // 3D fluid volumes: raymarch density atlas inside the box AABB.
+    // AlphaMode::Volume (3) must never fall through to sampling the Z-slice
+    // atlas as a face texture — that paints blocky tile stairs onto the box.
+    if (alphaMode == 3) {
+        vec4 vol = raymarchFluidVolume();
+        if (vol.a < 0.01) {
+            // Write transparent black before discard — some software drivers
+            // leave undefined color when discard is the first/only output.
+            outColor = vec4(0.0);
+            discard;
+        }
+        outColor = vec4(clamp(vol.rgb, 0.0, 1.0), clamp(vol.a, 0.0, 1.0));
+        return;
+    }
+
     vec4 baseSample = texture(materialTextures[nonuniformEXT(uPush.textureIndex)], vUv);
     vec3 baseColor = uPush.baseColor.rgb * baseSample.rgb * vInstanceColor.rgb;
     float alpha = uPush.baseColor.a * baseSample.a * vInstanceColor.a;
 
-    int alphaMode = int(uPush.materialParams.z);
     float alphaCutoff = uPush.materialParams.w;
     if (alphaMode == 1 && alpha < alphaCutoff) {
         discard;
@@ -648,13 +781,13 @@ void main() {
     float metalness = uPush.materialParams.x;
     float roughness = uPush.materialParams.y;
 
-    // Pre-tonemapped display textures / unlit particles: skip OpenPBR.
+    // Pre-tonemapped display textures / unlit particles: skip OpenPBR
+    // and skip a second display OETF — the source already encodes final RGB.
     if (alphaMode == 2 && metalness < 0.001 && roughness > 0.98) {
         if (alpha < 0.01) {
             discard;
         }
-        const float exposure = max(uFrame.cameraPos.w, 0.01);
-        outColor = vec4(applyDisplayTransform(baseColor * exposure, vWorldPos), alpha);
+        outColor = vec4(clamp(baseColor, 0.0, 1.0), alpha);
         return;
     }
 

@@ -1,27 +1,31 @@
 #version 450
 
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
 
-layout(set = 0, binding = 4, r16f) uniform readonly image2D uPressureRead;
-layout(set = 0, binding = 5, r16f) uniform writeonly image2D uPressureWrite;
-layout(set = 0, binding = 6, r16f) uniform readonly image2D uDivergence;
+layout(set = 0, binding = 4, r16f) uniform readonly image3D uPressureRead;
+layout(set = 0, binding = 5, r16f) uniform writeonly image3D uPressureWrite;
+layout(set = 0, binding = 6, r16f) uniform readonly image3D uDivergence;
 
 layout(push_constant) uniform Push {
-    ivec2 gridSize;
+    ivec3 gridSize;
+    float _pad0;
 } pc;
 
 void main() {
-    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
-    if (coord.x >= pc.gridSize.x || coord.y >= pc.gridSize.y) {
+    ivec3 coord = ivec3(gl_GlobalInvocationID.xyz);
+    if (any(greaterThanEqual(coord, pc.gridSize))) {
         return;
     }
 
-    float pL = imageLoad(uPressureRead, clamp(coord - ivec2(1, 0), ivec2(0), pc.gridSize - ivec2(1))).x;
-    float pR = imageLoad(uPressureRead, clamp(coord + ivec2(1, 0), ivec2(0), pc.gridSize - ivec2(1))).x;
-    float pB = imageLoad(uPressureRead, clamp(coord - ivec2(0, 1), ivec2(0), pc.gridSize - ivec2(1))).x;
-    float pT = imageLoad(uPressureRead, clamp(coord + ivec2(0, 1), ivec2(0), pc.gridSize - ivec2(1))).x;
+    ivec3 maxC = pc.gridSize - ivec3(1);
+    float pL = imageLoad(uPressureRead, clamp(coord - ivec3(1, 0, 0), ivec3(0), maxC)).x;
+    float pR = imageLoad(uPressureRead, clamp(coord + ivec3(1, 0, 0), ivec3(0), maxC)).x;
+    float pB = imageLoad(uPressureRead, clamp(coord - ivec3(0, 1, 0), ivec3(0), maxC)).x;
+    float pT = imageLoad(uPressureRead, clamp(coord + ivec3(0, 1, 0), ivec3(0), maxC)).x;
+    float pD = imageLoad(uPressureRead, clamp(coord - ivec3(0, 0, 1), ivec3(0), maxC)).x;
+    float pU = imageLoad(uPressureRead, clamp(coord + ivec3(0, 0, 1), ivec3(0), maxC)).x;
     float div = imageLoad(uDivergence, coord).x;
 
-    float pressure = (pL + pR + pB + pT - div) * 0.25;
+    float pressure = (pL + pR + pB + pT + pD + pU - div) * (1.0 / 6.0);
     imageStore(uPressureWrite, coord, vec4(pressure, 0.0, 0.0, 0.0));
 }

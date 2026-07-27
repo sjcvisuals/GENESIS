@@ -283,7 +283,11 @@ void ParticleWorld::stepOnce(Scene& scene, float dt) {
                 const glm::vec3 world_pos =
                     p.world_space ? p.position
                                   : glm::vec3(node->world * glm::vec4(p.position, 1.0f));
-                p.velocity += fluid_world_->sampleFluidVelocity(scene, fluid_node, world_pos) * dt;
+                const glm::vec3 fluid_vel =
+                    fluid_world_->sampleFluidVelocity(scene, fluid_node, world_pos);
+                // Softly blend toward the fluid field so particles rise/fall with the lamp.
+                const float blend = std::min(1.0f, 3.5f * dt);
+                p.velocity = p.velocity * (1.0f - blend) + fluid_vel * blend;
             }
         }
 

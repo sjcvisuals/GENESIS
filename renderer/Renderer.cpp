@@ -1,7 +1,5 @@
 #include "renderer/Renderer.hpp"
 
-#include "scene/SceneRuntime.hpp"
-
 #include "renderer/FrameUniforms.hpp"
 #include "renderer/GridDrawPushConstants.hpp"
 #include "renderer/MeshInstance.hpp"
@@ -39,9 +37,10 @@ struct Vertex {
 };
 
 const std::array<Vertex, 3> kTriangleVertices = {{
+    // CCW when viewed from +Z so Vulkan back-face culling keeps the face.
     {{0.0f, -0.5f, 0.0f}, {1.0f, 0.2f, 0.3f}},
-    {{0.5f, 0.5f, 0.0f}, {0.2f, 1.0f, 0.4f}},
     {{-0.5f, 0.5f, 0.0f}, {0.3f, 0.4f, 1.0f}},
+    {{0.5f, 0.5f, 0.0f}, {0.2f, 1.0f, 0.4f}},
 }};
 
 } // namespace
@@ -427,13 +426,17 @@ void Renderer::createGridResources() {
     pipeline_config.frag_shader = shader_dir / "grid.frag.spv";
     pipeline_config.extent = swapchain_->extent();
     pipeline_config.set0_layout = frame_set_layout_;
-    pipeline_config.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+    // Triangle ground plane + procedural lines in the fragment shader.
+    pipeline_config.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     pipeline_config.vertex_stride = sizeof(float) * 6;
     pipeline_config.vertex_attributes = {
         {0, VK_FORMAT_R32G32B32_SFLOAT, 0},
         {1, VK_FORMAT_R32G32B32_SFLOAT, static_cast<uint32_t>(sizeof(float) * 3)},
     };
     pipeline_config.depth_test = true;
+    pipeline_config.depth_write = false;
+    pipeline_config.alpha_blend = true;
+    pipeline_config.cull_mode = VK_CULL_MODE_NONE;
     pipeline_config.push_constant_size = sizeof(GridDrawPushConstants);
     pipeline_config.push_constant_stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     if (std::filesystem::exists(pipeline_config.vert_shader) && std::filesystem::exists(pipeline_config.frag_shader)) {
@@ -475,13 +478,16 @@ void Renderer::recreateSwapchain(int width, int height) {
         grid_cfg.frag_shader = resolveShaderDirectory() / "grid.frag.spv";
         grid_cfg.extent = swapchain_->extent();
         grid_cfg.set0_layout = frame_set_layout_;
-        grid_cfg.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+        grid_cfg.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         grid_cfg.vertex_stride = sizeof(float) * 6;
         grid_cfg.vertex_attributes = {
             {0, VK_FORMAT_R32G32B32_SFLOAT, 0},
             {1, VK_FORMAT_R32G32B32_SFLOAT, static_cast<uint32_t>(sizeof(float) * 3)},
         };
         grid_cfg.depth_test = true;
+        grid_cfg.depth_write = false;
+        grid_cfg.alpha_blend = true;
+        grid_cfg.cull_mode = VK_CULL_MODE_NONE;
         grid_cfg.push_constant_size = sizeof(GridDrawPushConstants);
         grid_cfg.push_constant_stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         if (std::filesystem::exists(grid_cfg.vert_shader) && std::filesystem::exists(grid_cfg.frag_shader)) {
@@ -609,13 +615,6 @@ void Renderer::drawMesh(const Mesh& mesh, const MeshDrawPushConstants& draw_cons
     fillGpuMeshInstance(instance, model, mesh.local_aabb_min, mesh.local_aabb_max);
     batch.instances.push_back(instance);
     drawMeshBatches({batch});
-}
-
-void Renderer::simulateFluids(SceneRuntime& runtime, const float dt_seconds) {
-    if (render_pass_active_) {
-        return;
-    }
-    runtime.simulateFluids(command_buffers_[current_frame_], dt_seconds);
 }
 
 void Renderer::drawMeshBatches(const std::vector<SceneMeshBatch>& batches, const MeshDrawOptions& options) {

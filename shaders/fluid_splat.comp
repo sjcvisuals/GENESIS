@@ -1,38 +1,41 @@
 #version 450
 
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
 
-layout(set = 0, binding = 0, rg16f) uniform image2D uVelocity;
-layout(set = 0, binding = 2, r16f) uniform image2D uDensity;
+layout(set = 0, binding = 0, rgba16f) uniform image3D uVelocity;
+layout(set = 0, binding = 2, r16f) uniform image3D uDensity;
 
 layout(push_constant) uniform Push {
-    ivec2 gridSize;
-    vec2 point;
-    vec2 velocity;
-    float radius;
-    float density;
+    ivec3 gridSize;
+    float _pad0;
+    vec4 pointRadius;   // xyz = UVW point, w = radius
+    vec4 velocityDensity; // xyz = velocity UVW/s, w = density amount
     float addDensity;
+    float _pad1;
+    float _pad2;
+    float _pad3;
 } pc;
 
 void main() {
-    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
-    if (coord.x >= pc.gridSize.x || coord.y >= pc.gridSize.y) {
+    ivec3 coord = ivec3(gl_GlobalInvocationID.xyz);
+    if (any(greaterThanEqual(coord, pc.gridSize))) {
         return;
     }
 
-    vec2 uv = (vec2(coord) + 0.5) / vec2(pc.gridSize);
-    vec2 delta = uv - pc.point;
+    vec3 uvw = (vec3(coord) + 0.5) / vec3(pc.gridSize);
+    vec3 delta = uvw - pc.pointRadius.xyz;
     float dist2 = dot(delta, delta);
-    float influence = exp(-dist2 / max(pc.radius * pc.radius, 1e-6));
+    float radius = max(pc.pointRadius.w, 1e-6);
+    float influence = exp(-dist2 / (radius * radius));
 
     if (influence > 1e-4) {
-        vec2 vel = imageLoad(uVelocity, coord).xy;
-        vel += pc.velocity * influence;
-        imageStore(uVelocity, coord, vec4(vel, 0.0, 0.0));
+        vec3 vel = imageLoad(uVelocity, coord).xyz;
+        vel += pc.velocityDensity.xyz * influence;
+        imageStore(uVelocity, coord, vec4(vel, 0.0));
 
         if (pc.addDensity > 0.5) {
             float d = imageLoad(uDensity, coord).x;
-            d += pc.density * influence;
+            d += pc.velocityDensity.w * influence;
             imageStore(uDensity, coord, vec4(d, 0.0, 0.0, 0.0));
         }
     }

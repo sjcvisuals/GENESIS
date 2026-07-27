@@ -4,10 +4,10 @@
 #include "renderer/vulkan/ComputePipeline.hpp"
 
 #include <algorithm>
-#include <glm/glm.hpp>
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <glm/glm.hpp>
 #include <stdexcept>
 
 namespace genesis {
@@ -15,52 +15,64 @@ namespace genesis {
 namespace {
 
 struct AdvectPush {
-    std::int32_t grid_size[2];
+    std::int32_t grid_size[3];
     float dt;
     float dissipation;
     std::int32_t advect_density;
+    float _pad0 = 0.0f;
+    float _pad1 = 0.0f;
 };
+static_assert(sizeof(AdvectPush) == 32, "AdvectPush must match fluid_advect.comp");
 
 struct DivergencePush {
-    std::int32_t grid_size[2];
+    std::int32_t grid_size[3];
     float cell_size;
 };
+static_assert(sizeof(DivergencePush) == 16, "DivergencePush must match fluid_divergence.comp");
 
 struct JacobiPush {
-    std::int32_t grid_size[2];
+    std::int32_t grid_size[3];
+    float _pad0 = 0.0f;
 };
+static_assert(sizeof(JacobiPush) == 16, "JacobiPush must match fluid_jacobi.comp");
 
 struct GradientPush {
-    std::int32_t grid_size[2];
+    std::int32_t grid_size[3];
     float cell_size;
 };
+static_assert(sizeof(GradientPush) == 16, "GradientPush must match fluid_gradient.comp");
 
 struct SplatPush {
-    std::int32_t grid_size[2];
-    float point[2];
-    float velocity[2];
-    float radius;
-    float density;
-    float add_density;
+    std::int32_t grid_size[3];
+    float _pad0 = 0.0f;
+    float point_radius[4];    // xyz point, w radius
+    float velocity_density[4]; // xyz velocity, w density
+    float add_density = 1.0f;
+    float _pad1 = 0.0f;
+    float _pad2 = 0.0f;
+    float _pad3 = 0.0f;
 };
+static_assert(sizeof(SplatPush) == 64, "SplatPush must match fluid_splat.comp");
 
 struct PresentPush {
-    std::int32_t grid_size[2];
+    std::int32_t grid_size[3];
+    std::int32_t tiles_x = 1;
     float dye_color[4];
 };
+static_assert(sizeof(PresentPush) == 32, "PresentPush must match fluid_present.comp");
 
-std::uint32_t nextPowerOfTwo(std::uint32_t value) {
-    if (value < 64) {
-        return 64;
-    }
-    value--;
-    value |= value >> 1;
-    value |= value >> 2;
-    value |= value >> 4;
-    value |= value >> 8;
-    value |= value >> 16;
-    value++;
-    return std::min(value, 512u);
+// Snap to the 4³ compute workgroup size. Prefer multiples of 4 over power-of-two
+// so authors can pick 40/48 without jumping straight to 64³.
+std::uint32_t snapFluidGridResolution(std::uint32_t value) {
+    constexpr std::uint32_t kMin = 24;
+    constexpr std::uint32_t kMax = 64; // realtime budget; N³ grows fast
+    value = std::max(value, kMin);
+    value = std::min(value, kMax);
+    return (value + 3u) & ~3u;
+}
+
+std::uint32_t atlasTilesX(std::uint32_t grid) {
+    return static_cast<std::uint32_t>(std::ceil(std::sqrt(static_cast<float>(grid))));
 }
 
 void imageBarrier(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout,
@@ -107,15 +119,15 @@ FluidGpuGrid::~FluidGpuGrid() {
     }
 }
 
-FluidGpuGrid::StorageImage FluidGpuGrid::createImage(const std::uint32_t size, const VkFormat format) {
+FluidGpuGrid::StorageImage FluidGpuGrid::createImage3D(const std::uint32_t size, const VkFormat format) {
     StorageImage out{};
     out.format = format;
 
     VkImageCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    info.imageType = VK_IMAGE_TYPE_2D;
+    info.imageType = VK_IMAGE_TYPE_3D;
     info.format = format;
-    info.extent = {size, size, 1};
+    info.extent = {size, size, size};
     info.mipLevels = 1;
     info.arrayLayers = 1;
     info.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -124,7 +136,7 @@ FluidGpuGrid::StorageImage FluidGpuGrid::createImage(const std::uint32_t size, c
     info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     if (vkCreateImage(device_, &info, nullptr, &out.image) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create fluid simulation image");
+        throw std::runtime_error("Failed to create 3D fluid simulation image");
     }
 
     VkMemoryRequirements requirements{};
@@ -135,20 +147,20 @@ FluidGpuGrid::StorageImage FluidGpuGrid::createImage(const std::uint32_t size, c
     alloc.memoryTypeIndex =
         context_.findMemoryType(requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (vkAllocateMemory(device_, &alloc, nullptr, &out.memory) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to allocate fluid simulation image memory");
+        throw std::runtime_error("Failed to allocate 3D fluid simulation image memory");
     }
     vkBindImageMemory(device_, out.image, out.memory, 0);
 
     VkImageViewCreateInfo view_info{};
     view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     view_info.image = out.image;
-    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_3D;
     view_info.format = format;
     view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     view_info.subresourceRange.levelCount = 1;
     view_info.subresourceRange.layerCount = 1;
     if (vkCreateImageView(device_, &view_info, nullptr, &out.view) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create fluid simulation image view");
+        throw std::runtime_error("Failed to create 3D fluid simulation image view");
     }
     return out;
 }
@@ -180,6 +192,7 @@ void FluidGpuGrid::destroyImages() {
     }
     destroyImage(divergence_);
     grid_size_ = 0;
+    atlas_tiles_x_ = 0;
 }
 
 void FluidGpuGrid::createPipelines() {
@@ -236,26 +249,31 @@ void FluidGpuGrid::createPipelines() {
 }
 
 void FluidGpuGrid::ensureResolution(const std::uint32_t resolution) {
-    const std::uint32_t size = nextPowerOfTwo(resolution);
+    const std::uint32_t size = snapFluidGridResolution(resolution);
     if (size == grid_size_ && display_texture_) {
         return;
     }
 
     destroyImages();
     grid_size_ = size;
-    velocity_[0] = createImage(size, VK_FORMAT_R16G16_SFLOAT);
-    velocity_[1] = createImage(size, VK_FORMAT_R16G16_SFLOAT);
-    density_[0] = createImage(size, VK_FORMAT_R16_SFLOAT);
-    density_[1] = createImage(size, VK_FORMAT_R16_SFLOAT);
-    pressure_[0] = createImage(size, VK_FORMAT_R16_SFLOAT);
-    pressure_[1] = createImage(size, VK_FORMAT_R16_SFLOAT);
-    divergence_ = createImage(size, VK_FORMAT_R16_SFLOAT);
-    display_texture_ = std::make_unique<GpuTexture>(GpuTexture::createFluidDisplayTarget(context_, size, size));
+    atlas_tiles_x_ = atlasTilesX(size);
+    const std::uint32_t tiles_y = (size + atlas_tiles_x_ - 1) / atlas_tiles_x_;
+    const std::uint32_t atlas_w = atlas_tiles_x_ * size;
+    const std::uint32_t atlas_h = tiles_y * size;
+
+    velocity_[0] = createImage3D(size, VK_FORMAT_R16G16B16A16_SFLOAT);
+    velocity_[1] = createImage3D(size, VK_FORMAT_R16G16B16A16_SFLOAT);
+    density_[0] = createImage3D(size, VK_FORMAT_R16_SFLOAT);
+    density_[1] = createImage3D(size, VK_FORMAT_R16_SFLOAT);
+    pressure_[0] = createImage3D(size, VK_FORMAT_R16_SFLOAT);
+    pressure_[1] = createImage3D(size, VK_FORMAT_R16_SFLOAT);
+    divergence_ = createImage3D(size, VK_FORMAT_R16_SFLOAT);
+    display_texture_ = std::make_unique<GpuTexture>(GpuTexture::createFluidDisplayTarget(context_, atlas_w, atlas_h));
     display_layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     velocity_index_ = 0;
     density_index_ = 0;
     pressure_index_ = 0;
-    velocity_readback_.assign(static_cast<std::size_t>(size) * size * 2, 0.0f);
+    velocity_readback_.assign(static_cast<std::size_t>(size) * size * size * 3, 0.0f);
 
     context_.immediateSubmit([&](VkCommandBuffer cmd) {
         for (StorageImage* image :
@@ -269,6 +287,7 @@ void FluidGpuGrid::ensureResolution(const std::uint32_t resolution) {
     });
 
     stats_.grid_resolution = size;
+    stats_.atlas_tiles_x = atlas_tiles_x_;
 }
 
 void FluidGpuGrid::bindSimDescriptors() {
@@ -280,17 +299,17 @@ void FluidGpuGrid::bindSimDescriptors() {
     const StorageImage& pres_w = pressure_[static_cast<std::size_t>(1 - pressure_index_)];
 
     VkDescriptorImageInfo infos[8]{};
-    auto store = [&](std::uint32_t binding, const StorageImage& image, VkImageLayout layout) {
+    auto store = [&](std::uint32_t binding, const StorageImage& image) {
         infos[binding].imageView = image.view;
-        infos[binding].imageLayout = layout;
+        infos[binding].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
     };
-    store(0, vel_r, VK_IMAGE_LAYOUT_GENERAL);
-    store(1, vel_w, VK_IMAGE_LAYOUT_GENERAL);
-    store(2, den_r, VK_IMAGE_LAYOUT_GENERAL);
-    store(3, den_w, VK_IMAGE_LAYOUT_GENERAL);
-    store(4, pres_r, VK_IMAGE_LAYOUT_GENERAL);
-    store(5, pres_w, VK_IMAGE_LAYOUT_GENERAL);
-    store(6, divergence_, VK_IMAGE_LAYOUT_GENERAL);
+    store(0, vel_r);
+    store(1, vel_w);
+    store(2, den_r);
+    store(3, den_w);
+    store(4, pres_r);
+    store(5, pres_w);
+    store(6, divergence_);
     infos[7].imageView = display_texture_->view();
     infos[7].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
@@ -306,16 +325,33 @@ void FluidGpuGrid::bindSimDescriptors() {
     vkUpdateDescriptorSets(device_, 8, writes, 0, nullptr);
 }
 
-void FluidGpuGrid::dispatchPass(VkCommandBuffer cmd, ComputePipeline& pipeline, const std::uint32_t size,
-                                const void* push_data, const std::uint32_t push_size) {
-    const std::uint32_t groups = (size + 7) / 8;
+void FluidGpuGrid::dispatchPass3D(VkCommandBuffer cmd, ComputePipeline& pipeline, const std::uint32_t size,
+                                  const void* push_data, const std::uint32_t push_size) {
+    const std::uint32_t groups = (size + 3) / 4;
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.handle());
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.layout(), 0, 1, &descriptor_set_, 0,
                             nullptr);
     vkCmdPushConstants(cmd, pipeline.layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, push_size, push_data);
-    vkCmdDispatch(cmd, groups, groups, 1);
+    vkCmdDispatch(cmd, groups, groups, groups);
 
-    // Ensure subsequent compute passes see storage-image writes from this dispatch.
+    VkMemoryBarrier mem{};
+    mem.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    mem.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    mem.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1,
+                         &mem, 0, nullptr, 0, nullptr);
+}
+
+void FluidGpuGrid::dispatchPresent(VkCommandBuffer cmd, const void* push_data, const std::uint32_t push_size,
+                                   const std::uint32_t atlas_w, const std::uint32_t atlas_h) {
+    const std::uint32_t groups_x = (atlas_w + 7) / 8;
+    const std::uint32_t groups_y = (atlas_h + 7) / 8;
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, present_pipeline_->handle());
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, present_pipeline_->layout(), 0, 1,
+                            &descriptor_set_, 0, nullptr);
+    vkCmdPushConstants(cmd, present_pipeline_->layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, push_size, push_data);
+    vkCmdDispatch(cmd, groups_x, groups_y, 1);
+
     VkMemoryBarrier mem{};
     mem.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
     mem.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -332,17 +368,20 @@ void FluidGpuGrid::swapDensity() {
     density_index_ = 1 - density_index_;
 }
 
-void FluidGpuGrid::injectSplat(VkCommandBuffer cmd, const glm::vec2 uv, const glm::vec2 velocity,
+void FluidGpuGrid::injectSplat(VkCommandBuffer cmd, const glm::vec3 uvw, const glm::vec3 velocity,
                                const float radius, const float density) {
     SplatPush splat{};
     splat.grid_size[0] = static_cast<std::int32_t>(grid_size_);
     splat.grid_size[1] = static_cast<std::int32_t>(grid_size_);
-    splat.point[0] = uv.x;
-    splat.point[1] = uv.y;
-    splat.velocity[0] = velocity.x;
-    splat.velocity[1] = velocity.y;
-    splat.radius = radius;
-    splat.density = density;
+    splat.grid_size[2] = static_cast<std::int32_t>(grid_size_);
+    splat.point_radius[0] = uvw.x;
+    splat.point_radius[1] = uvw.y;
+    splat.point_radius[2] = uvw.z;
+    splat.point_radius[3] = radius;
+    splat.velocity_density[0] = velocity.x;
+    splat.velocity_density[1] = velocity.y;
+    splat.velocity_density[2] = velocity.z;
+    splat.velocity_density[3] = density;
     splat.add_density = 1.0f;
 
     StorageImage& vel = velocity_[static_cast<std::size_t>(velocity_index_)];
@@ -366,7 +405,7 @@ void FluidGpuGrid::injectSplat(VkCommandBuffer cmd, const glm::vec2 uv, const gl
         writes[i].pImageInfo = &infos[i];
     }
     vkUpdateDescriptorSets(device_, 4, writes, 0, nullptr);
-    dispatchPass(cmd, *splat_pipeline_, grid_size_, &splat, sizeof(splat));
+    dispatchPass3D(cmd, *splat_pipeline_, grid_size_, &splat, sizeof(splat));
     bindSimDescriptors();
 }
 
@@ -385,73 +424,80 @@ void FluidGpuGrid::simulate(VkCommandBuffer cmd, const FluidVolume& volume, cons
 
     sim_time_ += dt_seconds;
 
-    const auto applySource = [&](const bool enabled, glm::vec2 uv, glm::vec2 velocity, const float radius,
-                                 const float density, const float phase) {
+    const auto applySource = [&](const bool enabled, glm::vec3 uvw, glm::vec3 velocity, float radius,
+                                 float density, const float phase) {
         if (!enabled) {
             return;
         }
         if (volume.animate_sources) {
-            uv.x += 0.06f * std::sin(sim_time_ * 0.82f + phase);
-            uv.y += 0.04f * std::sin(sim_time_ * 1.05f + phase * 1.7f);
+            uvw.x += 0.06f * std::sin(sim_time_ * 0.82f + phase);
+            uvw.y += 0.04f * std::sin(sim_time_ * 1.05f + phase * 1.7f);
+            uvw.z += 0.05f * std::sin(sim_time_ * 0.67f + phase * 0.9f);
             velocity.x += 0.08f * std::sin(sim_time_ * 0.58f + phase * 0.5f);
             velocity.y += 0.05f * std::cos(sim_time_ * 0.71f + phase);
+            velocity.z += 0.06f * std::sin(sim_time_ * 0.49f + phase * 1.2f);
+            const float pulse = 0.5f + 0.5f * std::sin(sim_time_ * 1.15f + phase * 1.3f);
+            const float gate = glm::smoothstep(0.42f, 0.78f, pulse);
+            density *= 0.15f + 0.85f * gate;
+            radius *= 0.75f + 0.35f * gate;
+            velocity.y *= 0.55f + 0.75f * gate;
         }
-        uv.x = glm::clamp(uv.x, 0.05f, 0.95f);
-        uv.y = glm::clamp(uv.y, 0.05f, 0.95f);
-        injectSplat(cmd, uv, velocity, radius, density);
+        uvw = glm::clamp(uvw, glm::vec3(0.05f), glm::vec3(0.95f));
+        injectSplat(cmd, uvw, velocity, radius, density);
     };
 
-    applySource(volume.source_enabled, volume.source_uv, volume.source_velocity, volume.source_radius,
+    applySource(volume.source_enabled, volume.source_uvw, volume.source_velocity, volume.source_radius,
                 volume.source_density, 0.0f);
-    applySource(volume.source2_enabled, volume.source2_uv, volume.source2_velocity, volume.source2_radius,
+    applySource(volume.source2_enabled, volume.source2_uvw, volume.source2_velocity, volume.source2_radius,
                 volume.source2_density, 2.1f);
 
+    const auto fillGrid = [&](std::int32_t* out) {
+        out[0] = static_cast<std::int32_t>(grid_size_);
+        out[1] = static_cast<std::int32_t>(grid_size_);
+        out[2] = static_cast<std::int32_t>(grid_size_);
+    };
+
     AdvectPush advect_vel{};
-    advect_vel.grid_size[0] = static_cast<std::int32_t>(grid_size_);
-    advect_vel.grid_size[1] = static_cast<std::int32_t>(grid_size_);
+    fillGrid(advect_vel.grid_size);
     advect_vel.dt = dt_seconds;
     advect_vel.dissipation = volume.velocity_dissipation;
     advect_vel.advect_density = 0;
-    dispatchPass(cmd, *advect_pipeline_, grid_size_, &advect_vel, sizeof(advect_vel));
+    dispatchPass3D(cmd, *advect_pipeline_, grid_size_, &advect_vel, sizeof(advect_vel));
     swapVelocity();
     bindSimDescriptors();
 
     DivergencePush div_push{};
-    div_push.grid_size[0] = static_cast<std::int32_t>(grid_size_);
-    div_push.grid_size[1] = static_cast<std::int32_t>(grid_size_);
+    fillGrid(div_push.grid_size);
     div_push.cell_size = 1.0f / static_cast<float>(grid_size_);
-    dispatchPass(cmd, *divergence_pipeline_, grid_size_, &div_push, sizeof(div_push));
+    dispatchPass3D(cmd, *divergence_pipeline_, grid_size_, &div_push, sizeof(div_push));
 
     JacobiPush jacobi{};
-    jacobi.grid_size[0] = static_cast<std::int32_t>(grid_size_);
-    jacobi.grid_size[1] = static_cast<std::int32_t>(grid_size_);
-    const std::uint32_t iterations = std::max(volume.pressure_iterations, 4u);
+    fillGrid(jacobi.grid_size);
+    // Cap projection work — more iterations are rarely worth the N³ cost for lamp blobs.
+    const std::uint32_t iterations = std::clamp(volume.pressure_iterations, 4u, 16u);
     for (std::uint32_t i = 0; i < iterations; ++i) {
         bindSimDescriptors();
-        dispatchPass(cmd, *jacobi_pipeline_, grid_size_, &jacobi, sizeof(jacobi));
+        dispatchPass3D(cmd, *jacobi_pipeline_, grid_size_, &jacobi, sizeof(jacobi));
         pressure_index_ = 1 - pressure_index_;
     }
 
     GradientPush grad{};
-    grad.grid_size[0] = static_cast<std::int32_t>(grid_size_);
-    grad.grid_size[1] = static_cast<std::int32_t>(grid_size_);
+    fillGrid(grad.grid_size);
     grad.cell_size = 1.0f / static_cast<float>(grid_size_);
     bindSimDescriptors();
-    dispatchPass(cmd, *gradient_pipeline_, grid_size_, &grad, sizeof(grad));
+    dispatchPass3D(cmd, *gradient_pipeline_, grid_size_, &grad, sizeof(grad));
     swapVelocity();
     bindSimDescriptors();
 
     AdvectPush advect_den{};
-    advect_den.grid_size[0] = static_cast<std::int32_t>(grid_size_);
-    advect_den.grid_size[1] = static_cast<std::int32_t>(grid_size_);
+    fillGrid(advect_den.grid_size);
     advect_den.dt = dt_seconds;
     advect_den.dissipation = volume.density_dissipation;
     advect_den.advect_density = 1;
-    dispatchPass(cmd, *advect_pipeline_, grid_size_, &advect_den, sizeof(advect_den));
+    dispatchPass3D(cmd, *advect_pipeline_, grid_size_, &advect_den, sizeof(advect_den));
     swapDensity();
     bindSimDescriptors();
 
-    // Present wrote SHADER_READ_ONLY last frame — return to GENERAL before writing again.
     imageBarrier(cmd, display_texture_->nativeImage(),
                  display_layout_ == VK_IMAGE_LAYOUT_UNDEFINED ? VK_IMAGE_LAYOUT_UNDEFINED
                                                               : display_layout_,
@@ -462,13 +508,14 @@ void FluidGpuGrid::simulate(VkCommandBuffer cmd, const FluidVolume& volume, cons
     bindSimDescriptors();
 
     PresentPush present{};
-    present.grid_size[0] = static_cast<std::int32_t>(grid_size_);
-    present.grid_size[1] = static_cast<std::int32_t>(grid_size_);
+    fillGrid(present.grid_size);
+    present.tiles_x = static_cast<std::int32_t>(atlas_tiles_x_);
     present.dye_color[0] = volume.dye_color.r;
     present.dye_color[1] = volume.dye_color.g;
     present.dye_color[2] = volume.dye_color.b;
     present.dye_color[3] = volume.dye_color.a;
-    dispatchPass(cmd, *present_pipeline_, grid_size_, &present, sizeof(present));
+    const std::uint32_t tiles_y = (grid_size_ + atlas_tiles_x_ - 1) / atlas_tiles_x_;
+    dispatchPresent(cmd, &present, sizeof(present), atlas_tiles_x_ * grid_size_, tiles_y * grid_size_);
 
     imageBarrier(cmd, display_texture_->nativeImage(), VK_IMAGE_LAYOUT_GENERAL,
                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
@@ -478,31 +525,28 @@ void FluidGpuGrid::simulate(VkCommandBuffer cmd, const FluidVolume& volume, cons
 
     const auto end = std::chrono::steady_clock::now();
     stats_.pressure_iterations = iterations;
+    stats_.atlas_tiles_x = atlas_tiles_x_;
     stats_.last_step_ms =
         static_cast<float>(std::chrono::duration<double, std::milli>(end - start).count());
 }
 
 void FluidGpuGrid::readbackVelocityField() {
-    // Downsampled CPU cache for particle coupling (every 4th texel).
     (void)velocity_readback_;
 }
 
-glm::vec2 FluidGpuGrid::sampleVelocityUv(const float u, const float v) const {
+glm::vec3 FluidGpuGrid::sampleVelocityUvw(const float u, const float v, const float w) const {
     if (grid_size_ == 0) {
-        return glm::vec2(0.0f);
+        return glm::vec3(0.0f);
     }
-    const float x = glm::clamp(u, 0.0f, 1.0f) * static_cast<float>(grid_size_ - 1);
-    const float y = glm::clamp(v, 0.0f, 1.0f) * static_cast<float>(grid_size_ - 1);
-    const std::size_t ix = static_cast<std::size_t>(x);
-    const std::size_t iy = static_cast<std::size_t>(y);
-    if (velocity_readback_.empty()) {
-        return glm::vec2(0.0f, (0.5f - u) * 2.0f);
-    }
-    const std::size_t idx = (iy * grid_size_ + ix) * 2;
-    if (idx + 1 >= velocity_readback_.size()) {
-        return glm::vec2(0.0f);
-    }
-    return glm::vec2(velocity_readback_[idx], velocity_readback_[idx + 1]);
+
+    // Synthetic 3D circulation until GPU velocity readback is wired.
+    const float dx = u - 0.5f;
+    const float dz = w - 0.5f;
+    const float radial = std::sqrt(dx * dx + dz * dz);
+    const float plume = (1.0f - std::min(1.0f, radial * 3.0f)) * 0.55f;
+    const float return_flow = (radial > 0.22f) ? -0.28f : 0.0f;
+    const float vertical = plume + return_flow + (0.5f - v) * 0.08f;
+    return glm::vec3(-dx * 0.45f, vertical, -dz * 0.45f);
 }
 
 } // namespace genesis

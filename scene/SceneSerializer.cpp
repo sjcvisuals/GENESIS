@@ -40,6 +40,8 @@ const char* alphaModeName(AlphaMode mode) {
         return "mask";
     case AlphaMode::Blend:
         return "blend";
+    case AlphaMode::Volume:
+        return "volume";
     default:
         return "opaque";
     }
@@ -52,6 +54,7 @@ AlphaMode alphaModeFromName(const std::string& name) {
     }
     if (lower == "mask") return AlphaMode::Mask;
     if (lower == "blend") return AlphaMode::Blend;
+    if (lower == "volume") return AlphaMode::Volume;
     return AlphaMode::Opaque;
 }
 
@@ -372,21 +375,21 @@ json fluidVolumeToJson(const FluidVolume& f) {
     return json{
         {"enabled", f.enabled},
         {"grid_resolution", f.grid_resolution},
-        {"extent_meters", {f.extent_meters.x, f.extent_meters.y}},
+        {"extent_meters", {f.extent_meters.x, f.extent_meters.y, f.extent_meters.z}},
         {"viscosity", f.viscosity},
         {"vorticity_strength", f.vorticity_strength},
         {"velocity_dissipation", f.velocity_dissipation},
         {"density_dissipation", f.density_dissipation},
         {"source_enabled", f.source_enabled},
-        {"source_uv", {f.source_uv.x, f.source_uv.y}},
+        {"source_uvw", {f.source_uvw.x, f.source_uvw.y, f.source_uvw.z}},
         {"source_radius", f.source_radius},
         {"source_density", f.source_density},
-        {"source_velocity", {f.source_velocity.x, f.source_velocity.y}},
+        {"source_velocity", {f.source_velocity.x, f.source_velocity.y, f.source_velocity.z}},
         {"source2_enabled", f.source2_enabled},
-        {"source2_uv", {f.source2_uv.x, f.source2_uv.y}},
+        {"source2_uvw", {f.source2_uvw.x, f.source2_uvw.y, f.source2_uvw.z}},
         {"source2_radius", f.source2_radius},
         {"source2_density", f.source2_density},
-        {"source2_velocity", {f.source2_velocity.x, f.source2_velocity.y}},
+        {"source2_velocity", {f.source2_velocity.x, f.source2_velocity.y, f.source2_velocity.z}},
         {"animate_sources", f.animate_sources},
         {"dye_color", vec4ToJson(f.dye_color)},
         {"drive_particles", f.drive_particles},
@@ -401,15 +404,23 @@ FluidVolume fluidVolumeFromJson(const json& j) {
     if (j.contains("extent_meters") && j["extent_meters"].is_array() && j["extent_meters"].size() >= 2) {
         f.extent_meters.x = j["extent_meters"][0];
         f.extent_meters.y = j["extent_meters"][1];
+        // Legacy 2-component scenes: match depth to width for a square footprint.
+        f.extent_meters.z = j["extent_meters"].size() >= 3 ? static_cast<float>(j["extent_meters"][2])
+                                                           : f.extent_meters.x;
     }
     f.viscosity = j.value("viscosity", f.viscosity);
     f.vorticity_strength = j.value("vorticity_strength", f.vorticity_strength);
     f.velocity_dissipation = j.value("velocity_dissipation", f.velocity_dissipation);
     f.density_dissipation = j.value("density_dissipation", f.density_dissipation);
     f.source_enabled = j.value("source_enabled", f.source_enabled);
-    if (j.contains("source_uv") && j["source_uv"].is_array() && j["source_uv"].size() >= 2) {
-        f.source_uv.x = j["source_uv"][0];
-        f.source_uv.y = j["source_uv"][1];
+    if (j.contains("source_uvw") && j["source_uvw"].is_array() && j["source_uvw"].size() >= 3) {
+        f.source_uvw.x = j["source_uvw"][0];
+        f.source_uvw.y = j["source_uvw"][1];
+        f.source_uvw.z = j["source_uvw"][2];
+    } else if (j.contains("source_uv") && j["source_uv"].is_array() && j["source_uv"].size() >= 2) {
+        f.source_uvw.x = j["source_uv"][0];
+        f.source_uvw.y = j["source_uv"][1];
+        f.source_uvw.z = 0.5f;
     }
     f.source_radius = j.value("source_radius", f.source_radius);
     f.source_density = j.value("source_density", f.source_density);
@@ -417,11 +428,17 @@ FluidVolume fluidVolumeFromJson(const json& j) {
         j["source_velocity"].size() >= 2) {
         f.source_velocity.x = j["source_velocity"][0];
         f.source_velocity.y = j["source_velocity"][1];
+        f.source_velocity.z = j["source_velocity"].size() >= 3 ? static_cast<float>(j["source_velocity"][2]) : 0.0f;
     }
     f.source2_enabled = j.value("source2_enabled", f.source2_enabled);
-    if (j.contains("source2_uv") && j["source2_uv"].is_array() && j["source2_uv"].size() >= 2) {
-        f.source2_uv.x = j["source2_uv"][0];
-        f.source2_uv.y = j["source2_uv"][1];
+    if (j.contains("source2_uvw") && j["source2_uvw"].is_array() && j["source2_uvw"].size() >= 3) {
+        f.source2_uvw.x = j["source2_uvw"][0];
+        f.source2_uvw.y = j["source2_uvw"][1];
+        f.source2_uvw.z = j["source2_uvw"][2];
+    } else if (j.contains("source2_uv") && j["source2_uv"].is_array() && j["source2_uv"].size() >= 2) {
+        f.source2_uvw.x = j["source2_uv"][0];
+        f.source2_uvw.y = j["source2_uv"][1];
+        f.source2_uvw.z = 0.5f;
     }
     f.source2_radius = j.value("source2_radius", f.source2_radius);
     f.source2_density = j.value("source2_density", f.source2_density);
@@ -429,6 +446,8 @@ FluidVolume fluidVolumeFromJson(const json& j) {
         j["source2_velocity"].size() >= 2) {
         f.source2_velocity.x = j["source2_velocity"][0];
         f.source2_velocity.y = j["source2_velocity"][1];
+        f.source2_velocity.z =
+            j["source2_velocity"].size() >= 3 ? static_cast<float>(j["source2_velocity"][2]) : 0.0f;
     }
     f.animate_sources = j.value("animate_sources", f.animate_sources);
     if (j.contains("dye_color")) f.dye_color = vec4FromJson(j["dye_color"]);

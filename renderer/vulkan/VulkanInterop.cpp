@@ -1,9 +1,5 @@
 #include "renderer/vulkan/VulkanInterop.hpp"
 
-#ifdef _WIN32
-#include <windows.h>
-#endif
-
 namespace genesis {
 
 namespace {
@@ -16,7 +12,7 @@ PFN_vkGetImageMemoryRequirements2 pfnGetImageMemoryRequirements2KHR = nullptr;
 
 } // namespace
 
-void loadVulkanWin32Interop(VkDevice device) {
+void loadVulkanInterop(VkDevice device) {
 #ifdef _WIN32
     pfnGetMemoryWin32HandleKHR = reinterpret_cast<PFN_vkGetMemoryWin32HandleKHR>(
         vkGetDeviceProcAddr(device, "vkGetMemoryWin32HandleKHR"));
@@ -29,10 +25,12 @@ void loadVulkanWin32Interop(VkDevice device) {
 
 #ifdef _WIN32
 VkResult getMemoryWin32HandleKHR(VkDevice device, const VkMemoryGetWin32HandleInfoKHR* info, HANDLE* handle) {
-    return pfnGetMemoryWin32HandleKHR ? pfnGetMemoryWin32HandleKHR(device, info, handle) : VK_ERROR_EXTENSION_NOT_PRESENT;
+    return pfnGetMemoryWin32HandleKHR ? pfnGetMemoryWin32HandleKHR(device, info, handle)
+                                      : VK_ERROR_EXTENSION_NOT_PRESENT;
 }
 
-VkResult getSemaphoreWin32HandleKHR(VkDevice device, const VkSemaphoreGetWin32HandleInfoKHR* info, HANDLE* handle) {
+VkResult getSemaphoreWin32HandleKHR(VkDevice device, const VkSemaphoreGetWin32HandleInfoKHR* info,
+                                    HANDLE* handle) {
     return pfnGetSemaphoreWin32HandleKHR ? pfnGetSemaphoreWin32HandleKHR(device, info, handle)
                                          : VK_ERROR_EXTENSION_NOT_PRESENT;
 }
@@ -42,9 +40,16 @@ void getImageMemoryRequirements2KHR(VkDevice device, const VkImageMemoryRequirem
                                     VkMemoryRequirements2* requirements) {
     if (pfnGetImageMemoryRequirements2KHR) {
         pfnGetImageMemoryRequirements2KHR(device, info, requirements);
-    } else {
-        vkGetImageMemoryRequirements2(device, info, requirements);
+        return;
     }
+    // Core Vulkan 1.1 fallback when the KHR entry point is unavailable.
+    if (vkGetImageMemoryRequirements2) {
+        vkGetImageMemoryRequirements2(device, info, requirements);
+        return;
+    }
+    VkMemoryRequirements legacy{};
+    vkGetImageMemoryRequirements(device, info->image, &legacy);
+    requirements->memoryRequirements = legacy;
 }
 
 } // namespace genesis
