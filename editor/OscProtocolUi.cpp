@@ -83,7 +83,7 @@ void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
         ImGui::EndPopup();
     }
 
-    ImGui::TextDisabled("Position uses cm, scale uses %, rotation uses degrees.");
+    ImGui::TextDisabled("%s", "Position uses cm, scale uses %, rotation uses degrees.");
     ImGui::TextDisabled("UDP packets: %llu   parsed messages: %llu   parse errors: %llu",
                         static_cast<unsigned long long>(protocol.totalPackets()),
                         static_cast<unsigned long long>(protocol.totalMessages()),

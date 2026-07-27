@@ -1,140 +1,11 @@
 #include "protocol/OscProtocol.hpp"
 
 #include "protocol/OscParser.hpp"
-#include "scene/ScenePath.hpp"
-
-#include <glm/gtc/quaternion.hpp>
+#include "scene/ParamBinding.hpp"
 
 #include <algorithm>
-#include <cmath>
 
 namespace genesis {
-
-namespace {
-
-constexpr float kCentimetersPerUnit = 100.0f;
-
-bool applyBindingTarget(SceneRuntime& runtime, const OscBinding& binding, float value) {
-    Node* node = binding.node_path.empty() ? nullptr : runtime.findNodeByPath(binding.node_path);
-    SceneMaterial* mat = nullptr;
-    if (binding.material_id < runtime.materials().size()) {
-        mat = runtime.material(binding.material_id);
-    }
-
-    auto setNodeRotationComponent = [&](int axis, float degrees) -> bool {
-        if (!node) {
-            return false;
-        }
-        const glm::vec3 euler = glm::degrees(glm::eulerAngles(node->local.rotation));
-        glm::vec3 updated = euler;
-        updated[axis] = degrees;
-        const float x = glm::radians(updated.x);
-        const float y = glm::radians(updated.y);
-        const float z = glm::radians(updated.z);
-        const glm::quat qx = glm::angleAxis(x, glm::vec3(1, 0, 0));
-        const glm::quat qy = glm::angleAxis(y, glm::vec3(0, 1, 0));
-        const glm::quat qz = glm::angleAxis(z, glm::vec3(0, 0, 1));
-        node->local.rotation = glm::normalize(qy * qx * qz);
-        return true;
-    };
-
-    switch (binding.target) {
-    case OscParamTarget::NodePositionX:
-        if (!node) return false;
-        node->local.position.x = value / kCentimetersPerUnit;
-        return true;
-    case OscParamTarget::NodePositionY:
-        if (!node) return false;
-        node->local.position.y = value / kCentimetersPerUnit;
-        return true;
-    case OscParamTarget::NodePositionZ:
-        if (!node) return false;
-        node->local.position.z = value / kCentimetersPerUnit;
-        return true;
-    case OscParamTarget::NodeScaleX:
-        if (!node) return false;
-        node->local.scale.x = value / 100.0f;
-        return true;
-    case OscParamTarget::NodeScaleY:
-        if (!node) return false;
-        node->local.scale.y = value / 100.0f;
-        return true;
-    case OscParamTarget::NodeScaleZ:
-        if (!node) return false;
-        node->local.scale.z = value / 100.0f;
-        return true;
-    case OscParamTarget::NodeRotationX:
-        return setNodeRotationComponent(0, value);
-    case OscParamTarget::NodeRotationY:
-        return setNodeRotationComponent(1, value);
-    case OscParamTarget::NodeRotationZ:
-        return setNodeRotationComponent(2, value);
-    case OscParamTarget::NodeVisible:
-        if (!node) return false;
-        node->visible = value > 0.5f;
-        return true;
-    case OscParamTarget::MaterialBaseColorR:
-        if (!mat) return false;
-        mat->base_color.r = value;
-        return true;
-    case OscParamTarget::MaterialBaseColorG:
-        if (!mat) return false;
-        mat->base_color.g = value;
-        return true;
-    case OscParamTarget::MaterialBaseColorB:
-        if (!mat) return false;
-        mat->base_color.b = value;
-        return true;
-    case OscParamTarget::MaterialBaseColorA:
-        if (!mat) return false;
-        mat->base_color.a = value;
-        return true;
-    case OscParamTarget::MaterialMetallic:
-        if (!mat) return false;
-        mat->metallic = value;
-        return true;
-    case OscParamTarget::MaterialRoughness:
-        if (!mat) return false;
-        mat->roughness = value;
-        return true;
-    case OscParamTarget::MaterialEmissiveStrength:
-        if (!mat) return false;
-        mat->emissive_strength = value;
-        return true;
-    case OscParamTarget::LightEnabled:
-        if (!node || !node->light.has_value()) return false;
-        node->light->enabled = value > 0.5f;
-        return true;
-    case OscParamTarget::LightIntensity:
-        if (!node || !node->light.has_value()) return false;
-        node->light->intensity = value;
-        return true;
-    case OscParamTarget::LightColorR:
-        if (!node || !node->light.has_value()) return false;
-        node->light->color.r = value;
-        return true;
-    case OscParamTarget::LightColorG:
-        if (!node || !node->light.has_value()) return false;
-        node->light->color.g = value;
-        return true;
-    case OscParamTarget::LightColorB:
-        if (!node || !node->light.has_value()) return false;
-        node->light->color.b = value;
-        return true;
-    case OscParamTarget::ParticleRate:
-        if (!node || !node->particle_emitter.has_value()) return false;
-        node->particle_emitter->rate_per_second = std::max(value, 0.0f);
-        return true;
-    case OscParamTarget::CameraFov:
-        if (!node || !node->camera.has_value()) return false;
-        node->camera->fov_y_radians = glm::radians(std::clamp(value, 1.0f, 170.0f));
-        return true;
-    default:
-        return false;
-    }
-}
-
-} // namespace
 
 void OscProtocol::setSettings(const Settings& settings) {
     const bool endpoint_changed = settings.bind_ip != settings_.bind_ip || settings.port != settings_.port;
@@ -252,21 +123,9 @@ void OscProtocol::applyBindings(SceneRuntime& runtime) {
             continue;
         }
         const float value = oscArgAsFloat(args[static_cast<std::size_t>(binding.arg_index)]);
-        if (applyBindingTarget(runtime, binding, value)) {
-            switch (binding.target) {
-            case OscParamTarget::NodePositionX:
-            case OscParamTarget::NodePositionY:
-            case OscParamTarget::NodePositionZ:
-            case OscParamTarget::NodeScaleX:
-            case OscParamTarget::NodeScaleY:
-            case OscParamTarget::NodeScaleZ:
-            case OscParamTarget::NodeRotationX:
-            case OscParamTarget::NodeRotationY:
-            case OscParamTarget::NodeRotationZ:
+        if (applySceneParam(runtime, binding.target, value, binding.node_path, binding.material_id)) {
+            if (sceneParamAffectsTransforms(binding.target)) {
                 transform_dirty = true;
-                break;
-            default:
-                break;
             }
         }
     }

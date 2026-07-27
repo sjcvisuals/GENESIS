@@ -136,6 +136,8 @@ add_library(genesis_engine_runtime STATIC
     scene/SceneSerializer.cpp
     scene/GnsPackage.cpp
     scene/SceneRuntime.cpp
+    scene/ParamBinding.cpp
+    protocol/OscParamLabels.cpp
     color/ColorManagement.cpp
     animation/AnimationClip.cpp
     animation/AnimationAuthoring.cpp
@@ -189,7 +191,16 @@ target_link_libraries(genesis_engine PUBLIC
     genesis_renderer_windowed
 )
 
-# Editor protocol input (OSC) — editor-only for now.
+# Editor protocol input (OSC) + audio-reactive analysis — editor-facing for now.
+add_library(genesis_audio STATIC
+    audio/AudioAnalyser.cpp
+    audio/AudioCapture.cpp
+    audio/AudioReactive.cpp
+    editor/AudioReactiveUi.cpp
+)
+target_include_directories(genesis_audio PUBLIC ${CMAKE_SOURCE_DIR})
+target_link_libraries(genesis_audio PUBLIC genesis_engine_runtime genesis_platform imgui_lib)
+
 add_library(genesis_protocol STATIC
     protocol/OscParser.cpp
     protocol/OscUdpReceiver.cpp
@@ -197,7 +208,7 @@ add_library(genesis_protocol STATIC
     editor/OscProtocolUi.cpp
 )
 target_include_directories(genesis_protocol PUBLIC ${CMAKE_SOURCE_DIR})
-target_link_libraries(genesis_protocol PUBLIC genesis_runtime imgui_lib)
+target_link_libraries(genesis_protocol PUBLIC genesis_runtime genesis_audio imgui_lib)
 if(WIN32)
     target_link_libraries(genesis_protocol PRIVATE ws2_32)
 endif()
@@ -241,6 +252,9 @@ if(GENESIS_BUILD_EXAMPLES)
 
     add_executable(genesis_osc_smoke examples/osc_smoke/main.cpp)
     target_link_libraries(genesis_osc_smoke PRIVATE genesis_protocol)
+
+    add_executable(genesis_audio_smoke examples/audio_smoke/main.cpp)
+    target_link_libraries(genesis_audio_smoke PRIVATE genesis_audio)
 
     add_executable(genesis_multiview_player examples/multiview_player/main.cpp)
     target_link_libraries(genesis_multiview_player PRIVATE genesis_engine)

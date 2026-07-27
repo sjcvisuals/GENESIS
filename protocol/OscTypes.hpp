@@ -52,6 +52,16 @@ enum class OscParamTarget : std::uint8_t {
     LightColorB,
     ParticleRate,
     CameraFov,
+    // GPU fluid volume (node must have particle_fluid).
+    FluidSourceDensity,
+    FluidSourceRadius,
+    FluidSourceVelocityY,
+    FluidSource2Density,
+    FluidSource2VelocityY,
+    FluidDensityDissipation,
+    FluidDyeColorR,
+    FluidDyeColorG,
+    FluidDyeColorB,
 };
 
 struct OscBinding {

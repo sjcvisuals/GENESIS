@@ -8,6 +8,7 @@
 #include "editor/EditorLayout.hpp"
 #include "editor/EditorSession.hpp"
 #include "editor/OscProtocolUi.hpp"
+#include "editor/AudioReactiveUi.hpp"
 #include "editor/SceneViewport.hpp"
 #include "engine/Application.hpp"
 #include "platform/EditorPaths.hpp"
@@ -26,6 +27,7 @@
 #include "scene/ScenePath.hpp"
 #include "particles/FluidVolume.hpp"
 #include "protocol/OscProtocol.hpp"
+#include "audio/AudioReactive.hpp"
 
 #include <SDL3/SDL.h>
 #include <glm/glm.hpp>
@@ -136,6 +138,7 @@ protected:
         osc_time_ += static_cast<double>(dt);
         osc_protocol_.poll(osc_time_);
         osc_protocol_.applyBindings(runtime_);
+        audio_reactive_.tick(runtime_, dt);
         runtime_.updateTransforms();
         runtime_.tickParticles(dt);
         last_frame_dt_ = dt;
@@ -278,6 +281,7 @@ protected:
         if (show_viewport_help_) drawViewportHelpPanel();
         if (show_timeline_) drawTimelinePanel();
         if (show_protocol_) drawProtocolPanel();
+        if (show_audio_) drawAudioPanel(scene);
         if (show_animation_graph_) drawAnimationGraphPanel();
         if (show_debug_window_) drawDebugWindow();
 
@@ -487,6 +491,7 @@ private:
             ImGui::MenuItem("Shortcuts", nullptr, &show_viewport_help_);
             ImGui::MenuItem("Timeline", nullptr, &show_timeline_);
             ImGui::MenuItem("Protocol", nullptr, &show_protocol_);
+            ImGui::MenuItem("Audio", nullptr, &show_audio_);
             ImGui::MenuItem("Animation Graph", nullptr, &show_animation_graph_);
             ImGui::MenuItem("Show Grid", nullptr, &show_grid_);
             ImGui::Separator();
@@ -722,6 +727,18 @@ private:
         genesis::drawOscProtocolPanel(osc_protocol_, &show_protocol_);
     }
 
+    void drawAudioPanel(genesis::Scene& scene) {
+        std::string fluid_path;
+        if (selection_.size() == 1) {
+            if (const genesis::Node* n = scene.find(selection_.front())) {
+                if (n->particle_fluid.has_value()) {
+                    fluid_path = genesis::nodePath(scene, n->id);
+                }
+            }
+        }
+        genesis::drawAudioReactivePanel(audio_reactive_, &show_audio_, fluid_path);
+    }
+
     void drawInspectorPanel(genesis::Scene& scene) {
         ImGui::Begin("Inspector", &show_inspector_);
 
@@ -736,10 +753,16 @@ private:
         } else if (genesis::Node* n = scene.find(primarySelected())) {
             const std::string node_path = genesis::nodePath(scene, n->id);
             genesis::OscLinkUiContext link_ctx{&osc_protocol_};
+            genesis::AudioLinkUiContext audio_link_ctx{&audio_reactive_};
 
             if (osc_protocol_.isAwaitingParameterLink()) {
                 ImGui::TextColored(ImVec4(0.95f, 0.85f, 0.35f, 1.0f),
                                    "OSC link active — click Link beside a parameter.");
+                ImGui::Separator();
+            }
+            if (audio_reactive_.isAwaitingParameterLink()) {
+                ImGui::TextColored(ImVec4(0.55f, 0.9f, 0.85f, 1.0f),
+                                   "Audio link active — click Audio beside a parameter.");
                 ImGui::Separator();
             }
 
@@ -834,7 +857,7 @@ private:
             drawCameraInspector(scene, *n, node_path, link_ctx);
             drawLightInspector(*n, node_path, link_ctx);
             drawParticleEmitterInspector(*n, node_path, link_ctx);
-            drawFluidVolumeInspector(*n);
+            drawFluidVolumeInspector(*n, node_path, link_ctx, audio_link_ctx);
         } else {
             ImGui::TextUnformatted("Selected node not found.");
         }
@@ -1236,7 +1259,9 @@ private:
         }
     }
 
-    void drawFluidVolumeInspector(genesis::Node& n) {
+    void drawFluidVolumeInspector(genesis::Node& n, const std::string& node_path,
+                                  genesis::OscLinkUiContext& link_ctx,
+                                  genesis::AudioLinkUiContext& audio_link_ctx) {
         if (!n.particle_fluid.has_value()) {
             return;
         }
@@ -1260,6 +1285,10 @@ private:
         }
         dirty |= ImGui::DragFloat("Velocity dissipation", &f.velocity_dissipation, 0.001f, 0.9f, 1.0f);
         dirty |= ImGui::DragFloat("Density dissipation", &f.density_dissipation, 0.001f, 0.9f, 1.0f);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::FluidDensityDissipation, node_path, 0,
+                                   "fld_dens_diss");
+        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::FluidDensityDissipation,
+                                     node_path, 0, "fld_dens_diss");
         int pressure = static_cast<int>(f.pressure_iterations);
         if (ImGui::SliderInt("Pressure iterations", &pressure, 4, 16)) {
             f.pressure_iterations = static_cast<std::uint32_t>(pressure);
@@ -1274,20 +1303,44 @@ private:
         dirty |= ImGui::Checkbox("Source enabled", &f.source_enabled);
         dirty |= ImGui::DragFloat3("Source UVW", &f.source_uvw.x, 0.01f, 0.0f, 1.0f);
         dirty |= ImGui::DragFloat("Source radius", &f.source_radius, 0.005f, 0.001f, 0.5f);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::FluidSourceRadius, node_path, 0,
+                                   "fld_src_r");
+        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::FluidSourceRadius, node_path, 0,
+                                     "fld_src_r");
         dirty |= ImGui::DragFloat("Source density", &f.source_density, 0.05f, 0.0f, 8.0f);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::FluidSourceDensity, node_path, 0,
+                                   "fld_src_d");
+        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::FluidSourceDensity, node_path, 0,
+                                     "fld_src_d");
         dirty |= ImGui::DragFloat3("Source velocity", &f.source_velocity.x, 0.05f, -20.0f, 20.0f);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::FluidSourceVelocityY, node_path, 0,
+                                   "fld_src_vy");
+        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::FluidSourceVelocityY, node_path,
+                                     0, "fld_src_vy");
         ImGui::Separator();
         ImGui::TextUnformatted("Secondary source");
         dirty |= ImGui::Checkbox("Source 2 enabled", &f.source2_enabled);
         dirty |= ImGui::DragFloat3("Source 2 UVW", &f.source2_uvw.x, 0.01f, 0.0f, 1.0f);
         dirty |= ImGui::DragFloat("Source 2 radius", &f.source2_radius, 0.005f, 0.001f, 0.5f);
         dirty |= ImGui::DragFloat("Source 2 density", &f.source2_density, 0.05f, 0.0f, 8.0f);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::FluidSource2Density, node_path, 0,
+                                   "fld_src2_d");
+        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::FluidSource2Density, node_path,
+                                     0, "fld_src2_d");
         dirty |= ImGui::DragFloat3("Source 2 velocity", &f.source2_velocity.x, 0.05f, -20.0f, 20.0f);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::FluidSource2VelocityY, node_path, 0,
+                                   "fld_src2_vy");
+        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::FluidSource2VelocityY,
+                                     node_path, 0, "fld_src2_vy");
         dirty |= ImGui::Checkbox("Animate sources", &f.animate_sources);
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Gentle wobble so blobs rise, merge, and split like a lava lamp.");
         }
         dirty |= ImGui::ColorEdit4("Dye color", &f.dye_color.x);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::FluidDyeColorR, node_path, 0,
+                                   "fld_dye_r");
+        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::FluidDyeColorR, node_path, 0,
+                                     "fld_dye_r");
         if (dirty) {
             markDirty();
         }
@@ -2375,6 +2428,7 @@ private:
     bool show_viewport_help_ = false;
     bool show_timeline_ = false;
     bool show_protocol_ = false;
+    bool show_audio_ = false;
     bool show_animation_graph_ = false;
     bool auto_key_ = false;
     bool show_debug_window_ = false;
@@ -2387,6 +2441,7 @@ private:
     int smoke_exit_frames_ = -1;
 
     genesis::OscProtocol osc_protocol_{};
+    genesis::AudioReactive audio_reactive_{};
     double osc_time_ = 0.0;
     float last_frame_dt_ = 1.0f / 60.0f;
     float look_time_seconds_ = 0.0f;
