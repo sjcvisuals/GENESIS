@@ -245,13 +245,21 @@ void VulkanContext::pickPhysicalDevice(std::uint64_t adapter_luid) {
             continue;
         }
 
+        VkPhysicalDeviceProperties props{};
+        vkGetPhysicalDeviceProperties(device, &props);
+        // OpenPBR materials use a 256-byte push block (widely supported; Vulkan min is 128).
+        if (props.limits.maxPushConstantsSize < 256) {
+            spdlog::warn("Skipping GPU {} — maxPushConstantsSize {} < 256", props.deviceName,
+                         props.limits.maxPushConstantsSize);
+            continue;
+        }
+
         physical_device_ = device;
         graphics_queue_family_ = graphics_family;
         present_queue_family_ = present_family;
 
-        VkPhysicalDeviceProperties props{};
-        vkGetPhysicalDeviceProperties(device, &props);
-        spdlog::info("Selected GPU: {}", props.deviceName);
+        spdlog::info("Selected GPU: {} (push constants {} bytes)", props.deviceName,
+                     props.limits.maxPushConstantsSize);
         return;
     }
 
@@ -273,6 +281,7 @@ void VulkanContext::createLogicalDevice(const VulkanContextConfig& config) {
     }
 
     if (headless_) {
+#ifdef _WIN32
         device_extensions_ = {
             VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
             VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
@@ -280,6 +289,15 @@ void VulkanContext::createLogicalDevice(const VulkanContextConfig& config) {
             VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME,
             VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME,
         };
+#else
+        device_extensions_ = {
+            VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
+            VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
+            VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME,
+            VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME,
+            VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME,
+        };
+#endif
     } else {
         device_extensions_ = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
     }

@@ -6,6 +6,7 @@
 #include "runtime/ProductionTopology.hpp"
 #include "runtime/RuntimeScene.hpp"
 #include "renderer/OffscreenRenderer.hpp"
+#include "color/ColorManagement.hpp"
 #include "scene/SceneDrawBatch.hpp"
 #include "scene/SceneRuntime.hpp"
 
@@ -50,6 +51,10 @@ public:
     const SceneRuntime& sceneRuntime() const { return *scene_; }
     const std::string& lastLoadError() const { return last_load_error_; }
 
+    ColorManagementSettings& lookSettings() { return look_settings_; }
+    const ColorManagementSettings& lookSettings() const { return look_settings_; }
+    void applyLookSettings();
+
 private:
     struct OutputSlot {
         ResolvedOutputAssignment assignment;
@@ -68,6 +73,8 @@ private:
     std::vector<SceneMeshBatch> draw_batches_;
     ProductionClock production_clock_{};
     GenesisFrameTime current_frame_time_{};
+    ColorManagementSettings look_settings_{};
+    ColorManagement color_mgmt_{};
     std::string last_load_error_;
 };
 

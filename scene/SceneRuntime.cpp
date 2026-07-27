@@ -7,13 +7,18 @@
 #include "animation/AnimationEvaluator.hpp"
 #include "assets/GltfLoader.hpp"
 #include "assets/PrimitiveMeshes.hpp"
+#include "assets/TextureLoader.hpp"
 #include "platform/Paths.hpp"
+#include "scene/DefaultMaterial.hpp"
 #include "scene/ScenePath.hpp"
 #include "scene/SceneSerializer.hpp"
 #include "scene/GnsPackage.hpp"
 
 #include <algorithm>
 #include <cstring>
+#include <system_error>
+#include <unordered_map>
+#include <vector>
 #include <glm/gtc/quaternion.hpp>
 #include <spdlog/spdlog.h>
 #include <stdexcept>
@@ -63,12 +68,15 @@ void SceneRuntime::loadGltfFile(const std::filesystem::path& absolute_path) {
 
 void SceneRuntime::loadDocument(const std::filesystem::path& path) {
     const SceneDocument document = SceneSerializer::load(path);
+    const std::filesystem::path resolved = resolveAssetPath(path);
+    const std::filesystem::path asset_root = resolved.parent_path();
     if (document.source == "builtin") {
         buildFromDocument(document);
     } else {
         loadGltfSource(resolveAssetPath(document.source));
         applyDocumentOverrides(document);
     }
+    resolveMaterialTextures(asset_root);
     document_path_ = path.string();
 }
 
@@ -87,6 +95,7 @@ void SceneRuntime::loadDocumentData(const SceneDocument& document,
         loadGltfSource(gltf_path);
         applyDocumentOverrides(document);
     }
+    resolveMaterialTextures(asset_root);
 }
 
 void SceneRuntime::loadDocumentFile(const std::filesystem::path& absolute_path) {
@@ -149,19 +158,23 @@ void SceneRuntime::loadDemo() {
         scene_.createLightNode("Directional Light", SceneLightType::Directional, root);
     if (Node* n = scene_.find(dir_light)) {
         n->local.rotation =
-            glm::angleAxis(glm::radians(-50.0f), glm::vec3(1.0f, 0.0f, 0.0f)) *
-            glm::angleAxis(glm::radians(40.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-        n->light->color = glm::vec3(1.0f, 0.97f, 0.92f);
-        n->light->intensity = 2.4f;
+            glm::angleAxis(glm::radians(-52.0f), glm::vec3(1.0f, 0.0f, 0.0f)) *
+            glm::angleAxis(glm::radians(38.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        n->light->color = glm::vec3(1.0f, 0.96f, 0.88f);
+        n->light->intensity = 3.8f;
+    }
+    const NodeId fill_light =
+        scene_.createLightNode("Sky Fill", SceneLightType::Directional, root);
+    if (Node* n = scene_.find(fill_light)) {
+        n->local.rotation =
+            glm::angleAxis(glm::radians(-25.0f), glm::vec3(1.0f, 0.0f, 0.0f)) *
+            glm::angleAxis(glm::radians(-130.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        n->light->color = glm::vec3(0.55f, 0.65f, 0.95f);
+        n->light->intensity = 0.7f;
     }
 
     const std::uint32_t cube_mesh = addMesh("Cube", createCubeMesh(context_));
-    const std::uint32_t cube_mat = addMaterial("Cube Material", SceneMaterial{});
-    if (SceneMaterial* mat = material(cube_mat)) {
-        mat->base_color = glm::vec4(0.82f, 0.38f, 0.26f, 1.0f);
-        mat->roughness = 0.38f;
-        mat->metallic = 0.12f;
-    }
+    const std::uint32_t cube_mat = addDefaultPbrMaterial("Cube Material");
 
     const NodeId cube = scene_.createMeshNode("Cube", cube_mesh, root, cube_mat);
     if (Node* n = scene_.find(cube)) {
@@ -197,6 +210,16 @@ std::uint32_t SceneRuntime::addMaterial(std::string name, SceneMaterial material
     materials_.push_back(std::move(material));
     material_names_.push_back(std::move(name));
     return static_cast<std::uint32_t>(materials_.size() - 1);
+}
+
+std::uint32_t SceneRuntime::addDefaultPbrMaterial(std::string name) {
+    const std::uint32_t id = addMaterial(std::move(name), makeDefaultPbrMaterial());
+    ensureMaterialTexturesLoaded();
+    return id;
+}
+
+void SceneRuntime::ensureMaterialTexturesLoaded() {
+    resolveMaterialTextures(std::filesystem::path("."));
 }
 
 std::uint32_t SceneRuntime::addTexture(std::string name, GpuTexture texture) {
@@ -688,6 +711,9 @@ std::uint32_t SceneRuntime::resolveMeshRef(const std::string& ref) {
     if (ref == "Plane") {
         return addMesh(ref, createPlaneMesh(context_));
     }
+    if (ref == "GroundPlane") {
+        return addMesh(ref, createPlaneMesh(context_, 4.0f, 8.0f));
+    }
     if (ref == "ImportedMesh" && !gltf_source_path_.empty()) {
         return addMesh(ref, GltfLoader::loadFirstMesh(context_, gltf_source_path_));
     }
@@ -700,9 +726,89 @@ std::uint32_t SceneRuntime::resolveMaterialRef(const std::string& ref) {
         if (material_names_[i] == ref) return static_cast<std::uint32_t>(i);
     }
     if (materials_.empty()) {
-        return addMaterial(ref, SceneMaterial{});
+        return addDefaultPbrMaterial(ref);
     }
     return 0;
+}
+
+void SceneRuntime::resolveMaterialTextures(const std::filesystem::path& asset_root) {
+    std::unordered_map<std::string, std::uint32_t> loaded_by_path;
+
+    auto find_texture = [&](const std::string& ref) -> std::filesystem::path {
+        if (ref.empty()) {
+            return {};
+        }
+        const std::filesystem::path as_path(ref);
+        std::vector<std::filesystem::path> candidates = {
+            as_path,
+            asset_root / as_path,
+            asset_root / ".." / as_path,
+            asset_root / ".." / "textures" / as_path,
+            asset_root / "textures" / as_path,
+            std::filesystem::path("assets") / as_path,
+            std::filesystem::path("assets/textures") / as_path,
+            std::filesystem::path("build/assets/textures") / as_path,
+            std::filesystem::path("build/assets") / as_path,
+        };
+        for (const std::filesystem::path& candidate : candidates) {
+            std::error_code ec;
+            if (!candidate.empty() && std::filesystem::exists(candidate, ec) && !ec) {
+                return std::filesystem::absolute(candidate);
+            }
+        }
+        // Last resort: resolveAssetPath may search configured roots (throws if missing).
+        try {
+            return resolveAssetPath(std::filesystem::path("assets/textures") / as_path);
+        } catch (const std::exception&) {
+        }
+        try {
+            return resolveAssetPath(as_path);
+        } catch (const std::exception&) {
+        }
+        return {};
+    };
+
+    auto load_slot = [&](std::string& name, std::optional<std::uint32_t>& resource, bool color_map) {
+        if (name.empty() || resource.has_value()) {
+            return;
+        }
+        const std::filesystem::path path = find_texture(name);
+        if (path.empty()) {
+            spdlog::warn("Material texture not found: {}", name);
+            return;
+        }
+        const std::string key = path.string();
+        if (const auto it = loaded_by_path.find(key); it != loaded_by_path.end()) {
+            resource = it->second;
+            name = path.filename().string();
+            return;
+        }
+        for (std::size_t i = 0; i < texture_names_.size(); ++i) {
+            if (texture_names_[i] == key) {
+                resource = static_cast<std::uint32_t>(i);
+                loaded_by_path[key] = *resource;
+                name = path.filename().string();
+                return;
+            }
+        }
+        try {
+            auto loaded = loadImageTexture(context_, path, TextureColorSpace::Auto, color_map);
+            resource = addTexture(key, std::move(loaded.texture));
+            loaded_by_path[key] = *resource;
+            name = path.filename().string();
+            spdlog::info("Loaded material texture {} -> {}", path.string(), *resource);
+        } catch (const std::exception& ex) {
+            spdlog::error("Failed to load material texture {}: {}", path.string(), ex.what());
+        }
+    };
+
+    for (SceneMaterial& material : materials_) {
+        load_slot(material.base_color_texture, material.base_color_texture_resource, true);
+        load_slot(material.metallic_roughness_texture, material.metallic_roughness_texture_resource,
+                  false);
+        load_slot(material.normal_texture, material.normal_texture_resource, false);
+        load_slot(material.emissive_texture, material.emissive_texture_resource, true);
+    }
 }
 
 } // namespace genesis

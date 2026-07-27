@@ -6,6 +6,7 @@
 #include "runtime/GenesisFrameTime.hpp"
 #include "runtime/RuntimeScene.hpp"
 #include "renderer/FrameUniforms.hpp"
+#include "color/ColorManagement.hpp"
 #include "scene/SceneDrawBatch.hpp"
 #include "scene/SceneRuntime.hpp"
 
@@ -54,6 +55,11 @@ public:
     SceneRuntime& sceneRuntime() { return *scene_; }
     const SceneRuntime& sceneRuntime() const { return *scene_; }
 
+    // Shared look / display settings used by player + host integrations.
+    ColorManagementSettings& lookSettings() { return look_settings_; }
+    const ColorManagementSettings& lookSettings() const { return look_settings_; }
+    void applyLookSettings();
+
     // --- Frame ---
     void beginFrame(const HostFrameInput& input);
     void renderScene();
@@ -73,6 +79,8 @@ private:
     std::vector<SceneMeshBatch> draw_batches_;
     FrameUniforms frame_uniforms_{};
     FrameStats frame_stats_{};
+    ColorManagementSettings look_settings_{};
+    ColorManagement color_mgmt_{};
     ProductionClock production_clock_{};
     GenesisFrameTime current_frame_time_{};
     bool stats_overlay_ = false;

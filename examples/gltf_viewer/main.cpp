@@ -20,6 +20,7 @@
 #include "scene/SceneCamera.hpp"
 #include "scene/SceneLight.hpp"
 #include "scene/SceneMaterial.hpp"
+#include "scene/DefaultMaterial.hpp"
 #include "scene/SceneDrawBatch.hpp"
 #include "scene/ScenePicker.hpp"
 #include "scene/ScenePath.hpp"
@@ -64,6 +65,7 @@ public:
         setRenderStatsEnabled(true);
         genesis::ensureEditorDataDirs();
         session_.loadRecentList();
+        renderer().setClearColor(0.035f, 0.038f, 0.045f, 1.0f);
 
         grid_mesh_ = genesis::createEditorGridMesh(renderer().context(), kGridHalfExtentM, kGridDivisions);
         if (color_mgmt_.lutDirty()) {
@@ -190,8 +192,9 @@ protected:
         const glm::mat4 vp = outputViewProjection(renderAspect());
         const genesis::FrameUniforms frame =
             genesis::buildFrameUniforms(runtime_.scene(), &vp[0][0], outputCameraPosition(),
-                                        &color_mgmt_.settings());
+                                        &color_mgmt_.settings(), look_time_seconds_);
         renderer().setFrameUniforms(frame);
+        look_time_seconds_ += last_frame_dt_;
     }
 
     void onDraw() override {
@@ -484,6 +487,13 @@ private:
         if (ImGui::Button("Sphere", ImVec2(62, 0))) {
             addPrimitiveMesh("Sphere", genesis::createSphereMesh(renderer().context()));
         }
+        if (ImGui::Button("Cylinder", ImVec2(70, 0))) {
+            addPrimitiveMesh("Cylinder", genesis::createCylinderMesh(renderer().context()));
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Plane", ImVec2(62, 0))) {
+            addPrimitiveMesh("Plane", genesis::createPlaneMesh(renderer().context()));
+        }
         if (ImGui::Button("Camera", ImVec2(128, 0))) {
             selectNode(scene.createCameraNode("Camera"));
             markDirty();
@@ -768,6 +778,18 @@ private:
         if (ImGui::DragFloat("Exposure", &settings.exposure, 0.01f, 0.05f, 8.0f)) {
             dirty = true;
         }
+        ImGui::Separator();
+        ImGui::TextUnformatted("Look (Notch / Unreal inspired)");
+        ImGui::TextDisabled("In-shader finishing — no HDR post cost");
+        if (ImGui::DragFloat("Bloom / glow", &settings.bloom_strength, 0.01f, 0.0f, 2.0f)) {
+            dirty = true;
+        }
+        if (ImGui::DragFloat("Vignette", &settings.vignette_strength, 0.01f, 0.0f, 1.0f)) {
+            dirty = true;
+        }
+        if (ImGui::DragFloat("Film grain", &settings.grain_strength, 0.001f, 0.0f, 0.15f)) {
+            dirty = true;
+        }
 
         ImGui::Separator();
         ImGui::TextWrapped("%s", color_mgmt_.configDescription().empty()
@@ -886,7 +908,7 @@ private:
         if (!n.material_resource.has_value()) {
             if (ImGui::Button("Assign Default Material")) {
                 n.has_material = true;
-                n.material_resource = 0;
+                n.material_resource = runtime_.addDefaultPbrMaterial("Default PBR");
                 markDirty();
             }
             return;
@@ -896,26 +918,107 @@ private:
         genesis::SceneMaterial& mat = *runtime_.material(*n.material_resource);
         const std::uint32_t material_id = *n.material_resource;
         ImGui::Text("%s", runtime_.materialNames()[material_id].c_str());
-        if (ImGui::ColorEdit4("Base color", &mat.base_color.x)) markDirty();
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialBaseColorR, node_path,
-                                   material_id, "base_r");
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialBaseColorG, node_path,
-                                   material_id, "base_g");
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialBaseColorB, node_path,
-                                   material_id, "base_b");
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialBaseColorA, node_path,
-                                   material_id, "base_a");
-        if (ImGui::DragFloat("Metallic", &mat.metallic, 0.01f, 0.0f, 1.0f)) markDirty();
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialMetallic, node_path,
-                                   material_id, "metallic");
-        if (ImGui::DragFloat("Roughness", &mat.roughness, 0.01f, 0.0f, 1.0f)) markDirty();
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialRoughness, node_path,
-                                   material_id, "roughness");
-        if (ImGui::DragFloat("Normal scale", &mat.normal_scale, 0.01f, 0.0f, 4.0f)) markDirty();
-        if (ImGui::ColorEdit3("Emissive", &mat.emissive.x)) markDirty();
-        if (ImGui::DragFloat("Emissive strength", &mat.emissive_strength, 0.05f, 0.0f, 32.0f)) markDirty();
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialEmissiveStrength, node_path,
-                                   material_id, "emissive_strength");
+        ImGui::TextDisabled("OpenPBR Surface");
+
+        if (ImGui::CollapsingHeader("Base", ImGuiTreeNodeFlags_DefaultOpen)) {
+            if (ImGui::DragFloat("Base weight", &mat.base_weight, 0.01f, 0.0f, 1.0f)) markDirty();
+            if (ImGui::ColorEdit4("Base color", &mat.base_color.x)) markDirty();
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialBaseColorR, node_path,
+                                       material_id, "base_r");
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialBaseColorG, node_path,
+                                       material_id, "base_g");
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialBaseColorB, node_path,
+                                       material_id, "base_b");
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialBaseColorA, node_path,
+                                       material_id, "base_a");
+            if (ImGui::DragFloat("Metalness", &mat.metallic, 0.01f, 0.0f, 1.0f)) markDirty();
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialMetallic, node_path,
+                                       material_id, "metallic");
+            if (ImGui::DragFloat("Diffuse roughness", &mat.base_diffuse_roughness, 0.01f, 0.0f, 1.0f)) {
+                markDirty();
+            }
+        }
+
+        if (ImGui::CollapsingHeader("Specular", ImGuiTreeNodeFlags_DefaultOpen)) {
+            if (ImGui::DragFloat("Specular weight", &mat.specular_weight, 0.01f, 0.0f, 1.0f)) markDirty();
+            if (ImGui::ColorEdit3("Specular color", &mat.specular_color.x)) markDirty();
+            if (ImGui::DragFloat("Roughness", &mat.roughness, 0.01f, 0.0f, 1.0f)) markDirty();
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialRoughness, node_path,
+                                       material_id, "roughness");
+            if (ImGui::DragFloat("IOR", &mat.specular_ior, 0.01f, 1.0f, 3.0f)) markDirty();
+        }
+
+        if (ImGui::CollapsingHeader("Transmission")) {
+            if (ImGui::DragFloat("Transmission weight", &mat.transmission_weight, 0.01f, 0.0f, 1.0f)) {
+                markDirty();
+            }
+            if (ImGui::ColorEdit3("Transmission color", &mat.transmission_color.x)) markDirty();
+            if (ImGui::DragFloat("Transmission depth", &mat.transmission_depth, 0.01f, 0.0f, 10.0f)) {
+                markDirty();
+            }
+            if (ImGui::ColorEdit3("Transmission scatter", &mat.transmission_scatter.x)) markDirty();
+            if (ImGui::DragFloat("Scatter anisotropy", &mat.transmission_scatter_anisotropy, 0.01f, -1.0f,
+                                1.0f)) {
+                markDirty();
+            }
+            if (ImGui::DragFloat("Dispersion scale", &mat.transmission_dispersion_scale, 0.01f, 0.0f,
+                                1.0f)) {
+                markDirty();
+            }
+            if (ImGui::DragFloat("Abbe number", &mat.transmission_dispersion_abbe, 0.5f, 9.0f, 91.0f)) {
+                markDirty();
+            }
+            if (ImGui::Checkbox("Thin walled", &mat.thin_walled)) markDirty();
+        }
+
+        if (ImGui::CollapsingHeader("Subsurface")) {
+            if (ImGui::DragFloat("Subsurface weight", &mat.subsurface_weight, 0.01f, 0.0f, 1.0f)) {
+                markDirty();
+            }
+            if (ImGui::ColorEdit3("Subsurface color", &mat.subsurface_color.x)) markDirty();
+            if (ImGui::DragFloat("Subsurface radius", &mat.subsurface_radius, 0.01f, 0.0f, 10.0f)) {
+                markDirty();
+            }
+            if (ImGui::ColorEdit3("Radius scale", &mat.subsurface_radius_scale.x)) markDirty();
+            if (ImGui::DragFloat("SSS anisotropy", &mat.subsurface_scatter_anisotropy, 0.01f, -1.0f,
+                                1.0f)) {
+                markDirty();
+            }
+        }
+
+        if (ImGui::CollapsingHeader("Coat")) {
+            if (ImGui::DragFloat("Coat weight", &mat.coat_weight, 0.01f, 0.0f, 1.0f)) markDirty();
+            if (ImGui::ColorEdit3("Coat color", &mat.coat_color.x)) markDirty();
+            if (ImGui::DragFloat("Coat roughness", &mat.coat_roughness, 0.01f, 0.0f, 1.0f)) markDirty();
+            if (ImGui::DragFloat("Coat IOR", &mat.coat_ior, 0.01f, 1.0f, 3.0f)) markDirty();
+            if (ImGui::DragFloat("Coat darkening", &mat.coat_darkening, 0.01f, 0.0f, 1.0f)) markDirty();
+        }
+
+        if (ImGui::CollapsingHeader("Fuzz")) {
+            if (ImGui::DragFloat("Fuzz weight", &mat.fuzz_weight, 0.01f, 0.0f, 1.0f)) markDirty();
+            if (ImGui::ColorEdit3("Fuzz color", &mat.fuzz_color.x)) markDirty();
+            if (ImGui::DragFloat("Fuzz roughness", &mat.fuzz_roughness, 0.01f, 0.0f, 1.0f)) markDirty();
+        }
+
+        if (ImGui::CollapsingHeader("Thin Film")) {
+            if (ImGui::DragFloat("Thin film weight", &mat.thin_film_weight, 0.01f, 0.0f, 1.0f)) {
+                markDirty();
+            }
+            if (ImGui::DragFloat("Thickness (um)", &mat.thin_film_thickness, 0.01f, 0.0f, 2.0f)) {
+                markDirty();
+            }
+            if (ImGui::DragFloat("Thin film IOR", &mat.thin_film_ior, 0.01f, 1.0f, 3.0f)) markDirty();
+        }
+
+        if (ImGui::CollapsingHeader("Emission", ImGuiTreeNodeFlags_DefaultOpen)) {
+            if (ImGui::ColorEdit3("Emissive", &mat.emissive.x)) markDirty();
+            if (ImGui::DragFloat("Emissive strength", &mat.emissive_strength, 0.05f, 0.0f, 32.0f)) {
+                markDirty();
+            }
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::MaterialEmissiveStrength, node_path,
+                                       material_id, "emissive_strength");
+            if (ImGui::DragFloat("Normal scale", &mat.normal_scale, 0.01f, 0.0f, 4.0f)) markDirty();
+        }
 
         ImGui::Separator();
         ImGui::TextUnformatted("Textures");
@@ -1867,19 +1970,23 @@ private:
             runtime_.scene().createLightNode("Directional Light", genesis::SceneLightType::Directional, root);
         if (genesis::Node* n = runtime_.scene().find(light)) {
             n->local.rotation =
-                glm::angleAxis(glm::radians(-50.0f), glm::vec3(1.0f, 0.0f, 0.0f)) *
-                glm::angleAxis(glm::radians(40.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-            n->light->color = glm::vec3(1.0f, 0.97f, 0.92f);
-            n->light->intensity = 2.4f;
+                glm::angleAxis(glm::radians(-52.0f), glm::vec3(1.0f, 0.0f, 0.0f)) *
+                glm::angleAxis(glm::radians(38.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+            n->light->color = glm::vec3(1.0f, 0.96f, 0.88f);
+            n->light->intensity = 3.8f;
+        }
+        const genesis::NodeId fill =
+            runtime_.scene().createLightNode("Sky Fill", genesis::SceneLightType::Directional, root);
+        if (genesis::Node* n = runtime_.scene().find(fill)) {
+            n->local.rotation =
+                glm::angleAxis(glm::radians(-25.0f), glm::vec3(1.0f, 0.0f, 0.0f)) *
+                glm::angleAxis(glm::radians(-130.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+            n->light->color = glm::vec3(0.55f, 0.65f, 0.95f);
+            n->light->intensity = 0.7f;
         }
 
         const std::uint32_t cube_mesh = runtime_.addMesh("Cube", genesis::createCubeMesh(renderer().context()));
-        const std::uint32_t cube_mat = runtime_.addMaterial("Cube Material", genesis::SceneMaterial{});
-        if (genesis::SceneMaterial* mat = runtime_.material(cube_mat)) {
-            mat->base_color = glm::vec4(0.82f, 0.38f, 0.26f, 1.0f);
-            mat->roughness = 0.38f;
-            mat->metallic = 0.12f;
-        }
+        const std::uint32_t cube_mat = runtime_.addDefaultPbrMaterial("Cube Material");
         const genesis::NodeId cube = runtime_.scene().createMeshNode("Cube", cube_mesh, root, cube_mat);
         if (genesis::Node* n = runtime_.scene().find(cube)) {
             n->local.position = glm::vec3(0.0f, 0.0f, 0.0f);
@@ -2038,7 +2145,7 @@ private:
         static int counter = 1;
         const std::string name = std::string(prefix) + " " + std::to_string(counter++);
         const std::uint32_t mesh_id = runtime_.addMesh(name, std::move(mesh));
-        const std::uint32_t material_id = runtime_.addMaterial(name + " Material", genesis::SceneMaterial{});
+        const std::uint32_t material_id = runtime_.addDefaultPbrMaterial(name + " Material");
         selectNode(runtime_.scene().createMeshNode(name, mesh_id, std::nullopt, material_id));
         markDirty();
     }
@@ -2058,13 +2165,13 @@ private:
     }
 
     void resetEditorCamera() {
-        const glm::vec3 target(0.0f, 0.8f, 0.0f);
-        const glm::vec3 eye(8.0f, 4.5f, 9.0f);
+        const glm::vec3 target(0.0f, 0.7f, 0.0f);
+        const glm::vec3 eye(4.2f, 2.55f, 5.4f);
         editor_camera_.transform.position = eye;
         editor_camera_.setRotation(genesis::cameraRotationFromLookAt(eye, target));
         genesis::extractYawPitchFromForward(editor_camera_.forward(), editor_camera_.yaw_radians,
                                             editor_camera_.pitch_radians);
-        editor_camera_.fov_y_radians = glm::radians(55.0f);
+        editor_camera_.fov_y_radians = glm::radians(42.0f);
         editor_camera_.near_plane = 0.1f;
         editor_camera_.far_plane = 250.0f;
     }
@@ -2195,6 +2302,7 @@ private:
     genesis::OscProtocol osc_protocol_{};
     double osc_time_ = 0.0;
     float last_frame_dt_ = 1.0f / 60.0f;
+    float look_time_seconds_ = 0.0f;
 };
 
 } // namespace

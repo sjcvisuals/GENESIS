@@ -141,15 +141,21 @@ void Renderer::setFrameUniforms(const FrameUniforms& uniforms) {
 void Renderer::setViewProjection(const float* mat4_col_major) {
     FrameUniforms u{};
     std::memcpy(u.view_proj, mat4_col_major, sizeof(u.view_proj));
-    u.camera_pos[3] = 1.15f;
-    u.ibl_intensity = 0.55f;
+    u.camera_pos[3] = 1.0f;
+    u.ibl_intensity = 1.05f;
     u.fog_density = 0.0f;
-    u.ambient_sky[0] = 0.42f;
-    u.ambient_sky[1] = 0.52f;
-    u.ambient_sky[2] = 0.72f;
-    u.ambient_ground[0] = 0.18f;
-    u.ambient_ground[1] = 0.14f;
-    u.ambient_ground[2] = 0.10f;
+    u.ambient_sky[0] = 0.20f;
+    u.ambient_sky[1] = 0.24f;
+    u.ambient_sky[2] = 0.32f;
+    u.ambient_ground[0] = 0.065f;
+    u.ambient_ground[1] = 0.055f;
+    u.ambient_ground[2] = 0.048f;
+    // Match buildFrameUniforms cinematic defaults (bloom / vignette / grain).
+    u.display_params[0] = 0.0f;
+    u.display_params[1] = 0.55f;
+    u.display_params[2] = 0.32f;
+    u.display_params[3] = 0.0f;
+    u.fog_color[3] = 0.028f;
     u.light_count = 0;
     setFrameUniforms(u);
 }

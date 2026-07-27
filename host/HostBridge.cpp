@@ -38,6 +38,10 @@ HostBridge::HostBridge(const HostBridgeConfig& config) {
     renderer_ = std::make_unique<Renderer>(*window_);
     scene_ = std::make_unique<SceneRuntime>(renderer_->context());
     stats_overlay_ = config.enable_stats_overlay;
+    // Windowed player: studio backdrop + cinematic look defaults (same as editor).
+    renderer_->setClearColor(0.035f, 0.038f, 0.045f, 1.0f);
+    look_settings_.display = DisplayColorSpace::Rec709;
+    applyLookSettings();
 }
 
 HostBridge::~HostBridge() {
@@ -47,6 +51,11 @@ HostBridge::~HostBridge() {
     scene_.reset();
     renderer_.reset();
     window_.reset();
+}
+
+void HostBridge::applyLookSettings() {
+    color_mgmt_.settings() = look_settings_;
+    renderer_->uploadDisplayLut(color_mgmt_.rebuildDisplayLut());
 }
 
 bool HostBridge::shouldClose() const {
@@ -247,7 +256,9 @@ void HostBridge::prepareFrameUniforms(const HostFrameInput& input) {
         std::memcpy(&view_proj[0][0], input.view_projection, sizeof(float) * 16);
     }
 
-    frame_uniforms_ = buildFrameUniforms(scene_->scene(), &view_proj[0][0], camera_pos);
+    frame_uniforms_ = buildFrameUniforms(scene_->scene(), &view_proj[0][0], camera_pos,
+                                         &look_settings_,
+                                         static_cast<float>(current_frame_time_.production_time_seconds));
 }
 
 void HostBridge::beginFrame(const HostFrameInput& input) {

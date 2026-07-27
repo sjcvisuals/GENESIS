@@ -55,11 +55,24 @@ MultiViewSession::MultiViewSession(const ProductionTopology& topology,
         });
     }
 
+    // Transparent clear for media-server compositing; shared cinematic look defaults.
+    look_settings_.display = DisplayColorSpace::Rec709;
+    applyLookSettings();
+
     spdlog::info("MultiViewSession: {} outputs on {} / {}", outputs_.size(), node_assignment_.machine_id,
                  node_assignment_.gpu_id);
 }
 
 MultiViewSession::~MultiViewSession() = default;
+
+void MultiViewSession::applyLookSettings() {
+    color_mgmt_.settings() = look_settings_;
+    const ColorLut3D& lut = color_mgmt_.rebuildDisplayLut();
+    for (OutputSlot& slot : outputs_) {
+        slot.renderer->setClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+        slot.renderer->uploadDisplayLut(lut);
+    }
+}
 
 void MultiViewSession::loadResolved(const RuntimeSceneResource& resource) {
     if (!tryLoadResolved(resource)) {
@@ -100,7 +113,9 @@ void MultiViewSession::prepareFrameUniforms(const OutputSlot& slot, const glm::d
         camera_pos = *pos;
     }
 
-    out_uniforms = buildFrameUniforms(scene_->scene(), glm::value_ptr(view_proj_f), camera_pos);
+    out_uniforms = buildFrameUniforms(scene_->scene(), glm::value_ptr(view_proj_f), camera_pos,
+                                      &look_settings_,
+                                      static_cast<float>(current_frame_time_.production_time_seconds));
 }
 
 MultiViewFrameMetrics MultiViewSession::renderAllOutputs(const glm::dmat4& host_view,
