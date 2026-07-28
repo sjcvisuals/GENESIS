@@ -1,5 +1,12 @@
-third_party/onnxruntime-*/
-*.tgz
-*.zip
 build/
-.cache/
+out/
+.vs/
+.vscode/
+*.user
+CMakeUserPresets.json
+compile_commands.json
+shaders/spv/
+*.spv
+
+# Downloaded by cmake/OnnxRuntime.cmake (not vendored in git)
+third_party/onnxruntime-*/
