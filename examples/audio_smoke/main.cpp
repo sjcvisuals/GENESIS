@@ -1,4 +1,5 @@
 #include "audio/AudioAnalyser.hpp"
+#include "audio/AudioCapture.hpp"
 #include "audio/AudioReactive.hpp"
 
 #include <cmath>
@@ -55,5 +56,12 @@ int main() {
     std::printf("audio_smoke: ok (bass=%.3f onset=%.3f beat=%.3f bindings=%zu)\n",
                 analyser.features().bass, analyser.features().onset, analyser.features().beat,
                 reactive.bindings().size());
+
+    // Device enumeration must be safe even with no mics (headless / CI).
+    const auto devices = genesis::AudioCapture::listRecordingDevices();
+    std::printf("audio_smoke: recording devices=%zu\n", devices.size());
+    for (const auto& d : devices) {
+        std::printf("  - [%u] %s\n", d.id, d.name.c_str());
+    }
     return 0;
 }

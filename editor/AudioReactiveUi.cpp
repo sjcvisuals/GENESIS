@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
+#include <string>
+#include <vector>
 
 namespace genesis {
 
@@ -18,6 +20,27 @@ void drawMeter(const char* label, float value) {
     ImGui::SameLine(72.0f);
     ImGui::ProgressBar(std::clamp(value, 0.0f, 1.0f), ImVec2(-1.0f, 0.0f), "");
 }
+
+struct CaptureDevicePickerState {
+    std::vector<AudioCapture::DeviceInfo> devices;
+    int selected = 0; // 0 = system default; 1..N = devices[i-1]
+    bool loaded_once = false;
+
+    void refresh() {
+        devices = AudioCapture::listRecordingDevices();
+        if (selected > static_cast<int>(devices.size())) {
+            selected = 0;
+        }
+        loaded_once = true;
+    }
+
+    std::uint32_t selectedDeviceId() const {
+        if (selected <= 0 || selected > static_cast<int>(devices.size())) {
+            return 0; // sentinel → startDefaultCapture
+        }
+        return devices[static_cast<std::size_t>(selected - 1)].id;
+    }
+};
 
 } // namespace
 
@@ -47,10 +70,55 @@ void drawAudioReactivePanel(AudioReactive& reactive, bool* open,
 
     ImGui::Spacing();
     ImGui::TextUnformatted("Source");
+
+    static CaptureDevicePickerState picker;
+    if (!picker.loaded_once) {
+        picker.refresh();
+    }
+
     if (!reactive.capture().isActive()) {
+        const char* preview = "System default";
+        if (picker.selected > 0 && picker.selected <= static_cast<int>(picker.devices.size())) {
+            preview = picker.devices[static_cast<std::size_t>(picker.selected - 1)].name.c_str();
+        }
+        ImGui::SetNextItemWidth(220.0f);
+        if (ImGui::BeginCombo("Input device", preview)) {
+            const bool default_selected = picker.selected <= 0;
+            if (ImGui::Selectable("System default", default_selected)) {
+                picker.selected = 0;
+            }
+            if (default_selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+            for (std::size_t i = 0; i < picker.devices.size(); ++i) {
+                const int idx = static_cast<int>(i + 1);
+                const bool sel = picker.selected == idx;
+                if (ImGui::Selectable(picker.devices[i].name.c_str(), sel)) {
+                    picker.selected = idx;
+                }
+                if (sel) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Refresh")) {
+            picker.refresh();
+        }
+        if (picker.devices.empty()) {
+            ImGui::TextDisabled("No recording devices reported (check OS permissions).");
+        }
+
         if (ImGui::Button("Start live capture")) {
             std::string error;
-            if (!reactive.capture().startDefaultCapture(&error)) {
+            bool ok = false;
+            if (picker.selected <= 0) {
+                ok = reactive.capture().startDefaultCapture(&error);
+            } else {
+                ok = reactive.capture().startCapture(picker.selectedDeviceId(), &error);
+            }
+            if (!ok) {
                 reactive.setLastError(error);
             } else {
                 reactive.setLastError({});
@@ -70,7 +138,10 @@ void drawAudioReactivePanel(AudioReactive& reactive, bool* open,
         }
     } else {
         if (reactive.capture().mode() == AudioInputMode::LiveCapture) {
-            ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "Live capture @ %.0f Hz",
+            ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "Live: %s @ %.0f Hz",
+                               reactive.capture().activeDeviceName().empty()
+                                   ? "Recording device"
+                                   : reactive.capture().activeDeviceName().c_str(),
                                reactive.capture().sampleRate());
         } else {
             ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "WAV: %s",

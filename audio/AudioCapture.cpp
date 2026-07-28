@@ -39,6 +39,8 @@ void AudioCapture::destroyStreams() {
 void AudioCapture::stop() {
     destroyStreams();
     mode_ = AudioInputMode::None;
+    active_device_id_ = 0;
+    active_device_name_.clear();
     wav_samples_.clear();
     wav_cursor_ = 0;
     wav_path_.clear();
@@ -103,8 +105,17 @@ bool AudioCapture::startCapture(std::uint32_t device_id, std::string* out_error)
         return false;
     }
 
+    active_device_id_ = device_id;
+    if (device_id == static_cast<std::uint32_t>(SDL_AUDIO_DEVICE_DEFAULT_RECORDING)) {
+        active_device_name_ = "System default";
+    } else if (const char* name = SDL_GetAudioDeviceName(static_cast<SDL_AudioDeviceID>(device_id))) {
+        active_device_name_ = name;
+    } else {
+        active_device_name_ = "Recording device";
+    }
+
     mode_ = AudioInputMode::LiveCapture;
-    spdlog::info("Audio capture started ({} Hz mono)", sample_rate_);
+    spdlog::info("Audio capture started on '{}' ({} Hz mono)", active_device_name_, sample_rate_);
     return true;
 }
 

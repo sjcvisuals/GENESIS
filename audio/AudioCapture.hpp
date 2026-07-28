@@ -45,6 +45,8 @@ public:
     AudioInputMode mode() const { return mode_; }
     const std::filesystem::path& wavPath() const { return wav_path_; }
     float sampleRate() const { return sample_rate_; }
+    std::uint32_t activeDeviceId() const { return active_device_id_; }
+    const std::string& activeDeviceName() const { return active_device_name_; }
 
     // Pull new samples into the analyser. Call once per frame.
     void pump(AudioAnalyser& analyser, float dt_seconds);
@@ -57,6 +59,8 @@ private:
     SDL_AudioStream* capture_stream_ = nullptr;
     SDL_AudioStream* playback_stream_ = nullptr;
     float sample_rate_ = 44100.0f;
+    std::uint32_t active_device_id_ = 0;
+    std::string active_device_name_;
 
     std::filesystem::path wav_path_;
     std::vector<float> wav_samples_;
