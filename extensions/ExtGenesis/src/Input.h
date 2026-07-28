@@ -45,6 +45,7 @@ private:
     void publishVideoInTexture();
     void ensureSession();
     void ensureRemover();
+    void applyMatteSettings();
     void refreshShowSelector();
     void refreshParameterCatalog();
     void refreshCatalogForLoadedShow();
@@ -59,6 +60,7 @@ private:
     ParameterTexture* sampler_ = nullptr;
     ParameterTexture* video_in_ = nullptr;
     ParameterInt* mode_ = nullptr;
+    ParameterInt* quality_ = nullptr;
     ParameterValue* time_ = nullptr;
     ParameterMatrix4* view_matrix_ = nullptr;
     ParameterMatrix4* projection_matrix_ = nullptr;

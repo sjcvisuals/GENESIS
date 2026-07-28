@@ -10,6 +10,7 @@
 #include "renderer/vulkan/ExternalSync.hpp"
 
 #include <format>
+#include <algorithm>
 #include <glm/gtc/matrix_transform.hpp>
 
 namespace rxext::genesis_ext {
@@ -47,6 +48,12 @@ Input::Input(std::uint64_t adapter_luid, ValueSet settings)
     video_in_ = add_parameter<ParameterTexture>("texture");
     video_in_->set_property(PropertyNames::name, "Video In");
     video_in_->set_property(PropertyNames::group_name, "Inputs");
+
+    quality_ = add_parameter<ParameterInt>("quality");
+    quality_->set_property(PropertyNames::name, "Quality");
+    quality_->set_property(PropertyNames::group_name, "Matte");
+    quality_->set_property(PropertyNames::enum_names, {"Fast", "Balanced", "Quality"});
+    quality_->set_value(1);
 
     ParameterVector3* position_param_ = nullptr;
     actor_bindings_.registerSceneParameters(*this, show_select_, use_scene_camera_, reload_scene_,
@@ -134,8 +141,25 @@ void Input::ensureRemover() {
         return;
     }
     remover_ = std::make_unique<::genesis::RemoverPipeline>(adapter_luid_);
+    remover_->setAsyncEnabled(true);
+    applyMatteSettings();
     host().log_info(std::format("GENESIS Background Remover ready ({})",
                                 remover_->remover().status()));
+}
+
+void Input::applyMatteSettings() {
+    if (!remover_) {
+        return;
+    }
+    ::genesis::BgRemoverSettings matte = remover_->remover().settings();
+    const int q = quality_ ? std::clamp(quality_->value(), 0, 2) : 1;
+    const auto next_q = static_cast<::genesis::BgRemoverQuality>(q);
+    if (matte.backend == ::genesis::BgRemoverBackend::Auto && matte.quality == next_q) {
+        return;
+    }
+    matte.backend = ::genesis::BgRemoverBackend::Auto;
+    matte.quality = next_q;
+    remover_->setSettings(matte);
 }
 
 void Input::ensureSession() {
@@ -346,6 +370,7 @@ string Input::get_property(string_view name) noexcept {
 bool Input::update() noexcept try {
     if (currentMode() == StreamMode::BackgroundRemover) {
         ensureRemover();
+        applyMatteSettings();
         publishVideoInTexture();
         return true;
     }

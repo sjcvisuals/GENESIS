@@ -12,14 +12,15 @@
 |-------|------|
 | `ExternalSharedImage` | Pixera→DLL shared RGBA |
 | `BgRemover` + `RvmOnnxSession` | Auto → **RVM ONNX** (preferred) or chroma key |
-| `RemoverPipeline` | video_in → matte → exportable RGBA |
-| ExtGenesis `mode` | Scene **or** Background Remover |
-| **ExtGenesisRemover** | Matte-only Pixera DLL (Step 2) |
+| `AsyncMatteWorker` | One-inflight worker; skip when busy; reuse last matte |
+| `RemoverPipeline` | video_in → async matte → exportable RGBA |
+| ExtGenesis `mode` | Scene **or** Background Remover (+ Quality) |
+| **ExtGenesisRemover** | Matte-only Pixera DLL |
 
 ### Pixera — full GENESIS
 
 1. Mode = **Background Remover**
-2. Link media/NDI/SDI → **Video In**
+2. Link media/NDI/SDI → **Video In**, pick **Quality**
 3. Output sampler = transparent cutout
 
 ### Pixera — Genesis Remover (free cutout module)
@@ -32,6 +33,7 @@
 
 - **RVM MobileNetV3 FP16** via ONNX Runtime (CPU today; CUDA/DirectML EP later)
 - Infer at reduced res (`Fast`/`Balanced`/`Quality` → downsample ~0.2–0.35)
+- **Async by default**: Pixera `render()` never waits on `Ort::Run`. Frames submitted while the worker is busy are skipped; the last completed matte is uploaded (1+ frame latency tradeoff).
 - Chroma key remains the zero-dep fallback for keyed stages
 - No NVIDIA Broadcast SDK install
 
@@ -51,3 +53,5 @@ CMake option: `GENESIS_ENABLE_ONNXRUNTIME` (default ON) downloads ORT into `thir
 ```bash
 ./build/genesis_matting_smoke
 ```
+
+Covers chroma, sync RVM, and async skip/reuse stats.

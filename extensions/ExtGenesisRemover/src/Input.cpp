@@ -49,6 +49,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
         pipeline_ = std::make_unique<::genesis::RemoverPipeline>(adapter_luid_);
     }
     pipeline_->resize(width_, height_);
+    pipeline_->setAsyncEnabled(true);
 
     ::genesis::BgRemoverSettings matte{};
     matte.backend = ::genesis::BgRemoverBackend::Auto;

@@ -15,7 +15,7 @@ On Linux VMs with `libvulkan-dev` installed, `cmake/VulkanSetup.cmake` prefers `
 - Configure: `bash scripts/cloud-install.sh` or `cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug`
 - Build: `cmake --build build -j$(nproc) --target genesis_gltf_viewer`
 - Audio smoke: `./build/genesis_audio_smoke`
-- Matting smoke: `./build/genesis_matting_smoke` (RVM when ORT + model present)
+- Matting smoke: `./build/genesis_matting_smoke` (chroma + RVM + async skip/reuse)
 - Optional RVM weights: `bash scripts/fetch-rvm-model.sh` (or commit `assets/matting/*.onnx`)
 - ONNX Runtime: CMake option `GENESIS_ENABLE_ONNXRUNTIME` (default ON) downloads into `third_party/onnxruntime-*` (gitignored)
 - Editor needs a display (`DISPLAY=:1` with XFCE/lavapipe in the cloud snapshot).

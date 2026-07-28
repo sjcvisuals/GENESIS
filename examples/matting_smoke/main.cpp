@@ -1,6 +1,9 @@
+#include "matting/AsyncMatteWorker.hpp"
 #include "matting/BgRemover.hpp"
 
+#include <chrono>
 #include <cstdio>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -75,12 +78,9 @@ int main() {
         constexpr std::uint32_t kH = 160;
         const auto in = makeGreenScreenPerson(kW, kH);
         std::vector<std::uint8_t> out = in;
-        // Warm recurrent state + second frame.
         auto_remover.process(in.data(), out.data(), kW, kH);
         auto_remover.process(in.data(), out.data(), kW, kH);
         const std::size_t center = ((kH / 2u) * kW + (kW / 2u)) * 4u;
-        // RVM on synthetic green-screen may not be perfect; just ensure it runs and
-        // produces a plausible alpha range.
         if (out[center + 3] == 0 && out[3] == 255) {
             std::fprintf(stderr, "matting_smoke: RVM produced inverted/empty matte\n");
             return 1;
@@ -88,6 +88,54 @@ int main() {
         std::printf("matting_smoke: rvm ok (center_a=%u corner_a=%u)\n", out[center + 3], out[3]);
     } else {
         std::printf("matting_smoke: rvm skipped (fallback active)\n");
+    }
+
+    // --- Async worker: never blocks submit; skips while busy; reuses last matte ---
+    {
+        genesis::AsyncMatteWorker worker;
+        genesis::BgRemoverSettings settings{};
+        settings.backend = genesis::BgRemoverBackend::Auto;
+        settings.quality = genesis::BgRemoverQuality::Quality;
+        settings.rvm_downsample = 0.35f;
+        settings.temporal_alpha = 0.0f;
+        worker.setSettings(settings);
+        worker.start();
+
+        constexpr std::uint32_t kW = 320;
+        constexpr std::uint32_t kH = 320;
+        const auto in = makeGreenScreenPerson(kW, kH);
+        std::vector<std::uint8_t> out(static_cast<std::size_t>(kW) * kH * 4u, 0);
+
+        worker.trySubmit(in.data(), kW, kH);
+        for (int i = 0; i < 64; ++i) {
+            worker.trySubmit(in.data(), kW, kH);
+        }
+
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (worker.completed() == 0 && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        if (worker.completed() == 0) {
+            std::fprintf(stderr, "matting_smoke: async worker produced no frames\n");
+            return 1;
+        }
+        if (!worker.copyLatest(out.data(), kW, kH)) {
+            std::fprintf(stderr, "matting_smoke: async copyLatest failed\n");
+            return 1;
+        }
+        if (worker.skipped() == 0) {
+            std::fprintf(stderr,
+                         "matting_smoke: expected skips while busy (submitted=%llu completed=%llu)\n",
+                         static_cast<unsigned long long>(worker.submitted()),
+                         static_cast<unsigned long long>(worker.completed()));
+            return 1;
+        }
+        std::printf("matting_smoke: async ok (submitted=%llu completed=%llu skipped=%llu center_a=%u)\n",
+                    static_cast<unsigned long long>(worker.submitted()),
+                    static_cast<unsigned long long>(worker.completed()),
+                    static_cast<unsigned long long>(worker.skipped()),
+                    out[((kH / 2u) * kW + (kW / 2u)) * 4u + 3u]);
+        worker.stop();
     }
 
     return 0;

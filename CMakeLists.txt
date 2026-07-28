@@ -165,12 +165,14 @@ target_link_libraries(genesis_engine_runtime PUBLIC
 )
 
 # Background removal / live video matte (shared by ExtGenesis + Genesis Remover).
+find_package(Threads REQUIRED)
 add_library(genesis_matting STATIC
     matting/BgRemover.cpp
     matting/RvmOnnxSession.cpp
+    matting/AsyncMatteWorker.cpp
 )
 target_include_directories(genesis_matting PUBLIC ${CMAKE_SOURCE_DIR})
-target_link_libraries(genesis_matting PUBLIC genesis_platform_core)
+target_link_libraries(genesis_matting PUBLIC genesis_platform_core Threads::Threads)
 if(GENESIS_HAS_ONNXRUNTIME)
     target_compile_definitions(genesis_matting PUBLIC GENESIS_HAS_ONNXRUNTIME=1)
     target_include_directories(genesis_matting PUBLIC "${GENESIS_ONNXRUNTIME_ROOT}/include")
