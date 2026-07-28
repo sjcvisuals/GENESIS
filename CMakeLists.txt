@@ -92,6 +92,7 @@ add_library(genesis_renderer_core STATIC
     renderer/vulkan/ShaderModule.cpp
     renderer/vulkan/Texture.cpp
     renderer/vulkan/ExternalRenderTarget.cpp
+    renderer/vulkan/ExternalSharedImage.cpp
     renderer/vulkan/ExternalSync.cpp
     renderer/vulkan/VulkanInterop.cpp
 )
@@ -161,6 +162,14 @@ target_link_libraries(genesis_engine_runtime PUBLIC
     nlohmann_json::nlohmann_json
     assimp::assimp
 )
+
+# Background removal / live video matte (shared by ExtGenesis + future Genesis Remover).
+add_library(genesis_matting STATIC
+    matting/BgRemover.cpp
+)
+target_include_directories(genesis_matting PUBLIC ${CMAKE_SOURCE_DIR})
+target_link_libraries(genesis_matting PUBLIC genesis_platform_core)
+
 add_library(genesis_runtime STATIC
     runtime/GenesisSession.cpp
     runtime/GenesisFrameTime.cpp
@@ -173,9 +182,10 @@ add_library(genesis_runtime STATIC
     runtime/ProductionTopology.cpp
     runtime/NodeAssignment.cpp
     runtime/MultiViewSession.cpp
+    runtime/RemoverPipeline.cpp
 )
 target_include_directories(genesis_runtime PUBLIC ${CMAKE_SOURCE_DIR})
-target_link_libraries(genesis_runtime PUBLIC genesis_engine_runtime)
+target_link_libraries(genesis_runtime PUBLIC genesis_engine_runtime genesis_matting)
 
 add_library(genesis_engine STATIC
     engine/Application.cpp
@@ -255,6 +265,9 @@ if(GENESIS_BUILD_EXAMPLES)
 
     add_executable(genesis_audio_smoke examples/audio_smoke/main.cpp)
     target_link_libraries(genesis_audio_smoke PRIVATE genesis_audio)
+
+    add_executable(genesis_matting_smoke examples/matting_smoke/main.cpp)
+    target_link_libraries(genesis_matting_smoke PRIVATE genesis_matting)
 
     add_executable(genesis_multiview_player examples/multiview_player/main.cpp)
     target_link_libraries(genesis_multiview_player PRIVATE genesis_engine)

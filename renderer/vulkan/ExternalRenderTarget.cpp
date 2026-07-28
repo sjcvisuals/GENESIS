@@ -201,7 +201,8 @@ void ExternalRenderTarget::createImages() {
     color_info.arrayLayers = 1;
     color_info.samples = VK_SAMPLE_COUNT_1_BIT;
     color_info.tiling = VK_IMAGE_TILING_OPTIMAL;
-    color_info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    color_info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                       VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     color_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
 #ifdef _WIN32
@@ -351,6 +352,85 @@ void ExternalRenderTarget::destroyFramebuffer() {
         vkDestroyFramebuffer(context_.device(), framebuffer_, nullptr);
         framebuffer_ = VK_NULL_HANDLE;
     }
+}
+
+bool ExternalRenderTarget::uploadColorRgba8(const std::uint8_t* rgba) {
+    if (!rgba || !color_image_ || extent_.width == 0 || extent_.height == 0) {
+        return false;
+    }
+    const VkDeviceSize bytes =
+        static_cast<VkDeviceSize>(extent_.width) * extent_.height * 4ull;
+
+    VkBufferCreateInfo buf_info{};
+    buf_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buf_info.size = bytes;
+    buf_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    VkBuffer staging = VK_NULL_HANDLE;
+    if (vkCreateBuffer(context_.device(), &buf_info, nullptr, &staging) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkMemoryRequirements reqs{};
+    vkGetBufferMemoryRequirements(context_.device(), staging, &reqs);
+    VkMemoryAllocateInfo alloc{};
+    alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc.allocationSize = reqs.size;
+    alloc.memoryTypeIndex = context_.findMemoryType(
+        reqs.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    VkDeviceMemory staging_mem = VK_NULL_HANDLE;
+    if (vkAllocateMemory(context_.device(), &alloc, nullptr, &staging_mem) != VK_SUCCESS) {
+        vkDestroyBuffer(context_.device(), staging, nullptr);
+        return false;
+    }
+    vkBindBufferMemory(context_.device(), staging, staging_mem, 0);
+
+    void* mapped = nullptr;
+    vkMapMemory(context_.device(), staging_mem, 0, bytes, 0, &mapped);
+    std::memcpy(mapped, rgba, static_cast<std::size_t>(bytes));
+    vkUnmapMemory(context_.device(), staging_mem);
+
+    context_.immediateSubmit([&](VkCommandBuffer cmd) {
+        VkImageMemoryBarrier to_dst{};
+        to_dst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        to_dst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        to_dst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        to_dst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        to_dst.image = color_image_;
+        to_dst.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        to_dst.subresourceRange.levelCount = 1;
+        to_dst.subresourceRange.layerCount = 1;
+        to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+                             0, nullptr, 0, nullptr, 1, &to_dst);
+
+        VkBufferImageCopy region{};
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.layerCount = 1;
+        region.imageExtent = {extent_.width, extent_.height, 1};
+        vkCmdCopyBufferToImage(cmd, staging, color_image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                               &region);
+
+        VkImageMemoryBarrier to_shader{};
+        to_shader.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        to_shader.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        to_shader.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        to_shader.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        to_shader.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        to_shader.image = color_image_;
+        to_shader.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        to_shader.subresourceRange.levelCount = 1;
+        to_shader.subresourceRange.layerCount = 1;
+        to_shader.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        to_shader.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &to_shader);
+    });
+
+    vkDestroyBuffer(context_.device(), staging, nullptr);
+    vkFreeMemory(context_.device(), staging_mem, nullptr);
+    return true;
 }
 
 } // namespace genesis

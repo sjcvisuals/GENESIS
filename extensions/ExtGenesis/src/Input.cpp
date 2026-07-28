@@ -38,6 +38,16 @@ Input::Input(std::uint64_t adapter_luid, ValueSet settings)
 
     sampler_ = add_output_parameter<ParameterTexture>(ParameterNames::sampler);
 
+    mode_ = add_parameter<ParameterInt>("mode");
+    mode_->set_property(PropertyNames::name, "Mode");
+    mode_->set_property(PropertyNames::group_name, "Stream");
+    mode_->set_property(PropertyNames::enum_names, {"Scene", "Background Remover"});
+    mode_->set_value(0);
+
+    video_in_ = add_parameter<ParameterTexture>("texture");
+    video_in_->set_property(PropertyNames::name, "Video In");
+    video_in_->set_property(PropertyNames::group_name, "Inputs");
+
     ParameterVector3* position_param_ = nullptr;
     actor_bindings_.registerSceneParameters(*this, show_select_, use_scene_camera_, reload_scene_,
                                               position_param_);
@@ -88,21 +98,44 @@ bool Input::update_settings(ValueSet settings) noexcept try {
 
     if (session_ && session_adapter_luid_ != adapter_luid_) {
         session_.reset();
+        remover_.reset();
         loaded_scene_resource_.clear();
         loaded_show_index_ = -1;
     }
 
-    ensureSession();
-    session_->resize(width_, height_);
-    publishTargetTexture();
-
-    view_matrix_->set_value(defaultViewMatrix());
-    projection_matrix_->set_value(defaultProjectionMatrix(width_, height_));
-    reloadSceneIfNeeded();
+    if (currentMode() == StreamMode::BackgroundRemover) {
+        ensureRemover();
+        remover_->resize(width_, height_);
+        publishTargetTexture();
+        publishVideoInTexture();
+    } else {
+        ensureSession();
+        session_->resize(width_, height_);
+        publishTargetTexture();
+        view_matrix_->set_value(defaultViewMatrix());
+        projection_matrix_->set_value(defaultProjectionMatrix(width_, height_));
+        reloadSceneIfNeeded();
+    }
     return true;
 } catch (const std::exception& ex) {
     host().log_error(std::format("updating GENESIS stream settings failed: {}", ex.what()));
     return false;
+}
+
+StreamMode Input::currentMode() const {
+    const std::int32_t mode = mode_ ? mode_->value() : 0;
+    return mode == static_cast<std::int32_t>(StreamMode::BackgroundRemover)
+               ? StreamMode::BackgroundRemover
+               : StreamMode::Scene;
+}
+
+void Input::ensureRemover() {
+    if (remover_) {
+        return;
+    }
+    remover_ = std::make_unique<::genesis::RemoverPipeline>(adapter_luid_);
+    host().log_info(std::format("GENESIS Background Remover ready ({})",
+                                remover_->remover().status()));
 }
 
 void Input::ensureSession() {
@@ -234,24 +267,63 @@ void Input::reloadSceneIfNeeded() {
 }
 
 void Input::publishTargetTexture() {
-    const auto& target = session_->renderer().target();
-    const auto& export_info = target.colorExport();
+    const ::genesis::ExternalImageExport* export_info = nullptr;
+    std::uint32_t w = width_;
+    std::uint32_t h = height_;
+
+    if (currentMode() == StreamMode::BackgroundRemover && remover_) {
+        export_info = &remover_->output().colorExport();
+        w = remover_->output().extent().width;
+        h = remover_->output().extent().height;
+    } else if (session_) {
+        export_info = &session_->renderer().target().colorExport();
+        w = session_->renderer().target().extent().width;
+        h = session_->renderer().target().extent().height;
+    } else {
+        return;
+    }
 
     TextureDesc desc{};
-    desc.width = target.extent().width;
-    desc.height = target.extent().height;
+    desc.width = w;
+    desc.height = h;
     desc.format = Format::R8G8B8A8_UNORM;
     desc.is_target = true;
     desc.share_handle = {
         kHandleType,
-        reinterpret_cast<Handle>(export_info.win32_handle),
+        reinterpret_cast<Handle>(export_info->win32_handle),
         0,
-        export_info.memory_size,
+        export_info->memory_size,
         0,
-        export_info.dedicated,
+        export_info->dedicated,
     };
 
     sampler_->set_texture(host().create_texture(desc));
+}
+
+void Input::publishVideoInTexture() {
+    if (!video_in_ || !remover_) {
+        return;
+    }
+    update_input_texture(*video_in_, [&](const TextureDesc& desc) {
+        remover_->videoIn().recreate(static_cast<std::uint32_t>(desc.width),
+                                     static_cast<std::uint32_t>(desc.height));
+        const auto& exp = remover_->videoIn().exportInfo();
+        TextureDesc shared = desc;
+        shared.is_target = false;
+        shared.share_handle = {
+            kHandleType,
+            reinterpret_cast<Handle>(exp.win32_handle),
+            0,
+            exp.memory_size,
+            0,
+            exp.dedicated,
+        };
+        video_in_->set_texture(host().create_texture(shared));
+        width_ = static_cast<std::uint32_t>(desc.width);
+        height_ = static_cast<std::uint32_t>(desc.height);
+        remover_->resize(width_, height_);
+        publishTargetTexture();
+    });
 }
 
 ValueSet Input::get_state() noexcept {
@@ -272,6 +344,12 @@ string Input::get_property(string_view name) noexcept {
 }
 
 bool Input::update() noexcept try {
+    if (currentMode() == StreamMode::BackgroundRemover) {
+        ensureRemover();
+        publishVideoInTexture();
+        return true;
+    }
+
     if (reload_scene_ && reload_scene_->value()) {
         loaded_scene_resource_.clear();
         loaded_show_index_ = -1;
@@ -288,6 +366,9 @@ bool Input::update() noexcept try {
 }
 
 SyncDesc Input::before_render() noexcept {
+    if (currentMode() == StreamMode::BackgroundRemover) {
+        return {};
+    }
     return {
         SyncStrategy::BinarySemaphore,
         ShareHandle{
@@ -298,6 +379,16 @@ SyncDesc Input::before_render() noexcept {
 }
 
 RenderResult Input::render() noexcept try {
+    if (currentMode() == StreamMode::BackgroundRemover) {
+        ensureRemover();
+        std::string error;
+        if (!remover_->processFrame(&error)) {
+            host().log_error(std::format("GENESIS remover failed: {}", error));
+            return RenderResult::Failed;
+        }
+        return RenderResult::Succeeded;
+    }
+
     actor_bindings_.apply(session_->sceneRuntime());
     const ::genesis::HostTimingInput timing =
         ::genesis::hostTimingFromPixeraTimeline(time_->value());
@@ -314,6 +405,9 @@ RenderResult Input::render() noexcept try {
 }
 
 SyncDesc Input::after_render() noexcept {
+    if (currentMode() == StreamMode::BackgroundRemover) {
+        return {};
+    }
     return {
         SyncStrategy::BinarySemaphore,
         ShareHandle{

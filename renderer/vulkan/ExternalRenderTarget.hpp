@@ -45,6 +45,9 @@ public:
     VkFramebuffer framebuffer() const { return framebuffer_; }
     const ExternalImageExport& colorExport() const { return color_export_; }
 
+    // Upload tightly packed RGBA8 into the exportable color image (remover path).
+    bool uploadColorRgba8(const std::uint8_t* rgba);
+
 private:
     void createImages();
     void createRenderPass();
