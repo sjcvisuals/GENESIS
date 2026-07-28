@@ -15,4 +15,8 @@ On Linux VMs with `libvulkan-dev` installed, `cmake/VulkanSetup.cmake` prefers `
 - Configure: `bash scripts/cloud-install.sh` or `cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug`
 - Build: `cmake --build build -j$(nproc) --target genesis_gltf_viewer`
 - Audio smoke: `./build/genesis_audio_smoke`
+- Matting smoke: `./build/genesis_matting_smoke`
+- Optional RVM weights: `bash scripts/fetch-rvm-model.sh`
 - Editor needs a display (`DISPLAY=:1` with XFCE/lavapipe in the cloud snapshot).
+
+See `docs/video-bg-remover.md` for live video / background remover status.
