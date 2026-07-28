@@ -27,14 +27,28 @@ if(GENESIS_VULKAN_SDK_ROOT)
     message(STATUS "GENESIS: Vulkan tools root: ${GENESIS_VULKAN_SDK_ROOT}")
 endif()
 
-# Headers — prefer full SDK, otherwise fetch
+# Headers — prefer full SDK, then distro packages, otherwise fetch.
+# System headers avoid FetchContent+Ninja "build.ninja still dirty" loops that
+# break Cursor cloud install scripts on warm/stale build trees.
 if(GENESIS_VULKAN_SDK_ROOT AND EXISTS "${GENESIS_VULKAN_SDK_ROOT}/Include/vulkan/vulkan.h")
     set(GENESIS_VULKAN_INCLUDE_DIR "${GENESIS_VULKAN_SDK_ROOT}/Include")
     message(STATUS "GENESIS: Vulkan headers from SDK")
+elseif(EXISTS "/usr/include/vulkan/vulkan.h")
+    set(GENESIS_VULKAN_INCLUDE_DIR "/usr/include")
+    message(STATUS "GENESIS: Vulkan headers from system (/usr/include)")
 else()
+    # If a previous populate left a half-broken Ninja subbuild, wipe it before
+    # FetchContent tries to rebuild (fixes cloud-agent install failures).
+    set(_vh_subbuild "${CMAKE_BINARY_DIR}/_deps/vulkan-headers-subbuild")
+    if(EXISTS "${_vh_subbuild}/build.ninja")
+        file(REMOVE_RECURSE "${_vh_subbuild}")
+        message(STATUS "GENESIS: cleared stale vulkan-headers-subbuild")
+    endif()
+
     FetchContent_Declare(
         Vulkan-Headers
         URL https://codeload.github.com/KhronosGroup/Vulkan-Headers/zip/refs/tags/v1.4.350
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
     FetchContent_MakeAvailable(Vulkan-Headers)
     set(GENESIS_VULKAN_INCLUDE_DIR "${vulkan-headers_SOURCE_DIR}/include")
