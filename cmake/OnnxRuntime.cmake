@@ -1,0 +1,42 @@
+# Optional ONNX Runtime for RVM background removal (no NVIDIA Broadcast SDK).
+option(GENESIS_ENABLE_ONNXRUNTIME "Download/link ONNX Runtime for RVM matting" ON)
+
+set(GENESIS_HAS_ONNXRUNTIME OFF)
+if(GENESIS_ENABLE_ONNXRUNTIME)
+    set(_ort_ver "1.20.1")
+    if(WIN32)
+        set(_ort_name "onnxruntime-win-x64-${_ort_ver}")
+        set(_ort_url "https://github.com/microsoft/onnxruntime/releases/download/v${_ort_ver}/${_ort_name}.zip")
+        set(_ort_archive "${CMAKE_BINARY_DIR}/_deps/${_ort_name}.zip")
+    else()
+        set(_ort_name "onnxruntime-linux-x64-${_ort_ver}")
+        set(_ort_url "https://github.com/microsoft/onnxruntime/releases/download/v${_ort_ver}/${_ort_name}.tgz")
+        set(_ort_archive "${CMAKE_BINARY_DIR}/_deps/${_ort_name}.tgz")
+    endif()
+
+    set(GENESIS_ONNXRUNTIME_ROOT "${CMAKE_SOURCE_DIR}/third_party/${_ort_name}" CACHE PATH "ONNX Runtime root")
+
+    if(NOT EXISTS "${GENESIS_ONNXRUNTIME_ROOT}/include/onnxruntime_cxx_api.h")
+        message(STATUS "GENESIS: downloading ONNX Runtime ${_ort_ver}…")
+        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/_deps")
+        file(DOWNLOAD "${_ort_url}" "${_ort_archive}" SHOW_PROGRESS STATUS _dl_status)
+        list(GET _dl_status 0 _dl_code)
+        if(NOT _dl_code EQUAL 0)
+            message(WARNING "GENESIS: ONNX Runtime download failed; RVM backend disabled")
+        else()
+            file(MAKE_DIRECTORY "${CMAKE_SOURCE_DIR}/third_party")
+            if(WIN32)
+                execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf "${_ort_archive}"
+                    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/third_party")
+            else()
+                execute_process(COMMAND ${CMAKE_COMMAND} -E tar xzf "${_ort_archive}"
+                    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/third_party")
+            endif()
+        endif()
+    endif()
+
+    if(EXISTS "${GENESIS_ONNXRUNTIME_ROOT}/include/onnxruntime_cxx_api.h")
+        set(GENESIS_HAS_ONNXRUNTIME ON)
+        message(STATUS "GENESIS: ONNX Runtime at ${GENESIS_ONNXRUNTIME_ROOT}")
+    endif()
+endif()

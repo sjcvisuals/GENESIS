@@ -3,46 +3,50 @@
 ## Goals
 
 - Ingest live video (Pixera sampler / later NDI·SDI) into GENESIS
-- Cut out people in realtime **without** requiring the NVIDIA Broadcast / Maxine SDK
-- Share one matte core with a future slim **Genesis Remover** Pixera fork
+- Cut out people in realtime **without** the NVIDIA Broadcast / Maxine SDK
+- Share one matte core with the slim **Genesis Remover** Pixera module
 
-## Architecture (Step 1 — landed)
+## Architecture
 
 | Piece | Role |
 |-------|------|
-| `ExternalSharedImage` | Pixera→DLL shared RGBA (same pattern as ExtSampleD3D) |
-| `BgRemover` | CPU matte: Auto → RVM(ONNX) if available, else chroma key |
-| `RemoverPipeline` | video_in download → matte → upload exportable output |
-| ExtGenesis `mode` | `Scene` (existing 3D) or `Background Remover` |
-| ExtGenesis `texture` | Video In parameter for Pixera to feed |
+| `ExternalSharedImage` | Pixera→DLL shared RGBA |
+| `BgRemover` + `RvmOnnxSession` | Auto → **RVM ONNX** (preferred) or chroma key |
+| `RemoverPipeline` | video_in → matte → exportable RGBA |
+| ExtGenesis `mode` | Scene **or** Background Remover |
+| **ExtGenesisRemover** | Matte-only Pixera DLL (Step 2) |
 
-### Pixera Remover workflow
+### Pixera — full GENESIS
 
-1. Create GENESIS stream, set **Mode = Background Remover**
-2. Link a Pixera media/NDI/SDI resource into **Video In** (`texture`)
-3. GENESIS writes a transparent RGBA cutout to the output **sampler**
-4. Stack Pixera effects on that sampler
+1. Mode = **Background Remover**
+2. Link media/NDI/SDI → **Video In**
+3. Output sampler = transparent cutout
 
-### Efficiency notes
+### Pixera — Genesis Remover (free cutout module)
 
-- Preferred AI path: **RVM MobileNetV3 FP16** via ONNX Runtime (CUDA/DirectML when present) — soft alpha + temporal state, no Broadcast SDK
-- Fast path: chroma key (keyed stages) — microseconds/frame class on CPU
-- Current matte stage is CPU RGBA for correctness; GPU ORT EP + zero-copy is the next perf pass
-- Infer at reduced resolution when RVM is enabled (`rvm_downsample`, quality presets)
+1. Load `ExtGenesisRemover` instead of full GENESIS
+2. Link video → **Video In**, pick Quality
+3. Output is only the cutout — stack Pixera effects on top
 
-### Step 2 — Genesis Remover fork (planned)
+## Efficiency
 
-Strip ExtGenesis to: Video In → matte → sampler out. Same `genesis_matting` + `RemoverPipeline`. No scene graph / fluids / OpenPBR. Ideal free Pixera “human cutout” module.
+- **RVM MobileNetV3 FP16** via ONNX Runtime (CPU today; CUDA/DirectML EP later)
+- Infer at reduced res (`Fast`/`Balanced`/`Quality` → downsample ~0.2–0.35)
+- Chroma key remains the zero-dep fallback for keyed stages
+- No NVIDIA Broadcast SDK install
 
-### Assets
+## Assets / build
 
 ```bash
-bash scripts/fetch-rvm-model.sh   # → assets/matting/rvm_mobilenetv3_fp16.onnx
+bash scripts/fetch-rvm-model.sh
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target genesis_matting_smoke
+./build/genesis_matting_smoke
 ```
 
-Build flag for ORT linking (future): `GENESIS_HAS_ONNXRUNTIME`.
+CMake option: `GENESIS_ENABLE_ONNXRUNTIME` (default ON) downloads ORT into `third_party/`.
 
-### Smoke test
+## Smoke test
 
 ```bash
 ./build/genesis_matting_smoke

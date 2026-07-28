@@ -1,5 +1,6 @@
 #include "matting/BgRemover.hpp"
 
+#include "matting/RvmOnnxSession.hpp"
 #include "platform/Paths.hpp"
 
 #include <algorithm>
@@ -15,15 +16,29 @@ float clampf(float v, float lo, float hi) {
 }
 
 std::filesystem::path defaultModelPath() {
-    return resolveAssetPath("matting/rvm_mobilenetv3_fp16.onnx");
+    return resolveAssetPath("assets/matting/rvm_mobilenetv3_fp16.onnx");
+}
+
+float downsampleForQuality(BgRemoverQuality q, float override_ratio) {
+    if (override_ratio > 0.0f) {
+        return override_ratio;
+    }
+    switch (q) {
+    case BgRemoverQuality::Fast:
+        return 0.2f;
+    case BgRemoverQuality::Quality:
+        return 0.35f;
+    case BgRemoverQuality::Balanced:
+    default:
+        return 0.25f;
+    }
 }
 
 } // namespace
 
 struct BgRemover::RvmState {
-    // Reserved for ONNX Runtime session + recurrent tensors.
-    // Populated when GENESIS_HAS_ONNXRUNTIME is enabled and a model loads.
-    bool placeholder = true;
+    RvmOnnxSession session;
+    std::vector<float> alpha;
 };
 
 const char* bgRemoverBackendLabel(BgRemoverBackend backend) {
@@ -69,22 +84,26 @@ void BgRemover::setSettings(const BgRemoverSettings& settings) {
 
 void BgRemover::resetTemporalState() {
     prev_alpha_.clear();
+    if (rvm_) {
+        rvm_->session.reset();
+    }
 }
 
 bool BgRemover::tryInitRvm(std::string* out_status) {
-#if defined(GENESIS_HAS_ONNXRUNTIME)
-    // Future: Ort::Env + InferenceSession on settings_.model_path (or default).
-    // Bundled model: assets/matting/rvm_mobilenetv3_fp16.onnx (see scripts/fetch-rvm-model.sh).
-    (void)out_status;
-    return false;
-#else
-    if (out_status) {
-        *out_status =
-            "RVM backend requires ONNX Runtime (build with GENESIS_HAS_ONNXRUNTIME). "
-            "Using chroma-key fallback — no NVIDIA Broadcast SDK needed either way.";
+    if (!rvm_) {
+        rvm_ = new RvmState();
     }
-    return false;
-#endif
+    std::string error;
+    if (!rvm_->session.load(settings_.model_path, &error)) {
+        if (out_status) {
+            *out_status = error;
+        }
+        return false;
+    }
+    if (out_status) {
+        *out_status = "rvm-onnx loaded: " + settings_.model_path.string();
+    }
+    return true;
 }
 
 bool BgRemover::initialize(std::string* out_status) {
@@ -117,7 +136,7 @@ bool BgRemover::initialize(std::string* out_status) {
         tryInitRvm(&rvm_status)) {
         active_backend_ = BgRemoverBackend::RvmOnnx;
         rvm_ready_ = true;
-        status_ = "rvm-onnx ready";
+        status_ = rvm_status;
         initialized_ = true;
         if (out_status) *out_status = status_;
         return true;
@@ -131,7 +150,6 @@ bool BgRemover::initialize(std::string* out_status) {
         return false;
     }
 
-    // Auto → chroma fallback (still realtime, no extra SDK install).
     active_backend_ = BgRemoverBackend::ChromaKey;
     status_ = rvm_status.empty() ? "auto: chroma-key (RVM not loaded)" : ("auto: " + rvm_status);
     initialized_ = true;
@@ -183,11 +201,38 @@ void BgRemover::processChroma(const std::uint8_t* in_rgba, std::uint8_t* out_rgb
 
 bool BgRemover::processRvm(const std::uint8_t* in_rgba, std::uint8_t* out_rgba, std::uint32_t width,
                            std::uint32_t height) {
-    (void)in_rgba;
-    (void)out_rgba;
-    (void)width;
-    (void)height;
-    return false;
+    if (!rvm_ || !rvm_->session.ready()) {
+        return false;
+    }
+    const float ds = downsampleForQuality(settings_.quality, settings_.rvm_downsample);
+    std::string error;
+    if (!rvm_->session.inferAlpha(in_rgba, width, height, ds, rvm_->alpha, &error)) {
+        status_ = error;
+        return false;
+    }
+
+    const std::size_t pixels = static_cast<std::size_t>(width) * height;
+    if (rvm_->alpha.size() != pixels) {
+        return false;
+    }
+    if (prev_alpha_.size() != pixels) {
+        prev_alpha_.assign(pixels, 1.0f);
+    }
+    const float temporal = clampf(settings_.temporal_alpha, 0.0f, 0.95f);
+
+    for (std::size_t i = 0; i < pixels; ++i) {
+        float alpha = clampf(rvm_->alpha[i], 0.0f, 1.0f);
+        alpha = alpha * (1.0f - temporal) + prev_alpha_[i] * temporal;
+        prev_alpha_[i] = alpha;
+        const float r = in_rgba[i * 4 + 0] / 255.0f;
+        const float g = in_rgba[i * 4 + 1] / 255.0f;
+        const float b = in_rgba[i * 4 + 2] / 255.0f;
+        out_rgba[i * 4 + 0] = static_cast<std::uint8_t>(std::lround(r * alpha * 255.0f));
+        out_rgba[i * 4 + 1] = static_cast<std::uint8_t>(std::lround(g * alpha * 255.0f));
+        out_rgba[i * 4 + 2] = static_cast<std::uint8_t>(std::lround(b * alpha * 255.0f));
+        out_rgba[i * 4 + 3] = static_cast<std::uint8_t>(std::lround(alpha * 255.0f));
+    }
+    return true;
 }
 
 bool BgRemover::process(const std::uint8_t* in_rgba, std::uint8_t* out_rgba, std::uint32_t width,

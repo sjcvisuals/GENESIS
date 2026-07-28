@@ -1,9 +1,5 @@
+third_party/onnxruntime-*/
+*.tgz
+*.zip
 build/
-out/
-.vs/
-.vscode/
-*.user
-CMakeUserPresets.json
-compile_commands.json
-shaders/spv/
-*.spv
+.cache/

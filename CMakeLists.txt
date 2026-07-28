@@ -12,6 +12,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(cmake/VulkanSetup.cmake)
 include(cmake/Dependencies.cmake)
 include(cmake/CompileShaders.cmake)
+include(cmake/OnnxRuntime.cmake)
 
 add_library(genesis_vulkan INTERFACE)
 target_include_directories(genesis_vulkan INTERFACE "${GENESIS_VULKAN_INCLUDE_DIR}")
@@ -163,12 +164,25 @@ target_link_libraries(genesis_engine_runtime PUBLIC
     assimp::assimp
 )
 
-# Background removal / live video matte (shared by ExtGenesis + future Genesis Remover).
+# Background removal / live video matte (shared by ExtGenesis + Genesis Remover).
 add_library(genesis_matting STATIC
     matting/BgRemover.cpp
+    matting/RvmOnnxSession.cpp
 )
 target_include_directories(genesis_matting PUBLIC ${CMAKE_SOURCE_DIR})
 target_link_libraries(genesis_matting PUBLIC genesis_platform_core)
+if(GENESIS_HAS_ONNXRUNTIME)
+    target_compile_definitions(genesis_matting PUBLIC GENESIS_HAS_ONNXRUNTIME=1)
+    target_include_directories(genesis_matting PUBLIC "${GENESIS_ONNXRUNTIME_ROOT}/include")
+    if(WIN32)
+        target_link_libraries(genesis_matting PUBLIC "${GENESIS_ONNXRUNTIME_ROOT}/lib/onnxruntime.lib")
+    else()
+        target_link_libraries(genesis_matting PUBLIC "${GENESIS_ONNXRUNTIME_ROOT}/lib/libonnxruntime.so")
+        set_target_properties(genesis_matting PROPERTIES
+            BUILD_RPATH "${GENESIS_ONNXRUNTIME_ROOT}/lib"
+            INSTALL_RPATH "${GENESIS_ONNXRUNTIME_ROOT}/lib")
+    endif()
+endif()
 
 add_library(genesis_runtime STATIC
     runtime/GenesisSession.cpp
@@ -268,6 +282,23 @@ if(GENESIS_BUILD_EXAMPLES)
 
     add_executable(genesis_matting_smoke examples/matting_smoke/main.cpp)
     target_link_libraries(genesis_matting_smoke PRIVATE genesis_matting)
+    if(GENESIS_HAS_ONNXRUNTIME AND UNIX)
+        set_target_properties(genesis_matting_smoke PROPERTIES
+            BUILD_RPATH "${GENESIS_ONNXRUNTIME_ROOT}/lib"
+            INSTALL_RPATH "${GENESIS_ONNXRUNTIME_ROOT}/lib")
+        add_custom_command(TARGET genesis_matting_smoke POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${GENESIS_ONNXRUNTIME_ROOT}/lib/libonnxruntime.so.1"
+                "$<TARGET_FILE_DIR:genesis_matting_smoke>/"
+            COMMENT "Copying ONNX Runtime next to genesis_matting_smoke")
+    endif()
+    add_custom_command(TARGET genesis_matting_smoke POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:genesis_matting_smoke>/assets/matting"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets/matting"
+            "$<TARGET_FILE_DIR:genesis_matting_smoke>/assets/matting"
+        COMMENT "Copying matting assets next to genesis_matting_smoke")
 
     add_executable(genesis_multiview_player examples/multiview_player/main.cpp)
     target_link_libraries(genesis_multiview_player PRIVATE genesis_engine)
@@ -386,8 +417,77 @@ if(GENESIS_BUILD_RENDERBRIDGE_EXT AND WIN32)
             "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/README.txt"
         COMMENT "Deploying ExtGenesis to RX modules and GenesisPixera package"
     )
+    if(GENESIS_HAS_ONNXRUNTIME)
+        add_custom_command(TARGET ExtGenesis POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${GENESIS_ONNXRUNTIME_ROOT}/lib/onnxruntime.dll"
+                "${RX_DEPLOY_DIR}/onnxruntime.dll"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${GENESIS_ONNXRUNTIME_ROOT}/lib/onnxruntime.dll"
+                "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/onnxruntime.dll"
+            COMMENT "Deploying ONNX Runtime next to ExtGenesis"
+        )
+    endif()
 
     add_custom_target(GenesisDeploy DEPENDS ExtGenesis)
+endif()
+
+# -----------------------------------------------------------------------------
+# PIXERA Genesis Remover — matte-only fork (same RemoverPipeline)
+# -----------------------------------------------------------------------------
+option(GENESIS_BUILD_REMOVER_EXT "Build PIXERA Genesis Remover DLL (ExtGenesisRemover)" ON)
+if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
+    set(RX_SDK_DIR "${CMAKE_SOURCE_DIR}/third_party/render-bridge-sdk/RenderBridge")
+    set(EXT_REMOVER_DIR "${CMAKE_SOURCE_DIR}/extensions/ExtGenesisRemover")
+
+    add_library(ExtGenesisRemover SHARED
+        ${EXT_REMOVER_DIR}/src/Extension.cpp
+        ${EXT_REMOVER_DIR}/src/Device.cpp
+        ${EXT_REMOVER_DIR}/src/Input.cpp
+        ${RX_SDK_DIR}/libs/common/string.cpp
+    )
+    target_include_directories(ExtGenesisRemover PRIVATE
+        ${EXT_REMOVER_DIR}/src
+        ${RX_SDK_DIR}/include
+        ${RX_SDK_DIR}/libs
+        ${CMAKE_SOURCE_DIR}
+        ${CMAKE_BINARY_DIR}
+    )
+    target_link_libraries(ExtGenesisRemover PRIVATE genesis_runtime)
+    set_target_properties(ExtGenesisRemover PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/rxExt/ExtGenesisRemover"
+    )
+
+    set(RX_REMOVER_DEPLOY "${RX_SDK_DIR}/RX/modules/ExtGenesisRemover")
+    add_custom_command(TARGET ExtGenesisRemover POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${RX_REMOVER_DEPLOY}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:ExtGenesisRemover>"
+            "${RX_REMOVER_DEPLOY}/ExtGenesisRemover.dll"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets/matting"
+            "${RX_REMOVER_DEPLOY}/assets/matting"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_BINARY_DIR}/deploy/GenesisRemover"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/deploy/GenesisRemover/assets/matting"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:ExtGenesisRemover>"
+            "${CMAKE_BINARY_DIR}/deploy/GenesisRemover/ExtGenesisRemover.dll"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets/matting"
+            "${CMAKE_BINARY_DIR}/deploy/GenesisRemover/assets/matting"
+        COMMENT "Deploying ExtGenesisRemover (matte-only) package"
+    )
+    if(GENESIS_HAS_ONNXRUNTIME)
+        add_custom_command(TARGET ExtGenesisRemover POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${GENESIS_ONNXRUNTIME_ROOT}/lib/onnxruntime.dll"
+                "${RX_REMOVER_DEPLOY}/onnxruntime.dll"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${GENESIS_ONNXRUNTIME_ROOT}/lib/onnxruntime.dll"
+                "${CMAKE_BINARY_DIR}/deploy/GenesisRemover/onnxruntime.dll"
+            COMMENT "Deploying ONNX Runtime next to ExtGenesisRemover"
+        )
+    endif()
 endif()
 
 # -----------------------------------------------------------------------------
