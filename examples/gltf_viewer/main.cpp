@@ -60,6 +60,12 @@ namespace {
 constexpr float kGridHalfExtentM = 12.0f;
 constexpr int kGridDivisions = 24;
 
+struct ExampleLoadOptions {
+    bool auto_play_animation = false;
+    bool import_fbx = false;
+    bool wire_audio_reactive = false;
+};
+
 class GltfViewerApp final : public genesis::Application {
 public:
     explicit GltfViewerApp(const genesis::ApplicationConfig& config)
@@ -117,6 +123,72 @@ public:
         selectNode(runtime_.scene().roots.empty() ? 0 : runtime_.scene().roots.front());
         syncEditorAfterDocumentLoad();
         updateWindowTitle();
+    }
+
+    void loadExampleScene(const char* bundled_relative) {
+        loadExampleScene(bundled_relative, ExampleLoadOptions{});
+    }
+
+    void loadExampleScene(const char* bundled_relative, ExampleLoadOptions options) {
+        try {
+            loadSceneDocument(session_.bundledScenePath(bundled_relative));
+            session_.dirty = false;
+
+            if (options.import_fbx) {
+                const std::filesystem::path fbx =
+                    genesis::resolveAssetPath("assets/models/examples/spinning_cube.fbx");
+                const genesis::ModelImportResult result = genesis::ModelImporter::importInto(runtime_, fbx);
+                if (!result.ok) {
+                    spdlog::error("Example FBX import failed: {}", result.error);
+                } else {
+                    // ASCII FBX is authored in centimeters. Scale the import folder and
+                    // focus a mesh node (not the empty RootNode).
+                    genesis::NodeId focus = result.root_node;
+                    for (genesis::Node& node : runtime_.scene().nodes) {
+                        if (node.name == "spinning_cube") {
+                            node.local.scale = glm::vec3(0.01f);
+                        }
+                        if (node.has_mesh && (node.name == "AnimatedCube" || focus == result.root_node)) {
+                            focus = node.id;
+                        }
+                    }
+                    runtime_.updateTransforms();
+                    selectNode(focus != 0 ? focus : result.root_node);
+                    focusEditorCameraOnSelection();
+                    show_timeline_ = true;
+                    show_animation_graph_ = true;
+                    spdlog::info("Example FBX imported ({} meshes, {} clips)", result.mesh_ids.size(),
+                                 result.clip_indices.size());
+                }
+            }
+
+            if (options.auto_play_animation) {
+                genesis::AnimationPlayback& playback = runtime_.animationPlayback();
+                if (playback.clip_index < 0 && !runtime_.animationClips().empty()) {
+                    playback.clip_index = 0;
+                }
+                if (playback.clip_index >= 0) {
+                    playback.playing = true;
+                    playback.loop = true;
+                    playback.time_seconds = 0.0f;
+                    show_timeline_ = true;
+                }
+            }
+
+            if (options.wire_audio_reactive) {
+                audio_reactive_.clearBindings();
+                audio_reactive_.addLavaLampBassPreset("Scene/Lava Lamp");
+                audio_reactive_.settings().enabled = true;
+                show_audio_ = true;
+                spdlog::info(
+                    "Audio-Reactive Lava: bass/beat/onset wired to Scene/Lava Lamp. "
+                    "Open View → Audio and Start live capture (or Open WAV).");
+            }
+
+            updateWindowTitle();
+        } catch (const std::exception& ex) {
+            spdlog::error("Failed to load example '{}': {}", bundled_relative, ex.what());
+        }
     }
 
     void loadGnsPackage(const std::filesystem::path& path) {
@@ -453,6 +525,31 @@ private:
             ImGui::Separator();
             if (ImGui::MenuItem("Import Model...")) {
                 importModelDialog();
+            }
+            if (ImGui::BeginMenu("Examples")) {
+                if (ImGui::MenuItem("Particle Fountain")) {
+                    loadExampleScene("examples/particles_fountain.scene.json");
+                }
+                if (ImGui::MenuItem("Lava Fluid")) {
+                    loadExampleScene("examples/lava_fluid.scene.json");
+                }
+                if (ImGui::MenuItem("Animated Primitives")) {
+                    ExampleLoadOptions opts;
+                    opts.auto_play_animation = true;
+                    loadExampleScene("examples/animated_primitives.scene.json", opts);
+                }
+                if (ImGui::MenuItem("Imported FBX Animation")) {
+                    ExampleLoadOptions opts;
+                    opts.auto_play_animation = true;
+                    opts.import_fbx = true;
+                    loadExampleScene("examples/fbx_stage.scene.json", opts);
+                }
+                if (ImGui::MenuItem("Audio-Reactive Lava")) {
+                    ExampleLoadOptions opts;
+                    opts.wire_audio_reactive = true;
+                    loadExampleScene("examples/audio_reactive_lava.scene.json", opts);
+                }
+                ImGui::EndMenu();
             }
             ImGui::Separator();
             if (!session_.recent_files.empty() && ImGui::BeginMenu("Open Recent")) {

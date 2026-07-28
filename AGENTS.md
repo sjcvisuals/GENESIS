@@ -16,6 +16,7 @@ On Linux VMs with `libvulkan-dev` installed, `cmake/VulkanSetup.cmake` prefers `
 - Build: `cmake --build build -j$(nproc) --target genesis_gltf_viewer`
 - Audio smoke: `./build/genesis_audio_smoke` (analyser + device enumeration)
 - Editor Audio panel: View → Audio — pick input device (or system default), WAV, bindings
+- Example scenes: File → Examples (particles, fluid, animated primitives, FBX import, audio-reactive lava)
 - Matting smoke: `./build/genesis_matting_smoke` (chroma + RVM + async skip/reuse)
 - Optional RVM weights: `bash scripts/fetch-rvm-model.sh` (or commit `assets/matting/*.onnx`)
 - ONNX Runtime: CMake option `GENESIS_ENABLE_ONNXRUNTIME` (default ON) downloads into `third_party/onnxruntime-*` (gitignored)
