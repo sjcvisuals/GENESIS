@@ -55,7 +55,7 @@ if (-not $CMake) {
 $VulkanRoot = Join-Path $env:LOCALAPPDATA "VulkanSDK\1.4.350.0"
 $Glslc = Join-Path $VulkanRoot "Bin\glslc.exe"
 if (-not (Test-Path $Glslc)) {
-    Write-Host "glslc not found under $VulkanRoot — attempting to extract from Vulkan SDK installer..."
+    Write-Host "glslc not found under $VulkanRoot - attempting to extract from Vulkan SDK installer..."
     $Installer = Join-Path $env:TEMP "vulkansdk-windows-X64-1.4.350.0.exe"
     if (-not (Test-Path $Installer)) {
         Write-Host "Downloading Vulkan SDK installer (one-time)..."
@@ -141,10 +141,10 @@ if ($Editor) {
     Write-Host "Editor exe:"
     Write-Host "  $Editor"
     Write-Host "Run (keep working directory = folder of the exe so assets resolve):"
-    Write-Host "  & `"$Editor`""
-    Write-Host "Then: File → Examples"
+    Write-Host ('  "{0}"' -f $Editor)
+    Write-Host "Then: File -> Examples"
 } else {
-    Write-Host "Editor exe not found — search with:"
+    Write-Host "Editor exe not found - search with:"
     Write-Host "  Get-ChildItem -Recurse -Filter genesis_gltf_viewer.exe $BuildDir"
 }
 if ($Dll) {
