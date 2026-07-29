@@ -1,4 +1,5 @@
 build/
+build-remover/
 out/
 .vs/
 .vscode/
