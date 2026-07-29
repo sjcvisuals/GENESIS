@@ -13,5 +13,5 @@
   "assetRoots": [
     "assets/matting"
   ],
-  "notes": "Matte-only Pixera module. Copy this folder to data/rxExt/ExtGenesisRemover/. Output is transparent RGBA cutout; keep onnxruntime.dll beside the DLL when present."
+  "notes": "Free matte-only Pixera module. Install with GenesisRemoverSetup.exe into data/rxExt/ExtGenesisRemover/, or unzip the portable package and browse ExtGenesisRemover.dll from PIXERA's generic extension picker. Output is transparent RGBA cutout; keep onnxruntime.dll beside the DLL."
 }

@@ -97,9 +97,25 @@ Build a single setup executable with component selection (Editor / Player / PIXE
 .\scripts\package-installer.ps1
 ```
 
-Output: `build\package\GenesisSetup-0.1.0.exe`
+Output: `build\package\GenesisSetup-0.1.1.exe`
 
 The wizard lets users pick which components to install. The PIXERA extension is copied to `<PIXERA>\data\rxExt\ExtGenesis\`. Uninstall via Windows Settings or the GENESIS uninstaller entry.
+
+## Genesis Remover (free PIXERA cutout)
+
+Standalone matte-only fork for PIXERA — realtime person cutout, no scenes / editor.
+Drag SDI / NDI / media onto **Video In**; output is a transparent RGBA cutout.
+
+```powershell
+.\scripts\package-remover-installer.ps1
+```
+
+Free download artifacts:
+
+- `build\package\GenesisRemoverSetup-0.1.0.exe` — Windows wizard (installs into PIXERA `rxExt`)
+- `build\package\GenesisRemover-0.1.0.zip` — portable folder for the generic extension picker
+
+End-user steps: [docs/genesis-remover-install.md](docs/genesis-remover-install.md).
 
 ## Project layout
 

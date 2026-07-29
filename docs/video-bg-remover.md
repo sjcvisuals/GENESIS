@@ -25,9 +25,12 @@
 
 ### Pixera — Genesis Remover (free cutout module)
 
-1. Load `ExtGenesisRemover` instead of full GENESIS
-2. Link video → **Video In**, pick Quality
-3. Output is only the cutout — stack Pixera effects on top
+1. Install `GenesisRemoverSetup-*.exe` (or unzip the portable package) — see [genesis-remover-install.md](genesis-remover-install.md)
+2. Load `ExtGenesisRemover` as a generic RenderBridge extension
+3. Link video → **Video In**, pick Quality
+4. Output is only the cutout — stack Pixera effects on top
+
+PIXERA owns SDI / NDI / media ingest; Remover only mattes the person in realtime.
 
 ## Efficiency
 
@@ -46,7 +49,16 @@ cmake --build build --target genesis_matting_smoke
 ./build/genesis_matting_smoke
 ```
 
-CMake option: `GENESIS_ENABLE_ONNXRUNTIME` (default ON) downloads ORT into `third_party/`.
+CMake options:
+
+- `GENESIS_ENABLE_ONNXRUNTIME` (default ON) — downloads ORT into `third_party/`
+- `GENESIS_REMOVER_ONLY` — slim tree: Remover DLL + matte smoke only (no editor / ExtGenesis)
+
+Windows free package:
+
+```powershell
+.\scripts\package-remover-installer.ps1
+```
 
 ## Smoke test
 

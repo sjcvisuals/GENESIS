@@ -1,0 +1,40 @@
+Genesis Remover — use in PIXERA (2 minutes)
+===========================================
+
+Goal: link a live SDI / NDI / media resource and get a realtime person
+cutout (transparent background). PIXERA owns capture; this DLL only
+removes the background.
+
+Install
+-------
+Option A — Setup wizard (recommended)
+  Run GenesisRemoverSetup-*.exe
+  Choose "Install into PIXERA" and pick your PIXERA root.
+  Module lands in: <PIXERA>\data\rxExt\ExtGenesisRemover\
+
+Option B — Portable ZIP
+  Unzip GenesisRemover-*.zip anywhere (keep the folder together).
+  You will browse to ExtGenesisRemover.dll from PIXERA.
+
+Wire it up in PIXERA
+--------------------
+1. Compositing → add a generic RenderBridge extension layer.
+2. Browse to ExtGenesisRemover.dll in the folder above.
+3. Drag your live SDI feed, NDI source, or clip onto **Video In**.
+4. Set **Quality** (Fast / Balanced / Quality).
+5. Use the layer sampler as a transparent RGBA cutout over your show.
+
+Keep these files beside the DLL
+-------------------------------
+  ExtGenesisRemover.dll
+  onnxruntime.dll
+  GenesisRemover.manifest.json
+  assets\matting\rvm_mobilenetv3_fp16.onnx
+
+If the DLL fails to load, install the VC++ 2015–2022 x64 redistributable
+(the Setup wizard does this automatically).
+
+What this is NOT
+----------------
+Not the full GENESIS scene renderer (ExtGenesis). No lights, cameras,
+or .gns shows — cutout only. Free to redistribute.

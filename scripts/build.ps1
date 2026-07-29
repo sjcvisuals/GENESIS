@@ -131,8 +131,13 @@ function Invoke-LoggedNative {
 Push-Location $RepoRoot
 try {
     Write-Host "Configuring..."
+    $cmakeArgs = @("-B", $BuildDir, "-DCMAKE_BUILD_TYPE=$Config")
+    if ($RemoverOnly) {
+        $cmakeArgs += "-DGENESIS_REMOVER_ONLY=ON"
+        Write-Host "GENESIS_REMOVER_ONLY=ON (slim Remover fork build)"
+    }
     $cfgCode = Invoke-LoggedNative -LogPath $LogFile -Command {
-        & $CMake -B $BuildDir -DCMAKE_BUILD_TYPE=$Config
+        & $CMake @cmakeArgs
     }
     if ($cfgCode -ne 0) { throw "CMake configure failed ($cfgCode). See $LogFile" }
 
@@ -217,6 +222,8 @@ if ($RemoverDll) {
     Write-Host "Keep sibling assets\matting\ and onnxruntime.dll next to that DLL."
     Write-Host "Deploy package (ready to copy into PIXERA data\rxExt\ExtGenesisRemover\):"
     Write-Host ("  {0}" -f (Join-Path $BuildDir "deploy\GenesisRemover"))
+    Write-Host "Free Windows installer + ZIP:"
+    Write-Host "  .\scripts\package-remover-installer.ps1 -SkipBuild"
 } elseif (-not $EditorOnly) {
     Write-Host ""
     Write-Host "ExtGenesisRemover.dll not found (Windows-only target). If you expected it, open the build log above."

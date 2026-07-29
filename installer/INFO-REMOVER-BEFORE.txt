@@ -1,0 +1,30 @@
+Genesis Remover (free)
+======================
+
+Realtime person cutout for PIXERA — no NVIDIA Broadcast / Maxine SDK.
+
+What you get
+------------
+* ExtGenesisRemover.dll — PIXERA RenderBridge generic extension
+* RVM ONNX model + onnxruntime.dll (bundled)
+* VC++ redistributable (if missing)
+
+How you use it in PIXERA
+------------------------
+1. Add a generic RenderBridge extension layer.
+2. Browse to ExtGenesisRemover.dll (installer puts it under
+   <PIXERA>\data\rxExt\ExtGenesisRemover\ or a portable folder).
+3. Drag your live SDI / NDI / media resource onto Video In.
+4. Pick Quality (Fast / Balanced / Quality).
+5. The sampler output is a transparent RGBA cutout of the person.
+
+PIXERA handles capture (SDI, NDI, files). Genesis Remover only removes
+the background in realtime.
+
+Requirements
+------------
+* Windows 10/11 x64
+* PIXERA with RenderBridge API 1.2
+* GPU with a current Vulkan-capable driver
+
+Not required: Genesis Editor, Visual Studio, Vulkan SDK, CMake.

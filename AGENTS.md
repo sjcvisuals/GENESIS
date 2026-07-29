@@ -21,5 +21,6 @@ On Linux VMs with `libvulkan-dev` installed, `cmake/VulkanSetup.cmake` prefers `
 - Optional RVM weights: `bash scripts/fetch-rvm-model.sh` (or commit `assets/matting/*.onnx`)
 - ONNX Runtime: CMake option `GENESIS_ENABLE_ONNXRUNTIME` (default ON) downloads into `third_party/onnxruntime-*` (gitignored)
 - Editor needs a display (`DISPLAY=:1` with XFCE/lavapipe in the cloud snapshot).
+- Free Remover package (Windows): `.\scripts\package-remover-installer.ps1` → `GenesisRemoverSetup-*.exe` + portable ZIP. See `docs/genesis-remover-install.md`.
 
 See `docs/video-bg-remover.md` for live video / background remover + Genesis Remover status.

@@ -7,6 +7,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(GENESIS_BUILD_EXAMPLES "Build example applications" ON)
+# When ON, skip editor / full ExtGenesis / player tools and focus on the free
+# Pixera background-remover module (ExtGenesisRemover) + matte smoke.
+option(GENESIS_REMOVER_ONLY "Build only Genesis Remover (Pixera cutout module)" OFF)
+if(GENESIS_REMOVER_ONLY)
+    set(GENESIS_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(cmake/VulkanSetup.cmake)
@@ -127,7 +133,9 @@ add_library(genesis_renderer ALIAS genesis_renderer_windowed)
 
 # -----------------------------------------------------------------------------
 # Engine (runtime core — shared by editor, player, and RenderBridge extension)
+# Skipped in GENESIS_REMOVER_ONLY builds (matte module does not need scenes).
 # -----------------------------------------------------------------------------
+if(NOT GENESIS_REMOVER_ONLY)
 add_library(genesis_engine_runtime STATIC
     scene/Transform.cpp
     scene/Camera.cpp
@@ -163,6 +171,7 @@ target_link_libraries(genesis_engine_runtime PUBLIC
     nlohmann_json::nlohmann_json
     assimp::assimp
 )
+endif() # NOT GENESIS_REMOVER_ONLY
 
 # Background removal / live video matte (shared by ExtGenesis + Genesis Remover).
 find_package(Threads REQUIRED)
@@ -186,6 +195,18 @@ if(GENESIS_HAS_ONNXRUNTIME)
     endif()
 endif()
 
+# Slim runtime for Genesis Remover (no scene engine / glTF / particles).
+add_library(genesis_remover_runtime STATIC
+    runtime/RemoverPipeline.cpp
+    runtime/RuntimePaths.cpp
+)
+target_include_directories(genesis_remover_runtime PUBLIC ${CMAKE_SOURCE_DIR})
+target_link_libraries(genesis_remover_runtime PUBLIC
+    genesis_renderer_core
+    genesis_matting
+)
+
+if(NOT GENESIS_REMOVER_ONLY)
 add_library(genesis_runtime STATIC
     runtime/GenesisSession.cpp
     runtime/GenesisFrameTime.cpp
@@ -193,15 +214,17 @@ add_library(genesis_runtime STATIC
     runtime/ScenePlaybackPipeline.cpp
     runtime/SceneStateHash.cpp
     runtime/DeterministicAnimation.cpp
-    runtime/RuntimePaths.cpp
     runtime/RuntimeScene.cpp
     runtime/ProductionTopology.cpp
     runtime/NodeAssignment.cpp
     runtime/MultiViewSession.cpp
-    runtime/RemoverPipeline.cpp
 )
 target_include_directories(genesis_runtime PUBLIC ${CMAKE_SOURCE_DIR})
-target_link_libraries(genesis_runtime PUBLIC genesis_engine_runtime genesis_matting)
+target_link_libraries(genesis_runtime PUBLIC
+    genesis_engine_runtime
+    genesis_matting
+    genesis_remover_runtime
+)
 
 add_library(genesis_engine STATIC
     engine/Application.cpp
@@ -238,6 +261,7 @@ target_link_libraries(genesis_protocol PUBLIC genesis_runtime genesis_audio imgu
 if(WIN32)
     target_link_libraries(genesis_protocol PRIVATE ws2_32)
 endif()
+endif() # NOT GENESIS_REMOVER_ONLY
 
 # -----------------------------------------------------------------------------
 # Examples
@@ -282,26 +306,6 @@ if(GENESIS_BUILD_EXAMPLES)
     add_executable(genesis_audio_smoke examples/audio_smoke/main.cpp)
     target_link_libraries(genesis_audio_smoke PRIVATE genesis_audio)
 
-    add_executable(genesis_matting_smoke examples/matting_smoke/main.cpp)
-    target_link_libraries(genesis_matting_smoke PRIVATE genesis_matting)
-    if(GENESIS_HAS_ONNXRUNTIME AND UNIX)
-        set_target_properties(genesis_matting_smoke PROPERTIES
-            BUILD_RPATH "${GENESIS_ONNXRUNTIME_ROOT}/lib"
-            INSTALL_RPATH "${GENESIS_ONNXRUNTIME_ROOT}/lib")
-        add_custom_command(TARGET genesis_matting_smoke POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${GENESIS_ONNXRUNTIME_ROOT}/lib/libonnxruntime.so.1"
-                "$<TARGET_FILE_DIR:genesis_matting_smoke>/"
-            COMMENT "Copying ONNX Runtime next to genesis_matting_smoke")
-    endif()
-    add_custom_command(TARGET genesis_matting_smoke POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory
-            "$<TARGET_FILE_DIR:genesis_matting_smoke>/assets/matting"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_SOURCE_DIR}/assets/matting"
-            "$<TARGET_FILE_DIR:genesis_matting_smoke>/assets/matting"
-        COMMENT "Copying matting assets next to genesis_matting_smoke")
-
     add_executable(genesis_multiview_player examples/multiview_player/main.cpp)
     target_link_libraries(genesis_multiview_player PRIVATE genesis_engine)
     add_dependencies(genesis_multiview_player genesis_shaders)
@@ -328,10 +332,36 @@ if(GENESIS_BUILD_EXAMPLES)
     )
 endif()
 
+# Matte smoke always available (full tree and Remover-only forks).
+if(GENESIS_BUILD_EXAMPLES OR GENESIS_REMOVER_ONLY)
+    add_executable(genesis_matting_smoke examples/matting_smoke/main.cpp)
+    target_link_libraries(genesis_matting_smoke PRIVATE genesis_matting)
+    if(GENESIS_HAS_ONNXRUNTIME AND UNIX)
+        set_target_properties(genesis_matting_smoke PROPERTIES
+            BUILD_RPATH "${GENESIS_ONNXRUNTIME_ROOT}/lib"
+            INSTALL_RPATH "${GENESIS_ONNXRUNTIME_ROOT}/lib")
+        add_custom_command(TARGET genesis_matting_smoke POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${GENESIS_ONNXRUNTIME_ROOT}/lib/libonnxruntime.so.1"
+                "$<TARGET_FILE_DIR:genesis_matting_smoke>/"
+            COMMENT "Copying ONNX Runtime next to genesis_matting_smoke")
+    endif()
+    add_custom_command(TARGET genesis_matting_smoke POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:genesis_matting_smoke>/assets/matting"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets/matting"
+            "$<TARGET_FILE_DIR:genesis_matting_smoke>/assets/matting"
+        COMMENT "Copying matting assets next to genesis_matting_smoke")
+endif()
+
 # -----------------------------------------------------------------------------
-# PIXERA RenderBridge extension
+# PIXERA RenderBridge extension (full GENESIS scenes)
 # -----------------------------------------------------------------------------
 option(GENESIS_BUILD_RENDERBRIDGE_EXT "Build PIXERA RenderBridge extension DLL (ExtGenesis)" ON)
+if(GENESIS_REMOVER_ONLY)
+    set(GENESIS_BUILD_RENDERBRIDGE_EXT OFF)
+endif()
 
 if(GENESIS_BUILD_RENDERBRIDGE_EXT AND WIN32)
     set(RX_SDK_DIR "${CMAKE_SOURCE_DIR}/third_party/render-bridge-sdk/RenderBridge")
@@ -456,7 +486,7 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_BINARY_DIR}
     )
-    target_link_libraries(ExtGenesisRemover PRIVATE genesis_runtime)
+    target_link_libraries(ExtGenesisRemover PRIVATE genesis_remover_runtime)
     set_target_properties(ExtGenesisRemover PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/rxExt/ExtGenesisRemover"
     )
@@ -511,7 +541,7 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
 endif()
 
 # -----------------------------------------------------------------------------
-# Windows installer (Inno Setup — run scripts/package-installer.ps1)
+# Windows installers (Inno Setup)
 # -----------------------------------------------------------------------------
 if(WIN32)
     add_custom_target(GenesisInstaller
@@ -520,5 +550,12 @@ if(WIN32)
             -BuildDir "${CMAKE_BINARY_DIR}"
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         COMMENT "Stage Release build and compile GenesisSetup.exe (requires Inno Setup 6)"
+    )
+    add_custom_target(GenesisRemoverInstaller
+        COMMAND powershell -ExecutionPolicy Bypass
+            -File "${CMAKE_SOURCE_DIR}/scripts/package-remover-installer.ps1"
+            -BuildDir "${CMAKE_BINARY_DIR}"
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Stage Remover package and compile GenesisRemoverSetup.exe (requires Inno Setup 6)"
     )
 endif()
