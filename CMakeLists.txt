@@ -470,6 +470,12 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/assets/matting"
             "${RX_REMOVER_DEPLOY}/assets/matting"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/deploy/GenesisRemover.manifest.json"
+            "${RX_REMOVER_DEPLOY}/GenesisRemover.manifest.json"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/deploy/README-remover.txt"
+            "${RX_REMOVER_DEPLOY}/README.txt"
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_BINARY_DIR}/deploy/GenesisRemover"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/deploy/GenesisRemover/assets/matting"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
