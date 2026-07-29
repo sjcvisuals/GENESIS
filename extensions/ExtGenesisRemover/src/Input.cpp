@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <format>
+#include <string>
+#include <vector>
 
 namespace rxext::genesis_remover {
 
