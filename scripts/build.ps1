@@ -95,19 +95,51 @@ Write-Host ""
 $LogFile = Join-Path $BuildDir "last-build.log"
 New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
 
+# CMake/MSBuild often print status to stderr. With $ErrorActionPreference=Stop,
+# PowerShell turns those lines into terminating NativeCommandError when piped.
+# Run native tools with Continue and stringify ErrorRecords before Tee-Object.
+function Invoke-LoggedNative {
+    param(
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Command,
+        [Parameter(Mandatory = $true)]
+        [string]$LogPath,
+        [switch]$Append
+    )
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $lines = & $Command 2>&1 | ForEach-Object {
+            if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.ToString() }
+            else { "$_" }
+        }
+        if ($Append) {
+            $lines | Tee-Object -FilePath $LogPath -Append | Out-Host
+        } else {
+            $lines | Tee-Object -FilePath $LogPath | Out-Host
+        }
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
+}
+
 Push-Location $RepoRoot
 try {
     Write-Host "Configuring..."
-    & $CMake -B $BuildDir -DCMAKE_BUILD_TYPE=$Config 2>&1 | Tee-Object -FilePath $LogFile
-    if ($LASTEXITCODE -ne 0) { throw "CMake configure failed ($LASTEXITCODE). See $LogFile" }
+    $cfgCode = Invoke-LoggedNative -LogPath $LogFile -Command {
+        & $CMake -B $BuildDir -DCMAKE_BUILD_TYPE=$Config
+    }
+    if ($cfgCode -ne 0) { throw "CMake configure failed ($cfgCode). See $LogFile" }
 
     foreach ($target in $targets) {
         Write-Host ""
         Write-Host "Building $target ..." -ForegroundColor Cyan
         # Important: pass --target once per name. "--target A B" is wrong on MSVC.
-        & $CMake --build $BuildDir --config $Config --target $target 2>&1 |
-            Tee-Object -FilePath $LogFile -Append
-        if ($LASTEXITCODE -ne 0) {
+        $buildCode = Invoke-LoggedNative -LogPath $LogFile -Append -Command {
+            & $CMake --build $BuildDir --config $Config --target $target
+        }
+        if ($buildCode -ne 0) {
             Write-Host ""
             Write-Host "----- last errors from $LogFile -----" -ForegroundColor Red
             Select-String -Path $LogFile -Pattern "error |error:|fatal error|LNK[0-9]+|FAILED|undefined|unresolved" |
@@ -115,7 +147,7 @@ try {
                 ForEach-Object { $_.Line }
             Write-Host "-------------------------------------" -ForegroundColor Red
             Write-Host "Full log: $LogFile"
-            throw "CMake build failed for target '$target' ($LASTEXITCODE)"
+            throw "CMake build failed for target '$target' ($buildCode)"
         }
     }
 }
