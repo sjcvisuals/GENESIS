@@ -42,7 +42,8 @@ Input::Input(std::uint64_t adapter_luid, ValueSet settings)
     mode_ = add_parameter<ParameterInt>("mode");
     mode_->set_property(PropertyNames::name, "Mode");
     mode_->set_property(PropertyNames::group_name, "Stream");
-    mode_->set_property(PropertyNames::enum_names, {"Scene", "Background Remover"});
+    mode_->set_property<std::vector<std::string>>(PropertyNames::enum_names,
+                                                   {"Scene", "Background Remover"});
     mode_->set_value(0);
 
     video_in_ = add_parameter<ParameterTexture>("texture");
@@ -52,7 +53,8 @@ Input::Input(std::uint64_t adapter_luid, ValueSet settings)
     quality_ = add_parameter<ParameterInt>("quality");
     quality_->set_property(PropertyNames::name, "Quality");
     quality_->set_property(PropertyNames::group_name, "Matte");
-    quality_->set_property(PropertyNames::enum_names, {"Fast", "Balanced", "Quality"});
+    quality_->set_property<std::vector<std::string>>(PropertyNames::enum_names,
+                                                      {"Fast", "Balanced", "Quality"});
     quality_->set_value(1);
 
     ParameterVector3* position_param_ = nullptr;

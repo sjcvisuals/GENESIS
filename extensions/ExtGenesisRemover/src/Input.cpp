@@ -27,7 +27,8 @@ Input::Input(std::uint64_t adapter_luid, ValueSet settings)
     quality_ = add_parameter<ParameterInt>("quality");
     quality_->set_property(PropertyNames::name, "Quality");
     quality_->set_property(PropertyNames::group_name, "Matte");
-    quality_->set_property(PropertyNames::enum_names, {"Fast", "Balanced", "Quality"});
+    quality_->set_property<std::vector<std::string>>(PropertyNames::enum_names,
+                                                      {"Fast", "Balanced", "Quality"});
     quality_->set_value(1);
 }
 
