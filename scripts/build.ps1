@@ -92,13 +92,32 @@ Write-Host "CMake:   $CMake"
 Write-Host "Targets: $($targets -join ', ')"
 Write-Host ""
 
+$LogFile = Join-Path $BuildDir "last-build.log"
+New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
+
 Push-Location $RepoRoot
 try {
-    & $CMake -B $BuildDir -DCMAKE_BUILD_TYPE=$Config
-    if ($LASTEXITCODE -ne 0) { throw "CMake configure failed ($LASTEXITCODE)" }
+    Write-Host "Configuring..."
+    & $CMake -B $BuildDir -DCMAKE_BUILD_TYPE=$Config 2>&1 | Tee-Object -FilePath $LogFile
+    if ($LASTEXITCODE -ne 0) { throw "CMake configure failed ($LASTEXITCODE). See $LogFile" }
 
-    & $CMake --build $BuildDir --config $Config --target @targets
-    if ($LASTEXITCODE -ne 0) { throw "CMake build failed ($LASTEXITCODE)" }
+    foreach ($target in $targets) {
+        Write-Host ""
+        Write-Host "Building $target ..." -ForegroundColor Cyan
+        # Important: pass --target once per name. "--target A B" is wrong on MSVC.
+        & $CMake --build $BuildDir --config $Config --target $target 2>&1 |
+            Tee-Object -FilePath $LogFile -Append
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host ""
+            Write-Host "----- last errors from $LogFile -----" -ForegroundColor Red
+            Select-String -Path $LogFile -Pattern "error |error:|fatal error|LNK[0-9]+|FAILED|undefined|unresolved" |
+                Select-Object -Last 40 |
+                ForEach-Object { $_.Line }
+            Write-Host "-------------------------------------" -ForegroundColor Red
+            Write-Host "Full log: $LogFile"
+            throw "CMake build failed for target '$target' ($LASTEXITCODE)"
+        }
+    }
 }
 finally {
     Pop-Location
