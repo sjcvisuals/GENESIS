@@ -17,14 +17,15 @@ Realtime 3D renderer for live events, virtual production, and media server workf
 .\scripts\build-and-run.bat
 ```
 
-That builds the editor + Pixera DLL, prints the exact paths, and launches the editor.
+That builds the editor + Pixera DLLs (scene + background remover), prints the exact paths, and launches the editor.
 Then use **File → Examples**.
 
 Or from PowerShell in the repo root:
 
 ```powershell
-.\scripts\build.ps1          # build only (prints paths)
-.\scripts\build.ps1 -Run     # build + launch editor
+.\scripts\build.ps1              # build only (prints paths)
+.\scripts\build.ps1 -Run         # build + launch editor
+.\scripts\build.ps1 -RemoverOnly # background-cutout DLL only
 .\scripts\build.ps1 -Config Debug
 ```
 
@@ -35,7 +36,7 @@ The script will try to fetch `glslc` / Vulkan runtime if needed.
 
 ```powershell
 cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release --target genesis_gltf_viewer ExtGenesis
+cmake --build build --config Release --target genesis_gltf_viewer ExtGenesis ExtGenesisRemover
 ```
 
 Dependencies are fetched automatically via CMake.
@@ -45,14 +46,17 @@ Dependencies are fetched automatically via CMake.
 After `.\scripts\build.ps1`, the script prints the real paths. Typically:
 
 ```
-build\Release\genesis_gltf_viewer.exe          # editor
-build\rxExt\ExtGenesis\Release\ExtGenesis.dll  # Pixera
+build\Release\genesis_gltf_viewer.exe                        # editor
+build\rxExt\ExtGenesis\Release\ExtGenesis.dll                # Pixera scenes
+build\rxExt\ExtGenesisRemover\Release\ExtGenesisRemover.dll  # Pixera matte-only
+build\deploy\GenesisRemover\                                 # ready-to-copy Remover package
 ```
 
 (MSVC Debug builds use `Debug\` instead of `Release\`.)
 
-In the editor: **File → Examples**.
-In PIXERA: browse to `ExtGenesis.dll` and keep its sibling `assets\` / `scenes\` folders.
+In the editor: **File → Examples**.  
+In PIXERA (scenes): browse to `ExtGenesis.dll` and keep sibling `assets\` / `scenes\`.  
+In PIXERA (cutout only): browse to `ExtGenesisRemover.dll` and keep sibling `assets\matting\` (+ `onnxruntime.dll`). See [docs/video-bg-remover.md](docs/video-bg-remover.md).
 
 ## Milestone status
 
@@ -61,6 +65,7 @@ Core vertical slice (scene runtime, editor, serialization, profiling) is complet
 ### Host integration (RenderBridge path)
 
 - [x] `ExtGenesis` — PIXERA RenderBridge extension DLL (`rxext` API)
+- [x] `ExtGenesisRemover` — matte-only PIXERA DLL (background cutout, no scenes)
 - [x] `OffscreenRenderer` + external Vulkan render target (shared texture export)
 - [x] `HostBridge` — dev harness (SDL window, not the shipping PIXERA path)
 - [x] `genesis_bridge_host` — reference dev integration example

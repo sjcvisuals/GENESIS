@@ -1,10 +1,11 @@
 # GENESIS one-shot Windows build helper
 #
 # Usage (from the repo root, in PowerShell):
-#   .\scripts\build.ps1              # editor + Pixera DLL
+#   .\scripts\build.ps1              # editor + Pixera DLLs (scene + remover)
 #   .\scripts\build.ps1 -Run         # build then launch the editor
 #   .\scripts\build.ps1 -Config Release
-#   .\scripts\build.ps1 -PixeraOnly  # ExtGenesis.dll only
+#   .\scripts\build.ps1 -PixeraOnly  # ExtGenesis + ExtGenesisRemover only
+#   .\scripts\build.ps1 -RemoverOnly # background-cutout DLL only
 #   .\scripts\build.ps1 -EditorOnly  # editor only
 #
 param(
@@ -12,7 +13,8 @@ param(
     [string]$Config = "Release",
     [switch]$Run,
     [switch]$EditorOnly,
-    [switch]$PixeraOnly
+    [switch]$PixeraOnly,
+    [switch]$RemoverOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -77,12 +79,14 @@ if (Test-Path $Glslc) {
 }
 
 $targets = @()
-if ($PixeraOnly) {
-    $targets = @("ExtGenesis")
+if ($RemoverOnly) {
+    $targets = @("ExtGenesisRemover")
+} elseif ($PixeraOnly) {
+    $targets = @("ExtGenesis", "ExtGenesisRemover")
 } elseif ($EditorOnly) {
     $targets = @("genesis_gltf_viewer")
 } else {
-    $targets = @("genesis_gltf_viewer", "ExtGenesis")
+    $targets = @("genesis_gltf_viewer", "ExtGenesis", "ExtGenesisRemover")
 }
 
 Write-Host ""
@@ -171,10 +175,7 @@ function Resolve-BuiltExe([string]$Name) {
 function Resolve-BuiltDll([string]$Relative) {
     $candidates = @(
         (Join-Path $BuildDir $Relative),
-        (Join-Path $BuildDir "$Config\$Relative"),
-        (Join-Path $BuildDir "rxExt\ExtGenesis\$Config\ExtGenesis.dll"),
-        (Join-Path $BuildDir "rxExt\ExtGenesis\ExtGenesis.dll"),
-        (Join-Path $BuildDir "deploy\GenesisPixera\ExtGenesis.dll")
+        (Join-Path $BuildDir "$Config\$Relative")
     )
     foreach ($c in $candidates) {
         if (Test-Path $c) { return (Resolve-Path $c).Path }
@@ -185,6 +186,8 @@ function Resolve-BuiltDll([string]$Relative) {
 $Editor = Resolve-BuiltExe "genesis_gltf_viewer.exe"
 $Dll = Resolve-BuiltDll "rxExt\ExtGenesis\$Config\ExtGenesis.dll"
 if (-not $Dll) { $Dll = Resolve-BuiltDll "deploy\GenesisPixera\ExtGenesis.dll" }
+$RemoverDll = Resolve-BuiltDll "rxExt\ExtGenesisRemover\$Config\ExtGenesisRemover.dll"
+if (-not $RemoverDll) { $RemoverDll = Resolve-BuiltDll "deploy\GenesisRemover\ExtGenesisRemover.dll" }
 
 Write-Host ""
 Write-Host "=== Build finished ===" -ForegroundColor Green
@@ -194,18 +197,29 @@ if ($Editor) {
     Write-Host "Run (keep working directory = folder of the exe so assets resolve):"
     Write-Host ('  "{0}"' -f $Editor)
     Write-Host "Then: File -> Examples"
-} else {
+} elseif (-not $PixeraOnly -and -not $RemoverOnly) {
     Write-Host "Editor exe not found - search with:"
     Write-Host "  Get-ChildItem -Recurse -Filter genesis_gltf_viewer.exe $BuildDir"
 }
 if ($Dll) {
     Write-Host ""
-    Write-Host "Pixera DLL (browse to this in PIXERA generic extension):"
+    Write-Host "Pixera scene DLL (browse to this in PIXERA generic extension):"
     Write-Host "  $Dll"
     Write-Host "Keep the sibling assets\ / scenes\ folders next to that DLL."
-} elseif (-not $EditorOnly) {
+} elseif (-not $EditorOnly -and -not $RemoverOnly) {
     Write-Host ""
     Write-Host "ExtGenesis.dll not found (Windows-only target). If you expected it, open the build log above."
+}
+if ($RemoverDll) {
+    Write-Host ""
+    Write-Host "Pixera background-remover DLL (matte only — no scenes):"
+    Write-Host "  $RemoverDll"
+    Write-Host "Keep sibling assets\matting\ and onnxruntime.dll next to that DLL."
+    Write-Host "Deploy package (ready to copy into PIXERA data\rxExt\ExtGenesisRemover\):"
+    Write-Host ("  {0}" -f (Join-Path $BuildDir "deploy\GenesisRemover"))
+} elseif (-not $EditorOnly) {
+    Write-Host ""
+    Write-Host "ExtGenesisRemover.dll not found (Windows-only target). If you expected it, open the build log above."
 }
 Write-Host ""
 

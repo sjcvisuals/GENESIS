@@ -446,6 +446,7 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         ${EXT_REMOVER_DIR}/src/Extension.cpp
         ${EXT_REMOVER_DIR}/src/Device.cpp
         ${EXT_REMOVER_DIR}/src/Input.cpp
+        ${EXT_REMOVER_DIR}/src/ModulePaths.cpp
         ${RX_SDK_DIR}/libs/common/string.cpp
     )
     target_include_directories(ExtGenesisRemover PRIVATE
@@ -477,6 +478,12 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/assets/matting"
             "${CMAKE_BINARY_DIR}/deploy/GenesisRemover/assets/matting"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/deploy/GenesisRemover.manifest.json"
+            "${CMAKE_BINARY_DIR}/deploy/GenesisRemover/GenesisRemover.manifest.json"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/deploy/README-remover.txt"
+            "${CMAKE_BINARY_DIR}/deploy/GenesisRemover/README.txt"
         COMMENT "Deploying ExtGenesisRemover (matte-only) package"
     )
     if(GENESIS_HAS_ONNXRUNTIME)
@@ -489,6 +496,11 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
                 "${CMAKE_BINARY_DIR}/deploy/GenesisRemover/onnxruntime.dll"
             COMMENT "Deploying ONNX Runtime next to ExtGenesisRemover"
         )
+    endif()
+
+    add_custom_target(GenesisRemoverDeploy DEPENDS ExtGenesisRemover)
+    if(TARGET GenesisDeploy)
+        add_dependencies(GenesisDeploy ExtGenesisRemover)
     endif()
 endif()
 

@@ -1,0 +1,17 @@
+{
+  "genesisVersion": "0.1.0",
+  "runtimeVersion": "0.1.0",
+  "renderBridgeSdkVersion": "1.2",
+  "graphicsBackend": "Vulkan",
+  "extensionDll": "ExtGenesisRemover.dll",
+  "moduleKind": "backgroundRemover",
+  "requiredRuntimeFiles": [
+    "ExtGenesisRemover.dll",
+    "GenesisRemover.manifest.json",
+    "assets/matting/rvm_mobilenetv3_fp16.onnx"
+  ],
+  "assetRoots": [
+    "assets/matting"
+  ],
+  "notes": "Matte-only Pixera module. Copy this folder to data/rxExt/ExtGenesisRemover/. Output is transparent RGBA cutout; keep onnxruntime.dll beside the DLL when present."
+}
