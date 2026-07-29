@@ -11,34 +11,48 @@ Realtime 3D renderer for live events, virtual production, and media server workf
 
 ## Build
 
-**Quick start (Windows):**
+**Easiest path (Windows):** double-click or run:
 
 ```powershell
-.\scripts\build.ps1
+.\scripts\build-and-run.bat
 ```
 
-This script provisions `glslc` from the Vulkan SDK installer (no admin required), installs the Vulkan runtime if needed, configures, and builds.
+That builds the editor + Pixera DLL, prints the exact paths, and launches the editor.
+Then use **File → Examples**.
+
+Or from PowerShell in the repo root:
+
+```powershell
+.\scripts\build.ps1          # build only (prints paths)
+.\scripts\build.ps1 -Run     # build + launch editor
+.\scripts\build.ps1 -Config Debug
+```
+
+Requirements: Visual Studio 2022 with the **Desktop development with C++** workload.
+The script will try to fetch `glslc` / Vulkan runtime if needed.
 
 **Manual build:**
 
 ```powershell
-$env:VULKAN_SDK = "$env:LOCALAPPDATA\VulkanSDK\1.4.350.0"   # after glslc is extracted
-cmake -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build --config Debug
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release --target genesis_gltf_viewer ExtGenesis
 ```
 
-Dependencies are fetched automatically via CMake (no Git required).
+Dependencies are fetched automatically via CMake.
 
 ## Run
 
-```bash
-./build/genesis_triangle      # Linux/macOS
-build\Debug\genesis_triangle.exe  # Windows MSVC
+After `.\scripts\build.ps1`, the script prints the real paths. Typically:
+
+```
+build\Release\genesis_gltf_viewer.exe          # editor
+build\rxExt\ExtGenesis\Release\ExtGenesis.dll  # Pixera
 ```
 
-Other examples:
+(MSVC Debug builds use `Debug\` instead of `Release\`.)
 
-- `build\\Debug\\genesis_camera.exe` (WASD + RMB look)
+In the editor: **File → Examples**.
+In PIXERA: browse to `ExtGenesis.dll` and keep its sibling `assets\` / `scenes\` folders.
 
 ## Milestone status
 
