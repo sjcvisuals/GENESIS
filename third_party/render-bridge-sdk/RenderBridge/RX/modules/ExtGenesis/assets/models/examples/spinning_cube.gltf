@@ -1,0 +1,58 @@
+{
+  "asset": { "version": "2.0", "generator": "GENESIS examples" },
+  "scene": 0,
+  "scenes": [{ "nodes": [0] }],
+  "nodes": [
+    {
+      "name": "AnimatedCube",
+      "mesh": 0,
+      "translation": [0, 0.5, 0]
+    }
+  ],
+  "meshes": [{
+    "name": "CubeMesh",
+    "primitives": [{
+      "attributes": { "POSITION": 0, "NORMAL": 1 },
+      "indices": 2,
+      "material": 0
+    }]
+  }],
+  "materials": [{
+    "name": "Orange",
+    "pbrMetallicRoughness": {
+      "baseColorFactor": [0.95, 0.45, 0.12, 1.0],
+      "metallicFactor": 0.1,
+      "roughnessFactor": 0.45
+    }
+  }],
+  "animations": [{
+    "name": "Spin",
+    "channels": [
+      { "sampler": 0, "target": { "node": 0, "path": "rotation" } },
+      { "sampler": 1, "target": { "node": 0, "path": "translation" } }
+    ],
+    "samplers": [
+      { "input": 3, "interpolation": "LINEAR", "output": 4 },
+      { "input": 3, "interpolation": "LINEAR", "output": 5 }
+    ]
+  }],
+  "accessors": [
+    { "bufferView": 0, "componentType": 5126, "count": 24, "type": "VEC3",
+      "max": [0.5, 0.5, 0.5], "min": [-0.5, -0.5, -0.5] },
+    { "bufferView": 1, "componentType": 5126, "count": 24, "type": "VEC3" },
+    { "bufferView": 2, "componentType": 5123, "count": 36, "type": "SCALAR" },
+    { "bufferView": 3, "componentType": 5126, "count": 5, "type": "SCALAR",
+      "max": [4.0], "min": [0.0] },
+    { "bufferView": 4, "componentType": 5126, "count": 5, "type": "VEC4" },
+    { "bufferView": 5, "componentType": 5126, "count": 5, "type": "VEC3" }
+  ],
+  "bufferViews": [
+    { "buffer": 0, "byteOffset": 0, "byteLength": 288, "target": 34962 },
+    { "buffer": 0, "byteOffset": 288, "byteLength": 288, "target": 34962 },
+    { "buffer": 0, "byteOffset": 576, "byteLength": 72, "target": 34963 },
+    { "buffer": 0, "byteOffset": 648, "byteLength": 20 },
+    { "buffer": 0, "byteOffset": 668, "byteLength": 80 },
+    { "buffer": 0, "byteOffset": 748, "byteLength": 60 }
+  ],
+  "buffers": [{ "uri": "spinning_cube.bin", "byteLength": 808 }]
+}

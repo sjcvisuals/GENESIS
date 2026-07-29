@@ -1,0 +1,226 @@
+{
+  "version": 1,
+  "source": "builtin",
+  "nodes": [
+    {
+      "path": "Scene",
+      "name": "Scene",
+      "parent": null,
+      "visible": true,
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Sun Key",
+      "name": "Sun Key",
+      "parent": "Scene",
+      "visible": true,
+      "light": {
+        "type": "directional",
+        "color": [1.0, 0.96, 0.88],
+        "intensity": 3.6,
+        "enabled": true,
+        "range": 10.0,
+        "inner_cone_degrees": 20.0,
+        "outer_cone_degrees": 30.0
+      },
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [-0.28, 0.42, 0.12, 0.85],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Sky Fill",
+      "name": "Sky Fill",
+      "parent": "Scene",
+      "visible": true,
+      "light": {
+        "type": "directional",
+        "color": [0.55, 0.65, 0.95],
+        "intensity": 0.85,
+        "enabled": true,
+        "range": 10.0,
+        "inner_cone_degrees": 20.0,
+        "outer_cone_degrees": 30.0
+      },
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.15, -0.72, 0.08, 0.67],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Rim",
+      "name": "Rim",
+      "parent": "Scene",
+      "visible": true,
+      "light": {
+        "type": "directional",
+        "color": [0.85, 0.9, 1.0],
+        "intensity": 1.15,
+        "enabled": true,
+        "range": 10.0,
+        "inner_cone_degrees": 20.0,
+        "outer_cone_degrees": 30.0
+      },
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.08, 0.92, 0.18, 0.34],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Warm Bounce",
+      "name": "Warm Bounce",
+      "parent": "Scene",
+      "visible": true,
+      "light": {
+        "type": "directional",
+        "color": [1.0, 0.72, 0.48],
+        "intensity": 0.22,
+        "enabled": true,
+        "range": 10.0,
+        "inner_cone_degrees": 20.0,
+        "outer_cone_degrees": 30.0
+      },
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.65, 0.05, -0.1, 0.75],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Floor",
+      "name": "Floor",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "GroundPlane",
+      "material": "Concrete Floor",
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Metal Cube",
+      "name": "Metal Cube",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "Cube",
+      "material": "Default Metal",
+      "transform": {
+        "position": [-2.35, 0.85, 0.15],
+        "rotation": [-0.12, 0.38, 0.08, 0.91],
+        "scale": [1.25, 1.25, 1.25]
+      }
+    },
+    {
+      "path": "Scene/Plastic Sphere",
+      "name": "Plastic Sphere",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "Sphere",
+      "material": "Default Plastic",
+      "transform": {
+        "position": [-0.35, 0.85, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.45, 1.45, 1.45]
+      }
+    },
+    {
+      "path": "Scene/Metal Cylinder",
+      "name": "Metal Cylinder",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "Cylinder",
+      "material": "Default Metal",
+      "transform": {
+        "position": [1.55, 0.9, 0.05],
+        "rotation": [0.0, 0.28, 0.0, 0.96],
+        "scale": [1.15, 1.45, 1.15]
+      }
+    },
+    {
+      "path": "Scene/Plastic Plane",
+      "name": "Plastic Plane",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "Plane",
+      "material": "Default Plastic",
+      "transform": {
+        "position": [3.15, 1.05, 0.25],
+        "rotation": [0.7071068, 0.0, 0.0, 0.7071068],
+        "scale": [1.45, 1.45, 1.45]
+      }
+    }
+  ],
+  "materials": [
+    {
+      "name": "Default Metal",
+      "shading_model": "OpenPBR",
+      "base_weight": 1.0,
+      "base_color": [1.0, 1.0, 1.0, 1.0],
+      "base_metalness": 1.0,
+      "specular_weight": 1.0,
+      "specular_color": [1.0, 1.0, 1.0],
+      "specular_roughness": 1.0,
+      "specular_ior": 1.45,
+      "coat_weight": 0.35,
+      "coat_color": [1.0, 1.0, 1.0],
+      "coat_roughness": 0.08,
+      "coat_ior": 1.5,
+      "coat_darkening": 0.85,
+      "normal_scale": 1.0,
+      "alpha_mode": "opaque",
+      "base_color_texture": "default_pbr/base_color.jpg",
+      "metallic_roughness_texture": "default_pbr/metallic_roughness.jpg",
+      "normal_texture": "default_pbr/normal.jpg"
+    },
+    {
+      "name": "Default Plastic",
+      "shading_model": "OpenPBR",
+      "base_weight": 1.0,
+      "base_color": [1.0, 1.0, 1.0, 1.0],
+      "base_metalness": 0.0,
+      "specular_weight": 1.0,
+      "specular_color": [1.0, 1.0, 1.0],
+      "specular_roughness": 1.0,
+      "specular_ior": 1.55,
+      "coat_weight": 0.28,
+      "coat_roughness": 0.2,
+      "coat_ior": 1.5,
+      "coat_darkening": 0.9,
+      "normal_scale": 1.0,
+      "alpha_mode": "opaque",
+      "base_color_texture": "default_pbr_plastic/base_color.jpg",
+      "metallic_roughness_texture": "default_pbr_plastic/metallic_roughness.jpg",
+      "normal_texture": "default_pbr_plastic/normal.jpg"
+    },
+    {
+      "name": "Concrete Floor",
+      "shading_model": "OpenPBR",
+      "base_weight": 1.0,
+      "base_color": [0.48, 0.48, 0.46, 1.0],
+      "base_metalness": 0.0,
+      "base_diffuse_roughness": 0.4,
+      "specular_weight": 1.0,
+      "specular_roughness": 1.0,
+      "specular_ior": 1.5,
+      "normal_scale": 1.15,
+      "alpha_mode": "opaque",
+      "base_color_texture": "default_pbr_floor/base_color.jpg",
+      "metallic_roughness_texture": "default_pbr_floor/metallic_roughness.jpg",
+      "normal_texture": "default_pbr_floor/normal.jpg"
+    }
+  ]
+}

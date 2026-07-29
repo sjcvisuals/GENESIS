@@ -1,0 +1,4 @@
+Default dielectric PBR textures for GENESIS.
+
+Source: ambientCG Plastic008 (https://ambientcg.com/view?id=Plastic008)
+License: CC0 1.0 Universal

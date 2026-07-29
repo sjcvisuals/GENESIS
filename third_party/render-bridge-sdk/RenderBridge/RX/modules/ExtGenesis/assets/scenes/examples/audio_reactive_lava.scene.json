@@ -1,0 +1,195 @@
+{
+  "version": 1,
+  "source": "builtin",
+  "nodes": [
+    {
+      "path": "Scene",
+      "name": "Scene",
+      "parent": null,
+      "visible": true,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "path": "Scene/Directional Light",
+      "name": "Directional Light",
+      "parent": "Scene",
+      "visible": true,
+      "light": {
+        "type": "directional",
+        "color": [
+          1.0,
+          0.98,
+          0.94
+        ],
+        "intensity": 1.0,
+        "enabled": true,
+        "range": 10.0,
+        "inner_cone_degrees": 20.0,
+        "outer_cone_degrees": 30.0
+      },
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          -0.383493,
+          0.30204,
+          0.131901,
+          0.864788
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "path": "Scene/Lava Lamp",
+      "name": "Lava Lamp",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "transform": {
+        "position": [
+          0.0,
+          0.55,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "particle_fluid": {
+        "enabled": true,
+        "grid_resolution": 40,
+        "extent_meters": [
+          0.70,
+          1.45,
+          0.70
+        ],
+        "viscosity": 0.0002,
+        "vorticity_strength": 0.45,
+        "velocity_dissipation": 0.992,
+        "density_dissipation": 0.996,
+        "source_enabled": true,
+        "source_uvw": [
+          0.5,
+          0.1,
+          0.5
+        ],
+        "source_radius": 0.12,
+        "source_density": 5.5,
+        "source_velocity": [
+          0.0,
+          0.4,
+          0.0
+        ],
+        "source2_enabled": true,
+        "source2_uvw": [
+          0.4,
+          0.82,
+          0.55
+        ],
+        "source2_radius": 0.14,
+        "source2_density": 4.0,
+        "source2_velocity": [
+          0.06,
+          -0.18,
+          -0.04
+        ],
+        "animate_sources": true,
+        "dye_color": [
+          1.0,
+          0.38,
+          0.06,
+          1.0
+        ],
+        "drive_particles": true,
+        "pressure_iterations": 8
+      }
+    },
+    {
+      "path": "Scene/Lava Lamp/Particle Emitter",
+      "name": "Particle Emitter",
+      "parent": "Scene/Lava Lamp",
+      "visible": true,
+      "pickable": true,
+      "transform": {
+        "position": [
+          0.0,
+          -0.55,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "particle_emitter": {
+        "enabled": true,
+        "looping": true,
+        "world_space": true,
+        "duration": 0.0,
+        "start_delay": 0.0,
+        "rate": 55.0,
+        "burst": 48,
+        "max_particles": 768,
+        "lifetime_min": 1.2,
+        "lifetime_max": 2.4,
+        "speed_min": 0.55,
+        "speed_max": 1.35,
+        "size_min": 0.035,
+        "size_max": 0.07,
+        "size_end_multiplier": 0.15,
+        "color_start": [1.0, 0.62, 0.18, 1.0],
+        "color_end": [1.0, 0.12, 0.02, 0.0],
+        "gravity": [0.0, -2.2, 0.0],
+        "drag": 0.35,
+        "spawn_shape": "cone",
+        "spawn_radius": 0.12,
+        "spawn_box_height": 0.1,
+        "cone_angle_degrees": 48.0,
+        "render_mesh": "sphere",
+        "unlit": true,
+        "seed_override": 0,
+        "fluid_coupled": true
+      }
+    }
+  ],
+  "materials": []
+}

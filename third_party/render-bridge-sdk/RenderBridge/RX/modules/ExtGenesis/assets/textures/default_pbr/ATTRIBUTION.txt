@@ -1,0 +1,9 @@
+Default PBR material textures for GENESIS.
+
+Source: ambientCG Metal019 (https://ambientcg.com/view?id=Metal019)
+License: CC0 1.0 Universal (public domain) — https://creativecommons.org/publicdomain/zero/1.0/
+
+Installed maps (1K):
+  base_color.jpg          — Color / albedo (sRGB)
+  metallic_roughness.jpg  — glTF packed (G=roughness, B=metalness)
+  normal.jpg              — OpenGL tangent-space normal

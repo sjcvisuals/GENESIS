@@ -1,0 +1,233 @@
+{
+  "version": 1,
+  "source": "builtin",
+  "nodes": [
+    {
+      "path": "Scene",
+      "name": "Scene",
+      "parent": null,
+      "visible": true,
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Directional Light",
+      "name": "Directional Light",
+      "parent": "Scene",
+      "visible": true,
+      "light": {
+        "type": "directional",
+        "color": [1.0, 0.98, 0.94],
+        "intensity": 2.4,
+        "enabled": true,
+        "range": 10.0,
+        "inner_cone_degrees": 20.0,
+        "outer_cone_degrees": 30.0
+      },
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [-0.383493, 0.30204, 0.131901, 0.864788],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Plastic",
+      "name": "Plastic",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "Sphere",
+      "material": "OpenPBR Plastic",
+      "transform": {
+        "position": [-3.3, 0.6, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Metal",
+      "name": "Metal",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "Sphere",
+      "material": "OpenPBR Metal",
+      "transform": {
+        "position": [-1.1, 0.6, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Coat",
+      "name": "Coat",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "Sphere",
+      "material": "OpenPBR Coat",
+      "transform": {
+        "position": [1.1, 0.6, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Fuzz",
+      "name": "Fuzz",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "Sphere",
+      "material": "OpenPBR Fuzz",
+      "transform": {
+        "position": [3.3, 0.6, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Glass",
+      "name": "Glass",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "Sphere",
+      "material": "OpenPBR Glass",
+      "transform": {
+        "position": [-2.2, 0.6, 2.4],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Subsurface",
+      "name": "Subsurface",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "Sphere",
+      "material": "OpenPBR Subsurface",
+      "transform": {
+        "position": [0.0, 0.6, 2.4],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/ThinFilm",
+      "name": "ThinFilm",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "Sphere",
+      "material": "OpenPBR ThinFilm",
+      "transform": {
+        "position": [2.2, 0.6, 2.4],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    }
+  ],
+  "materials": [
+    {
+      "name": "OpenPBR Plastic",
+      "shading_model": "OpenPBR",
+      "base_weight": 1.0,
+      "base_color": [0.82, 0.18, 0.12, 1.0],
+      "base_metalness": 0.0,
+      "specular_weight": 1.0,
+      "specular_color": [1.0, 1.0, 1.0],
+      "specular_roughness": 0.35,
+      "specular_ior": 1.5
+    },
+    {
+      "name": "OpenPBR Metal",
+      "shading_model": "OpenPBR",
+      "base_weight": 1.0,
+      "base_color": [0.95, 0.78, 0.42, 1.0],
+      "base_metalness": 1.0,
+      "specular_weight": 1.0,
+      "specular_color": [1.0, 0.95, 0.85],
+      "specular_roughness": 0.18,
+      "specular_ior": 1.5
+    },
+    {
+      "name": "OpenPBR Coat",
+      "shading_model": "OpenPBR",
+      "base_weight": 1.0,
+      "base_color": [0.08, 0.22, 0.55, 1.0],
+      "base_metalness": 0.0,
+      "specular_weight": 1.0,
+      "specular_roughness": 0.45,
+      "specular_ior": 1.5,
+      "coat_weight": 1.0,
+      "coat_color": [1.0, 1.0, 1.0],
+      "coat_roughness": 0.05,
+      "coat_ior": 1.6,
+      "coat_darkening": 1.0
+    },
+    {
+      "name": "OpenPBR Fuzz",
+      "shading_model": "OpenPBR",
+      "base_weight": 1.0,
+      "base_color": [0.55, 0.22, 0.35, 1.0],
+      "base_metalness": 0.0,
+      "specular_weight": 0.35,
+      "specular_roughness": 0.75,
+      "specular_ior": 1.4,
+      "fuzz_weight": 0.85,
+      "fuzz_color": [0.75, 0.45, 0.55],
+      "fuzz_roughness": 0.4
+    },
+    {
+      "name": "OpenPBR Glass",
+      "shading_model": "OpenPBR",
+      "base_weight": 1.0,
+      "base_color": [1.0, 1.0, 1.0, 1.0],
+      "base_metalness": 0.0,
+      "specular_weight": 1.0,
+      "specular_roughness": 0.02,
+      "specular_ior": 1.5,
+      "transmission_weight": 1.0,
+      "transmission_color": [0.75, 0.92, 0.85],
+      "transmission_depth": 0.35,
+      "transmission_dispersion_scale": 0.25,
+      "transmission_dispersion_abbe": 55.0,
+      "thin_walled": false,
+      "alpha_mode": "blend"
+    },
+    {
+      "name": "OpenPBR Subsurface",
+      "shading_model": "OpenPBR",
+      "base_weight": 1.0,
+      "base_color": [0.92, 0.55, 0.45, 1.0],
+      "base_metalness": 0.0,
+      "base_diffuse_roughness": 0.35,
+      "specular_weight": 0.6,
+      "specular_roughness": 0.45,
+      "specular_ior": 1.4,
+      "subsurface_weight": 0.85,
+      "subsurface_color": [0.95, 0.35, 0.25],
+      "subsurface_radius": 1.2,
+      "subsurface_radius_scale": [1.0, 0.4, 0.2],
+      "subsurface_scatter_anisotropy": 0.2
+    },
+    {
+      "name": "OpenPBR ThinFilm",
+      "shading_model": "OpenPBR",
+      "base_weight": 1.0,
+      "base_color": [0.75, 0.75, 0.78, 1.0],
+      "base_metalness": 1.0,
+      "specular_weight": 1.0,
+      "specular_roughness": 0.12,
+      "specular_ior": 1.5,
+      "thin_film_weight": 1.0,
+      "thin_film_thickness": 0.55,
+      "thin_film_ior": 1.4
+    }
+  ]
+}

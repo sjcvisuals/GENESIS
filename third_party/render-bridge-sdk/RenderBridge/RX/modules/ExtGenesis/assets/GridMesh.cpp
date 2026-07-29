@@ -3,37 +3,22 @@
 #include "assets/MeshUpload.hpp"
 #include "renderer/vulkan/Buffer.hpp"
 
-#include <cmath>
 #include <vector>
 
 namespace genesis {
 
-Mesh createEditorGridMesh(const VulkanContext& context, const float half_extent_m, const int divisions) {
-    const int divs = std::max(divisions, 1);
-    const float step = (half_extent_m * 2.0f) / static_cast<float>(divs);
-
-    std::vector<MeshVertexPN> vertices;
-    std::vector<std::uint32_t> indices;
-    vertices.reserve(static_cast<std::size_t>((divs + 1) * 2 * 2));
-    indices.reserve(static_cast<std::size_t>((divs + 1) * 4));
-
-    auto addLine = [&](const MeshVertexPN& a, const MeshVertexPN& b) {
-        const std::uint32_t base = static_cast<std::uint32_t>(vertices.size());
-        vertices.push_back(a);
-        vertices.push_back(b);
-        indices.push_back(base);
-        indices.push_back(base + 1);
+Mesh createEditorGridMesh(const VulkanContext& context, const float half_extent_m, const int /*divisions*/) {
+    // Single ground-plane quad; the grid pattern is drawn in grid.frag.
+    // Using a triangle mesh (not a line list) avoids driver bugs where LINE_LIST
+    // draws were rasterized as filled ground-plane triangles.
+    const float h = half_extent_m;
+    const std::vector<MeshVertexPN> vertices = {
+        MeshVertexPN{-h, 0.0f, -h, 0.0f, 1.0f, 0.0f},
+        MeshVertexPN{h, 0.0f, -h, 0.0f, 1.0f, 0.0f},
+        MeshVertexPN{h, 0.0f, h, 0.0f, 1.0f, 0.0f},
+        MeshVertexPN{-h, 0.0f, h, 0.0f, 1.0f, 0.0f},
     };
-
-    for (int i = 0; i <= divs; ++i) {
-        const float t = -half_extent_m + static_cast<float>(i) * step;
-        const bool major = (i % (divs / 2 == 0 ? divs : divs / 2) == 0) || i == 0 || i == divs;
-        (void)major;
-        addLine(MeshVertexPN{t, 0.0f, -half_extent_m, 0.0f, 1.0f, 0.0f},
-                MeshVertexPN{t, 0.0f, half_extent_m, 0.0f, 1.0f, 0.0f});
-        addLine(MeshVertexPN{-half_extent_m, 0.0f, t, 0.0f, 1.0f, 0.0f},
-                MeshVertexPN{half_extent_m, 0.0f, t, 0.0f, 1.0f, 0.0f});
-    }
+    const std::vector<std::uint32_t> indices = {0, 1, 2, 0, 2, 3};
 
     Mesh out{};
     const VkDeviceSize vb_size = static_cast<VkDeviceSize>(vertices.size() * sizeof(MeshVertexPN));
@@ -63,7 +48,9 @@ Mesh createEditorGridMesh(const VulkanContext& context, const float half_extent_
     });
 
     out.index_count = static_cast<std::uint32_t>(indices.size());
-    out.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+    out.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    out.local_aabb_min = glm::vec3(-h, -0.01f, -h);
+    out.local_aabb_max = glm::vec3(h, 0.01f, h);
     return out;
 }
 
