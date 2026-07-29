@@ -151,36 +151,7 @@ void SceneRuntime::saveDocument(const std::filesystem::path& path) {
 
 void SceneRuntime::loadDemo() {
     clear();
-
-    const NodeId root = scene_.createEmptyNode("Scene");
-
-    const NodeId dir_light =
-        scene_.createLightNode("Directional Light", SceneLightType::Directional, root);
-    if (Node* n = scene_.find(dir_light)) {
-        n->local.rotation =
-            glm::angleAxis(glm::radians(-52.0f), glm::vec3(1.0f, 0.0f, 0.0f)) *
-            glm::angleAxis(glm::radians(38.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-        n->light->color = glm::vec3(1.0f, 0.96f, 0.88f);
-        n->light->intensity = 3.8f;
-    }
-    const NodeId fill_light =
-        scene_.createLightNode("Sky Fill", SceneLightType::Directional, root);
-    if (Node* n = scene_.find(fill_light)) {
-        n->local.rotation =
-            glm::angleAxis(glm::radians(-25.0f), glm::vec3(1.0f, 0.0f, 0.0f)) *
-            glm::angleAxis(glm::radians(-130.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-        n->light->color = glm::vec3(0.55f, 0.65f, 0.95f);
-        n->light->intensity = 0.7f;
-    }
-
-    const std::uint32_t cube_mesh = addMesh("Cube", createCubeMesh(context_));
-    const std::uint32_t cube_mat = addDefaultPbrMaterial("Cube Material");
-
-    const NodeId cube = scene_.createMeshNode("Cube", cube_mesh, root, cube_mat);
-    if (Node* n = scene_.find(cube)) {
-        n->local.position = glm::vec3(0.0f, 0.0f, 0.0f);
-    }
-
+    scene_.createEmptyNode("Scene");
     scene_.active_output_camera.reset();
     source_path_ = "builtin";
     scene_.updateWorldTransforms();

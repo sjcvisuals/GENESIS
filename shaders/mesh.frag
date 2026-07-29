@@ -103,7 +103,8 @@ float distributionGGX(float NdotH, float roughness) {
     float a = roughness * roughness;
     float a2 = a * a;
     float denom = (NdotH * NdotH) * (a2 - 1.0) + 1.0;
-    return a2 / max(kPi * denom * denom, 1e-4);
+    // Cap the NDF peak — unclamped GGX at low roughness produces firefly spikes.
+    return min(a2 / max(kPi * denom * denom, 1e-4), 32.0);
 }
 
 float geometrySchlickGGX(float NdotX, float roughness) {
@@ -191,7 +192,8 @@ vec3 evalMicrofacet(vec3 N, vec3 V, vec3 L, float roughness, vec3 F0, out vec3 F
     float Ems = 1.0 - Ess;
     vec3 Favg = F0 + (1.0 - F0) / 21.0;
     vec3 energyComp = 1.0 + Favg * (Ems / max(Ess, 1e-3));
-    return specular * clamp(energyComp, vec3(1.0), vec3(2.75));
+    // Keep compensation modest — high boosts read as hot pixels in realtime.
+    return specular * clamp(energyComp, vec3(1.0), vec3(1.55));
 }
 
 // Specular anti-aliasing from normal-map / silhouette variance.
@@ -243,7 +245,11 @@ vec3 primaryLightRadiance() {
     if (uFrame.lightCount > 0 && int(uFrame.lights[0].params.x) == 0) {
         return uFrame.lights[0].color.rgb * uFrame.lights[0].color.a;
     }
-    return uFrame.ambientSky.rgb * 2.5;
+    // No lights / no IBL → no fake sun contribution.
+    if (uFrame.lightCount == 0 || uFrame.iblIntensity < 1e-5) {
+        return vec3(0.0);
+    }
+    return uFrame.ambientSky.rgb * 1.35;
 }
 
 // Height contact term reused on direct light for grounding.
@@ -421,11 +427,11 @@ vec3 evalOpenPbrLight(Light light, vec3 N, vec3 V, vec3 worldPos, vec3 baseColor
         float bloomRough = clamp(mix(0.55, 0.82, roughness), 0.4, 0.9);
         vec3 bloomF;
         vec3 bloomSpec = evalMicrofacet(N, V, L, bloomRough, F0, bloomF);
-        float glow = bloomStrength * mix(0.12, 0.28, metalness) * (0.55 + 0.45 * max(F0.r, max(F0.g, F0.b)));
+        float glow = bloomStrength * mix(0.06, 0.14, metalness) * (0.55 + 0.45 * max(F0.r, max(F0.g, F0.b)));
         base += bloomSpec * radiance * NdotL * glow;
         // Tiny additive haze around hot specular peaks.
         float peak = pow(max(dot(N, H), 0.0), mix(12.0, 3.0, bloomRough));
-        base += F0 * radiance * NdotL * peak * glow * 0.35;
+        base += F0 * radiance * NdotL * peak * glow * 0.18;
     }
 
     // Single-bounce ground fill from the key — warm floor reflection without GI.
@@ -459,6 +465,9 @@ vec3 evalOpenPbrLight(Light light, vec3 N, vec3 V, vec3 worldPos, vec3 baseColor
 
 vec3 evalOpenPbrAmbient(vec3 N, vec3 V, vec3 baseColor, float metalness, float roughness,
                         float opaqueWeight) {
+    if (uFrame.iblIntensity < 1e-5) {
+        return vec3(0.0);
+    }
     float hemi = N.y * 0.5 + 0.5;
     // Sharper sky/ground split for readable form (still a cheap hemi).
     hemi = hemi * hemi * (3.0 - 2.0 * hemi);
@@ -486,7 +495,7 @@ vec3 evalOpenPbrAmbient(vec3 N, vec3 V, vec3 baseColor, float metalness, float r
     }
 
     // Roughness blurs env toward irradiance; gloss keeps a brighter sky lobe.
-    vec3 envRadiance = mix(uFrame.ambientSky.rgb * 2.15, irradiance, roughness * roughness);
+    vec3 envRadiance = mix(uFrame.ambientSky.rgb * 1.35, irradiance, roughness * roughness);
     vec3 specular = envSpecular(F0, roughness, NdotV, envRadiance) * ao;
     // Specular occlusion for rough cavities.
     float specOcclusion = clamp(pow(NdotV + ao, exp2(-16.0 * roughness - 1.0)) - 1.0 + ao, 0.0, 1.0);
@@ -496,22 +505,22 @@ vec3 evalOpenPbrAmbient(vec3 N, vec3 V, vec3 baseColor, float metalness, float r
     vec3 sunDir = primaryLightDir();
     vec3 sunRad = primaryLightRadiance();
     vec3 R = reflect(-V, N);
-    float glossExp = mix(96.0, 6.0, roughness);
+    float glossExp = mix(64.0, 6.0, roughness);
     float sun = pow(max(dot(R, sunDir), 0.0), glossExp);
     float sunVis = softNdotL(dot(N, sunDir), 0.05);
-    specular += F0 * sun * sunVis * mix(0.12, 0.018, roughness) * sunRad * ao;
+    specular += F0 * sun * sunVis * mix(0.08, 0.012, roughness) * sunRad * ao;
 
     // Horizon “environment strip” for metals — reads as a room/window reflection.
     float horizon = pow(clamp(1.0 - abs(R.y), 0.0, 1.0), 2.0);
-    specular += F0 * horizon * mix(0.22, 0.04, roughness) * mix(uFrame.ambientGround.rgb, uFrame.ambientSky.rgb, 0.65) * ao;
+    specular += F0 * horizon * mix(0.14, 0.03, roughness) * mix(uFrame.ambientGround.rgb, uFrame.ambientSky.rgb, 0.65) * ao;
 
     // Wide ambient glow lobe (same Physical Glow idea for IBL).
     float bloomStrength = uFrame.displayParams.y;
     if (bloomStrength > 1e-4) {
         float bloomRough = clamp(mix(0.5, 0.85, roughness), 0.4, 0.9);
-        specular += envSpecular(F0, bloomRough, NdotV, envRadiance) * ao * bloomStrength * 0.22;
+        specular += envSpecular(F0, bloomRough, NdotV, envRadiance) * ao * bloomStrength * 0.12;
         float softSun = pow(max(dot(R, sunDir), 0.0), mix(10.0, 2.5, bloomRough));
-        specular += F0 * softSun * sunVis * bloomStrength * 0.06 * sunRad * ao;
+        specular += F0 * softSun * sunVis * bloomStrength * 0.035 * sunRad * ao;
     }
 
     vec3 color = (diffuse + specular) * uFrame.iblIntensity;
@@ -522,9 +531,9 @@ vec3 evalOpenPbrAmbient(vec3 N, vec3 V, vec3 baseColor, float metalness, float r
         vec3 coatF = fresnelSchlickRoughness(NdotV, vec3(coatF0), max(uPush.coatRoughness, 0.04));
         float dark = mix(1.0, uPush.coatDarkening, uPush.coatWeight);
         color *= mix(1.0, (1.0 - coatF.x * 0.9) * dark, uPush.coatWeight);
-        color += coatF * uFrame.ambientSky.rgb * (0.55 * uPush.coatWeight) * uFrame.iblIntensity * ao;
-        float coatSun = pow(max(dot(R, sunDir), 0.0), mix(220.0, 24.0, uPush.coatRoughness));
-        color += coatF * coatSun * sunVis * 0.35 * uPush.coatWeight * uFrame.iblIntensity * ao;
+        color += coatF * uFrame.ambientSky.rgb * (0.35 * uPush.coatWeight) * uFrame.iblIntensity * ao;
+        float coatSun = pow(max(dot(R, sunDir), 0.0), mix(160.0, 24.0, uPush.coatRoughness));
+        color += coatF * coatSun * sunVis * 0.22 * uPush.coatWeight * uFrame.iblIntensity * ao;
     }
     if (uPush.fuzzWeight > 1e-4) {
         float rim = pow(1.0 - NdotV, 2.5);
@@ -634,6 +643,19 @@ vec3 applyDisplayTransform(vec3 linearColor, vec3 worldPos) {
         return vec3(linearToSrgb(c.r), linearToSrgb(c.g), linearToSrgb(c.b));
     }
     return vec3(linearToRec709(c.r), linearToRec709(c.g), linearToRec709(c.b));
+}
+
+// Soft-knee luminance clamp — kills specular fireflies before tonemap without flattening
+// the whole image the way a hard max() would.
+vec3 suppressFireflies(vec3 color) {
+    float lum = max(dot(color, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
+    const float limit = 6.0;
+    if (lum <= limit) {
+        return color;
+    }
+    // Soft shoulder: approaches limit asymptotically as lum grows.
+    float soft = limit * (1.0 - exp(-lum / limit));
+    return color * (soft / lum);
 }
 
 // Fast nearest-Z atlas sample for empty-space probes.
@@ -845,7 +867,8 @@ void main() {
     }
 
     float exposure = max(uFrame.cameraPos.w, 0.01);
-    color = applyDisplayTransform(color * exposure, vWorldPos);
+    color = suppressFireflies(color * exposure);
+    color = applyDisplayTransform(color, vWorldPos);
 
     // Transmission drives transparency (thin-walled stronger).
     if (uPush.transmissionWeight > 1e-4 && metalness < 0.999) {

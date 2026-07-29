@@ -657,8 +657,15 @@ private:
             selectNode(scene.createCameraNode("Camera"));
             markDirty();
         });
-        createBtn("Light", half, [&] {
+        createBtn("Dir Light", half, [&] {
             addLightNode("Directional Light", genesis::SceneLightType::Directional);
+        });
+        ImGui::SameLine();
+        createBtn("Point Light", half, [&] {
+            addLightNode("Point Light", genesis::SceneLightType::Point);
+        });
+        createBtn("Spot Light", half, [&] {
+            addLightNode("Spot Light", genesis::SceneLightType::Spot);
         });
         ImGui::SameLine();
         createBtn("Particles", half, [&] {
@@ -1276,6 +1283,14 @@ private:
         if (ImGui::Checkbox("Enabled", &light.enabled)) markDirty();
         genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::LightEnabled, node_path, 0,
                                    "light_enabled");
+
+        int type_i = static_cast<int>(light.type);
+        const char* type_items[] = {"Directional", "Point", "Spot"};
+        if (ImGui::Combo("Type", &type_i, type_items, 3)) {
+            light.type = static_cast<genesis::SceneLightType>(type_i);
+            markDirty();
+        }
+
         if (ImGui::ColorEdit3("Color", &light.color.x)) markDirty();
         genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::LightColorR, node_path, 0,
                                    "light_r");
@@ -1286,6 +1301,22 @@ private:
         if (ImGui::DragFloat("Intensity", &light.intensity, 0.05f, 0.0f, 100.0f)) markDirty();
         genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::LightIntensity, node_path, 0,
                                    "light_intensity");
+
+        if (light.type == genesis::SceneLightType::Point || light.type == genesis::SceneLightType::Spot) {
+            if (ImGui::DragFloat("Range", &light.range, 0.05f, 0.01f, 1000.0f)) markDirty();
+        }
+        if (light.type == genesis::SceneLightType::Spot) {
+            float inner_deg = glm::degrees(light.inner_cone_radians);
+            float outer_deg = glm::degrees(light.outer_cone_radians);
+            if (ImGui::DragFloat("Inner Cone", &inner_deg, 0.25f, 0.0f, 89.0f)) {
+                light.inner_cone_radians = glm::radians(std::min(inner_deg, outer_deg));
+                markDirty();
+            }
+            if (ImGui::DragFloat("Outer Cone", &outer_deg, 0.25f, 1.0f, 89.0f)) {
+                light.outer_cone_radians = glm::radians(std::max(outer_deg, inner_deg));
+                markDirty();
+            }
+        }
     }
 
     void drawParticleEmitterInspector(genesis::Node& n, const std::string& node_path,
@@ -2191,38 +2222,11 @@ private:
 
     void newBlankScene() {
         runtime_.clear();
-
-        const genesis::NodeId root = runtime_.scene().createEmptyNode("Scene");
-        const genesis::NodeId light =
-            runtime_.scene().createLightNode("Directional Light", genesis::SceneLightType::Directional, root);
-        if (genesis::Node* n = runtime_.scene().find(light)) {
-            n->local.rotation =
-                glm::angleAxis(glm::radians(-52.0f), glm::vec3(1.0f, 0.0f, 0.0f)) *
-                glm::angleAxis(glm::radians(38.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-            n->light->color = glm::vec3(1.0f, 0.96f, 0.88f);
-            n->light->intensity = 3.8f;
-        }
-        const genesis::NodeId fill =
-            runtime_.scene().createLightNode("Sky Fill", genesis::SceneLightType::Directional, root);
-        if (genesis::Node* n = runtime_.scene().find(fill)) {
-            n->local.rotation =
-                glm::angleAxis(glm::radians(-25.0f), glm::vec3(1.0f, 0.0f, 0.0f)) *
-                glm::angleAxis(glm::radians(-130.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-            n->light->color = glm::vec3(0.55f, 0.65f, 0.95f);
-            n->light->intensity = 0.7f;
-        }
-
-        const std::uint32_t cube_mesh = runtime_.addMesh("Cube", genesis::createCubeMesh(renderer().context()));
-        const std::uint32_t cube_mat = runtime_.addDefaultPbrMaterial("Cube Material");
-        const genesis::NodeId cube = runtime_.scene().createMeshNode("Cube", cube_mesh, root, cube_mat);
-        if (genesis::Node* n = runtime_.scene().find(cube)) {
-            n->local.position = glm::vec3(0.0f, 0.0f, 0.0f);
-        }
-
+        runtime_.scene().createEmptyNode("Scene");
         runtime_.scene().active_output_camera.reset();
         session_.document_path = genesis::uniqueProjectPath("Untitled Scene");
         session_.dirty = true;
-        selectNode(cube);
+        selection_.clear();
         use_editor_output_ = true;
         resetEditorCamera();
         syncEditorAfterDocumentLoad();
@@ -2380,7 +2384,26 @@ private:
     void addLightNode(const char* prefix, genesis::SceneLightType type) {
         static int counter = 1;
         const std::string name = std::string(prefix) + " " + std::to_string(counter++);
-        selectNode(runtime_.scene().createLightNode(name, type, std::nullopt));
+        const genesis::NodeId id = runtime_.scene().createLightNode(name, type, std::nullopt);
+        if (genesis::Node* n = runtime_.scene().find(id)) {
+            if (type == genesis::SceneLightType::Directional) {
+                n->local.rotation =
+                    glm::angleAxis(glm::radians(-52.0f), glm::vec3(1.0f, 0.0f, 0.0f)) *
+                    glm::angleAxis(glm::radians(38.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+                n->light->intensity = 3.0f;
+            } else if (type == genesis::SceneLightType::Point) {
+                n->local.position = glm::vec3(0.0f, 2.0f, 0.0f);
+                n->light->intensity = 8.0f;
+                n->light->range = 12.0f;
+            } else {
+                n->local.position = glm::vec3(0.0f, 2.5f, 2.5f);
+                n->local.rotation =
+                    glm::angleAxis(glm::radians(-35.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+                n->light->intensity = 12.0f;
+                n->light->range = 16.0f;
+            }
+        }
+        selectNode(id);
         markDirty();
     }
 

@@ -12,9 +12,6 @@
         "use_scene_camera": false
       }
     ],
-    "bindings": {
-      "target_node": "Scene/Cube",
-      "light_node": "Scene/Directional Light"
-    }
+    "bindings": {}
   }
 }

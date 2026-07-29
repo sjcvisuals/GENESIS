@@ -12,48 +12,7 @@
         "rotation": [0.0, 0.0, 0.0, 1.0],
         "scale": [1.0, 1.0, 1.0]
       }
-    },
-    {
-      "path": "Scene/Directional Light",
-      "name": "Directional Light",
-      "parent": "Scene",
-      "visible": true,
-      "light": {
-        "type": "directional",
-        "color": [1.0, 0.98, 0.94],
-        "intensity": 1.0,
-        "enabled": true,
-        "range": 10.0,
-        "inner_cone_degrees": 20.0,
-        "outer_cone_degrees": 30.0
-      },
-      "transform": {
-        "position": [0.0, 0.0, 0.0],
-        "rotation": [-0.383493, 0.30204, 0.131901, 0.864788],
-        "scale": [1.0, 1.0, 1.0]
-      }
-    },
-    {
-      "path": "Scene/Cube",
-      "name": "Cube",
-      "parent": "Scene",
-      "visible": true,
-      "pickable": true,
-      "mesh": "Cube",
-      "material": "Cube Material",
-      "transform": {
-        "position": [0.0, 0.0, 0.0],
-        "rotation": [0.0, 0.0, 0.0, 1.0],
-        "scale": [1.0, 1.0, 1.0]
-      }
     }
   ],
-  "materials": [
-    {
-      "name": "Cube Material",
-      "base_color": [0.82, 0.38, 0.26, 1.0],
-      "metallic": 0.12,
-      "roughness": 0.38
-    }
-  ]
+  "materials": []
 }

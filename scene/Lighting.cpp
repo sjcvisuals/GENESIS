@@ -63,20 +63,10 @@ FrameUniforms buildFrameUniforms(const Scene& scene, const float* view_proj_col_
     u.camera_pos[2] = camera_position.z;
     u.camera_pos[3] = color ? std::max(color->exposure, 0.01f) : 1.0f;
 
-    // Studio + window ambient: cooler sky, warmer ground bounce.
-    u.ibl_intensity = 1.05f;
-    writeVec4(u.ambient_sky, 0.20f, 0.24f, 0.32f, 1.0f);
-    writeVec4(u.ambient_ground, 0.065f, 0.055f, 0.048f, 1.0f);
-
-    u.fog_density = 0.0032f;
-    u.fog_height = 0.04f;
-    // fog_color.a carries film-grain strength (keeps FrameUniforms at 672 bytes).
-    const float grain = color ? std::clamp(color->grain_strength, 0.0f, 0.2f) : 0.028f;
-    writeVec4(u.fog_color, 0.18f, 0.20f, 0.24f, grain);
-
+    const float grain = color ? std::clamp(color->grain_strength, 0.0f, 0.2f) : 0.018f;
     u.display_params[0] = color ? static_cast<float>(static_cast<int>(color->display)) : 0.0f;
-    u.display_params[1] = color ? std::clamp(color->bloom_strength, 0.0f, 2.0f) : 0.55f;
-    u.display_params[2] = color ? std::clamp(color->vignette_strength, 0.0f, 1.0f) : 0.32f;
+    u.display_params[1] = color ? std::clamp(color->bloom_strength, 0.0f, 2.0f) : 0.18f;
+    u.display_params[2] = color ? std::clamp(color->vignette_strength, 0.0f, 1.0f) : 0.22f;
     u.display_params[3] = time_seconds;
 
     int count = 0;
@@ -87,6 +77,24 @@ FrameUniforms buildFrameUniforms(const Scene& scene, const float* view_proj_col_
         ++count;
     }
     u.light_count = count;
+
+    if (count == 0) {
+        // No analytic lights → no residual studio ambient / fog fill.
+        u.ibl_intensity = 0.0f;
+        writeVec4(u.ambient_sky, 0.0f, 0.0f, 0.0f, 1.0f);
+        writeVec4(u.ambient_ground, 0.0f, 0.0f, 0.0f, 1.0f);
+        u.fog_density = 0.0f;
+        u.fog_height = 0.0f;
+        writeVec4(u.fog_color, 0.0f, 0.0f, 0.0f, grain);
+    } else {
+        // Modest hemisphere fill only when the scene actually has lights.
+        u.ibl_intensity = 0.55f;
+        writeVec4(u.ambient_sky, 0.08f, 0.10f, 0.14f, 1.0f);
+        writeVec4(u.ambient_ground, 0.028f, 0.024f, 0.020f, 1.0f);
+        u.fog_density = 0.0018f;
+        u.fog_height = 0.04f;
+        writeVec4(u.fog_color, 0.10f, 0.11f, 0.13f, grain);
+    }
     return u;
 }
 
