@@ -51,21 +51,31 @@ Usage in PIXERA
 
 If the resource imports but timeline drag fails
 -----------------------------------------------
-1. Rebuild + reinstall (Release Remover DLL):
+1. Fully quit PIXERA (so the old DLL unlocks), then:
 
+     git pull
      .\BUILD-AND-RUN.bat
      powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-pixera-remover.ps1
 
-2. Check the file log next to the DLL (written during stream init):
+2. Confirm the install printed BUILD_STAMP with:
+     remover-timeline-v3-cpu-first-20260731
 
+3. In PIXERA, re-browse to:
+     <PIXERA>\data\rxExt\ExtGenesisRemover\ExtGenesisRemover.dll
+   (not ExtGenesis, not Documents\...\out\ unless you intend to)
+
+4. Open the always-on log (created even if timeline init fails):
+
+     %TEMP%\ExtGenesisRemover.log
+
+   If that file is missing after loading the resource, PIXERA is not loading
+   this DLL at all (wrong path / locked old copy / need restart).
+
+5. Optional second log next to the DLL:
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
-     or
-     <repo>\out\ExtGenesisRemover\remover-init.log
 
-3. Check PIXERA logs for "GENESIS Remover" (Vulkan / adapter LUID / share handle).
-
-Timeline init only creates Vulkan + a shared output sampler. Video In, ONNX,
-and the async matte worker start later (after the stream is accepted).
+Timeline init now accepts with a host CPU placeholder texture (ExtSampleCPU
+style). Vulkan / Video In / ONNX start only after the stream is accepted.
 
 If PIXERA says "Can Not Load Pixera Extension"
 ---------------------------------------------
@@ -75,5 +85,6 @@ Typical causes:
   - browsed a Debug build (BUILD-AND-RUN now ships Release for Pixera DLLs)
   - copied Remover into data\rxExt\ExtGenesis\ by mistake
   - VC++ 2015-2022 x64 redistributable missing
+  - PIXERA still has the old DLL locked — fully quit and reinstall
 
 See docs/video-bg-remover.md.

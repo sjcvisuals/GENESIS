@@ -1,16 +1,15 @@
 #include "Input.h"
 
 #include "ModulePaths.h"
+#include "RemoverLog.h"
 #include "common/string.h"
 #include "matting/BgRemover.hpp"
 #include "platform/Paths.hpp"
 #include "renderer/vulkan/ExternalRenderTarget.hpp"
 
 #include <algorithm>
-#include <chrono>
+#include <array>
 #include <format>
-#include <fstream>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -22,39 +21,27 @@ constexpr auto kHandleType = HandleType::OPAQUE_WIN32;
 #else
 constexpr auto kHandleType = HandleType::OPAQUE_FD;
 #endif
-
-std::mutex g_log_mutex;
-
-void appendInitLog(const std::string& line) {
-    try {
-        const auto dir = extensionModuleDirectory();
-        if (dir.empty()) {
-            return;
-        }
-        std::lock_guard<std::mutex> lock(g_log_mutex);
-        std::ofstream out(dir / "remover-init.log", std::ios::app);
-        if (!out) {
-            return;
-        }
-        const auto now = std::chrono::system_clock::now();
-        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            now.time_since_epoch())
-                            .count();
-        out << ms << " " << line << '\n';
-    } catch (...) {
-        // Never throw from diagnostics.
-    }
-}
-
 } // namespace
 
 Input::Input(std::uint64_t adapter_luid, ValueSet settings)
     : adapter_luid_(adapter_luid), settings_(std::move(settings)) {
+    // HostContext is not injected yet (see rxext_client InputStream ctor flow).
+    // Only store settings here — register parameters + textures in initialize().
+    removerLog(std::format("Input ctor adapter_luid={:016x}", adapter_luid_));
+}
+
+Input::~Input() {
+    removerLog("Input dtor");
+}
+
+void Input::registerParameters() {
+    if (params_registered_) {
+        return;
+    }
     const std::filesystem::path module_dir = extensionModuleDirectory();
     const std::filesystem::path roots[] = {module_dir, module_dir / "assets"};
     ::genesis::setAssetSearchRoots(roots);
 
-    // Match ExtGenesis / ExtSampleD3D parameter surface expected by PIXERA timeline.
     sampler_ = add_output_parameter<ParameterTexture>(ParameterNames::sampler);
 
     time_ = add_parameter<ParameterValue>("time");
@@ -70,28 +57,64 @@ Input::Input(std::uint64_t adapter_luid, ValueSet settings)
     quality_->set_property<std::vector<std::string>>(PropertyNames::enum_names,
                                                       {"Fast", "Balanced", "Quality"});
     quality_->set_value(1);
+    params_registered_ = true;
+    removerLog("parameters registered");
 }
 
-Input::~Input() = default;
+void Input::publishPlaceholderSampler() {
+    if (!sampler_) {
+        return;
+    }
+    // ExtSampleCPU pattern: host-owned texture, no Vulkan / share handle.
+    // Guarantees PIXERA can accept the stream even if GPU init fails later.
+    TextureDesc desc{};
+    desc.width = static_cast<std::size_t>(std::max<std::uint32_t>(width_, 2));
+    desc.height = static_cast<std::size_t>(std::max<std::uint32_t>(height_, 2));
+    desc.format = Format::R8G8B8A8_UNORM;
+    desc.is_target = true;
+    sampler_->set_texture(host().create_texture(desc));
+
+    // Transparent black so timeline compositing stays clean until GPU path is up.
+    const std::size_t pixels = desc.width * desc.height;
+    std::vector<std::uint32_t> zeros(pixels, 0u);
+    BufferDesc buffer{};
+    buffer.data = zeros.data();
+    buffer.pitch = desc.width * sizeof(std::uint32_t);
+    buffer.size = buffer.pitch * desc.height;
+    host().upload_texture(sampler_->texture(), buffer, true, []() noexcept {});
+    placeholder_published_ = true;
+    shared_output_published_ = false;
+    removerLog(std::format("placeholder sampler {}x{}", desc.width, desc.height));
+}
 
 bool Input::initialize() noexcept try {
-    // Use const char* default so ValueSet::get returns std::string (MSVC std::format
-    // cannot format rxext::string / ptl::string).
     const std::string handle = settings_.get(SettingNames::handle, "main");
-    appendInitLog(std::format("initialize begin handle='{}' adapter_luid={:016x}", handle,
-                              adapter_luid_));
-    host().log_info(std::format("initializing GENESIS Remover stream '{}' (adapter_luid={:016x})",
-                                handle, adapter_luid_));
-    if (!update_settings(std::move(settings_))) {
-        appendInitLog("initialize FAILED: update_settings returned false");
-        return false;
+    removerLog(std::format("initialize begin handle='{}' adapter_luid={:016x}", handle,
+                           adapter_luid_));
+    host().log_info(std::format("initializing GENESIS Remover stream '{}' ({})", handle,
+                                kRemoverBuildStamp));
+
+    registerParameters();
+
+    width_ = settings_.get<std::uint32_t>(SettingNames::resolution_x, 1920);
+    height_ = settings_.get<std::uint32_t>(SettingNames::resolution_y, 1080);
+    if (const string stream_luid = settings_.get(SettingNames::adapter_luid, string{});
+        !stream_luid.empty()) {
+        adapter_luid_ = common::from_hex_string<std::uint64_t>(stream_luid);
     }
-    appendInitLog(std::format("initialize OK {}x{} output_ready={}", width_, height_,
-                              pipeline_ && pipeline_->hasOutput()));
+
+    // CRITICAL: accept the timeline stream with a CPU placeholder.
+    // Do not create Vulkan/ONNX here — that is what previously made PIXERA show
+    // the generic "dongle / corrupted / path" dialog when initialize() failed.
+    publishPlaceholderSampler();
+    removerLog("initialize OK (cpu-first placeholder)");
     return true;
 } catch (const std::exception& ex) {
-    appendInitLog(std::format("initialize exception: {}", ex.what()));
-    host().log_error(std::format("GENESIS Remover init failed: {}", ex.what()));
+    removerLog(std::format("initialize exception: {}", ex.what()));
+    try {
+        host().log_error(std::format("GENESIS Remover init failed: {}", ex.what()));
+    } catch (...) {
+    }
     return false;
 }
 
@@ -99,61 +122,90 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     settings_ = std::move(settings);
     width_ = settings_.get<std::uint32_t>(SettingNames::resolution_x, 1920);
     height_ = settings_.get<std::uint32_t>(SettingNames::resolution_y, 1080);
-
-    // PIXERA often injects the real GPU LUID on the stream, not only the device.
     if (const string stream_luid = settings_.get(SettingNames::adapter_luid, string{});
         !stream_luid.empty()) {
         adapter_luid_ = common::from_hex_string<std::uint64_t>(stream_luid);
     }
-
-    appendInitLog(std::format("update_settings {}x{} adapter_luid={:016x}", width_, height_,
-                              adapter_luid_));
+    removerLog(std::format("update_settings {}x{} adapter={:016x}", width_, height_,
+                           adapter_luid_));
 
     if (pipeline_ && pipeline_adapter_luid_ != adapter_luid_) {
-        host().log_info(std::format("GENESIS Remover recreating pipeline for adapter {:016x}",
-                                    adapter_luid_));
-        appendInitLog("recreating pipeline for new adapter");
         pipeline_.reset();
         processing_enabled_ = false;
+        shared_output_published_ = false;
+        gpu_failed_ = false;
     }
 
-    // Timeline-safe path (mirrors ExtSampleD3D): publish shared OUTPUT sampler only.
-    // Do NOT create video_in, load ONNX, or start async during initialize().
-    ensurePipeline();
-    pipeline_->resize(width_, height_);
-    publishOutput();
-
-    host().log_info(std::format("GENESIS Remover output ready {}x{} (matte deferred)", width_,
-                                height_));
-    appendInitLog(std::format("output published {}x{}", width_, height_));
+    // Keep stream alive: refresh placeholder if GPU path is not up yet.
+    if (!shared_output_published_) {
+        if (!params_registered_) {
+            registerParameters();
+        }
+        publishPlaceholderSampler();
+    } else if (pipeline_) {
+        try {
+            pipeline_->resize(width_, height_);
+            publishSharedOutput();
+        } catch (const std::exception& ex) {
+            removerLog(std::format("resize/publish after settings failed: {}", ex.what()));
+            publishPlaceholderSampler();
+        }
+    }
     return true;
 } catch (const std::exception& ex) {
-    appendInitLog(std::format("update_settings exception: {}", ex.what()));
+    removerLog(std::format("update_settings exception: {}", ex.what()));
     host().log_error(std::format("GENESIS Remover settings failed: {}", ex.what()));
-    return false;
+    // Still return true with placeholder so PIXERA does not unload the clip.
+    try {
+        publishPlaceholderSampler();
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
-void Input::ensurePipeline() {
+bool Input::tryEnsureGpuPipeline() {
     if (pipeline_) {
-        return;
+        return true;
+    }
+    if (gpu_failed_) {
+        return false;
     }
     try {
-        appendInitLog(std::format("creating RemoverPipeline adapter={:016x}", adapter_luid_));
+        removerLog(std::format("creating RemoverPipeline adapter={:016x}", adapter_luid_));
         pipeline_ = std::make_unique<::genesis::RemoverPipeline>(adapter_luid_);
         pipeline_adapter_luid_ = adapter_luid_;
-        appendInitLog("RemoverPipeline VulkanContext OK");
+        pipeline_->resize(width_, height_);
+        publishSharedOutput();
+        removerLog("RemoverPipeline GPU output published");
+        host().log_info(std::format("GENESIS Remover GPU ready {}x{}", width_, height_));
+        return true;
     } catch (const std::exception& ex) {
-        if (adapter_luid_ == 0) {
-            throw;
+        if (adapter_luid_ != 0) {
+            removerLog(std::format("pipeline adapter fail ({}); retry LUID 0", ex.what()));
+            try {
+                pipeline_ = std::make_unique<::genesis::RemoverPipeline>(0);
+                pipeline_adapter_luid_ = 0;
+                adapter_luid_ = 0;
+                pipeline_->resize(width_, height_);
+                publishSharedOutput();
+                removerLog("RemoverPipeline GPU output published (default GPU)");
+                return true;
+            } catch (const std::exception& ex2) {
+                removerLog(std::format("GPU pipeline failed: {}", ex2.what()));
+                host().log_error(std::format("GENESIS Remover GPU unavailable: {}", ex2.what()));
+                pipeline_.reset();
+                gpu_failed_ = true;
+                publishPlaceholderSampler();
+                return false;
+            }
         }
-        host().log_warning(std::format(
-            "GENESIS Remover pipeline failed for adapter {:016x} ({}), retrying default GPU",
-            adapter_luid_, ex.what()));
-        appendInitLog(std::format("pipeline adapter fail ({}); retry LUID 0", ex.what()));
-        pipeline_ = std::make_unique<::genesis::RemoverPipeline>(0);
-        pipeline_adapter_luid_ = 0;
-        adapter_luid_ = 0;
-        appendInitLog("RemoverPipeline VulkanContext OK (default GPU)");
+        removerLog(std::format("GPU pipeline failed: {}", ex.what()));
+        host().log_error(std::format("GENESIS Remover GPU unavailable: {}", ex.what()));
+        pipeline_.reset();
+        gpu_failed_ = true;
+        publishPlaceholderSampler();
+        return false;
     }
 }
 
@@ -181,11 +233,11 @@ void Input::enableProcessing() {
     processing_enabled_ = true;
     host().log_info(std::format("GENESIS Remover processing enabled ({})",
                                 pipeline_->remover().status()));
-    appendInitLog(std::format("processing enabled status={}", pipeline_->remover().status()));
+    removerLog(std::format("processing enabled status={}", pipeline_->remover().status()));
 }
 
-void Input::publishOutput() {
-    if (!pipeline_ || !sampler_) {
+void Input::publishSharedOutput() {
+    if (!pipeline_ || !sampler_ || !pipeline_->hasOutput()) {
         return;
     }
     const auto& exp = pipeline_->output().colorExport();
@@ -206,6 +258,8 @@ void Input::publishOutput() {
         exp.dedicated,
     };
     sampler_->set_texture(host().create_texture(desc));
+    shared_output_published_ = true;
+    placeholder_published_ = false;
 }
 
 void Input::publishVideoIn() {
@@ -215,8 +269,7 @@ void Input::publishVideoIn() {
     update_input_texture(*video_in_, [&](const TextureDesc& desc) {
         width_ = static_cast<std::uint32_t>(desc.width);
         height_ = static_cast<std::uint32_t>(desc.height);
-        appendInitLog(std::format("video_in allocate {}x{}", width_, height_));
-        // Size output first, then create matching video_in (never during initialize).
+        removerLog(std::format("video_in allocate {}x{}", width_, height_));
         pipeline_->resize(width_, height_);
         pipeline_->ensureVideoIn();
         const auto& exp = pipeline_->videoIn().exportInfo();
@@ -231,7 +284,7 @@ void Input::publishVideoIn() {
             exp.dedicated,
         };
         video_in_->set_texture(host().create_texture(shared));
-        publishOutput();
+        publishSharedOutput();
         enableProcessing();
     });
 }
@@ -242,11 +295,14 @@ ValueSet Input::get_state() noexcept {
     int res_y = static_cast<int>(height_);
     Format format = Format::R8G8B8A8_UNORM;
     if (sampler_) {
-        const auto desc = sampler_->texture().desc();
-        if (desc.width > 0 && desc.height > 0) {
-            res_x = desc.width;
-            res_y = desc.height;
-            format = desc.format;
+        try {
+            const auto desc = sampler_->texture().desc();
+            if (desc.width > 0 && desc.height > 0) {
+                res_x = desc.width;
+                res_y = desc.height;
+                format = desc.format;
+            }
+        } catch (...) {
         }
     }
     state.set(StateNames::resolution_x, res_x);
@@ -264,16 +320,16 @@ string Input::get_property(string_view name) noexcept {
 }
 
 bool Input::update() noexcept try {
-    if (!pipeline_) {
+    // Soft-fail GPU: never return false just because Vulkan/ONNX is unavailable.
+    if (!tryEnsureGpuPipeline()) {
         return true;
     }
-    // Match ExtSampleD3D: allocate input shared texture only after stream is alive.
     publishVideoIn();
     return true;
 } catch (const std::exception& ex) {
-    appendInitLog(std::format("update exception: {}", ex.what()));
+    removerLog(std::format("update exception: {}", ex.what()));
     host().log_error(std::format("GENESIS Remover update failed: {}", ex.what()));
-    return false;
+    return true;
 }
 
 SyncDesc Input::before_render() noexcept {
@@ -282,23 +338,22 @@ SyncDesc Input::before_render() noexcept {
 
 RenderResult Input::render() noexcept try {
     if (!pipeline_) {
-        host().log_error("GENESIS Remover render failed: pipeline missing");
-        return RenderResult::Failed;
+        return RenderResult::Succeeded;
     }
-    // If video is connected, enable matte; otherwise keep publishing transparent frames.
     if (pipeline_->hasVideoIn() && !processing_enabled_) {
         enableProcessing();
     }
     std::string error;
     if (!pipeline_->processFrame(&error)) {
         host().log_error(std::format("GENESIS Remover frame failed: {}", error));
-        return RenderResult::Failed;
+        // Keep the clip alive on the timeline.
+        return RenderResult::Succeeded;
     }
     return RenderResult::Succeeded;
 } catch (const std::exception& ex) {
-    appendInitLog(std::format("render exception: {}", ex.what()));
+    removerLog(std::format("render exception: {}", ex.what()));
     host().log_error(std::format("GENESIS Remover render failed: {}", ex.what()));
-    return RenderResult::Failed;
+    return RenderResult::Succeeded;
 }
 
 SyncDesc Input::after_render() noexcept {

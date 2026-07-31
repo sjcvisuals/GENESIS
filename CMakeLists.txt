@@ -430,6 +430,7 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         ${EXT_REMOVER_DIR}/src/Device.cpp
         ${EXT_REMOVER_DIR}/src/Input.cpp
         ${EXT_REMOVER_DIR}/src/ModulePaths.cpp
+        ${EXT_REMOVER_DIR}/src/RemoverLog.cpp
         ${RX_SDK_DIR}/libs/common/string.cpp
         ${EXT_REMOVER_DIR}/ExtGenesisRemover.def
     )

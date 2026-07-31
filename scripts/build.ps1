@@ -206,6 +206,17 @@ function Sync-OutFolder {
         if ($remSize -lt 200000) {
             throw "ExtGenesisRemover.dll looks too small ($remSize bytes) - build likely incomplete"
         }
+
+        $stamp = @"
+build=remover-timeline-v3-cpu-first-20260731
+dll=$remOut\ExtGenesisRemover.dll
+time=$(Get-Date -Format o)
+size=$remSize
+log=%TEMP%\ExtGenesisRemover.log
+"@
+        Set-Content -Path (Join-Path $remOut "BUILD_STAMP.txt") -Value $stamp -Encoding ASCII
+        Write-Host "Wrote BUILD_STAMP.txt (prove PIXERA is using this build)"
+        Write-Host "Timeline diagnostics log: %TEMP%\ExtGenesisRemover.log"
     }
 
     # Clear Mark-of-the-Web / Zone.Identifier so PIXERA can LoadLibrary from out\.

@@ -1,19 +1,26 @@
 #include "Device.h"
 
 #include "Input.h"
+#include "RemoverLog.h"
 #include "common/string.h"
 #include "rxext_util.h"
 
+#include <format>
+
 namespace rxext::genesis_remover {
 
-Device::Device(ValueSet settings) : settings_(std::move(settings)) {}
+Device::Device(ValueSet settings) : settings_(std::move(settings)) {
+    removerLog("Device ctor");
+}
 
 bool Device::initialize() noexcept try {
     const string luid_hex = settings_.get(SettingNames::adapter_luid, string("0000000000000000"));
     adapter_luid_ = common::from_hex_string<std::uint64_t>(luid_hex);
+    removerLog(std::format("Device::initialize adapter_luid={:016x}", adapter_luid_));
     host().log_info(std::format("GENESIS Remover device ready (adapter_luid={:016x})", adapter_luid_));
     return true;
 } catch (const std::exception& ex) {
+    removerLog(std::format("Device::initialize exception: {}", ex.what()));
     host().log_error(std::format("GENESIS Remover device init failed: {}", ex.what()));
     return false;
 }
@@ -32,6 +39,7 @@ string Device::get_property(string_view name) noexcept {
 }
 
 vector<ValueSet> Device::enumerate_stream_settings() noexcept {
+    removerLog("Device::enumerate_stream_settings");
     // Use the same stream identity shape as ExtGenesis ("Main"/"main") so PIXERA
     // timeline instantiation follows the known-good path.
     ValueSet stream;
@@ -43,8 +51,10 @@ vector<ValueSet> Device::enumerate_stream_settings() noexcept {
 }
 
 InputStream* Device::create_input_stream(ValueSet settings) noexcept try {
+    removerLog("Device::create_input_stream");
     return new Input(adapter_luid_, std::move(settings));
 } catch (const std::exception& ex) {
+    removerLog(std::format("create_input_stream exception: {}", ex.what()));
     host().log_error(ex.what());
     return nullptr;
 }

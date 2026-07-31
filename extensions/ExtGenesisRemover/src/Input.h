@@ -23,9 +23,11 @@ public:
     SyncDesc after_render() noexcept override;
 
 private:
-    void ensurePipeline();
+    void registerParameters();
+    void publishPlaceholderSampler();
+    bool tryEnsureGpuPipeline();
     void applyMatteSettings();
-    void publishOutput();
+    void publishSharedOutput();
     void publishVideoIn();
     void enableProcessing();
 
@@ -39,7 +41,11 @@ private:
     std::unique_ptr<::genesis::RemoverPipeline> pipeline_;
     std::uint32_t width_ = 1920;
     std::uint32_t height_ = 1080;
+    bool params_registered_ = false;
+    bool placeholder_published_ = false;
+    bool shared_output_published_ = false;
     bool processing_enabled_ = false;
+    bool gpu_failed_ = false;
 };
 
 } // namespace rxext::genesis_remover
