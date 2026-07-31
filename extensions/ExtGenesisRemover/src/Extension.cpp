@@ -1,3 +1,4 @@
+#include "WinPrefix.h"
 #include "Extension.h"
 
 #include "Device.h"

@@ -1,14 +1,14 @@
 #pragma once
 
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
+#include "WinPrefix.h"
+
+// Parse RenderBridge headers before D3D/Windows (ExtSampleD3D order).
+#include "rxext_client.h"
 
 #include "ComPointer.h"
 #include "d3d11/d3d11.h"
 #include "matting/AsyncMatteWorker.hpp"
 #include "matting/BgRemover.hpp"
-#include "rxext_client.h"
 
 #include <cstdint>
 #include <memory>

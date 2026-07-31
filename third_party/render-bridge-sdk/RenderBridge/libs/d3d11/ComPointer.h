@@ -1,5 +1,7 @@
 #pragma once
 
+#include <type_traits>
+#include <utility>
 #include <combaseapi.h>
 
 template<typename T>

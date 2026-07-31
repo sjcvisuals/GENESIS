@@ -1,8 +1,5 @@
+#include "WinPrefix.h"
 #include "Input.h"
-
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
 
 #include "ModulePaths.h"
 #include "RemoverLog.h"

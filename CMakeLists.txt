@@ -456,6 +456,11 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         WIN32_LEAN_AND_MEAN
         GENESIS_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders/spv"
     )
+    # Force WinPrefix into every TU so Windows min/max macros cannot break ptl.
+    if(MSVC)
+        target_compile_options(ExtGenesisRemover PRIVATE
+            "/FI${EXT_REMOVER_DIR}/src/WinPrefix.h")
+    endif()
     set_target_properties(ExtGenesisRemover PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/rxExt/ExtGenesisRemover"
     )
