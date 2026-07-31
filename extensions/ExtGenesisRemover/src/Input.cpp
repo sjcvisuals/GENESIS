@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstring>
 #include <d3d11_4.h>
+#include <d3dcompiler.h>
 #include <format>
 #include <stdexcept>
 #include <string>
@@ -69,6 +70,56 @@ std::uint8_t sampleCenterAlpha(const std::uint8_t* rgba, std::uint32_t w, std::u
     return rgba[idx];
 }
 
+// Continuous FrameCounter ticks can render before PIXERA fills Video In → all-zero
+// frames. Reject those so we keep the last good output instead of going black.
+bool hasVideoSignal(const std::uint8_t* rgba, std::size_t bytes) {
+    if (!rgba || bytes < 4) {
+        return false;
+    }
+    unsigned max_c = 0;
+    for (std::size_t i = 0; i + 3 < bytes; i += 64) { // stride ~16 pixels
+        max_c = std::max(max_c, static_cast<unsigned>(rgba[i + 0]));
+        max_c = std::max(max_c, static_cast<unsigned>(rgba[i + 1]));
+        max_c = std::max(max_c, static_cast<unsigned>(rgba[i + 2]));
+        if (max_c > 12) {
+            return true;
+        }
+    }
+    return max_c > 12;
+}
+
+// Reject fully-transparent matte results (failed RVM / empty alpha) that composite as black.
+bool matteHasCoverage(const std::uint8_t* rgba, std::uint32_t w, std::uint32_t h) {
+    if (!rgba || w == 0 || h == 0) {
+        return false;
+    }
+    const std::size_t pixels = static_cast<std::size_t>(w) * h;
+    const std::size_t step = std::max<std::size_t>(1, pixels / 4096u);
+    std::size_t hits = 0;
+    unsigned max_a = 0;
+    for (std::size_t i = 0; i < pixels; i += step) {
+        const unsigned a = rgba[i * 4u + 3u];
+        max_a = std::max(max_a, a);
+        if (a > 16) {
+            ++hits;
+        }
+    }
+    return max_a > 32 && hits >= 8;
+}
+
+constexpr const char* kOpaquePs = R"(
+struct VSOutput {
+  float4 Position: SV_Position;
+  float2 Uv: TEXCOORD0;
+};
+sampler sample_linear : register(s0);
+Texture2D u_texture : register(t0);
+float4 PSMain(VSOutput input) : SV_Target {
+  float4 c = u_texture.Sample(sample_linear, input.Uv);
+  return float4(c.rgb, 1.0);
+}
+)";
+
 } // namespace
 
 Input::Input(std::shared_ptr<d3d11::Device> d3d_device, ValueSet settings)
@@ -124,6 +175,17 @@ bool Input::initialize() noexcept try {
 
     // Full-frame blit (1.0). ExtSampleD3D uses 2/3 for a decorative inset.
     quad_ = std::make_unique<d3d11::Quad>(d3d_device_->device(), 1.0f);
+    {
+        ComPointer<ID3DBlob> blob;
+        ComPointer<ID3DBlob> errors;
+        if (FAILED(D3DCompile(kOpaquePs, std::strlen(kOpaquePs), nullptr, nullptr, nullptr, "PSMain",
+                              "ps_5_0", 0, 0, &blob, &errors)) ||
+            !blob ||
+            FAILED(d3d_device_->device()->CreatePixelShader(blob->GetBufferPointer(), blob->GetBufferSize(),
+                                                            nullptr, &opaque_ps_))) {
+            removerLog("opaque passthrough PS compile/create failed; GPU blit may stay transparent");
+        }
+    }
 
     if (!update_settings(std::move(settings_))) {
         removerLog("initialize FAILED update_settings");
@@ -168,7 +230,7 @@ void Input::clearOutputTransparent() {
     d3d_device_->device_context()->ClearRenderTargetView(output_tex_->render_target_view(), clear);
 }
 
-void Input::blitPassthrough() {
+void Input::blitPassthroughOpaque() {
     if (!output_tex_ || !video_in_tex_ || !quad_) {
         return;
     }
@@ -178,8 +240,17 @@ void Input::blitPassthrough() {
     const D3D11_VIEWPORT vp{0.f, 0.f, static_cast<FLOAT>(output_tex_->width()),
                             static_cast<FLOAT>(output_tex_->height()), 0.f, 1.f};
     ctx->RSSetViewports(1, &vp);
-    clearOutputTransparent();
+    // Opaque clear first; PS forces alpha=1 so applies_alpha compositing stays visible.
+    const float clear[4] = {0.f, 0.f, 0.f, 1.f};
+    ctx->ClearRenderTargetView(rtv, clear);
     quad_->draw(ctx, video_in_tex_->shader_resource_view());
+    if (opaque_ps_) {
+        // Re-draw with force-opaque PS (Quad::draw binds its own PS; override + draw again).
+        ctx->PSSetShader(opaque_ps_, nullptr, 0);
+        auto* srv = video_in_tex_->shader_resource_view();
+        ctx->PSSetShaderResources(0, 1, &srv);
+        ctx->Draw(4, 0);
+    }
 }
 
 void Input::ensureStaging(std::uint32_t width, std::uint32_t height, DXGI_FORMAT format) {
@@ -231,6 +302,8 @@ bool Input::readVideoInRgba(std::vector<std::uint8_t>& out_rgba) {
     auto* ctx = d3d_device_->device_context();
     // CopyResource is void; mismatched formats fail silently and leave staging empty.
     ctx->CopyResource(staging_read_, video_in_tex_->texture());
+    // Shared-texture writes from PIXERA may need a flush before CPU Map sees them.
+    ctx->Flush();
 
     D3D11_MAPPED_SUBRESOURCE mapped{};
     if (FAILED(ctx->Map(staging_read_, 0, D3D11_MAP_READ, 0, &mapped))) {
@@ -439,10 +512,14 @@ RenderResult Input::render() noexcept try {
         return RenderResult::Succeeded;
     }
 
-    // No Video In yet: transparent clear (safe while scrubbing).
+    // No Video In yet: only clear if we never had a good frame (avoid wiping a hold).
     if (!video_in_tex_) {
-        clearOutputTransparent();
-        logRenderPathOnce("no_video_in_clear", 0);
+        if (!had_good_output_) {
+            clearOutputTransparent();
+            logRenderPathOnce("no_video_in_clear", 0);
+        } else {
+            logRenderPathOnce("no_video_in_hold", 0);
+        }
         return RenderResult::Succeeded;
     }
 
@@ -453,15 +530,27 @@ RenderResult Input::render() noexcept try {
     const auto h = static_cast<std::uint32_t>(video_in_tex_->height());
     const bool size_ok = output_tex_->width() == w && output_tex_->height() == h;
 
-    // Prefer CPU opaque passthrough until matte is ready. Live/webcam textures often
-    // carry alpha=0; with applies_alpha=true a plain GPU blit composites as black.
     if (async_started_ && size_ok && readVideoInRgba(scratch_in_)) {
         const auto bytes = static_cast<std::size_t>(w) * h * 4u;
         if (scratch_in_.size() >= bytes) {
+            const bool signal = hasVideoSignal(scratch_in_.data(), bytes);
+            if (!signal) {
+                // Empty shared tex this tick — keep last good output (don't write black).
+                if (!had_good_output_) {
+                    blitPassthroughOpaque();
+                    logRenderPathOnce("empty_video_gpu_opaque", 0);
+                } else {
+                    logRenderPathOnce("empty_video_hold", 0);
+                }
+                return RenderResult::Succeeded;
+            }
+
             async_.trySubmit(scratch_in_.data(), w, h);
             scratch_out_.resize(bytes);
-            if (async_.copyLatest(scratch_out_.data(), w, h)) {
+            if (async_.copyLatest(scratch_out_.data(), w, h) &&
+                matteHasCoverage(scratch_out_.data(), w, h)) {
                 if (writeOutputRgba(scratch_out_.data())) {
+                    had_good_output_ = true;
                     logRenderPathOnce("matte", sampleCenterAlpha(scratch_out_.data(), w, h));
                     return RenderResult::Succeeded;
                 }
@@ -469,6 +558,7 @@ RenderResult Input::render() noexcept try {
 
             fillOpaquePassthrough(scratch_in_.data(), scratch_out_.data(), bytes);
             if (writeOutputRgba(scratch_out_.data())) {
+                had_good_output_ = true;
                 logRenderPathOnce("opaque_cpu_passthrough",
                                   sampleCenterAlpha(scratch_in_.data(), w, h));
                 return RenderResult::Succeeded;
@@ -476,14 +566,14 @@ RenderResult Input::render() noexcept try {
         }
     }
 
-    // Last resort: GPU blit (may still look black if source alpha is 0).
-    blitPassthrough();
-    logRenderPathOnce("gpu_blit_fallback", 0);
+    blitPassthroughOpaque();
+    had_good_output_ = true;
+    logRenderPathOnce("gpu_opaque_blit", 0);
     return RenderResult::Succeeded;
 } catch (const std::exception& ex) {
     removerLog(std::format("render exception: {}", ex.what()));
     try {
-        blitPassthrough();
+        blitPassthroughOpaque();
     } catch (...) {
     }
     return RenderResult::Succeeded;
