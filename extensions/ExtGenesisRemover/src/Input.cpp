@@ -36,11 +36,37 @@ DXGI_FORMAT toDxgi(Format format) {
     return DXGI_FORMAT_R8G8B8A8_UNORM;
 }
 
+const char* formatName(Format format) {
+    switch (format) {
+    case Format::R8_UNORM:
+        return "R8";
+    case Format::R8G8_UNORM:
+        return "RG8";
+    case Format::R8G8B8A8_UNORM:
+        return "RGBA8";
+    case Format::B8G8R8A8_UNORM:
+        return "BGRA8";
+    case Format::R16G16B16A16_SFLOAT:
+        return "RGBA16F";
+    case Format::None:
+        break;
+    }
+    return "unknown";
+}
+
 void fillOpaquePassthrough(const std::uint8_t* in_rgba, std::uint8_t* out_rgba, std::size_t bytes) {
     std::memcpy(out_rgba, in_rgba, bytes);
     for (std::size_t i = 3; i < bytes; i += 4) {
         out_rgba[i] = 255;
     }
+}
+
+std::uint8_t sampleCenterAlpha(const std::uint8_t* rgba, std::uint32_t w, std::uint32_t h) {
+    if (!rgba || w == 0 || h == 0) {
+        return 0;
+    }
+    const std::size_t idx = (static_cast<std::size_t>(h / 2u) * w + (w / 2u)) * 4u + 3u;
+    return rgba[idx];
 }
 
 } // namespace
@@ -91,6 +117,7 @@ bool Input::initialize() noexcept try {
                                                       {"Fast", "Balanced", "Quality"});
     quality_->set_value(1);
 
+    // Full-frame blit (1.0). ExtSampleD3D uses 2/3 for a decorative inset.
     quad_ = std::make_unique<d3d11::Quad>(d3d_device_->device(), 1.0f);
 
     if (!update_settings(std::move(settings_))) {
@@ -150,21 +177,23 @@ void Input::blitPassthrough() {
     quad_->draw(ctx, video_in_tex_->shader_resource_view());
 }
 
-void Input::ensureStaging(std::uint32_t width, std::uint32_t height) {
-    if (staging_read_ && staging_write_ && staging_w_ == width && staging_h_ == height) {
+void Input::ensureStaging(std::uint32_t width, std::uint32_t height, DXGI_FORMAT format) {
+    if (staging_read_ && staging_write_ && staging_w_ == width && staging_h_ == height &&
+        staging_format_ == format) {
         return;
     }
     staging_read_.release();
     staging_write_.release();
     staging_w_ = width;
     staging_h_ = height;
+    staging_format_ = format;
 
     D3D11_TEXTURE2D_DESC desc{};
     desc.Width = width;
     desc.Height = height;
     desc.MipLevels = 1;
     desc.ArraySize = 1;
-    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    desc.Format = format;
     desc.SampleDesc = {1, 0};
     desc.Usage = D3D11_USAGE_STAGING;
     desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
@@ -173,6 +202,8 @@ void Input::ensureStaging(std::uint32_t width, std::uint32_t height) {
         throw std::runtime_error("CreateTexture2D staging_read failed");
     }
 
+    // Output upload staging stays RGBA8 (matches output_tex_).
+    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
     if (FAILED(d3d_device_->device()->CreateTexture2D(&desc, nullptr, &staging_write_))) {
         throw std::runtime_error("CreateTexture2D staging_write failed");
@@ -185,20 +216,39 @@ bool Input::readVideoInRgba(std::vector<std::uint8_t>& out_rgba) {
     }
     const auto w = static_cast<std::uint32_t>(video_in_tex_->width());
     const auto h = static_cast<std::uint32_t>(video_in_tex_->height());
-    ensureStaging(w, h);
+    const DXGI_FORMAT src_format = video_in_tex_->format();
+    if (src_format != DXGI_FORMAT_R8G8B8A8_UNORM && src_format != DXGI_FORMAT_B8G8R8A8_UNORM) {
+        removerLog(std::format("readVideoIn unsupported format {}", static_cast<int>(src_format)));
+        return false;
+    }
+
+    ensureStaging(w, h, src_format);
     auto* ctx = d3d_device_->device_context();
+    // CopyResource is void; mismatched formats fail silently and leave staging empty.
     ctx->CopyResource(staging_read_, video_in_tex_->texture());
 
     D3D11_MAPPED_SUBRESOURCE mapped{};
     if (FAILED(ctx->Map(staging_read_, 0, D3D11_MAP_READ, 0, &mapped))) {
+        removerLog("readVideoIn Map failed");
         return false;
     }
     out_rgba.resize(static_cast<std::size_t>(w) * h * 4u);
     const auto* src = static_cast<const std::uint8_t*>(mapped.pData);
+    const bool bgra = (src_format == DXGI_FORMAT_B8G8R8A8_UNORM);
     for (std::uint32_t y = 0; y < h; ++y) {
-        std::memcpy(out_rgba.data() + static_cast<std::size_t>(y) * w * 4u,
-                    src + static_cast<std::size_t>(y) * mapped.RowPitch,
-                    static_cast<std::size_t>(w) * 4u);
+        const auto* row = src + static_cast<std::size_t>(y) * mapped.RowPitch;
+        auto* dst = out_rgba.data() + static_cast<std::size_t>(y) * w * 4u;
+        if (!bgra) {
+            std::memcpy(dst, row, static_cast<std::size_t>(w) * 4u);
+            continue;
+        }
+        for (std::uint32_t x = 0; x < w; ++x) {
+            const auto* p = row + static_cast<std::size_t>(x) * 4u;
+            dst[x * 4u + 0] = p[2];
+            dst[x * 4u + 1] = p[1];
+            dst[x * 4u + 2] = p[0];
+            dst[x * 4u + 3] = p[3];
+        }
     }
     ctx->Unmap(staging_read_, 0);
     return true;
@@ -236,6 +286,15 @@ void Input::applyMatteSettings() {
     }
 }
 
+void Input::logRenderPathOnce(const char* path, std::uint8_t sample_alpha) {
+    if (last_render_path_ == path) {
+        return;
+    }
+    last_render_path_ = path;
+    removerLog(std::format("render path={} video={}x{} fmt={} center_alpha={}", path, width_, height_,
+                           formatName(video_in_format_), static_cast<unsigned>(sample_alpha)));
+}
+
 bool Input::update() noexcept try {
     if (!video_in_param_) {
         return true;
@@ -249,6 +308,7 @@ bool Input::update() noexcept try {
             desc.format = Format::R8G8B8A8_UNORM;
         }
         desc.is_target = false;
+        video_in_format_ = desc.format;
         video_in_tex_ = createSharedTexture(*video_in_param_, desc, d3d11::Texture::Default);
         width_ = static_cast<std::uint32_t>(desc.width);
         height_ = static_cast<std::uint32_t>(desc.height);
@@ -268,23 +328,42 @@ bool Input::update() noexcept try {
             removerLog("async matte worker started");
         }
         async_.reset(width_, height_);
-        ensureStaging(width_, height_);
-        removerLog(std::format("video_in D3D11 shared {}x{}", width_, height_));
+        ensureStaging(width_, height_, toDxgi(video_in_format_));
+        last_render_path_.clear();
+        removerLog(std::format("video_in D3D11 shared {}x{} fmt={}", width_, height_,
+                               formatName(video_in_format_)));
     };
 
     update_input_texture(*video_in_param_, allocate);
 
-    // Fallback when format property is missing.
+    // Fallbacks when SDK helper skips (format/resolution props incomplete).
     if (!video_in_tex_) {
-        const int prop_w = video_in_param_->get_property<int>(SettingNames::resolution_x, 0);
-        const int prop_h = video_in_param_->get_property<int>(SettingNames::resolution_y, 0);
-        if (prop_w > 0 && prop_h > 0) {
-            TextureDesc desc{};
-            desc.width = static_cast<std::size_t>(prop_w);
-            desc.height = static_cast<std::size_t>(prop_h);
-            desc.format = get_format_by_name(video_in_param_->get_property(SettingNames::format),
-                                             Format::R8G8B8A8_UNORM);
+        TextureDesc desc{};
+        desc.width = static_cast<std::size_t>(
+            video_in_param_->get_property<int>(SettingNames::resolution_x, 0));
+        desc.height = static_cast<std::size_t>(
+            video_in_param_->get_property<int>(SettingNames::resolution_y, 0));
+        desc.format = get_format_by_name(video_in_param_->get_property(SettingNames::format),
+                                         Format::R8G8B8A8_UNORM);
+
+        if (desc.width == 0 || desc.height == 0) {
+            try {
+                const auto cur = video_in_param_->texture().desc();
+                if (cur.width > 0 && cur.height > 0) {
+                    desc.width = cur.width;
+                    desc.height = cur.height;
+                    if (cur.format != Format::None) {
+                        desc.format = cur.format;
+                    }
+                    removerLog("video_in allocate via texture().desc() fallback");
+                }
+            } catch (...) {
+            }
+        } else {
             removerLog("video_in allocate via property fallback");
+        }
+
+        if (desc.width > 0 && desc.height > 0) {
             allocate(desc);
         }
     }
@@ -303,33 +382,42 @@ RenderResult Input::render() noexcept try {
     // No Video In yet: transparent clear (safe while scrubbing).
     if (!video_in_tex_) {
         clearOutputTransparent();
+        logRenderPathOnce("no_video_in_clear", 0);
         return RenderResult::Succeeded;
     }
 
     applyMatteSettings();
 
-    // Prefer GPU blit passthrough first so the timeline always shows the feed.
-    // Then overlay matte when async has a completed frame.
-    bool wrote_matte = false;
-    if (async_started_ && readVideoInRgba(scratch_in_)) {
-        const auto w = static_cast<std::uint32_t>(video_in_tex_->width());
-        const auto h = static_cast<std::uint32_t>(video_in_tex_->height());
-        if (scratch_in_.size() >= static_cast<std::size_t>(w) * h * 4u) {
+    const auto w = static_cast<std::uint32_t>(video_in_tex_->width());
+    const auto h = static_cast<std::uint32_t>(video_in_tex_->height());
+    const bool size_ok = output_tex_->width() == w && output_tex_->height() == h;
+
+    // Prefer CPU opaque passthrough until matte is ready. Live/webcam textures often
+    // carry alpha=0; with applies_alpha=true a plain GPU blit composites as black.
+    if (async_started_ && size_ok && readVideoInRgba(scratch_in_)) {
+        const auto bytes = static_cast<std::size_t>(w) * h * 4u;
+        if (scratch_in_.size() >= bytes) {
             async_.trySubmit(scratch_in_.data(), w, h);
-            scratch_out_.resize(static_cast<std::size_t>(w) * h * 4u);
+            scratch_out_.resize(bytes);
             if (async_.copyLatest(scratch_out_.data(), w, h)) {
-                // Output size may match video; ensure staging matches output.
-                if (output_tex_->width() == w && output_tex_->height() == h) {
-                    wrote_matte = writeOutputRgba(scratch_out_.data());
+                if (writeOutputRgba(scratch_out_.data())) {
+                    logRenderPathOnce("matte", sampleCenterAlpha(scratch_out_.data(), w, h));
+                    return RenderResult::Succeeded;
                 }
+            }
+
+            fillOpaquePassthrough(scratch_in_.data(), scratch_out_.data(), bytes);
+            if (writeOutputRgba(scratch_out_.data())) {
+                logRenderPathOnce("opaque_cpu_passthrough",
+                                  sampleCenterAlpha(scratch_in_.data(), w, h));
+                return RenderResult::Succeeded;
             }
         }
     }
 
-    if (!wrote_matte) {
-        // ExtSampleD3D-identical path: always safe, shows linked video.
-        blitPassthrough();
-    }
+    // Last resort: GPU blit (may still look black if source alpha is 0).
+    blitPassthrough();
+    logRenderPathOnce("gpu_blit_fallback", 0);
     return RenderResult::Succeeded;
 } catch (const std::exception& ex) {
     removerLog(std::format("render exception: {}", ex.what()));

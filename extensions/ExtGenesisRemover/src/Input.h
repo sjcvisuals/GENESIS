@@ -35,12 +35,13 @@ private:
     std::unique_ptr<d3d11::Texture> createSharedTexture(ParameterTexture& parameter,
                                                         TextureDesc desc,
                                                         d3d11::Texture::Options options);
-    void ensureStaging(std::uint32_t width, std::uint32_t height);
+    void ensureStaging(std::uint32_t width, std::uint32_t height, DXGI_FORMAT format);
     bool readVideoInRgba(std::vector<std::uint8_t>& out_rgba);
     bool writeOutputRgba(const std::uint8_t* rgba);
     void applyMatteSettings();
     void blitPassthrough();
     void clearOutputTransparent();
+    void logRenderPathOnce(const char* path, std::uint8_t sample_alpha);
 
     std::shared_ptr<d3d11::Device> d3d_device_;
     ValueSet settings_;
@@ -53,11 +54,13 @@ private:
 
     std::unique_ptr<d3d11::Texture> output_tex_;
     std::unique_ptr<d3d11::Texture> video_in_tex_;
+    Format video_in_format_ = Format::R8G8B8A8_UNORM;
 
     ComPointer<ID3D11Texture2D> staging_read_;
     ComPointer<ID3D11Texture2D> staging_write_;
     std::uint32_t staging_w_ = 0;
     std::uint32_t staging_h_ = 0;
+    DXGI_FORMAT staging_format_ = DXGI_FORMAT_UNKNOWN;
 
     ::genesis::AsyncMatteWorker async_;
     ::genesis::BgRemoverSettings matte_settings_{};
@@ -67,6 +70,8 @@ private:
     std::vector<std::uint8_t> scratch_out_;
     std::uint32_t width_ = 1920;
     std::uint32_t height_ = 1080;
+
+    std::string last_render_path_;
 };
 
 } // namespace rxext::genesis_remover
