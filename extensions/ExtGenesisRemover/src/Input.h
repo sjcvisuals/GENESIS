@@ -23,14 +23,18 @@ public:
     SyncDesc after_render() noexcept override;
 
 private:
+    void ensurePipeline();
+    void applyMatteSettings();
     void publishOutput();
     void publishVideoIn();
 
     std::uint64_t adapter_luid_ = 0;
+    std::uint64_t pipeline_adapter_luid_ = 0;
     ValueSet settings_;
     ParameterTexture* sampler_ = nullptr;
     ParameterTexture* video_in_ = nullptr;
     ParameterInt* quality_ = nullptr;
+    ParameterValue* time_ = nullptr;
     std::unique_ptr<::genesis::RemoverPipeline> pipeline_;
     std::uint32_t width_ = 1920;
     std::uint32_t height_ = 1080;

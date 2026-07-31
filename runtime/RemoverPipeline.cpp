@@ -11,7 +11,8 @@ RemoverPipeline::RemoverPipeline(std::uint64_t adapter_luid) {
     context_ = std::make_unique<VulkanContext>(config);
     resize(1920, 1080);
     remover_.initialize(nullptr);
-    ensureAsyncStarted();
+    // Do not start the async worker here — PIXERA stream init is sensitive to
+    // background threads. Caller enables async after the output sampler is published.
 }
 
 RemoverPipeline::~RemoverPipeline() {
