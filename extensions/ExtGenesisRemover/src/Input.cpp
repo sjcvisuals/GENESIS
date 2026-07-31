@@ -8,7 +8,6 @@
 #include "renderer/vulkan/ExternalRenderTarget.hpp"
 
 #include <algorithm>
-#include <array>
 #include <format>
 #include <string>
 #include <vector>
