@@ -74,8 +74,18 @@ If the resource imports but timeline drag fails
 5. Optional second log next to the DLL:
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
-Timeline init now accepts with a host CPU placeholder texture (ExtSampleCPU
-style). Vulkan / Video In / ONNX start only after the stream is accepted.
+Timeline init uses host CPU textures (ExtSampleCPU/Shader style). Video In is
+downloaded via the PIXERA host API (not Vulkan shared memory), matted on CPU,
+then uploaded to the output sampler.
+
+Build stamp in logs / BUILD_STAMP.txt:
+  remover-timeline-v5-host-texture-20260731
+
+If output is magenta, Video In is linked but pixels are empty — check the log.
+If output stays black with no `video_in HOST texture` log line, the input was
+never allocated (link/properties). Open:
+
+  %TEMP%\ExtGenesisRemover.log
 
 If PIXERA says "Can Not Load Pixera Extension"
 ---------------------------------------------
