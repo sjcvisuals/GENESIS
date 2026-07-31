@@ -7,7 +7,7 @@
 #   .\scripts\build.ps1          # build only
 #   .\scripts\build.ps1 -Run     # build + launch editor
 #
-# Ignore the build\ tree for testing — use out\ only.
+# Ignore the build\ tree for testing - use out\ only.
 
 param(
     [switch]$Run,
@@ -18,7 +18,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# WIP only — Release packaging uses scripts/package-installer.ps1 separately.
+# WIP only - Release packaging uses scripts/package-installer.ps1 separately.
 $Config = "Debug"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
@@ -282,7 +282,7 @@ out\
 if ($Editor) {
     Write-Host "Editor:  $Editor"
 } elseif (-not $PixeraOnly -and -not $RemoverOnly) {
-    Write-Host "Editor missing under out\Editor — see $LogFile" -ForegroundColor Yellow
+    Write-Host "Editor missing under out\Editor - see $LogFile" -ForegroundColor Yellow
 }
 if ($Dll) {
     Write-Host "Pixera:  $Dll"
@@ -295,7 +295,7 @@ if ($RemoverDll) {
     Write-Host "ExtGenesisRemover.dll missing under out\ExtGenesisRemover (Windows-only)." -ForegroundColor Yellow
 }
 Write-Host ""
-Write-Host "(Ignore build\ for day-to-day testing — that is just the CMake cache.)"
+Write-Host "(Ignore build\ for day-to-day testing - that is just the CMake cache.)"
 Write-Host ""
 
 if ($Run) {
