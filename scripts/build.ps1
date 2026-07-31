@@ -1,13 +1,15 @@
 # GENESIS local WIP build (Windows)
 #
 # Day-to-day: double-click BUILD-AND-RUN.bat in the repo root.
-# That builds Debug, syncs everything into out\, and launches the editor.
+# That builds the editor (Debug) + Pixera DLLs (Release), syncs into out\,
+# and launches the editor.
 #
 # PowerShell:
 #   .\scripts\build.ps1          # build only
 #   .\scripts\build.ps1 -Run     # build + launch editor
 #
 # Ignore the build\ tree for testing - use out\ only.
+# Pixera DLLs are always Release: Debug CRTs often fail to LoadLibrary in PIXERA.
 
 param(
     [switch]$Run,
@@ -18,8 +20,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# WIP only - Release packaging uses scripts/package-installer.ps1 separately.
-$Config = "Debug"
+# Editor stays Debug for WIP. Pixera host apps need Release CRT DLLs.
+$EditorConfig = "Debug"
+$PixeraConfig = "Release"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $BuildDir = Join-Path $RepoRoot "build"
@@ -69,7 +72,7 @@ function Invoke-LoggedNative {
     }
 }
 
-function Resolve-BuiltExe([string]$Name) {
+function Resolve-BuiltExe([string]$Name, [string]$Config) {
     foreach ($c in @(
         (Join-Path $BuildDir "$Config\$Name"),
         (Join-Path $BuildDir $Name)
@@ -79,7 +82,7 @@ function Resolve-BuiltExe([string]$Name) {
     return $null
 }
 
-function Resolve-BuiltDll([string]$Name) {
+function Resolve-BuiltDll([string]$Name, [string]$Config) {
     $candidates = @(
         (Join-Path $BuildDir "rxExt\$Name\$Config\$Name.dll"),
         (Join-Path $BuildDir "rxExt\$Name\$Name.dll")
@@ -91,12 +94,19 @@ function Resolve-BuiltDll([string]$Name) {
 }
 
 function Find-OnnxRuntimeDll {
-    $roots = @(
-        (Join-Path $RepoRoot "third_party"),
-        $BuildDir
+    $preferred = @(
+        (Join-Path $RepoRoot "third_party\onnxruntime-win-x64-1.20.1\lib\onnxruntime.dll"),
+        (Join-Path $RepoRoot "third_party\onnxruntime-win-x64-1.19.2\lib\onnxruntime.dll")
     )
-    foreach ($root in $roots) {
-        if (-not (Test-Path $root)) { continue }
+    foreach ($c in $preferred) {
+        if (Test-Path $c) { return (Resolve-Path $c).Path }
+    }
+    $root = Join-Path $RepoRoot "third_party"
+    if (Test-Path $root) {
+        $hit = Get-ChildItem -Path $root -Recurse -Filter "onnxruntime.dll" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match 'onnxruntime-win-x64' } |
+            Select-Object -First 1
+        if ($hit) { return $hit.FullName }
         $hit = Get-ChildItem -Path $root -Recurse -Filter "onnxruntime.dll" -ErrorAction SilentlyContinue |
             Select-Object -First 1
         if ($hit) { return $hit.FullName }
@@ -116,6 +126,12 @@ function Sync-Directory([string]$Source, [string]$Destination) {
     Copy-Item -Path $Source -Destination $Destination -Recurse -Force
 }
 
+function Assert-File([string]$Path, [string]$Label) {
+    if (-not (Test-Path $Path)) {
+        throw "Missing $Label : $Path"
+    }
+}
+
 function Sync-OutFolder {
     Write-Host ""
     Write-Host "Syncing WIP outputs to out\ ..." -ForegroundColor Cyan
@@ -123,9 +139,15 @@ function Sync-OutFolder {
     $assetsSrc = Join-Path $RepoRoot "assets"
     $shaderSrc = Join-Path $BuildDir "shaders\spv"
     $onnx = Find-OnnxRuntimeDll
+    if (-not $onnx) {
+        Write-Host "WARNING: onnxruntime.dll not found under third_party\. Pixera Remover will fail to load." -ForegroundColor Yellow
+        Write-Host "Re-run cmake configure so ONNX Runtime is fetched, then rebuild."
+    } else {
+        Write-Host "ONNX Runtime: $onnx"
+    }
 
-    # --- Editor ---
-    $editorExe = Resolve-BuiltExe "genesis_gltf_viewer.exe"
+    # --- Editor (Debug) ---
+    $editorExe = Resolve-BuiltExe "genesis_gltf_viewer.exe" $EditorConfig
     if ($editorExe) {
         $editorOut = Join-Path $OutDir "Editor"
         New-Item -ItemType Directory -Force -Path $editorOut | Out-Null
@@ -138,8 +160,8 @@ function Sync-OutFolder {
         }
     }
 
-    # --- Pixera scene DLL ---
-    $extDll = Resolve-BuiltDll "ExtGenesis"
+    # --- Pixera scene DLL (Release) ---
+    $extDll = Resolve-BuiltDll "ExtGenesis" $PixeraConfig
     if ($extDll) {
         $extOut = Join-Path $OutDir "ExtGenesis"
         New-Item -ItemType Directory -Force -Path $extOut | Out-Null
@@ -160,8 +182,8 @@ function Sync-OutFolder {
         }
     }
 
-    # --- Pixera matte-only DLL ---
-    $removerDll = Resolve-BuiltDll "ExtGenesisRemover"
+    # --- Pixera matte-only DLL (Release) ---
+    $removerDll = Resolve-BuiltDll "ExtGenesisRemover" $PixeraConfig
     if ($removerDll) {
         $remOut = Join-Path $OutDir "ExtGenesisRemover"
         New-Item -ItemType Directory -Force -Path $remOut | Out-Null
@@ -174,6 +196,28 @@ function Sync-OutFolder {
         if ($onnx) {
             Copy-Item -Path $onnx -Destination (Join-Path $remOut "onnxruntime.dll") -Force
         }
+
+        Assert-File (Join-Path $remOut "ExtGenesisRemover.dll") "Remover DLL"
+        Assert-File (Join-Path $remOut "onnxruntime.dll") "onnxruntime.dll next to Remover"
+        Assert-File (Join-Path $remOut "assets\matting\rvm_mobilenetv3_fp16.onnx") "RVM model"
+    }
+}
+
+function Build-Target([string]$Target, [string]$Config, [string]$LogPath) {
+    Write-Host ""
+    Write-Host "Building $Target ($Config) ..." -ForegroundColor Cyan
+    $buildCode = Invoke-LoggedNative -LogPath $LogPath -Append -Command {
+        & $CMake --build $BuildDir --config $Config --target $Target
+    }
+    if ($buildCode -ne 0) {
+        Write-Host ""
+        Write-Host "----- last errors from $LogPath -----" -ForegroundColor Red
+        Select-String -Path $LogPath -Pattern "error |error:|fatal error|LNK[0-9]+|FAILED|undefined|unresolved" |
+            Select-Object -Last 40 |
+            ForEach-Object { $_.Line }
+        Write-Host "-------------------------------------" -ForegroundColor Red
+        Write-Host "Full log: $LogPath"
+        throw "CMake build failed for target '$Target' ($Config) ($buildCode)"
     }
 }
 
@@ -210,23 +254,26 @@ if (Test-Path $Glslc) {
     Write-Host "Warning: glslc still missing. If configure fails, install the Vulkan SDK from https://vulkan.lunarg.com/" -ForegroundColor Yellow
 }
 
-$targets = @()
+$editorTargets = @()
+$pixeraTargets = @()
 if ($RemoverOnly) {
-    $targets = @("ExtGenesisRemover")
+    $pixeraTargets = @("ExtGenesisRemover")
 } elseif ($PixeraOnly) {
-    $targets = @("ExtGenesis", "ExtGenesisRemover")
+    $pixeraTargets = @("ExtGenesis", "ExtGenesisRemover")
 } elseif ($EditorOnly) {
-    $targets = @("genesis_gltf_viewer")
+    $editorTargets = @("genesis_gltf_viewer")
 } else {
-    $targets = @("genesis_gltf_viewer", "ExtGenesis", "ExtGenesisRemover")
+    $editorTargets = @("genesis_gltf_viewer")
+    $pixeraTargets = @("ExtGenesis", "ExtGenesisRemover")
 }
 
 Write-Host ""
-Write-Host "=== GENESIS WIP build (Debug) ===" -ForegroundColor Cyan
+Write-Host "=== GENESIS WIP build ===" -ForegroundColor Cyan
 Write-Host "Repo:    $RepoRoot"
 Write-Host "CMake:   $CMake"
 Write-Host "Out:     $OutDir"
-Write-Host "Targets: $($targets -join ', ')"
+Write-Host "Editor:  $($editorTargets -join ', ') [$EditorConfig]"
+Write-Host "Pixera:  $($pixeraTargets -join ', ') [$PixeraConfig]"
 Write-Host ""
 
 $LogFile = Join-Path $BuildDir "last-build.log"
@@ -236,26 +283,15 @@ Push-Location $RepoRoot
 try {
     Write-Host "Configuring..."
     $cfgCode = Invoke-LoggedNative -LogPath $LogFile -Command {
-        & $CMake -B $BuildDir -DCMAKE_BUILD_TYPE=$Config
+        & $CMake -B $BuildDir -DCMAKE_BUILD_TYPE=$EditorConfig
     }
     if ($cfgCode -ne 0) { throw "CMake configure failed ($cfgCode). See $LogFile" }
 
-    foreach ($target in $targets) {
-        Write-Host ""
-        Write-Host "Building $target ..." -ForegroundColor Cyan
-        $buildCode = Invoke-LoggedNative -LogPath $LogFile -Append -Command {
-            & $CMake --build $BuildDir --config $Config --target $target
-        }
-        if ($buildCode -ne 0) {
-            Write-Host ""
-            Write-Host "----- last errors from $LogFile -----" -ForegroundColor Red
-            Select-String -Path $LogFile -Pattern "error |error:|fatal error|LNK[0-9]+|FAILED|undefined|unresolved" |
-                Select-Object -Last 40 |
-                ForEach-Object { $_.Line }
-            Write-Host "-------------------------------------" -ForegroundColor Red
-            Write-Host "Full log: $LogFile"
-            throw "CMake build failed for target '$target' ($buildCode)"
-        }
+    foreach ($target in $editorTargets) {
+        Build-Target -Target $target -Config $EditorConfig -LogPath $LogFile
+    }
+    foreach ($target in $pixeraTargets) {
+        Build-Target -Target $target -Config $PixeraConfig -LogPath $LogFile
     }
 }
 finally {
@@ -291,6 +327,7 @@ if ($Dll) {
 }
 if ($RemoverDll) {
     Write-Host "Remover: $RemoverDll"
+    Write-Host "In PIXERA browse to that DLL. Keep onnxruntime.dll + assets\matting next to it."
 } elseif (-not $EditorOnly) {
     Write-Host "ExtGenesisRemover.dll missing under out\ExtGenesisRemover (Windows-only)." -ForegroundColor Yellow
 }

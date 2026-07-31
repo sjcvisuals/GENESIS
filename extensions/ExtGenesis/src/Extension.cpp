@@ -44,10 +44,10 @@ vector<ValueSet> Extension::enumerate_stream_device_settings() noexcept {
 
 //-------------------------------------------------------------------------
 
-rxext::ExtensionP* rxext_open() {
+RXEXT_API rxext::ExtensionP* rxext_open() {
     return new rxext::genesis_ext::Extension();
 }
 
-void rxext_close(rxext::ExtensionP* extension) {
+RXEXT_API void rxext_close(rxext::ExtensionP* extension) {
     delete static_cast<rxext::genesis_ext::Extension*>(extension);
 }

@@ -16,7 +16,7 @@ Double-click this file in the repo root:
 BUILD-AND-RUN.bat
 ```
 
-That builds **Debug**, puts everything in `out\`, and launches the editor.
+That builds the editor (**Debug**) and Pixera DLLs (**Release** — required for PIXERA to load them), puts everything in `out\`, and launches the editor.
 
 ```
 out\
@@ -25,7 +25,8 @@ out\
   ExtGenesisRemover\ExtGenesisRemover.dll  <- Pixera background cutout only
 ```
 
-Ignore `build\` — that is only the CMake cache. Test from `out\` only.
+Ignore `build\` - that is only the CMake cache. Test from `out\` only.  
+For Remover, keep `onnxruntime.dll` + `assets\matting\` next to the DLL.
 
 In the editor: **File → Examples**.  
 In PIXERA: browse to the DLL inside `out\ExtGenesis\` or `out\ExtGenesisRemover\` (keep the sibling folders next to the DLL).
