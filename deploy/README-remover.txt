@@ -74,16 +74,12 @@ If the resource imports but timeline drag fails
 5. Optional second log next to the DLL:
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
-Timeline init uses host CPU textures (ExtSampleCPU/Shader style). Video In is
-downloaded via the PIXERA host API (not Vulkan shared memory), matted on CPU,
-then uploaded to the output sampler.
-
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v6-d3d11-20260731
+  remover-timeline-v6d-opaque-pass-20260731
 
 This build uses D3D11 shared textures (same pattern as ExtSampleD3D) with
-PIXERA fence sync. Host download_texture was removed — it crashed PIXERA when
-scrubbing the timeline.
+PIXERA fence sync. Until the matte is ready it forces opaque CPU passthrough
+(live/webcam Video In often has alpha=0; with applies_alpha that looked black).
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log
