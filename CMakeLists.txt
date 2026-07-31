@@ -440,7 +440,8 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         ${EXT_REMOVER_DIR}/src
         ${RX_SDK_DIR}/include
         ${RX_SDK_DIR}/libs
-        ${RX_SDK_DIR}/libs/d3d11
+        # Do NOT add libs/d3d11 here: #include <d3d11.h> must resolve to the
+        # Windows SDK header, not our wrapper at libs/d3d11/d3d11.h.
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_BINARY_DIR}
     )

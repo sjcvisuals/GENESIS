@@ -7,7 +7,7 @@
 
 #include <algorithm>
 #include <cstring>
-#include <d3d11.h>
+#include <d3d11_4.h>
 #include <format>
 #include <stdexcept>
 #include <string>
