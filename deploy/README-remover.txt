@@ -4,24 +4,37 @@ Genesis Remover — PIXERA background cutout (matte only)
 This module is ONLY live-video background removal. No scenes, lights, or actors.
 Use ExtGenesis when you need GENESIS scenes.
 
+IMPORTANT — two different modules
+---------------------------------
+  ExtGenesis          = full GENESIS scene bridge
+  ExtGenesisRemover   = background cutout only
+
+They are NOT interchangeable. Do not drop ExtGenesisRemover.dll into
+data\rxExt\ExtGenesis\. Use a separate ExtGenesisRemover folder.
+
 Local WIP testing
 -----------------
 After double-clicking BUILD-AND-RUN.bat, use:
 
   <repo>\out\ExtGenesisRemover\ExtGenesisRemover.dll
 
-Point PIXERA at that DLL. Keep sibling assets\matting\ and onnxruntime.dll.
+Point PIXERA at that DLL. Keep sibling onnxruntime.dll + assets\matting\.
 
-Install (playback machine)
---------------------------
-Copy the entire ExtGenesisRemover folder to:
-  <PIXERA>/data/rxExt/ExtGenesisRemover/
+Or copy the whole folder into PIXERA:
+
+  <PIXERA>\data\rxExt\ExtGenesisRemover\
+
+Then browse to ExtGenesisRemover.dll inside THAT folder.
+
+Verify before PIXERA
+--------------------
+  .\scripts\check-pixera-dll.ps1
 
 Required files
 --------------
   ExtGenesisRemover.dll
   GenesisRemover.manifest.json
-  assets/matting/          (RVM ONNX model)
+  assets/matting/rvm_mobilenetv3_fp16.onnx
   onnxruntime.dll
 
 Usage in PIXERA
@@ -34,11 +47,11 @@ Usage in PIXERA
 
 If PIXERA says "Can Not Load Pixera Extension"
 ---------------------------------------------
-Almost always a LoadLibrary failure. Check:
-  - You browsed to out\ExtGenesisRemover\ExtGenesisRemover.dll (Release build)
-  - onnxruntime.dll sits in that same folder
-  - assets\matting\rvm_mobilenetv3_fp16.onnx is present
-  - Visual C++ 2015-2022 x64 redistributable is installed
-Do NOT use a Debug copy of the DLL inside PIXERA.
+Run .\scripts\check-pixera-dll.ps1 and fix anything marked [MISS]/[FAIL].
+Typical causes:
+  - onnxruntime.dll missing next to the DLL
+  - browsed a Debug build (BUILD-AND-RUN now ships Release for Pixera DLLs)
+  - copied Remover into data\rxExt\ExtGenesis\ by mistake
+  - VC++ 2015-2022 x64 redistributable missing
 
 See docs/video-bg-remover.md.

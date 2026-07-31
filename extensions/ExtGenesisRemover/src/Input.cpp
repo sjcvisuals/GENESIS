@@ -2,8 +2,8 @@
 
 #include "ModulePaths.h"
 #include "matting/BgRemover.hpp"
+#include "platform/Paths.hpp"
 #include "renderer/vulkan/ExternalRenderTarget.hpp"
-#include "runtime/RuntimePaths.hpp"
 
 #include <algorithm>
 #include <format>
@@ -22,7 +22,9 @@ constexpr auto kHandleType = HandleType::OPAQUE_FD;
 
 Input::Input(std::uint64_t adapter_luid, ValueSet settings)
     : adapter_luid_(adapter_luid), settings_(std::move(settings)) {
-    ::genesis::setRuntimeAssetRoots(extensionModuleDirectory());
+    const std::filesystem::path module_dir = extensionModuleDirectory();
+    const std::filesystem::path roots[] = {module_dir, module_dir / "assets"};
+    ::genesis::setAssetSearchRoots(roots);
 
     sampler_ = add_output_parameter<ParameterTexture>(ParameterNames::sampler);
 

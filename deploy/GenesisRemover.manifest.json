@@ -7,6 +7,7 @@
   "moduleKind": "backgroundRemover",
   "requiredRuntimeFiles": [
     "ExtGenesisRemover.dll",
+    "onnxruntime.dll",
     "GenesisRemover.manifest.json",
     "assets/matting/rvm_mobilenetv3_fp16.onnx"
   ],

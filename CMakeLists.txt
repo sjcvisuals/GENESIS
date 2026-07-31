@@ -186,6 +186,16 @@ if(GENESIS_HAS_ONNXRUNTIME)
     endif()
 endif()
 
+# Thin matte + Vulkan shared-image stack (Pixera Remover; also used by full runtime).
+add_library(genesis_remover_core STATIC
+    runtime/RemoverPipeline.cpp
+)
+target_include_directories(genesis_remover_core PUBLIC ${CMAKE_SOURCE_DIR})
+target_link_libraries(genesis_remover_core PUBLIC
+    genesis_matting
+    genesis_renderer_core
+)
+
 add_library(genesis_runtime STATIC
     runtime/GenesisSession.cpp
     runtime/GenesisFrameTime.cpp
@@ -198,10 +208,12 @@ add_library(genesis_runtime STATIC
     runtime/ProductionTopology.cpp
     runtime/NodeAssignment.cpp
     runtime/MultiViewSession.cpp
-    runtime/RemoverPipeline.cpp
 )
 target_include_directories(genesis_runtime PUBLIC ${CMAKE_SOURCE_DIR})
-target_link_libraries(genesis_runtime PUBLIC genesis_engine_runtime genesis_matting)
+target_link_libraries(genesis_runtime PUBLIC
+    genesis_engine_runtime
+    genesis_remover_core
+)
 
 add_library(genesis_engine STATIC
     engine/Application.cpp
@@ -360,6 +372,10 @@ if(GENESIS_BUILD_RENDERBRIDGE_EXT AND WIN32)
     target_link_libraries(ExtGenesis PRIVATE
         genesis_runtime
     )
+    if(MSVC AND GENESIS_HAS_ONNXRUNTIME)
+        target_link_options(ExtGenesis PRIVATE "/DELAYLOAD:onnxruntime.dll")
+        target_link_libraries(ExtGenesis PRIVATE delayimp)
+    endif()
 
     target_compile_definitions(ExtGenesis PRIVATE
         GENESIS_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders/spv"
@@ -423,7 +439,12 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_BINARY_DIR}
     )
-    target_link_libraries(ExtGenesisRemover PRIVATE genesis_runtime)
+    # Do NOT link full genesis_runtime (assimp/scenes). Remover is matte-only.
+    target_link_libraries(ExtGenesisRemover PRIVATE genesis_remover_core)
+    if(MSVC AND GENESIS_HAS_ONNXRUNTIME)
+        target_link_options(ExtGenesisRemover PRIVATE "/DELAYLOAD:onnxruntime.dll")
+        target_link_libraries(ExtGenesisRemover PRIVATE delayimp)
+    endif()
     set_target_properties(ExtGenesisRemover PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/rxExt/ExtGenesisRemover"
     )

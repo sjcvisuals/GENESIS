@@ -327,7 +327,10 @@ if ($Dll) {
 }
 if ($RemoverDll) {
     Write-Host "Remover: $RemoverDll"
-    Write-Host "In PIXERA browse to that DLL. Keep onnxruntime.dll + assets\matting next to it."
+    Write-Host "In PIXERA browse to that DLL (or copy the whole folder to data\rxExt\ExtGenesisRemover\)."
+    Write-Host "Do NOT put it inside data\rxExt\ExtGenesis\ - that folder is the scene bridge only."
+    Write-Host "Verify load with:  .\scripts\check-pixera-dll.ps1"
+    & (Join-Path $PSScriptRoot "check-pixera-dll.ps1") -DllPath $RemoverDll
 } elseif (-not $EditorOnly) {
     Write-Host "ExtGenesisRemover.dll missing under out\ExtGenesisRemover (Windows-only)." -ForegroundColor Yellow
 }
