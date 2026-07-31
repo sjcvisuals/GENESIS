@@ -1,13 +1,20 @@
 Genesis Remover — PIXERA background cutout (matte only)
 =======================================================
 
-This module is ONLY live-video background removal. It has no scene renderer,
-lights, cameras, or actors. Use full ExtGenesis when you need GENESIS scenes.
+This module is ONLY live-video background removal. No scenes, lights, or actors.
+Use ExtGenesis when you need GENESIS scenes.
 
-Install
--------
-Copy the entire GenesisRemover folder to your PIXERA RenderBridge extensions
-directory. Typical path:
+Local WIP testing
+-----------------
+After double-clicking BUILD-AND-RUN.bat, use:
+
+  <repo>\out\ExtGenesisRemover\ExtGenesisRemover.dll
+
+Point PIXERA at that DLL. Keep sibling assets\matting\ and onnxruntime.dll.
+
+Install (playback machine)
+--------------------------
+Copy the entire ExtGenesisRemover folder to:
   <PIXERA>/data/rxExt/ExtGenesisRemover/
 
 Required files
@@ -15,7 +22,7 @@ Required files
   ExtGenesisRemover.dll
   GenesisRemover.manifest.json
   assets/matting/          (RVM ONNX model)
-  onnxruntime.dll          (copied next to the DLL when ORT is enabled)
+  onnxruntime.dll
 
 Usage in PIXERA
 ---------------
@@ -23,11 +30,6 @@ Usage in PIXERA
 2. Create the Cutout stream.
 3. Link media / NDI / SDI → Video In.
 4. Set Quality (Fast / Balanced / Quality).
-5. Output sampler is a transparent RGBA cutout (applies_alpha).
+5. Output sampler is a transparent RGBA cutout.
 
-Runtime dependency
-------------------
-Built with MSVC — needs Visual C++ 2015–2022 Redistributable (x64).
-Vulkan-capable GPU driver. No Genesis Editor, Vulkan SDK, or CMake on playback.
-
-See docs/video-bg-remover.md for architecture (RVM + async matte worker).
+See docs/video-bg-remover.md.

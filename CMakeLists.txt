@@ -368,7 +368,6 @@ if(GENESIS_BUILD_RENDERBRIDGE_EXT AND WIN32)
     add_dependencies(ExtGenesis genesis_shaders)
 
     set(RX_TEST_DIR "${RX_SDK_DIR}/RX")
-    set(RX_DEPLOY_DIR "${RX_TEST_DIR}/modules/ExtGenesis")
     set_target_properties(ExtGenesis PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/rxExt/ExtGenesis"
         VS_DEBUGGER_COMMAND "${RX_TEST_DIR}/RX.exe"
@@ -376,58 +375,26 @@ if(GENESIS_BUILD_RENDERBRIDGE_EXT AND WIN32)
         VS_DEBUGGER_COMMAND_ARGUMENTS "-script=${EXT_GENESIS_DIR}/run.lua"
     )
 
+    # Keep assets next to the built DLL for MSVC debugging. Day-to-day WIP
+    # packages live under repo out/ (filled by scripts/build.ps1).
     add_custom_command(TARGET ExtGenesis POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${RX_DEPLOY_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:ExtGenesis>"
-            "${RX_DEPLOY_DIR}/ExtGenesis.dll"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:ExtGenesis>"
-            "${RX_TEST_DIR}/modules/ExtGenesis.dll"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_SOURCE_DIR}/assets"
-            "${RX_DEPLOY_DIR}/assets"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/assets"
             "$<TARGET_FILE_DIR:ExtGenesis>/assets"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/assets/scenes"
-            "${RX_DEPLOY_DIR}/scenes"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_SOURCE_DIR}/assets/scenes"
             "$<TARGET_FILE_DIR:ExtGenesis>/scenes"
-        COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_BINARY_DIR}/deploy/GenesisPixera"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/scenes"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/assets"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:ExtGenesis>"
-            "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/ExtGenesis.dll"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_SOURCE_DIR}/assets/scenes"
-            "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/scenes"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_SOURCE_DIR}/assets/scenes"
-            "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/assets/scenes"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_SOURCE_DIR}/assets/test"
-            "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/assets/test"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_SOURCE_DIR}/deploy/Genesis.manifest.json"
-            "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/Genesis.manifest.json"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_SOURCE_DIR}/deploy/README-pixera.txt"
-            "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/README.txt"
-        COMMENT "Deploying ExtGenesis to RX modules and GenesisPixera package"
+            "$<TARGET_FILE_DIR:ExtGenesis>/Genesis.manifest.json"
+        COMMENT "Copying ExtGenesis assets next to DLL"
     )
     if(GENESIS_HAS_ONNXRUNTIME)
         add_custom_command(TARGET ExtGenesis POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${GENESIS_ONNXRUNTIME_ROOT}/lib/onnxruntime.dll"
-                "${RX_DEPLOY_DIR}/onnxruntime.dll"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${GENESIS_ONNXRUNTIME_ROOT}/lib/onnxruntime.dll"
-                "${CMAKE_BINARY_DIR}/deploy/GenesisPixera/onnxruntime.dll"
-            COMMENT "Deploying ONNX Runtime next to ExtGenesis"
+                "$<TARGET_FILE_DIR:ExtGenesis>/onnxruntime.dll"
+            COMMENT "Copying ONNX Runtime next to ExtGenesis"
         )
     endif()
 
@@ -461,46 +428,23 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/rxExt/ExtGenesisRemover"
     )
 
-    set(RX_REMOVER_DEPLOY "${RX_SDK_DIR}/RX/modules/ExtGenesisRemover")
     add_custom_command(TARGET ExtGenesisRemover POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${RX_REMOVER_DEPLOY}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:ExtGenesisRemover>"
-            "${RX_REMOVER_DEPLOY}/ExtGenesisRemover.dll"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:ExtGenesisRemover>/assets/matting"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/assets/matting"
-            "${RX_REMOVER_DEPLOY}/assets/matting"
+            "$<TARGET_FILE_DIR:ExtGenesisRemover>/assets/matting"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_SOURCE_DIR}/deploy/GenesisRemover.manifest.json"
-            "${RX_REMOVER_DEPLOY}/GenesisRemover.manifest.json"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_SOURCE_DIR}/deploy/README-remover.txt"
-            "${RX_REMOVER_DEPLOY}/README.txt"
-        COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_BINARY_DIR}/deploy/GenesisRemover"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/deploy/GenesisRemover/assets/matting"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:ExtGenesisRemover>"
-            "${CMAKE_BINARY_DIR}/deploy/GenesisRemover/ExtGenesisRemover.dll"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_SOURCE_DIR}/assets/matting"
-            "${CMAKE_BINARY_DIR}/deploy/GenesisRemover/assets/matting"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_SOURCE_DIR}/deploy/GenesisRemover.manifest.json"
-            "${CMAKE_BINARY_DIR}/deploy/GenesisRemover/GenesisRemover.manifest.json"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_SOURCE_DIR}/deploy/README-remover.txt"
-            "${CMAKE_BINARY_DIR}/deploy/GenesisRemover/README.txt"
-        COMMENT "Deploying ExtGenesisRemover (matte-only) package"
+            "$<TARGET_FILE_DIR:ExtGenesisRemover>/GenesisRemover.manifest.json"
+        COMMENT "Copying ExtGenesisRemover assets next to DLL"
     )
     if(GENESIS_HAS_ONNXRUNTIME)
         add_custom_command(TARGET ExtGenesisRemover POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${GENESIS_ONNXRUNTIME_ROOT}/lib/onnxruntime.dll"
-                "${RX_REMOVER_DEPLOY}/onnxruntime.dll"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${GENESIS_ONNXRUNTIME_ROOT}/lib/onnxruntime.dll"
-                "${CMAKE_BINARY_DIR}/deploy/GenesisRemover/onnxruntime.dll"
-            COMMENT "Deploying ONNX Runtime next to ExtGenesisRemover"
+                "$<TARGET_FILE_DIR:ExtGenesisRemover>/onnxruntime.dll"
+            COMMENT "Copying ONNX Runtime next to ExtGenesisRemover"
         )
     endif()
 

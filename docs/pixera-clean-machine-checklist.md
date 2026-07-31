@@ -10,15 +10,15 @@ Run `build\package\GenesisSetup-0.1.0.exe`, select the components you need, and 
 
 **Option B — manual copy**
 
-Copy `build/deploy/GenesisPixera/` (or a Release build of the same layout) to:
+Copy `out\ExtGenesis\` (from `BUILD-AND-RUN.bat`) to:
 
 ```
 C:\PIXERA\data\rxExt\ExtGenesis\
 ```
 
-Or browse to the folder via PIXERA's generic RenderBridge extension picker.
+Or browse to that folder via PIXERA's generic RenderBridge extension picker.
 
-Use the **Release** `ExtGenesis.dll` (~3.5 MB) for production checks. Debug builds are larger and slower.
+WIP builds are Debug. Shipping installer builds are separate (`scripts\package-installer.ps1`).
 
 ## Prerequisites (playback machine)
 

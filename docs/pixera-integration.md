@@ -17,11 +17,11 @@ The generic extension slot in PIXERA is **not** where you import a `.gns` / `.ge
 ## Add GENESIS in PIXERA (generic extension)
 
 1. **Compositing** → add a **generic RenderBridge extension** layer.
-2. **Browse to `ExtGenesis.dll`** — e.g. after building:
+2. **Browse to `ExtGenesis.dll`** — after double-clicking `BUILD-AND-RUN.bat`:
    ```
-   build\rxExt\ExtGenesis\Debug\ExtGenesis.dll
+   out\ExtGenesis\ExtGenesis.dll
    ```
-   Keep **`scenes/`** and **`assets/`** next to that DLL (CMake copies them on build). Drop project shows into `scenes/`.
+   Keep **`scenes/`** and **`assets/`** next to that DLL. Drop project shows into `scenes/`.
 3. Set device **adapter LUID** (hex) to the GPU PIXERA shares with GENESIS.
 4. On the layer, pick **Show** from the dropdown (populated from `scenes/` and `assets/scenes/`).
 5. Animate actors via their **per-actor parameter groups** (Position, Rotation, Scale, Color, Visible for each mesh; Intensity for each light).
@@ -41,7 +41,7 @@ MyGenesis/                    ← PIXERA often remembers this folder, not just t
       default.scene.json
 ```
 
-Recommended: copy `build\rxExt\ExtGenesis\Debug\` (DLL + `scenes\` + `assets\`) into your **PIXERA project folder** or a fixed install path, then import **that** `ExtGenesis.dll`. Avoid pointing at paths inside the GENESIS git repo unless that repo will stay put on the show machine.
+Recommended: copy `out\ExtGenesis\` (DLL + `scenes\` + `assets\`) into your **PIXERA project folder** or a fixed install path, then import **that** `ExtGenesis.dll`. Avoid pointing at paths inside the GENESIS git repo unless that repo will stay put on the show machine.
 
 After importing the DLL resource, drag it to the timeline. PIXERA should offer a **Main** stream (1920×1080). Pick a show from the **Show** dropdown — entries come from `scenes/` and `assets/scenes/` beside the DLL.
 

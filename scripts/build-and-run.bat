@@ -1,5 +1,4 @@
 @echo off
-REM Double-click this file (or run from cmd) to build GENESIS and open the editor.
+REM Old shortcut — use the repo-root BUILD-AND-RUN.bat instead.
 cd /d "%~dp0.."
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0build.ps1" -Run
-if errorlevel 1 pause
+call BUILD-AND-RUN.bat

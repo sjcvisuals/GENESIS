@@ -31,25 +31,26 @@ Genesis Editor → .scene.json / .gns → deploy folder → PIXERA loads ExtGene
 
 ## 2. Current deployment output
 
-After building `ExtGenesis` or `GenesisDeploy`:
+After `BUILD-AND-RUN.bat` (WIP Debug):
 
 | Output | Path |
 |--------|------|
-| Extension DLL | `build/rxExt/ExtGenesis/Debug/ExtGenesis.dll` |
-| RX test copy | `third_party/render-bridge-sdk/RenderBridge/RX/modules/ExtGenesis/` |
-| PIXERA package | `build/deploy/GenesisPixera/` |
-| Editor | `build/Debug/genesis_gltf_viewer.exe` |
-| Player | `build/Debug/genesis_player.exe` |
+| Editor | `out/Editor/genesis_gltf_viewer.exe` |
+| Pixera scene DLL | `out/ExtGenesis/ExtGenesis.dll` |
+| Pixera cutout DLL | `out/ExtGenesisRemover/ExtGenesisRemover.dll` |
 
-**GenesisPixera layout**
+`build/` is the CMake cache only — do not use it for day-to-day testing.
+
+**`out/ExtGenesis` layout**
 
 ```
-GenesisPixera/
+out/ExtGenesis/
 ├── ExtGenesis.dll
 ├── Genesis.manifest.json
 ├── README.txt
-├── Scenes/          (from assets/scenes)
-└── Assets/          (full assets tree)
+├── scenes/
+├── assets/
+└── shaders/spv/
 ```
 
 ## 3. Runtime dependencies (RenderBridge DLL)
@@ -105,7 +106,7 @@ GenesisPixera/
 2. **Shared `runtime/` module** — `GenesisSession`, path resolution, scene load API.
 3. **Module-relative paths** — `Scenes/`, `Assets/`, `assets/` under DLL directory.
 4. **Safe scene reload** — failed load keeps previous scene.
-5. **`GenesisDeploy` target** — reproducible `build/deploy/GenesisPixera/` folder.
+5. **`out/` WIP package** — filled by `scripts/build.ps1` / `BUILD-AND-RUN.bat`.
 6. **`genesis_player`** — validates scene load without PIXERA.
 7. **Renderer split** — `genesis_renderer_core` (offscreen) vs `genesis_renderer_windowed` (editor/player); extension links core only (no ImGui / windowed `Renderer`).
 

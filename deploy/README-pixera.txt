@@ -1,29 +1,33 @@
 Genesis PIXERA RenderBridge Extension
 =====================================
 
-Install
--------
-Copy the entire GenesisPixera folder to your PIXERA RenderBridge extensions directory.
-Typical path:
+Local WIP testing
+-----------------
+After double-clicking BUILD-AND-RUN.bat, use:
+
+  <repo>\out\ExtGenesis\ExtGenesis.dll
+
+Point PIXERA at that DLL. Keep the sibling folders next to it
+(assets\, scenes\, shaders\, onnxruntime.dll).
+
+Install (playback machine)
+--------------------------
+Copy the entire ExtGenesis folder to:
   <PIXERA>/data/rxExt/ExtGenesis/
 
 Required files
 --------------
-  ExtGenesis.dll          (~3.5 MB Release; use Release builds for shows)
+  ExtGenesis.dll
   Genesis.manifest.json
   scenes/   (drop your .genesis / .gns shows here — fills the Show dropdown)
   assets/   (bundled resources; assets/scenes/ is also scanned into Show)
 
 Runtime dependency
 ------------------
-ExtGenesis is built with MSVC and requires the Visual C++ 2015–2022 Redistributable (x64)
-on playback machines:
+ExtGenesis is built with MSVC and requires the Visual C++ 2015–2022 Redistributable (x64):
   https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist
 
 The Genesis Editor is NOT required on playback machines.
-
-Topology examples (assets/topology/) are included for reference. Multi-output
-simulation tools live with Genesis Player, not inside this PIXERA folder.
 
 Scene loading
 -------------
@@ -31,32 +35,6 @@ Scene loading
 - The dropdown is filled from folders next to ExtGenesis.dll:
     scenes/
     assets/scenes/
-- Paths are resolved relative to the extension DLL directory, not the process working directory.
-- Built-in demo is available when no scene files are present.
+- Paths are resolved relative to the extension DLL directory.
 
-Reload
-------
-Change "Show" to load another scene. Toggle "Reload Scene" after saving in the editor
-and copying the file into scenes/. If loading fails, the previous scene stays active.
-New .genesis / .gns files under scenes/ appear in Show automatically; restart the stream
-if new actors need fresh parameters.
-
-See docs/pixera-clean-machine-checklist.md for full verification steps.
-
-Local test (developer machine)
-------------------------------
-Build ExtGenesis, then run RX.exe with extensions/ExtGenesis/run.lua from the RenderBridge SDK.
-
-Clean-machine requirements
---------------------------
-- Windows 10/11 x64
-- Vulkan 1.1+ compatible GPU driver (installed with GPU vendor driver)
-- PIXERA with RenderBridge API 1.2
-
-NOT required on playback machines
----------------------------------
-- Genesis Editor
-- Visual Studio / MSVC build tools
-- Vulkan SDK
-- CMake
-- Source code
+See docs/pixera-integration.md and docs/pixera-clean-machine-checklist.md.

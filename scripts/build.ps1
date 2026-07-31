@@ -1,16 +1,15 @@
-# GENESIS one-shot Windows build helper
+# GENESIS local WIP build (Windows)
 #
-# Usage (from the repo root, in PowerShell):
-#   .\scripts\build.ps1              # editor + Pixera DLLs (scene + remover)
-#   .\scripts\build.ps1 -Run         # build then launch the editor
-#   .\scripts\build.ps1 -Config Release
-#   .\scripts\build.ps1 -PixeraOnly  # ExtGenesis + ExtGenesisRemover only
-#   .\scripts\build.ps1 -RemoverOnly # background-cutout DLL only
-#   .\scripts\build.ps1 -EditorOnly  # editor only
+# Day-to-day: double-click BUILD-AND-RUN.bat in the repo root.
+# That builds Debug, syncs everything into out\, and launches the editor.
 #
+# PowerShell:
+#   .\scripts\build.ps1          # build only
+#   .\scripts\build.ps1 -Run     # build + launch editor
+#
+# Ignore the build\ tree for testing — use out\ only.
+
 param(
-    [ValidateSet("Release", "Debug")]
-    [string]$Config = "Release",
     [switch]$Run,
     [switch]$EditorOnly,
     [switch]$PixeraOnly,
@@ -19,8 +18,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# WIP only — Release packaging uses scripts/package-installer.ps1 separately.
+$Config = "Debug"
+
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $BuildDir = Join-Path $RepoRoot "build"
+$OutDir = Join-Path $RepoRoot "out"
 
 function Find-CMake {
     $candidates = @(
@@ -42,18 +45,147 @@ function Find-CMake {
     return $null
 }
 
+function Invoke-LoggedNative {
+    param(
+        [Parameter(Mandatory = $true)][scriptblock]$Command,
+        [Parameter(Mandatory = $true)][string]$LogPath,
+        [switch]$Append
+    )
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $lines = & $Command 2>&1 | ForEach-Object {
+            if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.ToString() }
+            else { "$_" }
+        }
+        if ($Append) {
+            $lines | Tee-Object -FilePath $LogPath -Append | Out-Host
+        } else {
+            $lines | Tee-Object -FilePath $LogPath | Out-Host
+        }
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
+}
+
+function Resolve-BuiltExe([string]$Name) {
+    foreach ($c in @(
+        (Join-Path $BuildDir "$Config\$Name"),
+        (Join-Path $BuildDir $Name)
+    )) {
+        if (Test-Path $c) { return (Resolve-Path $c).Path }
+    }
+    return $null
+}
+
+function Resolve-BuiltDll([string]$Name) {
+    $candidates = @(
+        (Join-Path $BuildDir "rxExt\$Name\$Config\$Name.dll"),
+        (Join-Path $BuildDir "rxExt\$Name\$Name.dll")
+    )
+    foreach ($c in $candidates) {
+        if (Test-Path $c) { return (Resolve-Path $c).Path }
+    }
+    return $null
+}
+
+function Find-OnnxRuntimeDll {
+    $roots = @(
+        (Join-Path $RepoRoot "third_party"),
+        $BuildDir
+    )
+    foreach ($root in $roots) {
+        if (-not (Test-Path $root)) { continue }
+        $hit = Get-ChildItem -Path $root -Recurse -Filter "onnxruntime.dll" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($hit) { return $hit.FullName }
+    }
+    return $null
+}
+
+function Sync-Directory([string]$Source, [string]$Destination) {
+    if (-not (Test-Path $Source)) { return }
+    if (Test-Path $Destination) {
+        Remove-Item -Path $Destination -Recurse -Force
+    }
+    $parent = Split-Path -Parent $Destination
+    if ($parent) {
+        New-Item -ItemType Directory -Force -Path $parent | Out-Null
+    }
+    Copy-Item -Path $Source -Destination $Destination -Recurse -Force
+}
+
+function Sync-OutFolder {
+    Write-Host ""
+    Write-Host "Syncing WIP outputs to out\ ..." -ForegroundColor Cyan
+
+    $assetsSrc = Join-Path $RepoRoot "assets"
+    $shaderSrc = Join-Path $BuildDir "shaders\spv"
+    $onnx = Find-OnnxRuntimeDll
+
+    # --- Editor ---
+    $editorExe = Resolve-BuiltExe "genesis_gltf_viewer.exe"
+    if ($editorExe) {
+        $editorOut = Join-Path $OutDir "Editor"
+        New-Item -ItemType Directory -Force -Path $editorOut | Out-Null
+        Copy-Item -Path $editorExe -Destination (Join-Path $editorOut "genesis_gltf_viewer.exe") -Force
+        Sync-Directory $assetsSrc (Join-Path $editorOut "assets")
+        if (Test-Path $shaderSrc) {
+            $shaderDest = Join-Path $editorOut "shaders\spv"
+            New-Item -ItemType Directory -Force -Path $shaderDest | Out-Null
+            Copy-Item -Path (Join-Path $shaderSrc "*.spv") -Destination $shaderDest -Force
+        }
+    }
+
+    # --- Pixera scene DLL ---
+    $extDll = Resolve-BuiltDll "ExtGenesis"
+    if ($extDll) {
+        $extOut = Join-Path $OutDir "ExtGenesis"
+        New-Item -ItemType Directory -Force -Path $extOut | Out-Null
+        Copy-Item -Path $extDll -Destination (Join-Path $extOut "ExtGenesis.dll") -Force
+        Sync-Directory $assetsSrc (Join-Path $extOut "assets")
+        Sync-Directory (Join-Path $assetsSrc "scenes") (Join-Path $extOut "scenes")
+        if (Test-Path $shaderSrc) {
+            $shaderDest = Join-Path $extOut "shaders\spv"
+            New-Item -ItemType Directory -Force -Path $shaderDest | Out-Null
+            Copy-Item -Path (Join-Path $shaderSrc "*.spv") -Destination $shaderDest -Force
+        }
+        Copy-Item -Path (Join-Path $RepoRoot "deploy\Genesis.manifest.json") `
+            -Destination (Join-Path $extOut "Genesis.manifest.json") -Force
+        Copy-Item -Path (Join-Path $RepoRoot "deploy\README-pixera.txt") `
+            -Destination (Join-Path $extOut "README.txt") -Force
+        if ($onnx) {
+            Copy-Item -Path $onnx -Destination (Join-Path $extOut "onnxruntime.dll") -Force
+        }
+    }
+
+    # --- Pixera matte-only DLL ---
+    $removerDll = Resolve-BuiltDll "ExtGenesisRemover"
+    if ($removerDll) {
+        $remOut = Join-Path $OutDir "ExtGenesisRemover"
+        New-Item -ItemType Directory -Force -Path $remOut | Out-Null
+        Copy-Item -Path $removerDll -Destination (Join-Path $remOut "ExtGenesisRemover.dll") -Force
+        Sync-Directory (Join-Path $assetsSrc "matting") (Join-Path $remOut "assets\matting")
+        Copy-Item -Path (Join-Path $RepoRoot "deploy\GenesisRemover.manifest.json") `
+            -Destination (Join-Path $remOut "GenesisRemover.manifest.json") -Force
+        Copy-Item -Path (Join-Path $RepoRoot "deploy\README-remover.txt") `
+            -Destination (Join-Path $remOut "README.txt") -Force
+        if ($onnx) {
+            Copy-Item -Path $onnx -Destination (Join-Path $remOut "onnxruntime.dll") -Force
+        }
+    }
+}
+
 $CMake = Find-CMake
 if (-not $CMake) {
     Write-Host ""
     Write-Host "CMake / Visual Studio C++ tools not found." -ForegroundColor Red
-    Write-Host "Install Visual Studio 2022 with the 'Desktop development with C++' workload,"
-    Write-Host "then re-run this script."
-    Write-Host ""
+    Write-Host "Install Visual Studio 2022 with the 'Desktop development with C++' workload."
     Write-Host "Download: https://visualstudio.microsoft.com/downloads/"
     exit 1
 }
 
-# Prefer a local Vulkan SDK (glslc). Optional bootstrap from LunarG installer.
 $VulkanRoot = Join-Path $env:LOCALAPPDATA "VulkanSDK\1.4.350.0"
 $Glslc = Join-Path $VulkanRoot "Bin\glslc.exe"
 if (-not (Test-Path $Glslc)) {
@@ -90,43 +222,15 @@ if ($RemoverOnly) {
 }
 
 Write-Host ""
-Write-Host "=== GENESIS build ($Config) ===" -ForegroundColor Cyan
+Write-Host "=== GENESIS WIP build (Debug) ===" -ForegroundColor Cyan
 Write-Host "Repo:    $RepoRoot"
 Write-Host "CMake:   $CMake"
+Write-Host "Out:     $OutDir"
 Write-Host "Targets: $($targets -join ', ')"
 Write-Host ""
 
 $LogFile = Join-Path $BuildDir "last-build.log"
 New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
-
-# CMake/MSBuild often print status to stderr. With $ErrorActionPreference=Stop,
-# PowerShell turns those lines into terminating NativeCommandError when piped.
-# Run native tools with Continue and stringify ErrorRecords before Tee-Object.
-function Invoke-LoggedNative {
-    param(
-        [Parameter(Mandatory = $true)]
-        [scriptblock]$Command,
-        [Parameter(Mandatory = $true)]
-        [string]$LogPath,
-        [switch]$Append
-    )
-    $prevEap = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $lines = & $Command 2>&1 | ForEach-Object {
-            if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.ToString() }
-            else { "$_" }
-        }
-        if ($Append) {
-            $lines | Tee-Object -FilePath $LogPath -Append | Out-Host
-        } else {
-            $lines | Tee-Object -FilePath $LogPath | Out-Host
-        }
-        return $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $prevEap
-    }
-}
 
 Push-Location $RepoRoot
 try {
@@ -139,7 +243,6 @@ try {
     foreach ($target in $targets) {
         Write-Host ""
         Write-Host "Building $target ..." -ForegroundColor Cyan
-        # Important: pass --target once per name. "--target A B" is wrong on MSVC.
         $buildCode = Invoke-LoggedNative -LogPath $LogFile -Append -Command {
             & $CMake --build $BuildDir --config $Config --target $target
         }
@@ -159,72 +262,44 @@ finally {
     Pop-Location
 }
 
-function Resolve-BuiltExe([string]$Name) {
-    $candidates = @(
-        (Join-Path $BuildDir "$Config\$Name"),
-        (Join-Path $BuildDir $Name),
-        (Join-Path $BuildDir "RelWithDebInfo\$Name"),
-        (Join-Path $BuildDir "MinSizeRel\$Name")
-    )
-    foreach ($c in $candidates) {
-        if (Test-Path $c) { return (Resolve-Path $c).Path }
-    }
-    return $null
-}
+Sync-OutFolder
 
-function Resolve-BuiltDll([string]$Relative) {
-    $candidates = @(
-        (Join-Path $BuildDir $Relative),
-        (Join-Path $BuildDir "$Config\$Relative")
-    )
-    foreach ($c in $candidates) {
-        if (Test-Path $c) { return (Resolve-Path $c).Path }
-    }
-    return $null
-}
-
-$Editor = Resolve-BuiltExe "genesis_gltf_viewer.exe"
-$Dll = Resolve-BuiltDll "rxExt\ExtGenesis\$Config\ExtGenesis.dll"
-if (-not $Dll) { $Dll = Resolve-BuiltDll "deploy\GenesisPixera\ExtGenesis.dll" }
-$RemoverDll = Resolve-BuiltDll "rxExt\ExtGenesisRemover\$Config\ExtGenesisRemover.dll"
-if (-not $RemoverDll) { $RemoverDll = Resolve-BuiltDll "deploy\GenesisRemover\ExtGenesisRemover.dll" }
+$Editor = Join-Path $OutDir "Editor\genesis_gltf_viewer.exe"
+$Dll = Join-Path $OutDir "ExtGenesis\ExtGenesis.dll"
+$RemoverDll = Join-Path $OutDir "ExtGenesisRemover\ExtGenesisRemover.dll"
+if (-not (Test-Path $Editor)) { $Editor = $null }
+if (-not (Test-Path $Dll)) { $Dll = $null }
+if (-not (Test-Path $RemoverDll)) { $RemoverDll = $null }
 
 Write-Host ""
-Write-Host "=== Build finished ===" -ForegroundColor Green
+Write-Host "=== Ready (use the out\ folder) ===" -ForegroundColor Green
+Write-Host @"
+out\
+  Editor\                 <- run the editor from here
+  ExtGenesis\             <- point PIXERA at ExtGenesis.dll
+  ExtGenesisRemover\      <- point PIXERA at ExtGenesisRemover.dll (cutout only)
+"@
 if ($Editor) {
-    Write-Host "Editor exe:"
-    Write-Host "  $Editor"
-    Write-Host "Run (keep working directory = folder of the exe so assets resolve):"
-    Write-Host ('  "{0}"' -f $Editor)
-    Write-Host "Then: File -> Examples"
+    Write-Host "Editor:  $Editor"
 } elseif (-not $PixeraOnly -and -not $RemoverOnly) {
-    Write-Host "Editor exe not found - search with:"
-    Write-Host "  Get-ChildItem -Recurse -Filter genesis_gltf_viewer.exe $BuildDir"
+    Write-Host "Editor missing under out\Editor — see $LogFile" -ForegroundColor Yellow
 }
 if ($Dll) {
-    Write-Host ""
-    Write-Host "Pixera scene DLL (browse to this in PIXERA generic extension):"
-    Write-Host "  $Dll"
-    Write-Host "Keep the sibling assets\ / scenes\ folders next to that DLL."
+    Write-Host "Pixera:  $Dll"
 } elseif (-not $EditorOnly -and -not $RemoverOnly) {
-    Write-Host ""
-    Write-Host "ExtGenesis.dll not found (Windows-only target). If you expected it, open the build log above."
+    Write-Host "ExtGenesis.dll missing under out\ExtGenesis (Windows-only)." -ForegroundColor Yellow
 }
 if ($RemoverDll) {
-    Write-Host ""
-    Write-Host "Pixera background-remover DLL (matte only — no scenes):"
-    Write-Host "  $RemoverDll"
-    Write-Host "Keep sibling assets\matting\ and onnxruntime.dll next to that DLL."
-    Write-Host "Deploy package (ready to copy into PIXERA data\rxExt\ExtGenesisRemover\):"
-    Write-Host ("  {0}" -f (Join-Path $BuildDir "deploy\GenesisRemover"))
+    Write-Host "Remover: $RemoverDll"
 } elseif (-not $EditorOnly) {
-    Write-Host ""
-    Write-Host "ExtGenesisRemover.dll not found (Windows-only target). If you expected it, open the build log above."
+    Write-Host "ExtGenesisRemover.dll missing under out\ExtGenesisRemover (Windows-only)." -ForegroundColor Yellow
 }
+Write-Host ""
+Write-Host "(Ignore build\ for day-to-day testing — that is just the CMake cache.)"
 Write-Host ""
 
 if ($Run) {
-    if (-not $Editor) { Write-Error "Cannot -Run: editor exe missing." }
+    if (-not $Editor) { Write-Error "Cannot -Run: out\Editor\genesis_gltf_viewer.exe missing." }
     $EditorDir = Split-Path -Parent $Editor
     Write-Host "Launching editor from $EditorDir ..."
     Start-Process -FilePath $Editor -WorkingDirectory $EditorDir
