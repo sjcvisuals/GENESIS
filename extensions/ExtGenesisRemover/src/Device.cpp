@@ -14,10 +14,15 @@ Device::Device(ValueSet settings) : settings_(std::move(settings)) {
 }
 
 bool Device::initialize() noexcept try {
-    const string luid_hex = settings_.get(SettingNames::adapter_luid, string("0000000000000000"));
-    adapter_luid_ = common::from_hex_string<std::uint64_t>(luid_hex);
-    removerLog(std::format("Device::initialize adapter_luid={:016x}", adapter_luid_));
-    host().log_info(std::format("GENESIS Remover device ready (adapter_luid={:016x})", adapter_luid_));
+    adapter_luid_hex_ = std::string(settings_.get(SettingNames::adapter_luid, string("0000000000000000")));
+    removerLog(std::format("Device::initialize adapter_luid={}", adapter_luid_hex_));
+
+    // ExtSampleD3D pattern: create the D3D11 device at device init (before streams).
+    d3d_device_ = std::make_shared<d3d11::Device>(adapter_luid_hex_);
+    d3d_fence_ = std::make_unique<d3d11::Fence>(d3d_device_->device_5());
+
+    host().log_info(std::format("GENESIS Remover D3D11 device ready (adapter_luid={})", adapter_luid_hex_));
+    removerLog("Device::initialize D3D11 OK");
     return true;
 } catch (const std::exception& ex) {
     removerLog(std::format("Device::initialize exception: {}", ex.what()));
@@ -40,8 +45,6 @@ string Device::get_property(string_view name) noexcept {
 
 vector<ValueSet> Device::enumerate_stream_settings() noexcept {
     removerLog("Device::enumerate_stream_settings");
-    // Use the same stream identity shape as ExtGenesis ("Main"/"main") so PIXERA
-    // timeline instantiation follows the known-good path.
     ValueSet stream;
     stream.set(SettingNames::name, string("Main"));
     stream.set(SettingNames::handle, string("main"));
@@ -52,11 +55,46 @@ vector<ValueSet> Device::enumerate_stream_settings() noexcept {
 
 InputStream* Device::create_input_stream(ValueSet settings) noexcept try {
     removerLog("Device::create_input_stream");
-    return new Input(adapter_luid_, std::move(settings));
+    if (!d3d_device_) {
+        throw std::runtime_error("D3D11 device missing");
+    }
+    return new Input(d3d_device_, std::move(settings));
 } catch (const std::exception& ex) {
     removerLog(std::format("create_input_stream exception: {}", ex.what()));
     host().log_error(ex.what());
     return nullptr;
+}
+
+SyncDesc Device::before_render() noexcept {
+    return get_sync_desc();
+}
+
+void Device::render() noexcept {
+    // ExtSampleD3D: wait for host to finish using shared textures.
+    if (d3d_fence_ && d3d_device_) {
+        d3d_fence_->wait(d3d_device_->device_context_4(), ++fence_counter_);
+    }
+}
+
+SyncDesc Device::after_render() noexcept {
+    if (d3d_fence_ && d3d_device_) {
+        d3d_fence_->signal(d3d_device_->device_context_4(), ++fence_counter_);
+    }
+    return get_sync_desc();
+}
+
+SyncDesc Device::get_sync_desc() noexcept {
+    if (!d3d_fence_) {
+        return {};
+    }
+    return {
+        SyncStrategy::TimelineSemaphore,
+        ShareHandle{
+            HandleType::D3D_FENCE,
+            d3d_fence_->share_handle(),
+        },
+        fence_counter_,
+    };
 }
 
 } // namespace rxext::genesis_remover

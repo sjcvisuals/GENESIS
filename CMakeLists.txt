@@ -432,18 +432,21 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         ${EXT_REMOVER_DIR}/src/ModulePaths.cpp
         ${EXT_REMOVER_DIR}/src/RemoverLog.cpp
         ${RX_SDK_DIR}/libs/common/string.cpp
+        ${RX_SDK_DIR}/libs/d3d11/d3d11.cpp
+        ${RX_SDK_DIR}/libs/d3d11/getSecurityAttributes.cpp
         ${EXT_REMOVER_DIR}/ExtGenesisRemover.def
     )
     target_include_directories(ExtGenesisRemover PRIVATE
         ${EXT_REMOVER_DIR}/src
         ${RX_SDK_DIR}/include
         ${RX_SDK_DIR}/libs
+        ${RX_SDK_DIR}/libs/d3d11
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_BINARY_DIR}
     )
-    # Match ExtGenesis link graph exactly - PIXERA already loads that PE shape.
-    # (Matte-only behavior is still enforced by the Remover Input/Device surface.)
-    target_link_libraries(ExtGenesisRemover PRIVATE genesis_runtime)
+    # D3D11 shared textures (ExtSampleD3D pattern) + CPU matte core.
+    # Do NOT link full genesis_runtime/Vulkan here — that path crashed PIXERA on scrub.
+    target_link_libraries(ExtGenesisRemover PRIVATE genesis_matting d3d11 dxgi d3dcompiler)
     if(MSVC AND GENESIS_HAS_ONNXRUNTIME)
         target_link_options(ExtGenesisRemover PRIVATE "/DELAYLOAD:onnxruntime.dll")
         target_link_libraries(ExtGenesisRemover PRIVATE delayimp)
@@ -451,7 +454,6 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
     target_compile_definitions(ExtGenesisRemover PRIVATE
         GENESIS_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders/spv"
     )
-    add_dependencies(ExtGenesisRemover genesis_shaders)
     set_target_properties(ExtGenesisRemover PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/rxExt/ExtGenesisRemover"
     )
