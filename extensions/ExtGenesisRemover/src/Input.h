@@ -1,5 +1,9 @@
 #pragma once
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include "ComPointer.h"
 #include "d3d11/d3d11.h"
 #include "matting/AsyncMatteWorker.hpp"
@@ -8,6 +12,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <utility>
 #include <vector>
 
 struct ID3D11Texture2D;

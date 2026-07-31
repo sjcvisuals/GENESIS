@@ -1,5 +1,9 @@
 #include "Input.h"
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include "ModulePaths.h"
 #include "RemoverLog.h"
 #include "platform/Paths.hpp"
@@ -8,7 +12,9 @@
 #include <cstring>
 #include <d3d11.h>
 #include <format>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace rxext::genesis_remover {

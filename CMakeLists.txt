@@ -452,6 +452,8 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         target_link_libraries(ExtGenesisRemover PRIVATE delayimp)
     endif()
     target_compile_definitions(ExtGenesisRemover PRIVATE
+        NOMINMAX
+        WIN32_LEAN_AND_MEAN
         GENESIS_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders/spv"
     )
     set_target_properties(ExtGenesisRemover PROPERTIES

@@ -1,10 +1,15 @@
 #pragma once
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include "d3d11/d3d11.h"
 #include "rxext_client.h"
 
 #include <cstdint>
 #include <memory>
+#include <utility>
 
 namespace rxext::genesis_remover {
 

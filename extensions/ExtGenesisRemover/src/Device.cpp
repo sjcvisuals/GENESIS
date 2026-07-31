@@ -1,5 +1,9 @@
 #include "Device.h"
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include "Input.h"
 #include "RemoverLog.h"
 #include "common/string.h"
@@ -7,6 +11,7 @@
 
 #include <format>
 #include <stdexcept>
+#include <utility>
 
 namespace rxext::genesis_remover {
 
