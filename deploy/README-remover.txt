@@ -43,11 +43,14 @@ Required files
 
 Usage in PIXERA
 ---------------
-1. Load ExtGenesisRemover as a generic RenderBridge extension.
-2. Create the Cutout stream.
+1. Load ExtGenesisRemover as a generic RenderBridge extension resource.
+2. Drag it onto the timeline (stream name is Main, same as ExtGenesis).
 3. Link media / NDI / SDI -> Video In.
 4. Set Quality (Fast / Balanced / Quality).
 5. Output sampler is a transparent RGBA cutout.
+
+If the resource imports but timeline drag fails, check PIXERA logs for
+"GENESIS Remover" errors (Vulkan / adapter LUID / share handle).
 
 If PIXERA says "Can Not Load Pixera Extension"
 ---------------------------------------------

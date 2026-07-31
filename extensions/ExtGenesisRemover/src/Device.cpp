@@ -32,9 +32,11 @@ string Device::get_property(string_view name) noexcept {
 }
 
 vector<ValueSet> Device::enumerate_stream_settings() noexcept {
+    // Use the same stream identity shape as ExtGenesis ("Main"/"main") so PIXERA
+    // timeline instantiation follows the known-good path.
     ValueSet stream;
-    stream.set(SettingNames::name, string("Cutout"));
-    stream.set(SettingNames::handle, string("cutout"));
+    stream.set(SettingNames::name, string("Main"));
+    stream.set(SettingNames::handle, string("main"));
     stream.set(SettingNames::resolution_x, static_cast<std::uint32_t>(1920));
     stream.set(SettingNames::resolution_y, static_cast<std::uint32_t>(1080));
     return {stream};
