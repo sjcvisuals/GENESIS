@@ -114,8 +114,13 @@ if ($DllPath -match 'ExtGenesisRemover') {
 Write-Host ""
 if ($ok) {
     Write-Host "Check passed. If PIXERA still fails, restart PIXERA after copying the folder." -ForegroundColor Green
-    exit 0
+    if ($MyInvocation.InvocationName -ne '.') {
+        exit 0
+    }
 } else {
     Write-Host "Check failed. Fix the missing items above, rebuild with BUILD-AND-RUN.bat, retry." -ForegroundColor Red
-    exit 1
+    if ($MyInvocation.InvocationName -ne '.') {
+        exit 1
+    }
+    throw "PIXERA DLL load check failed"
 }

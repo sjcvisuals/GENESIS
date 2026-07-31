@@ -330,7 +330,22 @@ if ($RemoverDll) {
     Write-Host "In PIXERA browse to that DLL (or copy the whole folder to data\rxExt\ExtGenesisRemover\)."
     Write-Host "Do NOT put it inside data\rxExt\ExtGenesis\ - that folder is the scene bridge only."
     Write-Host "Verify load with:  .\scripts\check-pixera-dll.ps1"
-    & (Join-Path $PSScriptRoot "check-pixera-dll.ps1") -DllPath $RemoverDll
+    # Run in a child process so its exit code cannot abort this script via `exit`.
+    $checkScript = Join-Path $PSScriptRoot "check-pixera-dll.ps1"
+    $checkCode = 0
+    try {
+        $p = Start-Process -FilePath "powershell.exe" -ArgumentList @(
+            "-NoProfile", "-ExecutionPolicy", "Bypass",
+            "-File", $checkScript, "-DllPath", $RemoverDll
+        ) -Wait -PassThru -NoNewWindow
+        $checkCode = $p.ExitCode
+    } catch {
+        Write-Host "Could not run load check: $_" -ForegroundColor Yellow
+        $checkCode = 1
+    }
+    if ($checkCode -ne 0) {
+        Write-Host "WARNING: Remover LoadLibrary check failed (exit $checkCode). PIXERA will likely reject this DLL." -ForegroundColor Yellow
+    }
 } elseif (-not $EditorOnly) {
     Write-Host "ExtGenesisRemover.dll missing under out\ExtGenesisRemover (Windows-only)." -ForegroundColor Yellow
 }
