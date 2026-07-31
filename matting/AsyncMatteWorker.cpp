@@ -38,6 +38,19 @@ void AsyncMatteWorker::stop() {
 void AsyncMatteWorker::setSettings(const BgRemoverSettings& settings) {
     {
         std::lock_guard lock(mu_);
+        // Identical settings must be a no-op. Clearing has_latest every call
+        // (e.g. from applyMatteSettings each render) permanently blocks matte output.
+        if (!settings_dirty_ && settings_.backend == settings.backend &&
+            settings_.quality == settings.quality &&
+            settings_.key_r == settings.key_r && settings_.key_g == settings.key_g &&
+            settings_.key_b == settings.key_b &&
+            settings_.key_threshold == settings.key_threshold &&
+            settings_.key_softness == settings.key_softness &&
+            settings_.temporal_alpha == settings.temporal_alpha &&
+            settings_.rvm_downsample == settings.rvm_downsample &&
+            settings_.model_path == settings.model_path) {
+            return;
+        }
         settings_ = settings;
         settings_dirty_ = true;
         has_pending_ = false;

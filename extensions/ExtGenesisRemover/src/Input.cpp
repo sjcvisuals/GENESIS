@@ -106,6 +106,11 @@ bool Input::initialize() noexcept try {
     time_ = add_parameter<ParameterValue>("time");
     time_->set_property(PropertyNames::purpose, PurposeNames::TimelineTime);
 
+    // PIXERA only re-ticks parked clips when a FrameCounter (or similar) advances.
+    // Without this, live Video In freezes to the frame captured on scrub-in.
+    frame_counter_ = add_parameter<ParameterValue>("frame_counter");
+    frame_counter_->set_property(PropertyNames::purpose, PurposeNames::FrameCounter);
+
     video_in_param_ = add_parameter<ParameterTexture>("texture");
     video_in_param_->set_property(PropertyNames::name, "Video In");
     video_in_param_->set_property(PropertyNames::group_name, "Input");
@@ -278,12 +283,62 @@ bool Input::writeOutputRgba(const std::uint8_t* rgba) {
 }
 
 void Input::applyMatteSettings() {
-    matte_settings_.backend = ::genesis::BgRemoverBackend::Auto;
     const int q = quality_ ? std::clamp(quality_->value(), 0, 2) : 1;
-    matte_settings_.quality = static_cast<::genesis::BgRemoverQuality>(q);
+    const auto next_q = static_cast<::genesis::BgRemoverQuality>(q);
+
+    // Match ExtGenesis: only push when quality/backend actually change. Calling
+    // AsyncMatteWorker::setSettings every frame cleared has_latest and reloaded ONNX.
+    if (matte_settings_applied_ && matte_settings_.backend == ::genesis::BgRemoverBackend::Auto &&
+        matte_settings_.quality == next_q) {
+        return;
+    }
+
+    matte_settings_.backend = ::genesis::BgRemoverBackend::Auto;
+    matte_settings_.quality = next_q;
+    if (matte_settings_.model_path.empty()) {
+        try {
+            matte_settings_.model_path =
+                ::genesis::resolveAssetPath("assets/matting/rvm_mobilenetv3_fp16.onnx");
+            removerLog(std::format("RVM model: {}", matte_settings_.model_path.string()));
+        } catch (const std::exception& ex) {
+            removerLog(std::format("RVM model resolve failed: {}", ex.what()));
+        }
+    }
+
+    matte_settings_applied_ = true;
     if (async_started_) {
         async_.setSettings(matte_settings_);
+        removerLog(std::format("matte settings applied quality={} backend=Auto", q));
     }
+}
+
+void Input::touchHostClock() {
+    // Consume host-driven clocks so PIXERA keeps calling update/render for live Video In.
+    if (time_) {
+        (void)time_->value();
+    }
+    if (frame_counter_) {
+        (void)frame_counter_->value();
+    }
+}
+
+void Input::logMatteStatusMaybe() {
+    if (!async_started_) {
+        return;
+    }
+    const auto completed = async_.completed();
+    const std::string status = async_.status();
+    const bool status_changed = status != last_matte_status_;
+    const bool completed_changed = completed != last_logged_completed_;
+    if (!status_changed && !completed_changed && (render_ticks_ % 120u) != 0u) {
+        return;
+    }
+    last_matte_status_ = status;
+    last_logged_completed_ = completed;
+    removerLog(std::format(
+        "matte status='{}' backend={} rvm={} submitted={} completed={} skipped={} busy={}", status,
+        ::genesis::bgRemoverBackendLabel(async_.activeBackend()), async_.isRvmReady() ? 1 : 0,
+        async_.submitted(), completed, async_.skipped(), async_.busy() ? 1 : 0));
 }
 
 void Input::logRenderPathOnce(const char* path, std::uint8_t sample_alpha) {
@@ -296,6 +351,7 @@ void Input::logRenderPathOnce(const char* path, std::uint8_t sample_alpha) {
 }
 
 bool Input::update() noexcept try {
+    touchHostClock();
     if (!video_in_param_) {
         return true;
     }
@@ -321,12 +377,13 @@ bool Input::update() noexcept try {
         out.is_target = true;
         output_tex_ = createSharedTexture(*sampler_, out, d3d11::Texture::RenderTarget);
 
-        applyMatteSettings();
         if (!async_started_) {
             async_.start();
             async_started_ = true;
             removerLog("async matte worker started");
         }
+        // Apply settings after start so the worker actually receives them.
+        applyMatteSettings();
         async_.reset(width_, height_);
         ensureStaging(width_, height_, toDxgi(video_in_format_));
         last_render_path_.clear();
@@ -375,6 +432,9 @@ bool Input::update() noexcept try {
 }
 
 RenderResult Input::render() noexcept try {
+    touchHostClock();
+    ++render_ticks_;
+
     if (!output_tex_) {
         return RenderResult::Succeeded;
     }
@@ -387,6 +447,7 @@ RenderResult Input::render() noexcept try {
     }
 
     applyMatteSettings();
+    logMatteStatusMaybe();
 
     const auto w = static_cast<std::uint32_t>(video_in_tex_->width());
     const auto h = static_cast<std::uint32_t>(video_in_tex_->height());
@@ -448,6 +509,8 @@ ValueSet Input::get_state() noexcept {
     state.set(StateNames::resolution_y, res_y);
     state.set(StateNames::format, get_format_name(format));
     state.set(StateNames::scale_y, 1);
+    // Hint continuous refresh for live Video In compositing.
+    state.set(StateNames::frame_rate, 60.0);
     return state;
 }
 

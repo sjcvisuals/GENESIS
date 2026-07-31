@@ -39,9 +39,11 @@ private:
     bool readVideoInRgba(std::vector<std::uint8_t>& out_rgba);
     bool writeOutputRgba(const std::uint8_t* rgba);
     void applyMatteSettings();
+    void touchHostClock();
     void blitPassthrough();
     void clearOutputTransparent();
     void logRenderPathOnce(const char* path, std::uint8_t sample_alpha);
+    void logMatteStatusMaybe();
 
     std::shared_ptr<d3d11::Device> d3d_device_;
     ValueSet settings_;
@@ -51,6 +53,7 @@ private:
     ParameterTexture* video_in_param_ = nullptr;
     ParameterInt* quality_ = nullptr;
     ParameterValue* time_ = nullptr;
+    ParameterValue* frame_counter_ = nullptr;
 
     std::unique_ptr<d3d11::Texture> output_tex_;
     std::unique_ptr<d3d11::Texture> video_in_tex_;
@@ -65,6 +68,7 @@ private:
     ::genesis::AsyncMatteWorker async_;
     ::genesis::BgRemoverSettings matte_settings_{};
     bool async_started_ = false;
+    bool matte_settings_applied_ = false;
 
     std::vector<std::uint8_t> scratch_in_;
     std::vector<std::uint8_t> scratch_out_;
@@ -72,6 +76,9 @@ private:
     std::uint32_t height_ = 1080;
 
     std::string last_render_path_;
+    std::string last_matte_status_;
+    std::uint64_t render_ticks_ = 0;
+    std::uint64_t last_logged_completed_ = 0;
 };
 
 } // namespace rxext::genesis_remover
