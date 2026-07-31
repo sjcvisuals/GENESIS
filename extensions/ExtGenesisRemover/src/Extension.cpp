@@ -12,6 +12,7 @@ bool Extension::initialize() noexcept {
 }
 
 string Extension::get_property(string_view name) noexcept {
+    // Keep property surface aligned with ExtGenesis (known-good in PIXERA).
     if (name == PropertyNames::name) {
         return string("GENESIS Remover");
     }

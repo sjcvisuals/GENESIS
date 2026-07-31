@@ -40,6 +40,16 @@ foreach ($item in $required) {
     }
 }
 
+# Zone.Identifier (Mark-of-the-Web) can make LoadLibrary fail inside some hosts.
+$zone = $DllPath + ":Zone.Identifier"
+if (Test-Path $zone) {
+    Write-Host "[WARN] Mark-of-the-Web Zone.Identifier present - unblocking..." -ForegroundColor Yellow
+    try { Unblock-File -Path $DllPath } catch { }
+}
+Get-ChildItem -Path $DllDir -Filter *.dll -ErrorAction SilentlyContinue | ForEach-Object {
+    try { Unblock-File -Path $_.FullName -ErrorAction SilentlyContinue } catch { }
+}
+
 # dumpbin dependents / exports when VS tools are available
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 $dumpbin = $null
@@ -106,10 +116,24 @@ if ($handle -eq [IntPtr]::Zero) {
 Write-Host ""
 if ($DllPath -match 'ExtGenesisRemover') {
     Write-Host "PIXERA install tip:" -ForegroundColor Cyan
-    Write-Host "  Copy the WHOLE out\ExtGenesisRemover folder to:"
-    Write-Host "    <PIXERA>\data\rxExt\ExtGenesisRemover\"
-    Write-Host "  Do NOT put ExtGenesisRemover.dll inside data\rxExt\ExtGenesis\"
-    Write-Host "  (that folder is for the scene bridge only)."
+    Write-Host "  ExtGenesis works for you from data\rxExt\ExtGenesis - install Remover the same way:"
+    Write-Host "    .\scripts\install-pixera-remover.ps1"
+    Write-Host "  That copies out\ExtGenesisRemover -> <PIXERA>\data\rxExt\ExtGenesisRemover\"
+    Write-Host "  Then browse PIXERA to THAT ExtGenesisRemover.dll (not the ExtGenesis folder)."
+
+    $sibling = Join-Path $RepoRoot "out\ExtGenesis\ExtGenesis.dll"
+    if (Test-Path $sibling) {
+        Write-Host ""
+        Write-Host "Comparing LoadLibrary with working ExtGenesis from out\ ..." -ForegroundColor Cyan
+        $h2 = [GenesisNativeLoad]::LoadLibraryEx($sibling, [IntPtr]::Zero,
+            [GenesisNativeLoad]::LOAD_WITH_ALTERED_SEARCH_PATH)
+        if ($h2 -eq [IntPtr]::Zero) {
+            Write-Host ("[WARN] out\ExtGenesis also failed LoadLibrary (err {0}) - your working Pixera copy is probably the older data\rxExt one." -f ([GenesisNativeLoad]::GetLastError())) -ForegroundColor Yellow
+        } else {
+            Write-Host "[OK]  out\ExtGenesis\ExtGenesis.dll loads in this process" -ForegroundColor Green
+            [void][GenesisNativeLoad]::FreeLibrary($h2)
+        }
+    }
 }
 Write-Host ""
 if ($ok) {

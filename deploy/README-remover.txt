@@ -20,11 +20,15 @@ After double-clicking BUILD-AND-RUN.bat, use:
 
 Point PIXERA at that DLL. Keep sibling onnxruntime.dll + assets\matting\.
 
-Or copy the whole folder into PIXERA:
+Recommended (same pattern as your working ExtGenesis install):
+
+  .\scripts\install-pixera-remover.ps1
+
+That copies into:
 
   <PIXERA>\data\rxExt\ExtGenesisRemover\
 
-Then browse to ExtGenesisRemover.dll inside THAT folder.
+Then browse PIXERA to ExtGenesisRemover.dll inside THAT folder (not ExtGenesis).
 
 Verify before PIXERA
 --------------------

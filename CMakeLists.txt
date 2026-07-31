@@ -431,6 +431,7 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         ${EXT_REMOVER_DIR}/src/Input.cpp
         ${EXT_REMOVER_DIR}/src/ModulePaths.cpp
         ${RX_SDK_DIR}/libs/common/string.cpp
+        ${EXT_REMOVER_DIR}/ExtGenesisRemover.def
     )
     target_include_directories(ExtGenesisRemover PRIVATE
         ${EXT_REMOVER_DIR}/src
@@ -439,12 +440,17 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_BINARY_DIR}
     )
-    # Do NOT link full genesis_runtime (assimp/scenes). Remover is matte-only.
-    target_link_libraries(ExtGenesisRemover PRIVATE genesis_remover_core)
+    # Match ExtGenesis link graph exactly - PIXERA already loads that PE shape.
+    # (Matte-only behavior is still enforced by the Remover Input/Device surface.)
+    target_link_libraries(ExtGenesisRemover PRIVATE genesis_runtime)
     if(MSVC AND GENESIS_HAS_ONNXRUNTIME)
         target_link_options(ExtGenesisRemover PRIVATE "/DELAYLOAD:onnxruntime.dll")
         target_link_libraries(ExtGenesisRemover PRIVATE delayimp)
     endif()
+    target_compile_definitions(ExtGenesisRemover PRIVATE
+        GENESIS_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders/spv"
+    )
+    add_dependencies(ExtGenesisRemover genesis_shaders)
     set_target_properties(ExtGenesisRemover PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/rxExt/ExtGenesisRemover"
     )

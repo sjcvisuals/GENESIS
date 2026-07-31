@@ -200,7 +200,19 @@ function Sync-OutFolder {
         Assert-File (Join-Path $remOut "ExtGenesisRemover.dll") "Remover DLL"
         Assert-File (Join-Path $remOut "onnxruntime.dll") "onnxruntime.dll next to Remover"
         Assert-File (Join-Path $remOut "assets\matting\rvm_mobilenetv3_fp16.onnx") "RVM model"
+
+        $remSize = (Get-Item (Join-Path $remOut "ExtGenesisRemover.dll")).Length
+        Write-Host ("Remover DLL size: {0:N0} bytes" -f $remSize)
+        if ($remSize -lt 200000) {
+            throw "ExtGenesisRemover.dll looks too small ($remSize bytes) - build likely incomplete"
+        }
     }
+
+    # Clear Mark-of-the-Web / Zone.Identifier so PIXERA can LoadLibrary from out\.
+    Get-ChildItem -Path $OutDir -Recurse -Include *.dll,*.exe -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            try { Unblock-File -Path $_.FullName -ErrorAction SilentlyContinue } catch { }
+        }
 }
 
 function Build-Target([string]$Target, [string]$Config, [string]$LogPath) {
@@ -327,8 +339,9 @@ if ($Dll) {
 }
 if ($RemoverDll) {
     Write-Host "Remover: $RemoverDll"
-    Write-Host "In PIXERA browse to that DLL (or copy the whole folder to data\rxExt\ExtGenesisRemover\)."
-    Write-Host "Do NOT put it inside data\rxExt\ExtGenesis\ - that folder is the scene bridge only."
+    Write-Host "Because ExtGenesis works from PIXERA data\rxExt, install Remover the same way:"
+    Write-Host "  .\scripts\install-pixera-remover.ps1"
+    Write-Host "Then browse PIXERA to data\rxExt\ExtGenesisRemover\ExtGenesisRemover.dll"
     Write-Host "Verify load with:  .\scripts\check-pixera-dll.ps1"
     # Run in a child process so its exit code cannot abort this script via `exit`.
     $checkScript = Join-Path $PSScriptRoot "check-pixera-dll.ps1"
