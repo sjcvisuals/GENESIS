@@ -48,9 +48,11 @@ Input::Input(std::uint64_t adapter_luid, ValueSet settings)
 Input::~Input() = default;
 
 bool Input::initialize() noexcept try {
+    // Use const char* default so ValueSet::get returns std::string (MSVC std::format
+    // cannot format rxext::string / ptl::string).
+    const std::string handle = settings_.get(SettingNames::handle, "main");
     host().log_info(std::format("initializing GENESIS Remover stream '{}' (adapter_luid={:016x})",
-                                settings_.get(SettingNames::handle, string("cutout")),
-                                adapter_luid_));
+                                handle, adapter_luid_));
     if (!update_settings(std::move(settings_))) {
         return false;
     }
