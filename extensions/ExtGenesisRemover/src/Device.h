@@ -1,19 +1,15 @@
 #pragma once
 
 #include "WinPrefix.h"
-
-// Parse RenderBridge headers before D3D/Windows (ExtSampleD3D order).
 #include "rxext_client.h"
 
-#include "d3d11/d3d11.h"
-
 #include <cstdint>
-#include <memory>
-#include <string>
 #include <utility>
 
 namespace rxext::genesis_remover {
 
+// Host-texture Remover device: no D3D11/Vulkan shared images.
+// PIXERA fills a host Video In texture; we download → matte → upload sampler.
 class Device : public rxext::StreamDevice {
 public:
     explicit Device(ValueSet settings);
@@ -22,18 +18,9 @@ public:
     vector<ValueSet> enumerate_stream_settings() noexcept override;
     InputStream* create_input_stream(ValueSet settings) noexcept override;
 
-    SyncDesc before_render() noexcept override;
-    void render() noexcept override;
-    SyncDesc after_render() noexcept override;
-
 private:
-    SyncDesc get_sync_desc() noexcept;
-
     ValueSet settings_;
-    std::string adapter_luid_hex_ = "0000000000000000";
-    std::shared_ptr<d3d11::Device> d3d_device_;
-    std::unique_ptr<d3d11::Fence> d3d_fence_;
-    std::uint64_t fence_counter_ = 0;
+    std::uint64_t adapter_luid_ = 0;
 };
 
 } // namespace rxext::genesis_remover

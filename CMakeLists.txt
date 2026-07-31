@@ -432,22 +432,18 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         ${EXT_REMOVER_DIR}/src/ModulePaths.cpp
         ${EXT_REMOVER_DIR}/src/RemoverLog.cpp
         ${RX_SDK_DIR}/libs/common/string.cpp
-        ${RX_SDK_DIR}/libs/d3d11/d3d11.cpp
-        ${RX_SDK_DIR}/libs/d3d11/getSecurityAttributes.cpp
         ${EXT_REMOVER_DIR}/ExtGenesisRemover.def
     )
     target_include_directories(ExtGenesisRemover PRIVATE
         ${EXT_REMOVER_DIR}/src
         ${RX_SDK_DIR}/include
         ${RX_SDK_DIR}/libs
-        # Do NOT add libs/d3d11 here: #include <d3d11.h> must resolve to the
-        # Windows SDK header, not our wrapper at libs/d3d11/d3d11.h.
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_BINARY_DIR}
     )
-    # D3D11 shared textures (ExtSampleD3D pattern) + CPU matte core.
-    # Do NOT link full genesis_runtime/Vulkan here — that path crashed PIXERA on scrub.
-    target_link_libraries(ExtGenesisRemover PRIVATE genesis_matting d3d11 dxgi d3dcompiler)
+    # Host-texture I/O (download/upload) + CPU matte. No D3D11/Vulkan shared images —
+    # those stayed black with live PIXERA Video In. Do not link genesis_runtime.
+    target_link_libraries(ExtGenesisRemover PRIVATE genesis_matting)
     if(MSVC AND GENESIS_HAS_ONNXRUNTIME)
         target_link_options(ExtGenesisRemover PRIVATE "/DELAYLOAD:onnxruntime.dll")
         target_link_libraries(ExtGenesisRemover PRIVATE delayimp)
@@ -455,9 +451,7 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
     target_compile_definitions(ExtGenesisRemover PRIVATE
         NOMINMAX
         WIN32_LEAN_AND_MEAN
-        GENESIS_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders/spv"
     )
-    # Force WinPrefix into every TU so Windows min/max macros cannot break ptl.
     if(MSVC)
         target_compile_options(ExtGenesisRemover PRIVATE
             "/FI${EXT_REMOVER_DIR}/src/WinPrefix.h")

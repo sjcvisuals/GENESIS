@@ -75,12 +75,16 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v7-sample-blit-20260731
+  remover-timeline-v8-host-tex-20260731
 
-Visibility-first (ExtSampleD3D blit every frame). applies_alpha stays false
-until a covered RVM/chroma matte is written — live webcam textures often have
-alpha=0, and applies_alpha=true made the whole layer invisible (black).
-Matte settings apply only on change. FrameCounter keeps live ticks running.
+Host-texture I/O (PIXERA download_texture → CPU matte → upload_texture).
+D3D11/Vulkan shared Video In stayed black with live inputs. Color diagnostics:
+  cyan = DLL alive, waiting for download
+  magenta = linked Video In but empty pixels
+  live feed = passthrough; cutout after RVM
+applies_alpha stays false until a covered matte is written.
+After install: quit PIXERA, delete/re-import the Remover resource, then:
+  .\scripts\dump-remover-log.ps1
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log

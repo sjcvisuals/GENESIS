@@ -1,27 +1,25 @@
 #pragma once
 
 #include "WinPrefix.h"
-
-// Parse RenderBridge headers before D3D/Windows (ExtSampleD3D order).
 #include "rxext_client.h"
 
-#include "d3d11/ComPointer.h"
-#include "d3d11/d3d11.h"
 #include "matting/AsyncMatteWorker.hpp"
 #include "matting/BgRemover.hpp"
 
+#include <atomic>
 #include <cstdint>
-#include <memory>
+#include <mutex>
+#include <string>
 #include <utility>
 #include <vector>
 
-struct ID3D11Texture2D;
-
 namespace rxext::genesis_remover {
 
+// Host-texture path (ExtSampleShader Video In + ExtSampleCPU sampler upload).
+// D3D11/Vulkan shared Video In stayed black with live PIXERA inputs.
 class Input : public rxext::InputStream {
 public:
-    Input(std::shared_ptr<d3d11::Device> d3d_device, ValueSet settings);
+    explicit Input(ValueSet settings);
     ~Input() override;
 
     bool initialize() noexcept override;
@@ -32,56 +30,46 @@ public:
     RenderResult render() noexcept override;
 
 private:
-    std::unique_ptr<d3d11::Texture> createSharedTexture(ParameterTexture& parameter,
-                                                        TextureDesc desc,
-                                                        d3d11::Texture::Options options);
-    void ensureStaging(std::uint32_t width, std::uint32_t height, DXGI_FORMAT format);
-    bool readVideoInRgba(std::vector<std::uint8_t>& out_rgba);
-    bool writeOutputRgba(const std::uint8_t* rgba);
+    void registerParameters();
+    void ensureSampler(std::uint32_t width, std::uint32_t height);
+    void ensureVideoInHostTexture();
+    void requestVideoDownload();
     void applyMatteSettings();
+    void uploadOutputRgba(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height);
     void touchHostClock();
-    // ExtSampleD3D-identical: clear + Quad blit. Visibility does NOT depend on source alpha.
-    void blitSampleD3D();
-    void clearOutput(float r, float g, float b, float a);
-    void logRenderPathOnce(const char* path);
     void logMatteStatusMaybe();
 
-    std::shared_ptr<d3d11::Device> d3d_device_;
     ValueSet settings_;
-    std::unique_ptr<d3d11::Quad> quad_;
-
     ParameterTexture* sampler_ = nullptr;
-    ParameterTexture* video_in_param_ = nullptr;
+    ParameterTexture* video_in_ = nullptr;
     ParameterInt* quality_ = nullptr;
     ParameterValue* time_ = nullptr;
     ParameterValue* frame_counter_ = nullptr;
-
-    std::unique_ptr<d3d11::Texture> output_tex_;
-    std::unique_ptr<d3d11::Texture> video_in_tex_;
-    Format video_in_format_ = Format::R8G8B8A8_UNORM;
-
-    ComPointer<ID3D11Texture2D> staging_read_;
-    ComPointer<ID3D11Texture2D> staging_write_;
-    std::uint32_t staging_w_ = 0;
-    std::uint32_t staging_h_ = 0;
-    DXGI_FORMAT staging_format_ = DXGI_FORMAT_UNKNOWN;
 
     ::genesis::AsyncMatteWorker async_;
     ::genesis::BgRemoverSettings matte_settings_{};
     bool async_started_ = false;
     bool matte_settings_applied_ = false;
-    // Only advertise applies_alpha after a covered matte frame was written.
     bool matte_live_ = false;
+    bool params_registered_ = false;
 
-    std::vector<std::uint8_t> scratch_in_;
-    std::vector<std::uint8_t> scratch_out_;
     std::uint32_t width_ = 1920;
     std::uint32_t height_ = 1080;
 
-    std::string last_render_path_;
+    std::mutex frame_mutex_;
+    std::vector<std::uint8_t> latest_in_;
+    std::uint32_t in_w_ = 0;
+    std::uint32_t in_h_ = 0;
+    bool has_in_ = false;
+    std::atomic<bool> download_pending_{false};
+    std::atomic<std::uint64_t> downloads_ok_{0};
+    std::atomic<std::uint64_t> downloads_empty_{0};
+
+    std::vector<std::uint8_t> scratch_out_;
     std::string last_matte_status_;
     std::uint64_t render_ticks_ = 0;
     std::uint64_t last_logged_completed_ = 0;
+    std::string last_render_path_;
 };
 
 } // namespace rxext::genesis_remover
