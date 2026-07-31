@@ -113,10 +113,10 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     }
 
     if (currentMode() == StreamMode::BackgroundRemover) {
+        // Timeline-safe: publish shared output only. video_in / async happen in update().
         ensureRemover();
         remover_->resize(width_, height_);
         publishTargetTexture();
-        publishVideoInTexture();
     } else {
         ensureSession();
         session_->resize(width_, height_);
@@ -143,10 +143,8 @@ void Input::ensureRemover() {
         return;
     }
     remover_ = std::make_unique<::genesis::RemoverPipeline>(adapter_luid_);
-    remover_->setAsyncEnabled(true);
-    applyMatteSettings();
-    host().log_info(std::format("GENESIS Background Remover ready ({})",
-                                remover_->remover().status()));
+    // Async/ONNX stay deferred until after output sampler is published and video_in exists.
+    host().log_info("GENESIS Background Remover Vulkan ready (matte deferred)");
 }
 
 void Input::applyMatteSettings() {
@@ -331,8 +329,10 @@ void Input::publishVideoInTexture() {
         return;
     }
     update_input_texture(*video_in_, [&](const TextureDesc& desc) {
-        remover_->videoIn().recreate(static_cast<std::uint32_t>(desc.width),
-                                     static_cast<std::uint32_t>(desc.height));
+        width_ = static_cast<std::uint32_t>(desc.width);
+        height_ = static_cast<std::uint32_t>(desc.height);
+        remover_->resize(width_, height_);
+        remover_->ensureVideoIn();
         const auto& exp = remover_->videoIn().exportInfo();
         TextureDesc shared = desc;
         shared.is_target = false;
@@ -345,10 +345,9 @@ void Input::publishVideoInTexture() {
             exp.dedicated,
         };
         video_in_->set_texture(host().create_texture(shared));
-        width_ = static_cast<std::uint32_t>(desc.width);
-        height_ = static_cast<std::uint32_t>(desc.height);
-        remover_->resize(width_, height_);
         publishTargetTexture();
+        applyMatteSettings();
+        remover_->setAsyncEnabled(true);
     });
 }
 
@@ -372,7 +371,6 @@ string Input::get_property(string_view name) noexcept {
 bool Input::update() noexcept try {
     if (currentMode() == StreamMode::BackgroundRemover) {
         ensureRemover();
-        applyMatteSettings();
         publishVideoInTexture();
         return true;
     }
@@ -408,6 +406,10 @@ SyncDesc Input::before_render() noexcept {
 RenderResult Input::render() noexcept try {
     if (currentMode() == StreamMode::BackgroundRemover) {
         ensureRemover();
+        if (remover_->hasVideoIn() && !remover_->asyncEnabled()) {
+            applyMatteSettings();
+            remover_->setAsyncEnabled(true);
+        }
         std::string error;
         if (!remover_->processFrame(&error)) {
             host().log_error(std::format("GENESIS remover failed: {}", error));

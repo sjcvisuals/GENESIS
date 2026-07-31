@@ -15,6 +15,12 @@ namespace genesis {
 
 // Headless Pixera-style remover: shared video in → matte → exportable RGBA out.
 // Used by ExtGenesis Remover mode and ExtGenesisRemover.
+//
+// Lifecycle is staged so PIXERA timeline placement can succeed before ONNX/video_in:
+//   1) construct          → VulkanContext only
+//   2) resize / ensureOutput → ExternalRenderTarget (sampler publish)
+//   3) ensureVideoIn      → optional DXGI video_in (may fail; deferred to update())
+//   4) processFrame       → lazy BgRemover / async worker
 class RemoverPipeline {
 public:
     explicit RemoverPipeline(std::uint64_t adapter_luid = 0);
@@ -23,17 +29,26 @@ public:
     RemoverPipeline(const RemoverPipeline&) = delete;
     RemoverPipeline& operator=(const RemoverPipeline&) = delete;
 
+    // Creates/resizes the exportable output. Does not create video_in or load ONNX.
     void resize(std::uint32_t width, std::uint32_t height);
+
+    // Lazily create DXGI video_in for the current size. No-op if already sized.
+    void ensureVideoIn();
+
     void setSettings(const BgRemoverSettings& settings);
 
-    // When true (default), processFrame never blocks on ORT — skips if busy, reuses last matte.
+    // When true, processFrame never blocks on ORT — skips if busy, reuses last matte.
+    // Default is false: PIXERA stream init must not start background ORT threads.
     void setAsyncEnabled(bool enabled);
     bool asyncEnabled() const { return async_enabled_; }
 
-    ExternalSharedImage& videoIn() { return *video_in_; }
-    const ExternalSharedImage& videoIn() const { return *video_in_; }
-    ExternalRenderTarget& output() { return *output_; }
-    const ExternalRenderTarget& output() const { return *output_; }
+    bool hasOutput() const { return static_cast<bool>(output_); }
+    bool hasVideoIn() const { return static_cast<bool>(video_in_); }
+
+    ExternalSharedImage& videoIn();
+    const ExternalSharedImage& videoIn() const;
+    ExternalRenderTarget& output();
+    const ExternalRenderTarget& output() const;
     BgRemover& remover() { return remover_; }
     const BgRemover& remover() const { return remover_; }
     AsyncMatteWorker& asyncWorker() { return async_; }
@@ -55,13 +70,16 @@ public:
 
 private:
     void ensureAsyncStarted();
+    void ensureRemoverInitialized();
+    void ensureScratch();
 
     std::unique_ptr<VulkanContext> context_;
     std::unique_ptr<ExternalSharedImage> video_in_;
     std::unique_ptr<ExternalRenderTarget> output_;
     BgRemover remover_;
     AsyncMatteWorker async_;
-    bool async_enabled_ = true;
+    bool async_enabled_ = false;
+    bool remover_initialized_ = false;
     std::vector<std::uint8_t> scratch_in_;
     std::vector<std::uint8_t> scratch_out_;
     std::uint32_t width_ = 0;

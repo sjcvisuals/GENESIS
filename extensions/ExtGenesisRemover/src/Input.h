@@ -27,6 +27,7 @@ private:
     void applyMatteSettings();
     void publishOutput();
     void publishVideoIn();
+    void enableProcessing();
 
     std::uint64_t adapter_luid_ = 0;
     std::uint64_t pipeline_adapter_luid_ = 0;
@@ -38,6 +39,7 @@ private:
     std::unique_ptr<::genesis::RemoverPipeline> pipeline_;
     std::uint32_t width_ = 1920;
     std::uint32_t height_ = 1080;
+    bool processing_enabled_ = false;
 };
 
 } // namespace rxext::genesis_remover

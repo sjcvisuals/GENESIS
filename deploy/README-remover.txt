@@ -49,8 +49,23 @@ Usage in PIXERA
 4. Set Quality (Fast / Balanced / Quality).
 5. Output sampler is a transparent RGBA cutout.
 
-If the resource imports but timeline drag fails, check PIXERA logs for
-"GENESIS Remover" errors (Vulkan / adapter LUID / share handle).
+If the resource imports but timeline drag fails
+-----------------------------------------------
+1. Rebuild + reinstall (Release Remover DLL):
+
+     .\BUILD-AND-RUN.bat
+     powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-pixera-remover.ps1
+
+2. Check the file log next to the DLL (written during stream init):
+
+     <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
+     or
+     <repo>\out\ExtGenesisRemover\remover-init.log
+
+3. Check PIXERA logs for "GENESIS Remover" (Vulkan / adapter LUID / share handle).
+
+Timeline init only creates Vulkan + a shared output sampler. Video In, ONNX,
+and the async matte worker start later (after the stream is accepted).
 
 If PIXERA says "Can Not Load Pixera Extension"
 ---------------------------------------------
