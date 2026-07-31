@@ -75,14 +75,12 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v6f-hold-signal-20260731
+  remover-timeline-v7-sample-blit-20260731
 
-This build uses D3D11 shared textures (same pattern as ExtSampleD3D) with
-PIXERA fence sync. Until the matte is ready it forces opaque passthrough
-(live/webcam Video In often has alpha=0; with applies_alpha that looked black).
-Empty Video In ticks hold the last good frame (continuous FrameCounter can
-sample before PIXERA fills the shared texture). Transparent/empty mattes are
-rejected. Matte settings apply only on change.
+Visibility-first (ExtSampleD3D blit every frame). applies_alpha stays false
+until a covered RVM/chroma matte is written — live webcam textures often have
+alpha=0, and applies_alpha=true made the whole layer invisible (black).
+Matte settings apply only on change. FrameCounter keeps live ticks running.
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log

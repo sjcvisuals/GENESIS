@@ -2,7 +2,7 @@
   "genesisVersion": "0.1.0",
   "runtimeVersion": "0.1.0",
   "renderBridgeSdkVersion": "1.2",
-  "graphicsBackend": "Vulkan",
+  "graphicsBackend": "D3D11",
   "extensionDll": "ExtGenesisRemover.dll",
   "moduleKind": "backgroundRemover",
   "requiredRuntimeFiles": [
@@ -14,5 +14,5 @@
   "assetRoots": [
     "assets/matting"
   ],
-  "notes": "Matte-only Pixera module. Copy this folder to data/rxExt/ExtGenesisRemover/. Output is transparent RGBA cutout; keep onnxruntime.dll beside the DLL when present."
+  "notes": "Matte-only Pixera module (D3D11 shared textures, ExtSampleD3D I/O). Copy to data/rxExt/ExtGenesisRemover/. Keep onnxruntime.dll beside the DLL. Passthrough is opaque until RVM matte is live, then applies_alpha cutout."
 }

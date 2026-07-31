@@ -16,7 +16,6 @@
 #include <vector>
 
 struct ID3D11Texture2D;
-struct ID3D11PixelShader;
 
 namespace rxext::genesis_remover {
 
@@ -41,15 +40,15 @@ private:
     bool writeOutputRgba(const std::uint8_t* rgba);
     void applyMatteSettings();
     void touchHostClock();
-    void blitPassthroughOpaque();
-    void clearOutputTransparent();
-    void logRenderPathOnce(const char* path, std::uint8_t sample_alpha);
+    // ExtSampleD3D-identical: clear + Quad blit. Visibility does NOT depend on source alpha.
+    void blitSampleD3D();
+    void clearOutput(float r, float g, float b, float a);
+    void logRenderPathOnce(const char* path);
     void logMatteStatusMaybe();
 
     std::shared_ptr<d3d11::Device> d3d_device_;
     ValueSet settings_;
     std::unique_ptr<d3d11::Quad> quad_;
-    ComPointer<ID3D11PixelShader> opaque_ps_;
 
     ParameterTexture* sampler_ = nullptr;
     ParameterTexture* video_in_param_ = nullptr;
@@ -71,6 +70,8 @@ private:
     ::genesis::BgRemoverSettings matte_settings_{};
     bool async_started_ = false;
     bool matte_settings_applied_ = false;
+    // Only advertise applies_alpha after a covered matte frame was written.
+    bool matte_live_ = false;
 
     std::vector<std::uint8_t> scratch_in_;
     std::vector<std::uint8_t> scratch_out_;
@@ -81,7 +82,6 @@ private:
     std::string last_matte_status_;
     std::uint64_t render_ticks_ = 0;
     std::uint64_t last_logged_completed_ = 0;
-    bool had_good_output_ = false;
 };
 
 } // namespace rxext::genesis_remover
