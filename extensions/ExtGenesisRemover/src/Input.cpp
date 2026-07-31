@@ -2,12 +2,10 @@
 
 #include "ModulePaths.h"
 #include "RemoverLog.h"
-#include "common/string.h"
-#include "matting/BgRemover.hpp"
 #include "platform/Paths.hpp"
-#include "renderer/vulkan/ExternalRenderTarget.hpp"
 
 #include <algorithm>
+#include <cstring>
 #include <format>
 #include <string>
 #include <vector>
@@ -15,21 +13,42 @@
 namespace rxext::genesis_remover {
 
 namespace {
-#if defined(_WIN32)
-constexpr auto kHandleType = HandleType::OPAQUE_WIN32;
-#else
-constexpr auto kHandleType = HandleType::OPAQUE_FD;
-#endif
+
+std::size_t nonzeroRgbCount(const std::uint8_t* rgba, std::size_t bytes) {
+    std::size_t n = 0;
+    for (std::size_t i = 0; i + 3 < bytes; i += 4) {
+        if (rgba[i] | rgba[i + 1] | rgba[i + 2]) {
+            ++n;
+        }
+    }
+    return n;
+}
+
+void fillOpaquePassthrough(const std::uint8_t* in_rgba, std::uint8_t* out_rgba, std::size_t bytes) {
+    std::memcpy(out_rgba, in_rgba, bytes);
+    for (std::size_t i = 3; i < bytes; i += 4) {
+        out_rgba[i] = 255;
+    }
+}
+
+void fillDebugMagenta(std::uint8_t* out_rgba, std::size_t bytes) {
+    for (std::size_t i = 0; i + 3 < bytes; i += 4) {
+        out_rgba[i + 0] = 255;
+        out_rgba[i + 1] = 0;
+        out_rgba[i + 2] = 255;
+        out_rgba[i + 3] = 255;
+    }
+}
+
 } // namespace
 
 Input::Input(std::uint64_t adapter_luid, ValueSet settings)
     : adapter_luid_(adapter_luid), settings_(std::move(settings)) {
-    // HostContext is not injected yet (see rxext_client InputStream ctor flow).
-    // Only store settings here — register parameters + textures in initialize().
     removerLog(std::format("Input ctor adapter_luid={:016x}", adapter_luid_));
 }
 
 Input::~Input() {
+    async_.stop();
     removerLog("Input dtor");
 }
 
@@ -56,57 +75,197 @@ void Input::registerParameters() {
     quality_->set_property<std::vector<std::string>>(PropertyNames::enum_names,
                                                       {"Fast", "Balanced", "Quality"});
     quality_->set_value(1);
+
     params_registered_ = true;
-    removerLog("parameters registered");
+    removerLog("parameters registered (host-texture path)");
 }
 
-void Input::publishPlaceholderSampler() {
-    if (!sampler_) {
+void Input::ensureSampler(std::uint32_t width, std::uint32_t height) {
+    if (!sampler_ || width == 0 || height == 0) {
         return;
     }
-    // ExtSampleCPU pattern: host-owned texture, no Vulkan / share handle.
-    // Guarantees PIXERA can accept the stream even if GPU init fails later.
+    width_ = width;
+    height_ = height;
+
+    bool need_new = true;
+    try {
+        const auto cur = sampler_->texture().desc();
+        need_new = (cur.width != width_ || cur.height != height_ ||
+                    cur.format != Format::R8G8B8A8_UNORM);
+    } catch (...) {
+        need_new = true;
+    }
+    if (!need_new) {
+        return;
+    }
+
     TextureDesc desc{};
-    desc.width = static_cast<std::size_t>(std::max<std::uint32_t>(width_, 2));
-    desc.height = static_cast<std::size_t>(std::max<std::uint32_t>(height_, 2));
+    desc.width = width_;
+    desc.height = height_;
     desc.format = Format::R8G8B8A8_UNORM;
     desc.is_target = true;
     sampler_->set_texture(host().create_texture(desc));
 
-    // Transparent black so timeline compositing stays clean until GPU path is up.
-    const std::size_t pixels = desc.width * desc.height;
-    std::vector<std::uint32_t> zeros(pixels, 0u);
+    const std::size_t bytes = static_cast<std::size_t>(width_) * height_ * 4u;
+    scratch_out_.assign(bytes, 0);
     BufferDesc buffer{};
-    buffer.data = zeros.data();
-    buffer.pitch = desc.width * sizeof(std::uint32_t);
-    buffer.size = buffer.pitch * desc.height;
-    host().upload_texture(sampler_->texture(), buffer, true, []() noexcept {});
-    placeholder_published_ = true;
-    shared_output_published_ = false;
-    removerLog(std::format("placeholder sampler {}x{}", desc.width, desc.height));
+    buffer.data = scratch_out_.data();
+    buffer.pitch = static_cast<std::size_t>(width_) * 4u;
+    buffer.size = bytes;
+    host().upload_texture(TextureRef(sampler_->texture()), buffer, true, []() noexcept {});
+    removerLog(std::format("sampler host texture {}x{}", width_, height_));
+}
+
+void Input::ensureVideoInHostTexture() {
+    if (!video_in_) {
+        return;
+    }
+
+    auto allocate = [&](TextureDesc desc) {
+        if (desc.width == 0 || desc.height == 0) {
+            return;
+        }
+        if (desc.format == Format::None) {
+            desc.format = Format::R8G8B8A8_UNORM;
+        }
+        // Host-owned texture (ExtSampleShader). PIXERA writes linked media into it.
+        desc.is_target = false;
+        desc.share_handle = {};
+        video_in_->set_texture(host().create_texture(desc));
+        ensureSampler(static_cast<std::uint32_t>(desc.width),
+                      static_cast<std::uint32_t>(desc.height));
+        applyMatteSettings();
+        if (!async_started_) {
+            async_.start();
+            async_started_ = true;
+        }
+        async_.reset(static_cast<std::uint32_t>(desc.width),
+                     static_cast<std::uint32_t>(desc.height));
+        removerLog(std::format("video_in HOST texture {}x{} format={}", desc.width, desc.height,
+                               get_format_name(desc.format)));
+    };
+
+    update_input_texture(*video_in_, allocate);
+
+    // Fallback when format property is missing (common PIXERA case).
+    TextureDesc probe{};
+    try {
+        probe = video_in_->texture().desc();
+    } catch (...) {
+        probe = {};
+    }
+    const int prop_w = video_in_->get_property<int>(SettingNames::resolution_x, 0);
+    const int prop_h = video_in_->get_property<int>(SettingNames::resolution_y, 0);
+    const Format prop_fmt = get_format_by_name(video_in_->get_property(SettingNames::format),
+                                               Format::R8G8B8A8_UNORM);
+
+    const bool has_usable =
+        probe.width > 0 && probe.height > 0 && probe.format != Format::None;
+    if (!has_usable && prop_w > 0 && prop_h > 0) {
+        TextureDesc desc{};
+        desc.width = static_cast<std::size_t>(prop_w);
+        desc.height = static_cast<std::size_t>(prop_h);
+        desc.format = prop_fmt;
+        removerLog("video_in allocate via property fallback");
+        allocate(desc);
+    }
+}
+
+void Input::requestVideoDownload() {
+    if (!video_in_) {
+        return;
+    }
+    TextureDesc desc{};
+    try {
+        desc = video_in_->texture().desc();
+    } catch (...) {
+        return;
+    }
+    if (desc.width == 0 || desc.height == 0 || !video_in_->texture()) {
+        return;
+    }
+    if (download_pending_.exchange(true)) {
+        return;
+    }
+
+    host().download_texture(
+        TextureRef(video_in_->texture()),
+        [this, w = static_cast<std::uint32_t>(desc.width),
+         h = static_cast<std::uint32_t>(desc.height)](BufferDesc buffer,
+                                                      OnComplete on_complete) mutable noexcept {
+            try {
+                const std::size_t expected = static_cast<std::size_t>(w) * h * 4u;
+                if (!buffer.data || buffer.size < expected || w == 0 || h == 0) {
+                    downloads_empty_.fetch_add(1);
+                    if (downloads_empty_.load() <= 3) {
+                        removerLog(std::format("download empty/short size={} expected={}",
+                                               buffer.size, expected));
+                    }
+                } else {
+                    // Respect pitch if larger than tightly packed RGBA.
+                    std::vector<std::uint8_t> packed(expected);
+                    const auto* src = static_cast<const std::uint8_t*>(buffer.data);
+                    const std::size_t src_pitch =
+                        buffer.pitch > 0 ? buffer.pitch : static_cast<std::size_t>(w) * 4u;
+                    for (std::uint32_t y = 0; y < h; ++y) {
+                        std::memcpy(packed.data() + static_cast<std::size_t>(y) * w * 4u,
+                                    src + static_cast<std::size_t>(y) * src_pitch,
+                                    static_cast<std::size_t>(w) * 4u);
+                    }
+                    const std::size_t lit = nonzeroRgbCount(packed.data(), expected);
+                    {
+                        std::lock_guard<std::mutex> lock(frame_mutex_);
+                        latest_in_ = std::move(packed);
+                        in_w_ = w;
+                        in_h_ = h;
+                        has_in_ = true;
+                    }
+                    downloads_ok_.fetch_add(1);
+                    if (downloads_ok_.load() <= 3 || (downloads_ok_.load() % 120) == 0) {
+                        removerLog(std::format("download ok {}x{} nonzero_rgb={}", w, h, lit));
+                    }
+                }
+            } catch (...) {
+                removerLog("download callback exception");
+            }
+            download_pending_.store(false);
+            on_complete();
+        });
+}
+
+void Input::applyMatteSettings() {
+    matte_settings_.backend = ::genesis::BgRemoverBackend::Auto;
+    const int q = quality_ ? std::clamp(quality_->value(), 0, 2) : 1;
+    matte_settings_.quality = static_cast<::genesis::BgRemoverQuality>(q);
+    if (async_started_) {
+        async_.setSettings(matte_settings_);
+    }
+}
+
+void Input::uploadOutputRgba(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height) {
+    if (!sampler_ || !rgba || width == 0 || height == 0) {
+        return;
+    }
+    ensureSampler(width, height);
+    const std::size_t bytes = static_cast<std::size_t>(width) * height * 4u;
+    BufferDesc buffer{};
+    buffer.data = rgba;
+    buffer.pitch = static_cast<std::size_t>(width) * 4u;
+    buffer.size = bytes;
+    host().upload_texture(TextureRef(sampler_->texture()), buffer, true, []() noexcept {});
 }
 
 bool Input::initialize() noexcept try {
     const std::string handle = settings_.get(SettingNames::handle, "main");
-    removerLog(std::format("initialize begin handle='{}' adapter_luid={:016x}", handle,
-                           adapter_luid_));
+    removerLog(std::format("initialize begin handle='{}' ({})", handle, kRemoverBuildStamp));
     host().log_info(std::format("initializing GENESIS Remover stream '{}' ({})", handle,
                                 kRemoverBuildStamp));
 
     registerParameters();
-
     width_ = settings_.get<std::uint32_t>(SettingNames::resolution_x, 1920);
     height_ = settings_.get<std::uint32_t>(SettingNames::resolution_y, 1080);
-    if (const string stream_luid = settings_.get(SettingNames::adapter_luid, string{});
-        !stream_luid.empty()) {
-        adapter_luid_ = common::from_hex_string<std::uint64_t>(stream_luid);
-    }
-
-    // CRITICAL: accept the timeline stream with a CPU placeholder.
-    // Do not create Vulkan/ONNX here — that is what previously made PIXERA show
-    // the generic "dongle / corrupted / path" dialog when initialize() failed.
-    publishPlaceholderSampler();
-    removerLog("initialize OK (cpu-first placeholder)");
+    ensureSampler(width_, height_);
+    removerLog("initialize OK (host-texture path)");
     return true;
 } catch (const std::exception& ex) {
     removerLog(std::format("initialize exception: {}", ex.what()));
@@ -121,211 +280,15 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     settings_ = std::move(settings);
     width_ = settings_.get<std::uint32_t>(SettingNames::resolution_x, 1920);
     height_ = settings_.get<std::uint32_t>(SettingNames::resolution_y, 1080);
-    if (const string stream_luid = settings_.get(SettingNames::adapter_luid, string{});
-        !stream_luid.empty()) {
-        adapter_luid_ = common::from_hex_string<std::uint64_t>(stream_luid);
+    removerLog(std::format("update_settings {}x{}", width_, height_));
+    if (!params_registered_) {
+        registerParameters();
     }
-    removerLog(std::format("update_settings {}x{} adapter={:016x}", width_, height_,
-                           adapter_luid_));
-
-    if (pipeline_ && pipeline_adapter_luid_ != adapter_luid_) {
-        pipeline_.reset();
-        processing_enabled_ = false;
-        shared_output_published_ = false;
-        gpu_failed_ = false;
-    }
-
-    // Keep stream alive: refresh placeholder if GPU path is not up yet.
-    if (!shared_output_published_) {
-        if (!params_registered_) {
-            registerParameters();
-        }
-        publishPlaceholderSampler();
-    } else if (pipeline_) {
-        try {
-            pipeline_->resize(width_, height_);
-            publishSharedOutput();
-        } catch (const std::exception& ex) {
-            removerLog(std::format("resize/publish after settings failed: {}", ex.what()));
-            publishPlaceholderSampler();
-        }
-    }
+    ensureSampler(width_, height_);
     return true;
 } catch (const std::exception& ex) {
     removerLog(std::format("update_settings exception: {}", ex.what()));
-    host().log_error(std::format("GENESIS Remover settings failed: {}", ex.what()));
-    // Still return true with placeholder so PIXERA does not unload the clip.
-    try {
-        publishPlaceholderSampler();
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-bool Input::tryEnsureGpuPipeline() {
-    if (pipeline_) {
-        return true;
-    }
-    if (gpu_failed_) {
-        return false;
-    }
-    try {
-        removerLog(std::format("creating RemoverPipeline adapter={:016x}", adapter_luid_));
-        pipeline_ = std::make_unique<::genesis::RemoverPipeline>(adapter_luid_);
-        pipeline_adapter_luid_ = adapter_luid_;
-        pipeline_->resize(width_, height_);
-        publishSharedOutput();
-        removerLog("RemoverPipeline GPU output published");
-        host().log_info(std::format("GENESIS Remover GPU ready {}x{}", width_, height_));
-        return true;
-    } catch (const std::exception& ex) {
-        if (adapter_luid_ != 0) {
-            removerLog(std::format("pipeline adapter fail ({}); retry LUID 0", ex.what()));
-            try {
-                pipeline_ = std::make_unique<::genesis::RemoverPipeline>(0);
-                pipeline_adapter_luid_ = 0;
-                adapter_luid_ = 0;
-                pipeline_->resize(width_, height_);
-                publishSharedOutput();
-                removerLog("RemoverPipeline GPU output published (default GPU)");
-                return true;
-            } catch (const std::exception& ex2) {
-                removerLog(std::format("GPU pipeline failed: {}", ex2.what()));
-                host().log_error(std::format("GENESIS Remover GPU unavailable: {}", ex2.what()));
-                pipeline_.reset();
-                gpu_failed_ = true;
-                publishPlaceholderSampler();
-                return false;
-            }
-        }
-        removerLog(std::format("GPU pipeline failed: {}", ex.what()));
-        host().log_error(std::format("GENESIS Remover GPU unavailable: {}", ex.what()));
-        pipeline_.reset();
-        gpu_failed_ = true;
-        publishPlaceholderSampler();
-        return false;
-    }
-}
-
-void Input::applyMatteSettings() {
-    if (!pipeline_) {
-        return;
-    }
-    ::genesis::BgRemoverSettings matte = pipeline_->remover().settings();
-    const int q = quality_ ? std::clamp(quality_->value(), 0, 2) : 1;
-    const auto next_q = static_cast<::genesis::BgRemoverQuality>(q);
-    if (matte.backend == ::genesis::BgRemoverBackend::Auto && matte.quality == next_q) {
-        return;
-    }
-    matte.backend = ::genesis::BgRemoverBackend::Auto;
-    matte.quality = next_q;
-    pipeline_->setSettings(matte);
-}
-
-void Input::enableProcessing() {
-    if (!pipeline_ || processing_enabled_) {
-        return;
-    }
-    applyMatteSettings();
-    pipeline_->setAsyncEnabled(true);
-    processing_enabled_ = true;
-    host().log_info(std::format("GENESIS Remover processing enabled ({})",
-                                pipeline_->remover().status()));
-    removerLog(std::format("processing enabled status={}", pipeline_->remover().status()));
-}
-
-void Input::publishSharedOutput() {
-    if (!pipeline_ || !sampler_ || !pipeline_->hasOutput()) {
-        return;
-    }
-    const auto& exp = pipeline_->output().colorExport();
-    if (!exp.win32_handle) {
-        throw std::runtime_error("GENESIS Remover output share handle is null");
-    }
-    TextureDesc desc{};
-    desc.width = pipeline_->output().extent().width;
-    desc.height = pipeline_->output().extent().height;
-    desc.format = Format::R8G8B8A8_UNORM;
-    desc.is_target = true;
-    desc.share_handle = {
-        kHandleType,
-        reinterpret_cast<Handle>(exp.win32_handle),
-        0,
-        exp.memory_size,
-        0,
-        exp.dedicated,
-    };
-    sampler_->set_texture(host().create_texture(desc));
-    shared_output_published_ = true;
-    placeholder_published_ = false;
-}
-
-void Input::publishVideoIn() {
-    if (!video_in_ || !pipeline_) {
-        return;
-    }
-
-    auto allocate = [&](const TextureDesc& desc) {
-        if (desc.width == 0 || desc.height == 0) {
-            return;
-        }
-        width_ = static_cast<std::uint32_t>(desc.width);
-        height_ = static_cast<std::uint32_t>(desc.height);
-        removerLog(std::format("video_in allocate {}x{} format={}", width_, height_,
-                               get_format_name(desc.format)));
-        pipeline_->resize(width_, height_);
-        pipeline_->ensureVideoIn();
-        const auto& exp = pipeline_->videoIn().exportInfo();
-        TextureDesc shared = desc;
-        if (shared.format == Format::None) {
-            shared.format = Format::R8G8B8A8_UNORM;
-        }
-        shared.is_target = false;
-        shared.share_handle = {
-            kHandleType,
-            reinterpret_cast<Handle>(exp.win32_handle),
-            0,
-            exp.memory_size,
-            0,
-            exp.dedicated,
-        };
-        video_in_->set_texture(host().create_texture(shared));
-        publishSharedOutput();
-        enableProcessing();
-    };
-
-    // SDK helper — only fires when resolution_* AND format properties are set.
-    update_input_texture(*video_in_, allocate);
-
-    // Fallback: PIXERA sometimes sets resolution without format, which makes the
-    // helper no-op forever (black output). Also accept an already-sized host texture.
-    if (!pipeline_->hasVideoIn()) {
-        TextureDesc desc{};
-        desc.width = static_cast<std::size_t>(
-            video_in_->get_property<int>(SettingNames::resolution_x, 0));
-        desc.height = static_cast<std::size_t>(
-            video_in_->get_property<int>(SettingNames::resolution_y, 0));
-        desc.format = get_format_by_name(video_in_->get_property(SettingNames::format),
-                                         Format::R8G8B8A8_UNORM);
-        if (desc.width == 0 || desc.height == 0) {
-            try {
-                const auto cur = video_in_->texture().desc();
-                if (cur.width > 0 && cur.height > 0) {
-                    desc.width = cur.width;
-                    desc.height = cur.height;
-                    if (cur.format != Format::None) {
-                        desc.format = cur.format;
-                    }
-                }
-            } catch (...) {
-            }
-        }
-        if (desc.width > 0 && desc.height > 0) {
-            removerLog("video_in allocate via fallback (missing format property?)");
-            allocate(desc);
-        }
-    }
+    return true;
 }
 
 ValueSet Input::get_state() noexcept {
@@ -337,8 +300,8 @@ ValueSet Input::get_state() noexcept {
         try {
             const auto desc = sampler_->texture().desc();
             if (desc.width > 0 && desc.height > 0) {
-                res_x = desc.width;
-                res_y = desc.height;
+                res_x = static_cast<int>(desc.width);
+                res_y = static_cast<int>(desc.height);
                 format = desc.format;
             }
         } catch (...) {
@@ -359,15 +322,12 @@ string Input::get_property(string_view name) noexcept {
 }
 
 bool Input::update() noexcept try {
-    // Soft-fail GPU: never return false just because Vulkan/ONNX is unavailable.
-    if (!tryEnsureGpuPipeline()) {
-        return true;
-    }
-    publishVideoIn();
+    ensureVideoInHostTexture();
+    applyMatteSettings();
+    requestVideoDownload();
     return true;
 } catch (const std::exception& ex) {
     removerLog(std::format("update exception: {}", ex.what()));
-    host().log_error(std::format("GENESIS Remover update failed: {}", ex.what()));
     return true;
 }
 
@@ -376,22 +336,50 @@ SyncDesc Input::before_render() noexcept {
 }
 
 RenderResult Input::render() noexcept try {
-    if (!pipeline_) {
+    std::vector<std::uint8_t> frame;
+    std::uint32_t w = 0;
+    std::uint32_t h = 0;
+    {
+        std::lock_guard<std::mutex> lock(frame_mutex_);
+        if (!has_in_ || latest_in_.empty()) {
+            return RenderResult::Succeeded;
+        }
+        frame = latest_in_;
+        w = in_w_;
+        h = in_h_;
+    }
+
+    const std::size_t bytes = static_cast<std::size_t>(w) * h * 4u;
+    if (frame.size() < bytes || w == 0 || h == 0) {
         return RenderResult::Succeeded;
     }
-    if (pipeline_->hasVideoIn() && !processing_enabled_) {
-        enableProcessing();
+
+    if (!async_started_) {
+        async_.start();
+        async_started_ = true;
+        applyMatteSettings();
+        async_.reset(w, h);
     }
-    std::string error;
-    if (!pipeline_->processFrame(&error)) {
-        host().log_error(std::format("GENESIS Remover frame failed: {}", error));
-        removerLog(std::format("processFrame failed: {}", error));
-        return RenderResult::Succeeded;
+
+    async_.trySubmit(frame.data(), w, h);
+    scratch_out_.resize(bytes);
+    if (!async_.copyLatest(scratch_out_.data(), w, h)) {
+        const std::size_t lit = nonzeroRgbCount(frame.data(), bytes);
+        if (lit == 0) {
+            // Linked but pixels are empty — make failure obvious (magenta).
+            fillDebugMagenta(scratch_out_.data(), bytes);
+            if (downloads_ok_.load() + downloads_empty_.load() <= 5) {
+                removerLog("render: input all black → debug magenta");
+            }
+        } else {
+            fillOpaquePassthrough(frame.data(), scratch_out_.data(), bytes);
+        }
     }
+
+    uploadOutputRgba(scratch_out_.data(), w, h);
     return RenderResult::Succeeded;
 } catch (const std::exception& ex) {
     removerLog(std::format("render exception: {}", ex.what()));
-    host().log_error(std::format("GENESIS Remover render failed: {}", ex.what()));
     return RenderResult::Succeeded;
 }
 
