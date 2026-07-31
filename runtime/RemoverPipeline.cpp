@@ -191,8 +191,13 @@ bool RemoverPipeline::processFrame(std::string* out_error) {
         ensureAsyncStarted();
         async_.trySubmit(scratch_in_.data(), width_, height_);
         if (!async_.copyLatest(scratch_out_.data(), width_, height_)) {
-            // Transparent until the first matte completes — never stall render on ORT.
-            std::memset(scratch_out_.data(), 0, scratch_out_.size());
+            // Show opaque passthrough until the first matte completes (was full
+            // transparent → looked permanently black on the timeline).
+            const std::size_t bytes = scratch_out_.size();
+            std::memcpy(scratch_out_.data(), scratch_in_.data(), bytes);
+            for (std::size_t i = 3; i < bytes; i += 4) {
+                scratch_out_[i] = 255;
+            }
         }
     } else if (!remover_.process(scratch_in_.data(), scratch_out_.data(), width_, height_)) {
         if (out_error) *out_error = "matte process failed";

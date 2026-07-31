@@ -87,6 +87,24 @@ VkDeviceMemory allocateExportableSampledMemory(VkDevice device, VkPhysicalDevice
     return memory;
 }
 
+VkImageMemoryBarrier makeBarrier(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout,
+                                 VkAccessFlags src_access, VkAccessFlags dst_access,
+                                 std::uint32_t src_family, std::uint32_t dst_family) {
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = old_layout;
+    barrier.newLayout = new_layout;
+    barrier.srcQueueFamilyIndex = src_family;
+    barrier.dstQueueFamilyIndex = dst_family;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = src_access;
+    barrier.dstAccessMask = dst_access;
+    return barrier;
+}
+
 } // namespace
 
 ExternalSharedImage::ExternalSharedImage(const VulkanContext& context,
@@ -131,6 +149,7 @@ void ExternalSharedImage::destroy() {
         vkFreeMemory(context_.device(), memory_, nullptr);
         memory_ = VK_NULL_HANDLE;
     }
+    layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
 }
 
 void ExternalSharedImage::create() {
@@ -195,6 +214,26 @@ void ExternalSharedImage::create() {
     if (vkCreateSampler(context_.device(), &sampler_info, nullptr, &sampler_) != VK_SUCCESS) {
         throw std::runtime_error("ExternalSharedImage: sampler failed");
     }
+
+    // Park in GENERAL for PIXERA host writes. Never download with UNDEFINED (that discards).
+    const std::uint32_t gfx = context_.graphicsQueueFamily();
+    context_.immediateSubmit([&](VkCommandBuffer cmd) {
+        auto to_general = makeBarrier(image_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, 0,
+                                      VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT |
+                                          VK_ACCESS_MEMORY_WRITE_BIT,
+                                      VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED);
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &to_general);
+
+        // Release to external so the PIXERA/D3D host can write into the shared memory.
+        auto release = makeBarrier(image_, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
+                                   VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT, 0, gfx,
+                                   VK_QUEUE_FAMILY_EXTERNAL);
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &release);
+    });
+    layout_ = VK_IMAGE_LAYOUT_GENERAL;
+    released_to_external_ = true;
 }
 
 bool ExternalSharedImage::downloadRgba8(std::vector<std::uint8_t>& out_rgba) const {
@@ -226,27 +265,29 @@ bool ExternalSharedImage::downloadRgba8(std::vector<std::uint8_t>& out_rgba) con
     }
     vkBindBufferMemory(context_.device(), staging, staging_mem, 0);
 
+    const std::uint32_t gfx = context_.graphicsQueueFamily();
     context_.immediateSubmit([&](VkCommandBuffer cmd) {
-        VkImageMemoryBarrier to_src{};
-        to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        to_src.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        to_src.image = image_;
-        to_src.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        to_src.subresourceRange.levelCount = 1;
-        to_src.subresourceRange.layerCount = 1;
-        to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
-                             0, nullptr, 0, nullptr, 1, &to_src);
+        // Acquire from PIXERA (do NOT use UNDEFINED — that discards host pixels → black matte).
+        auto acquire = makeBarrier(image_, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                   0, VK_ACCESS_TRANSFER_READ_BIT,
+                                   released_to_external_ ? VK_QUEUE_FAMILY_EXTERNAL : VK_QUEUE_FAMILY_IGNORED,
+                                   gfx);
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0,
+                             nullptr, 0, nullptr, 1, &acquire);
 
         VkBufferImageCopy region{};
         region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         region.imageSubresource.layerCount = 1;
         region.imageExtent = {extent_.width, extent_.height, 1};
         vkCmdCopyImageToBuffer(cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, staging, 1, &region);
+
+        auto release = makeBarrier(image_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+                                   VK_ACCESS_TRANSFER_READ_BIT, 0, gfx, VK_QUEUE_FAMILY_EXTERNAL);
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0,
+                             0, nullptr, 0, nullptr, 1, &release);
     });
+    released_to_external_ = true;
+    layout_ = VK_IMAGE_LAYOUT_GENERAL;
 
     void* mapped = nullptr;
     vkMapMemory(context_.device(), staging_mem, 0, bytes, 0, &mapped);
@@ -294,27 +335,28 @@ bool ExternalSharedImage::uploadRgba8(const std::uint8_t* rgba, std::uint32_t wi
     std::memcpy(mapped, rgba, static_cast<std::size_t>(bytes));
     vkUnmapMemory(context_.device(), staging_mem);
 
+    const std::uint32_t gfx = context_.graphicsQueueFamily();
     context_.immediateSubmit([&](VkCommandBuffer cmd) {
-        VkImageMemoryBarrier to_dst{};
-        to_dst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        to_dst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        to_dst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        to_dst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        to_dst.image = image_;
-        to_dst.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        to_dst.subresourceRange.levelCount = 1;
-        to_dst.subresourceRange.layerCount = 1;
-        to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
-                             0, nullptr, 0, nullptr, 1, &to_dst);
+        auto acquire = makeBarrier(image_, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                   0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                                   released_to_external_ ? VK_QUEUE_FAMILY_EXTERNAL : VK_QUEUE_FAMILY_IGNORED,
+                                   gfx);
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0,
+                             nullptr, 0, nullptr, 1, &acquire);
 
         VkBufferImageCopy region{};
         region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         region.imageSubresource.layerCount = 1;
         region.imageExtent = {width, height, 1};
         vkCmdCopyBufferToImage(cmd, staging, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+        auto release = makeBarrier(image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+                                   VK_ACCESS_TRANSFER_WRITE_BIT, 0, gfx, VK_QUEUE_FAMILY_EXTERNAL);
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0,
+                             0, nullptr, 0, nullptr, 1, &release);
     });
+    released_to_external_ = true;
+    layout_ = VK_IMAGE_LAYOUT_GENERAL;
 
     vkDestroyBuffer(context_.device(), staging, nullptr);
     vkFreeMemory(context_.device(), staging_mem, nullptr);

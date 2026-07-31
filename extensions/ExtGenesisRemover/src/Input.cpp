@@ -266,14 +266,22 @@ void Input::publishVideoIn() {
     if (!video_in_ || !pipeline_) {
         return;
     }
-    update_input_texture(*video_in_, [&](const TextureDesc& desc) {
+
+    auto allocate = [&](const TextureDesc& desc) {
+        if (desc.width == 0 || desc.height == 0) {
+            return;
+        }
         width_ = static_cast<std::uint32_t>(desc.width);
         height_ = static_cast<std::uint32_t>(desc.height);
-        removerLog(std::format("video_in allocate {}x{}", width_, height_));
+        removerLog(std::format("video_in allocate {}x{} format={}", width_, height_,
+                               get_format_name(desc.format)));
         pipeline_->resize(width_, height_);
         pipeline_->ensureVideoIn();
         const auto& exp = pipeline_->videoIn().exportInfo();
         TextureDesc shared = desc;
+        if (shared.format == Format::None) {
+            shared.format = Format::R8G8B8A8_UNORM;
+        }
         shared.is_target = false;
         shared.share_handle = {
             kHandleType,
@@ -286,7 +294,39 @@ void Input::publishVideoIn() {
         video_in_->set_texture(host().create_texture(shared));
         publishSharedOutput();
         enableProcessing();
-    });
+    };
+
+    // SDK helper — only fires when resolution_* AND format properties are set.
+    update_input_texture(*video_in_, allocate);
+
+    // Fallback: PIXERA sometimes sets resolution without format, which makes the
+    // helper no-op forever (black output). Also accept an already-sized host texture.
+    if (!pipeline_->hasVideoIn()) {
+        TextureDesc desc{};
+        desc.width = static_cast<std::size_t>(
+            video_in_->get_property<int>(SettingNames::resolution_x, 0));
+        desc.height = static_cast<std::size_t>(
+            video_in_->get_property<int>(SettingNames::resolution_y, 0));
+        desc.format = get_format_by_name(video_in_->get_property(SettingNames::format),
+                                         Format::R8G8B8A8_UNORM);
+        if (desc.width == 0 || desc.height == 0) {
+            try {
+                const auto cur = video_in_->texture().desc();
+                if (cur.width > 0 && cur.height > 0) {
+                    desc.width = cur.width;
+                    desc.height = cur.height;
+                    if (cur.format != Format::None) {
+                        desc.format = cur.format;
+                    }
+                }
+            } catch (...) {
+            }
+        }
+        if (desc.width > 0 && desc.height > 0) {
+            removerLog("video_in allocate via fallback (missing format property?)");
+            allocate(desc);
+        }
+    }
 }
 
 ValueSet Input::get_state() noexcept {
@@ -346,7 +386,7 @@ RenderResult Input::render() noexcept try {
     std::string error;
     if (!pipeline_->processFrame(&error)) {
         host().log_error(std::format("GENESIS Remover frame failed: {}", error));
-        // Keep the clip alive on the timeline.
+        removerLog(std::format("processFrame failed: {}", error));
         return RenderResult::Succeeded;
     }
     return RenderResult::Succeeded;

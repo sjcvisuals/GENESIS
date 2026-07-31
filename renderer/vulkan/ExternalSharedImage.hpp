@@ -57,6 +57,8 @@ private:
     VkImageView view_ = VK_NULL_HANDLE;
     VkSampler sampler_ = VK_NULL_HANDLE;
     ExternalImageExport export_info_{};
+    mutable VkImageLayout layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+    mutable bool released_to_external_ = false;
 };
 
 } // namespace genesis

@@ -328,13 +328,20 @@ void Input::publishVideoInTexture() {
     if (!video_in_ || !remover_) {
         return;
     }
-    update_input_texture(*video_in_, [&](const TextureDesc& desc) {
+
+    auto allocate = [&](const TextureDesc& desc) {
+        if (desc.width == 0 || desc.height == 0) {
+            return;
+        }
         width_ = static_cast<std::uint32_t>(desc.width);
         height_ = static_cast<std::uint32_t>(desc.height);
         remover_->resize(width_, height_);
         remover_->ensureVideoIn();
         const auto& exp = remover_->videoIn().exportInfo();
         TextureDesc shared = desc;
+        if (shared.format == Format::None) {
+            shared.format = Format::R8G8B8A8_UNORM;
+        }
         shared.is_target = false;
         shared.share_handle = {
             kHandleType,
@@ -348,7 +355,35 @@ void Input::publishVideoInTexture() {
         publishTargetTexture();
         applyMatteSettings();
         remover_->setAsyncEnabled(true);
-    });
+    };
+
+    update_input_texture(*video_in_, allocate);
+
+    if (!remover_->hasVideoIn()) {
+        TextureDesc desc{};
+        desc.width = static_cast<std::size_t>(
+            video_in_->get_property<int>(SettingNames::resolution_x, 0));
+        desc.height = static_cast<std::size_t>(
+            video_in_->get_property<int>(SettingNames::resolution_y, 0));
+        desc.format = get_format_by_name(video_in_->get_property(SettingNames::format),
+                                         Format::R8G8B8A8_UNORM);
+        if (desc.width == 0 || desc.height == 0) {
+            try {
+                const auto cur = video_in_->texture().desc();
+                if (cur.width > 0 && cur.height > 0) {
+                    desc.width = cur.width;
+                    desc.height = cur.height;
+                    if (cur.format != Format::None) {
+                        desc.format = cur.format;
+                    }
+                }
+            } catch (...) {
+            }
+        }
+        if (desc.width > 0 && desc.height > 0) {
+            allocate(desc);
+        }
+    }
 }
 
 ValueSet Input::get_state() noexcept {

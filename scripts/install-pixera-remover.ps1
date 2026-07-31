@@ -53,7 +53,7 @@ if (Test-Path (Join-Path $dest "BUILD_STAMP.txt")) {
 Write-Host ""
 Write-Host "After restarting PIXERA and loading the resource, check:"
 Write-Host "  $env:TEMP\ExtGenesisRemover.log"
-Write-Host "You should see build stamp: remover-timeline-v3-cpu-first-20260731"
+Write-Host "You should see build stamp: remover-timeline-v4-video-in-20260731"
 Write-Host ""
 Write-Host "Then verify:"
 Write-Host ("  .\scripts\check-pixera-dll.ps1 -DllPath `"{0}`"" -f (Join-Path $dest "ExtGenesisRemover.dll"))
