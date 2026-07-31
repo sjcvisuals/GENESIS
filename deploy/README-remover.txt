@@ -79,12 +79,13 @@ downloaded via the PIXERA host API (not Vulkan shared memory), matted on CPU,
 then uploaded to the output sampler.
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v5-host-texture-20260731
+  remover-timeline-v6-d3d11-20260731
 
-If output is magenta, Video In is linked but pixels are empty — check the log.
-If output stays black with no `video_in HOST texture` log line, the input was
-never allocated (link/properties). Open:
+This build uses D3D11 shared textures (same pattern as ExtSampleD3D) with
+PIXERA fence sync. Host download_texture was removed — it crashed PIXERA when
+scrubbing the timeline.
 
+Open diagnostics:
   %TEMP%\ExtGenesisRemover.log
 
 If PIXERA says "Can Not Load Pixera Extension"

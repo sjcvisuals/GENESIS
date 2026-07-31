@@ -6,6 +6,7 @@
 #include "rxext_util.h"
 
 #include <format>
+#include <stdexcept>
 
 namespace rxext::genesis_remover {
 
