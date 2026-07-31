@@ -62,18 +62,15 @@ A GENESIS installer can register there, but the generic extension path picker is
 
 ## Build `ExtGenesis.dll`
 
-```powershell
-cmake --build build --config Debug --target ExtGenesis
-```
-
-Output:
+Double-click `BUILD-AND-RUN.bat` (or `.\scripts\build.ps1`). Output for PIXERA:
 
 ```
-build/rxExt/ExtGenesis/Debug/ExtGenesis.dll
-build/rxExt/ExtGenesis/Debug/assets/          ← scenes, meshes, etc.
+out/ExtGenesis/ExtGenesis.dll
+out/ExtGenesis/assets/
+out/ExtGenesis/scenes/
 ```
 
-For local SDK testing, CMake also deploys to `third_party/render-bridge-sdk/RenderBridge/RX/modules/ExtGenesis/`.
+Matte-only cutout module (no scenes): `out/ExtGenesisRemover/ExtGenesisRemover.dll`.
 
 ## Layer setup (after the DLL is loaded)
 
