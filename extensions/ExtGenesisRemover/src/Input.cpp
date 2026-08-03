@@ -92,8 +92,10 @@ void Input::registerParameters() {
     time_ = add_parameter<ParameterValue>("time");
     time_->set_property(PropertyNames::purpose, PurposeNames::TimelineTime);
 
-    // Intentionally NO FrameCounter before Video In is linked: continuous pre-link
-    // ticks previously drove download_texture on empty textures and crashed PIXERA.
+    // Needed so update() keeps running after a Video In link while the playhead
+    // is parked (otherwise we stay on cyan forever).
+    frame_counter_ = add_parameter<ParameterValue>("frame_counter");
+    frame_counter_->set_property(PropertyNames::purpose, PurposeNames::FrameCounter);
 
     video_in_ = add_parameter<ParameterTexture>("texture");
     video_in_->set_property(PropertyNames::name, "Video In");
@@ -113,6 +115,9 @@ void Input::registerParameters() {
 void Input::touchHostClock() {
     if (time_) {
         (void)time_->value();
+    }
+    if (frame_counter_) {
+        (void)frame_counter_->value();
     }
 }
 
@@ -160,25 +165,24 @@ void Input::ensureVideoInHostTexture() {
         return;
     }
 
-    auto allocate = [&](TextureDesc desc) {
+    auto allocate = [&](TextureDesc desc, const char* reason) {
         if (desc.width == 0 || desc.height == 0) {
             return;
         }
         if (desc.format == Format::None) {
             desc.format = Format::R8G8B8A8_UNORM;
         }
-        // Host-owned texture (ExtSampleShader). No D3D11/Vulkan share handle.
         desc.is_target = false;
         desc.share_handle = {};
 
-        // Invalidate any in-flight download callback for the previous texture.
         const auto gen = video_in_generation_.fetch_add(1) + 1;
         download_pending_.store(false);
 
         video_in_->set_texture(host().create_texture(desc));
-        video_in_download_allowed_ = true;
-        // Give PIXERA time to bind/write the new host texture before download_texture.
-        download_cooldown_frames_ = 30;
+        video_in_allocated_ = true;
+        // Never download in the same step as create — that crashed PIXERA.
+        video_in_download_allowed_ = false;
+        download_cooldown_frames_ = 45;
         ensureSampler(static_cast<std::uint32_t>(desc.width),
                       static_cast<std::uint32_t>(desc.height));
         {
@@ -187,23 +191,69 @@ void Input::ensureVideoInHostTexture() {
             latest_in_.clear();
         }
         last_render_path_.clear();
-        removerLog(std::format("video_in HOST texture {}x{} format={} gen={}", desc.width,
-                               desc.height, get_format_name(desc.format), gen));
+        removerLog(std::format("video_in HOST texture {}x{} format={} gen={} ({})", desc.width,
+                               desc.height, get_format_name(desc.format), gen, reason));
     };
 
-    // Only the SDK helper: requires width+height+format from the host. That
-    // fires when Video In is actually linked. Do NOT fallback-allocate from
-    // stream resolution alone — that created an empty texture and
-    // download_texture crashed PIXERA before the user could link a camera.
-    update_input_texture(*video_in_, allocate);
+    update_input_texture(*video_in_, [&](const TextureDesc& desc) {
+        allocate(desc, "update_input_texture");
+    });
+
+    const int prop_w = video_in_->get_property<int>(SettingNames::resolution_x, 0);
+    const int prop_h = video_in_->get_property<int>(SettingNames::resolution_y, 0);
+    const std::string format_str(video_in_->get_property(SettingNames::format));
+    const Format prop_fmt = get_format_by_name(format_str, Format::R8G8B8A8_UNORM);
+
+    if (!baseline_captured_ && prop_w > 0 && prop_h > 0) {
+        baseline_w_ = prop_w;
+        baseline_h_ = prop_h;
+        baseline_format_ = format_str;
+        baseline_captured_ = true;
+        removerLog(std::format("video_in baseline props {}x{} format='{}'", prop_w, prop_h,
+                               format_str));
+    }
+
+    // PIXERA live inputs often omit format, so the SDK helper never fires.
+    // Allocate when format is explicit or when props change from the pre-link baseline.
+    if (!video_in_allocated_ && prop_w > 0 && prop_h > 0 && baseline_captured_) {
+        const bool format_explicit = !format_str.empty();
+        const bool dims_changed = (prop_w != baseline_w_ || prop_h != baseline_h_);
+        const bool format_changed = (format_str != baseline_format_);
+        if (format_explicit || dims_changed || format_changed) {
+            TextureDesc desc{};
+            desc.width = static_cast<std::size_t>(prop_w);
+            desc.height = static_cast<std::size_t>(prop_h);
+            desc.format = prop_fmt;
+            allocate(desc, format_explicit ? "props+format" : "props-changed");
+        } else if (!same_res_allocate_tried_ && render_ticks_ > 120) {
+            // Same-resolution live link: props may never change. After ~2s of ticks,
+            // create the host texture so PIXERA can write; download arms after cooldown.
+            same_res_allocate_tried_ = true;
+            TextureDesc desc{};
+            desc.width = static_cast<std::size_t>(prop_w);
+            desc.height = static_cast<std::size_t>(prop_h);
+            desc.format = prop_fmt;
+            allocate(desc, "same-res-timeout");
+        }
+    }
+
+    if (video_in_allocated_ && !video_in_download_allowed_) {
+        if (download_cooldown_frames_ > 0) {
+            --download_cooldown_frames_;
+        } else {
+            video_in_download_allowed_ = true;
+            removerLog("video_in download armed");
+        }
+    }
+
+    if (!video_in_allocated_ && (render_ticks_ % 60u) == 1u) {
+        removerLog(std::format("waiting link: props {}x{} format='{}' baseline={}", prop_w, prop_h,
+                               format_str, baseline_captured_ ? 1 : 0));
+    }
 }
 
 void Input::requestVideoDownload() {
     if (!video_in_ || !video_in_download_allowed_) {
-        return;
-    }
-    if (download_cooldown_frames_ > 0) {
-        --download_cooldown_frames_;
         return;
     }
     TextureDesc desc{};
@@ -221,7 +271,6 @@ void Input::requestVideoDownload() {
 
     const auto gen = video_in_generation_.load(std::memory_order_acquire);
 
-    // Copy TextureRef (acquire); HostContext::download_texture release()s that copy.
     host().download_texture(
         video_in_->texture(),
         [this, gen, w = static_cast<std::uint32_t>(desc.width),
@@ -229,7 +278,6 @@ void Input::requestVideoDownload() {
                                                       OnComplete on_complete) mutable noexcept {
             try {
                 if (gen != video_in_generation_.load(std::memory_order_acquire)) {
-                    // Texture was replaced since this download was issued.
                     download_pending_.store(false);
                     on_complete();
                     return;

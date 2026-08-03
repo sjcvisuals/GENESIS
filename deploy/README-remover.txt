@@ -75,17 +75,14 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v8b-dl-gate-20260803
+  remover-timeline-v8c-link-alloc-20260803
 
-Host-texture I/O (PIXERA download_texture → CPU matte → upload_texture).
-download_texture is gated until Video In is linked (no empty pre-link downloads —
-those crashed PIXERA on scrub). Cyan placeholder until download succeeds.
-Color diagnostics:
-  cyan = DLL alive, waiting for Video In link/download
-  magenta = linked Video In but empty pixels
-  live feed = passthrough; cutout after RVM
-After install: quit PIXERA, delete/re-import the Remover resource, then:
-  .\scripts\dump-remover-log.ps1
+Host-texture I/O. FrameCounter keeps update() running after Video In is linked
+(without it the clip stayed cyan forever). Video In allocates when format/dims
+change from baseline, or after a short same-res timeout. download_texture is
+cooldown-gated after allocate (immediate download crashed PIXERA).
+After install: quit PIXERA, re-import Remover, scrub to cyan, link webcam, wait
+~2s. Dump log: .\scripts\dump-remover-log.ps1
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log

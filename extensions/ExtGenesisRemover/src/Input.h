@@ -44,6 +44,7 @@ private:
     ParameterTexture* video_in_ = nullptr;
     ParameterInt* quality_ = nullptr;
     ParameterValue* time_ = nullptr;
+    ParameterValue* frame_counter_ = nullptr;
 
     ::genesis::AsyncMatteWorker async_;
     ::genesis::BgRemoverSettings matte_settings_{};
@@ -63,11 +64,16 @@ private:
     std::atomic<bool> download_pending_{false};
     std::atomic<std::uint64_t> downloads_ok_{0};
     std::atomic<std::uint64_t> downloads_empty_{0};
-    // Only download textures WE created after PIXERA published w/h/format (link).
-    // Downloading an empty/unlinked param texture crashes PIXERA on scrub.
+    // Downloads only after WE created a host Video In texture + cooldown.
+    bool video_in_allocated_ = false;
     bool video_in_download_allowed_ = false;
     std::uint32_t download_cooldown_frames_ = 0;
     std::atomic<std::uint64_t> video_in_generation_{0};
+    bool baseline_captured_ = false;
+    int baseline_w_ = 0;
+    int baseline_h_ = 0;
+    std::string baseline_format_;
+    bool same_res_allocate_tried_ = false;
 
     std::vector<std::uint8_t> scratch_out_;
     std::string last_matte_status_;

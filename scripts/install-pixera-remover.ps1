@@ -66,6 +66,6 @@ Write-Host "  CYAN    = DLL rendering, waiting for Video In download"
 Write-Host "  MAGENTA = Video In linked but pixels are empty"
 Write-Host "  Webcam  = passthrough working; cutout follows after RVM warms up"
 Write-Host ""
-Write-Host "Stamp must be: remover-timeline-v8b-dl-gate-20260803"
+Write-Host "Stamp must be: remover-timeline-v8c-link-alloc-20260803"
 Write-Host "Dump log with: .\scripts\dump-remover-log.ps1"
 Write-Host ("Check DLL: .\scripts\check-pixera-dll.ps1 -DllPath `"{0}`"" -f (Join-Path $dest "ExtGenesisRemover.dll"))
