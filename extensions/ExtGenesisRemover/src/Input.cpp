@@ -92,8 +92,8 @@ void Input::registerParameters() {
     time_ = add_parameter<ParameterValue>("time");
     time_->set_property(PropertyNames::purpose, PurposeNames::TimelineTime);
 
-    frame_counter_ = add_parameter<ParameterValue>("frame_counter");
-    frame_counter_->set_property(PropertyNames::purpose, PurposeNames::FrameCounter);
+    // Intentionally NO FrameCounter before Video In is linked: continuous pre-link
+    // ticks previously drove download_texture on empty textures and crashed PIXERA.
 
     video_in_ = add_parameter<ParameterTexture>("texture");
     video_in_->set_property(PropertyNames::name, "Video In");
@@ -113,9 +113,6 @@ void Input::registerParameters() {
 void Input::touchHostClock() {
     if (time_) {
         (void)time_->value();
-    }
-    if (frame_counter_) {
-        (void)frame_counter_->value();
     }
 }
 
@@ -173,66 +170,40 @@ void Input::ensureVideoInHostTexture() {
         // Host-owned texture (ExtSampleShader). No D3D11/Vulkan share handle.
         desc.is_target = false;
         desc.share_handle = {};
+
+        // Invalidate any in-flight download callback for the previous texture.
+        const auto gen = video_in_generation_.fetch_add(1) + 1;
+        download_pending_.store(false);
+
         video_in_->set_texture(host().create_texture(desc));
+        video_in_download_allowed_ = true;
+        // Give PIXERA time to bind/write the new host texture before download_texture.
+        download_cooldown_frames_ = 30;
         ensureSampler(static_cast<std::uint32_t>(desc.width),
                       static_cast<std::uint32_t>(desc.height));
-        if (!async_started_) {
-            async_.start();
-            async_started_ = true;
-            removerLog("async matte worker started");
-        }
-        applyMatteSettings();
-        async_.reset(static_cast<std::uint32_t>(desc.width),
-                     static_cast<std::uint32_t>(desc.height));
         {
             std::lock_guard<std::mutex> lock(frame_mutex_);
             has_in_ = false;
             latest_in_.clear();
         }
         last_render_path_.clear();
-        removerLog(std::format("video_in HOST texture {}x{} format={}", desc.width, desc.height,
-                               get_format_name(desc.format)));
+        removerLog(std::format("video_in HOST texture {}x{} format={} gen={}", desc.width,
+                               desc.height, get_format_name(desc.format), gen));
     };
 
+    // Only the SDK helper: requires width+height+format from the host. That
+    // fires when Video In is actually linked. Do NOT fallback-allocate from
+    // stream resolution alone — that created an empty texture and
+    // download_texture crashed PIXERA before the user could link a camera.
     update_input_texture(*video_in_, allocate);
-
-    TextureDesc probe{};
-    try {
-        probe = video_in_->texture().desc();
-    } catch (...) {
-        probe = {};
-    }
-    const int prop_w = video_in_->get_property<int>(SettingNames::resolution_x, 0);
-    const int prop_h = video_in_->get_property<int>(SettingNames::resolution_y, 0);
-    const Format prop_fmt =
-        get_format_by_name(video_in_->get_property(SettingNames::format), Format::R8G8B8A8_UNORM);
-
-    const bool has_usable = probe.width > 0 && probe.height > 0 && probe.format != Format::None;
-    if (!has_usable && prop_w > 0 && prop_h > 0) {
-        TextureDesc desc{};
-        desc.width = static_cast<std::size_t>(prop_w);
-        desc.height = static_cast<std::size_t>(prop_h);
-        desc.format = prop_fmt;
-        removerLog("video_in allocate via property fallback");
-        allocate(desc);
-    } else if (!has_usable) {
-        try {
-            const auto cur = video_in_->texture().desc();
-            if (cur.width > 0 && cur.height > 0) {
-                TextureDesc desc = cur;
-                if (desc.format == Format::None) {
-                    desc.format = Format::R8G8B8A8_UNORM;
-                }
-                removerLog("video_in allocate via texture().desc() fallback");
-                allocate(desc);
-            }
-        } catch (...) {
-        }
-    }
 }
 
 void Input::requestVideoDownload() {
-    if (!video_in_) {
+    if (!video_in_ || !video_in_download_allowed_) {
+        return;
+    }
+    if (download_cooldown_frames_ > 0) {
+        --download_cooldown_frames_;
         return;
     }
     TextureDesc desc{};
@@ -248,13 +219,21 @@ void Input::requestVideoDownload() {
         return;
     }
 
+    const auto gen = video_in_generation_.load(std::memory_order_acquire);
+
     // Copy TextureRef (acquire); HostContext::download_texture release()s that copy.
     host().download_texture(
         video_in_->texture(),
-        [this, w = static_cast<std::uint32_t>(desc.width),
+        [this, gen, w = static_cast<std::uint32_t>(desc.width),
          h = static_cast<std::uint32_t>(desc.height)](BufferDesc buffer,
                                                       OnComplete on_complete) mutable noexcept {
             try {
+                if (gen != video_in_generation_.load(std::memory_order_acquire)) {
+                    // Texture was replaced since this download was issued.
+                    download_pending_.store(false);
+                    on_complete();
+                    return;
+                }
                 const std::size_t expected = static_cast<std::size_t>(w) * h * 4u;
                 if (!buffer.data || buffer.size < expected || w == 0 || h == 0) {
                     const auto n = downloads_empty_.fetch_add(1) + 1;
@@ -302,7 +281,9 @@ void Input::applyMatteSettings() {
     }
     matte_settings_.backend = ::genesis::BgRemoverBackend::Auto;
     matte_settings_.quality = next_q;
-    if (matte_settings_.model_path.empty()) {
+    // Resolve model only when the worker is (about to be) running — avoid SDL/asset
+    // work during cyan scrub-in before Video In is linked.
+    if (async_started_ && matte_settings_.model_path.empty()) {
         try {
             matte_settings_.model_path =
                 ::genesis::resolveAssetPath("assets/matting/rvm_mobilenetv3_fp16.onnx");
@@ -422,7 +403,7 @@ string Input::get_property(string_view name) noexcept {
 bool Input::update() noexcept try {
     touchHostClock();
     ensureVideoInHostTexture();
-    applyMatteSettings();
+    // Do not call applyMatteSettings / start ORT here — scrub-in must stay light.
     requestVideoDownload();
     return true;
 } catch (const std::exception& ex) {
@@ -461,8 +442,10 @@ RenderResult Input::render() noexcept try {
     if (!async_started_) {
         async_.start();
         async_started_ = true;
+        matte_settings_applied_ = false; // force push now that worker exists
         applyMatteSettings();
         async_.reset(w, h);
+        removerLog("async matte worker started (after first video frame)");
     }
 
     async_.trySubmit(frame.data(), w, h);

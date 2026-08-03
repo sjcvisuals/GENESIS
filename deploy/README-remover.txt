@@ -75,14 +75,15 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v8-host-tex-20260731
+  remover-timeline-v8b-dl-gate-20260803
 
 Host-texture I/O (PIXERA download_texture → CPU matte → upload_texture).
-D3D11/Vulkan shared Video In stayed black with live inputs. Color diagnostics:
-  cyan = DLL alive, waiting for download
+download_texture is gated until Video In is linked (no empty pre-link downloads —
+those crashed PIXERA on scrub). Cyan placeholder until download succeeds.
+Color diagnostics:
+  cyan = DLL alive, waiting for Video In link/download
   magenta = linked Video In but empty pixels
   live feed = passthrough; cutout after RVM
-applies_alpha stays false until a covered matte is written.
 After install: quit PIXERA, delete/re-import the Remover resource, then:
   .\scripts\dump-remover-log.ps1
 
