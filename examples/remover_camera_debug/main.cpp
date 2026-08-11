@@ -89,7 +89,7 @@ bool surfaceToRgba(SDL_Surface* src, std::vector<std::uint8_t>& out_rgba, std::u
 
 std::filesystem::path exeDirectory() {
     if (const char* base = SDL_GetBasePath()) {
-        // SDL3: GetBasePath is owned by SDL — do not SDL_free (unlike SDL2).
+        // SDL3: GetBasePath is owned by SDL - do not SDL_free (unlike SDL2).
         return std::filesystem::path(base);
     }
     return std::filesystem::current_path();
@@ -97,7 +97,7 @@ std::filesystem::path exeDirectory() {
 
 void printUsage() {
     std::printf(
-        "genesis_remover_camera_debug — standalone webcam BG remover (no PIXERA)\n"
+        "genesis_remover_camera_debug - standalone webcam BG remover (no PIXERA)\n"
         "  --camera N     Use camera index N (default 0)\n"
         "  --list         List cameras and exit\n"
         "  --passthrough  Start in opaque passthrough (skip matte)\n"
