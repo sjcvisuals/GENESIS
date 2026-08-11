@@ -15,7 +15,8 @@ param(
     [switch]$Run,
     [switch]$EditorOnly,
     [switch]$PixeraOnly,
-    [switch]$RemoverOnly
+    [switch]$RemoverOnly,
+    [switch]$CameraDebugOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -219,6 +220,25 @@ log=%TEMP%\ExtGenesisRemover.log
         Write-Host "Timeline diagnostics log: %TEMP%\ExtGenesisRemover.log"
     }
 
+    # --- Standalone webcam BG-remover debug (isolates matte from PIXERA) ---
+    $camExe = Resolve-BuiltExe "genesis_remover_camera_debug.exe" $PixeraConfig
+    if (-not $camExe) {
+        $camExe = Resolve-BuiltExe "genesis_remover_camera_debug.exe" $EditorConfig
+    }
+    if ($camExe) {
+        $camOut = Join-Path $OutDir "RemoverCameraDebug"
+        New-Item -ItemType Directory -Force -Path $camOut | Out-Null
+        Copy-Item -Path $camExe -Destination (Join-Path $camOut "genesis_remover_camera_debug.exe") -Force
+        Sync-Directory (Join-Path $assetsSrc "matting") (Join-Path $camOut "assets\matting")
+        if ($onnx) {
+            Copy-Item -Path $onnx -Destination (Join-Path $camOut "onnxruntime.dll") -Force
+        }
+        Assert-File (Join-Path $camOut "genesis_remover_camera_debug.exe") "camera debug exe"
+        Assert-File (Join-Path $camOut "assets\matting\rvm_mobilenetv3_fp16.onnx") "RVM model (camera debug)"
+        Write-Host "Camera debug: $camOut\genesis_remover_camera_debug.exe"
+        Write-Host "  Run: .\scripts\run-remover-camera-debug.ps1"
+    }
+
     # Clear Mark-of-the-Web / Zone.Identifier so PIXERA can LoadLibrary from out\.
     Get-ChildItem -Path $OutDir -Recurse -Include *.dll,*.exe -ErrorAction SilentlyContinue |
         ForEach-Object {
@@ -279,15 +299,18 @@ if (Test-Path $Glslc) {
 
 $editorTargets = @()
 $pixeraTargets = @()
-if ($RemoverOnly) {
-    $pixeraTargets = @("ExtGenesisRemover")
+if ($CameraDebugOnly) {
+    # Release preferred: matches Remover CRT + ships next to onnxruntime.dll in out\.
+    $pixeraTargets = @("genesis_remover_camera_debug")
+} elseif ($RemoverOnly) {
+    $pixeraTargets = @("ExtGenesisRemover", "genesis_remover_camera_debug")
 } elseif ($PixeraOnly) {
-    $pixeraTargets = @("ExtGenesis", "ExtGenesisRemover")
+    $pixeraTargets = @("ExtGenesis", "ExtGenesisRemover", "genesis_remover_camera_debug")
 } elseif ($EditorOnly) {
     $editorTargets = @("genesis_gltf_viewer")
 } else {
     $editorTargets = @("genesis_gltf_viewer")
-    $pixeraTargets = @("ExtGenesis", "ExtGenesisRemover")
+    $pixeraTargets = @("ExtGenesis", "ExtGenesisRemover", "genesis_remover_camera_debug")
 }
 
 Write-Host ""
@@ -337,15 +360,19 @@ out\
   Editor\                 <- run the editor from here
   ExtGenesis\             <- point PIXERA at ExtGenesis.dll
   ExtGenesisRemover\      <- point PIXERA at ExtGenesisRemover.dll (cutout only)
+  RemoverCameraDebug\     <- standalone webcam cutout (no PIXERA)
 "@
+$CamDebug = Join-Path $OutDir "RemoverCameraDebug\genesis_remover_camera_debug.exe"
+if (-not (Test-Path $CamDebug)) { $CamDebug = $null }
+
 if ($Editor) {
     Write-Host "Editor:  $Editor"
-} elseif (-not $PixeraOnly -and -not $RemoverOnly) {
+} elseif (-not $PixeraOnly -and -not $RemoverOnly -and -not $CameraDebugOnly) {
     Write-Host "Editor missing under out\Editor - see $LogFile" -ForegroundColor Yellow
 }
 if ($Dll) {
     Write-Host "Pixera:  $Dll"
-} elseif (-not $EditorOnly -and -not $RemoverOnly) {
+} elseif (-not $EditorOnly -and -not $RemoverOnly -and -not $CameraDebugOnly) {
     Write-Host "ExtGenesis.dll missing under out\ExtGenesis (Windows-only)." -ForegroundColor Yellow
 }
 if ($RemoverDll) {
@@ -370,8 +397,14 @@ if ($RemoverDll) {
     if ($checkCode -ne 0) {
         Write-Host "WARNING: Remover LoadLibrary check failed (exit $checkCode). PIXERA will likely reject this DLL." -ForegroundColor Yellow
     }
-} elseif (-not $EditorOnly) {
+} elseif (-not $EditorOnly -and -not $CameraDebugOnly) {
     Write-Host "ExtGenesisRemover.dll missing under out\ExtGenesisRemover (Windows-only)." -ForegroundColor Yellow
+}
+if ($CamDebug) {
+    Write-Host "Camera:  $CamDebug"
+    Write-Host "  Prove matte outside PIXERA: .\scripts\run-remover-camera-debug.ps1"
+} elseif ($CameraDebugOnly -or $RemoverOnly -or -not $EditorOnly) {
+    Write-Host "Camera debug exe missing under out\RemoverCameraDebug - see $LogFile" -ForegroundColor Yellow
 }
 Write-Host ""
 Write-Host "(Ignore build\ for day-to-day testing - that is just the CMake cache.)"

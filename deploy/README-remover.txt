@@ -87,6 +87,20 @@ After install: quit PIXERA, re-import Remover, scrub to cyan, link webcam, wait
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log
 
+Prove matte outside PIXERA first
+--------------------------------
+If the timeline is still black/cyan/frozen, isolate RVM from PIXERA I/O:
+
+  .\scripts\run-remover-camera-debug.ps1
+
+That opens the laptop camera (left) and the cutout (right). Decision tree:
+
+  .\scripts\diagnose-remover.ps1
+
+Build only the debug exe:
+
+  .\scripts\build.ps1 -CameraDebugOnly
+
 If PIXERA says "Can Not Load Pixera Extension"
 ---------------------------------------------
 Run .\scripts\check-pixera-dll.ps1 and fix anything marked [MISS]/[FAIL].

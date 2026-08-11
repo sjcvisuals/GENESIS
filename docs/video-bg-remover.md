@@ -55,3 +55,34 @@ CMake option: `GENESIS_ENABLE_ONNXRUNTIME` (default ON) downloads ORT into `thir
 ```
 
 Covers chroma, sync RVM, and async skip/reuse stats.
+
+## Isolate matte from PIXERA (webcam debug)
+
+When Remover misbehaves in PIXERA, **do not keep guessing I/O vs RVM**. Run the
+standalone camera tool that uses the same `AsyncMatteWorker` + RVM path with the
+laptop webcam (SDL3), no RenderBridge:
+
+```powershell
+.\scripts\build.ps1 -CameraDebugOnly
+.\scripts\run-remover-camera-debug.ps1
+```
+
+Or: `.\scripts\diagnose-remover.ps1` (prints the decision tree + dumps logs).
+
+| Result | Meaning |
+|--------|---------|
+| Right pane: live person cutout over checkerboard, log `rvm=1` | Matte works. Bug is PIXERA Video In / host download-upload. |
+| Log `rvm=0` / only chroma (green key) | ORT or `assets/matting/*.onnx` broken — fix shared deps before PIXERA. |
+| No cameras / no frames | OS camera permission, device busy, or try `--camera N`. |
+
+Log file: `out\RemoverCameraDebug\remover-camera-debug.log`
+
+Keys: `1`/`2`/`3` quality, `P` opaque passthrough, `Esc` quit.
+
+### PIXERA log after camera debug proves matte
+
+```powershell
+.\scripts\dump-remover-log.ps1
+```
+
+Look for: `video_in HOST`, `download armed`, `download ok`, allocate / cyan / magenta stamps.

@@ -314,6 +314,34 @@ if(GENESIS_BUILD_EXAMPLES)
             "$<TARGET_FILE_DIR:genesis_matting_smoke>/assets/matting"
         COMMENT "Copying matting assets next to genesis_matting_smoke")
 
+    # Standalone webcam + RVM cutout (isolates matte from PIXERA I/O).
+    add_executable(genesis_remover_camera_debug examples/remover_camera_debug/main.cpp)
+    target_link_libraries(genesis_remover_camera_debug PRIVATE genesis_matting)
+    if(GENESIS_HAS_ONNXRUNTIME AND UNIX)
+        set_target_properties(genesis_remover_camera_debug PROPERTIES
+            BUILD_RPATH "${GENESIS_ONNXRUNTIME_ROOT}/lib"
+            INSTALL_RPATH "${GENESIS_ONNXRUNTIME_ROOT}/lib")
+        add_custom_command(TARGET genesis_remover_camera_debug POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${GENESIS_ONNXRUNTIME_ROOT}/lib/libonnxruntime.so.1"
+                "$<TARGET_FILE_DIR:genesis_remover_camera_debug>/"
+            COMMENT "Copying ONNX Runtime next to genesis_remover_camera_debug")
+    endif()
+    if(GENESIS_HAS_ONNXRUNTIME AND WIN32)
+        add_custom_command(TARGET genesis_remover_camera_debug POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${GENESIS_ONNXRUNTIME_ROOT}/lib/onnxruntime.dll"
+                "$<TARGET_FILE_DIR:genesis_remover_camera_debug>/onnxruntime.dll"
+            COMMENT "Copying onnxruntime.dll next to genesis_remover_camera_debug")
+    endif()
+    add_custom_command(TARGET genesis_remover_camera_debug POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:genesis_remover_camera_debug>/assets/matting"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets/matting"
+            "$<TARGET_FILE_DIR:genesis_remover_camera_debug>/assets/matting"
+        COMMENT "Copying matting assets next to genesis_remover_camera_debug")
+
     add_executable(genesis_multiview_player examples/multiview_player/main.cpp)
     target_link_libraries(genesis_multiview_player PRIVATE genesis_engine)
     add_dependencies(genesis_multiview_player genesis_shaders)
