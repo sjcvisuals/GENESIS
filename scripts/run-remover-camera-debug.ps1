@@ -1,10 +1,13 @@
 # Launch the standalone webcam background-remover (no PIXERA).
 # Use this FIRST when Remover looks wrong in PIXERA — it isolates RVM/matte from host I/O.
 #
+# From the GENESIS repo root (the folder that contains BUILD-AND-RUN.bat):
 #   .\scripts\run-remover-camera-debug.ps1
 #   .\scripts\run-remover-camera-debug.ps1 -List
 #   .\scripts\run-remover-camera-debug.ps1 -Camera 1
 #   .\scripts\run-remover-camera-debug.ps1 -Passthrough
+#
+# Or double-click: RUN-CAMERA-DEBUG.bat
 #
 # If the right pane shows a live cutout over the checkerboard, matte works outside PIXERA
 # and the bug is in ExtGenesisRemover Video In / download / upload.
@@ -20,6 +23,18 @@ param(
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Exe = Join-Path $RepoRoot "out\RemoverCameraDebug\genesis_remover_camera_debug.exe"
+
+if (-not (Test-Path (Join-Path $RepoRoot "CMakeLists.txt"))) {
+    Write-Host ""
+    Write-Host "This script must run from the GENESIS repo (folder with BUILD-AND-RUN.bat)." -ForegroundColor Red
+    Write-Host "You are resolving repo as: $RepoRoot"
+    Write-Host ""
+    Write-Host "In Explorer, open your GENESIS folder, then either:"
+    Write-Host "  - Double-click RUN-CAMERA-DEBUG.bat"
+    Write-Host "  - Or in PowerShell:  cd <path-to-GENESIS>; .\scripts\run-remover-camera-debug.ps1"
+    Write-Host ""
+    exit 1
+}
 
 if ($Build -or -not (Test-Path $Exe)) {
     Write-Host "Building camera debug exe..." -ForegroundColor Cyan
