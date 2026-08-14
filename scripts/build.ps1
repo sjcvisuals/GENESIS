@@ -238,11 +238,12 @@ function Sync-OutFolder {
         }
 
         $stamp = @"
-build=remover-timeline-v8c-link-alloc-20260803
+build=remover-timeline-v9-dml-20260814
 dll=$remOut\ExtGenesisRemover.dll
 time=$(Get-Date -Format o)
 size=$remSize
 log=%TEMP%\ExtGenesisRemover.log
+ep=DirectML-preferred
 "@
         Set-Content -Path (Join-Path $remOut "BUILD_STAMP.txt") -Value $stamp -Encoding ASCII
         Write-Host "Wrote BUILD_STAMP.txt (prove PIXERA is using this build)"

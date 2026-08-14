@@ -30,17 +30,35 @@ bool matteHasCoverage(const std::uint8_t* rgba, std::uint32_t w, std::uint32_t h
         return false;
     }
     const std::size_t pixels = static_cast<std::size_t>(w) * h;
-    const std::size_t step = std::max<std::size_t>(1, pixels / 4096u);
+    const std::size_t step = std::max<std::size_t>(1, pixels / 8192u);
     std::size_t hits = 0;
     unsigned max_a = 0;
     for (std::size_t i = 0; i < pixels; i += step) {
         const unsigned a = rgba[i * 4u + 3u];
         max_a = std::max(max_a, a);
-        if (a > 16) {
+        if (a > 8) {
             ++hits;
         }
     }
-    return max_a > 32 && hits >= 8;
+    // Soft gate: RVM often has sparse person coverage; don't block matte_live forever.
+    return max_a > 24 && hits >= 3;
+}
+
+void extractAlpha(const std::uint8_t* rgba, std::uint8_t* alpha8, std::size_t pixels) {
+    for (std::size_t i = 0; i < pixels; ++i) {
+        alpha8[i] = rgba[i * 4u + 3u];
+    }
+}
+
+void compositeWithAlpha(const std::uint8_t* in_rgba, const std::uint8_t* alpha8,
+                        std::uint8_t* out_rgba, std::size_t pixels) {
+    for (std::size_t i = 0; i < pixels; ++i) {
+        const std::uint8_t a = alpha8[i];
+        out_rgba[i * 4u + 0] = static_cast<std::uint8_t>((in_rgba[i * 4u + 0] * a) / 255u);
+        out_rgba[i * 4u + 1] = static_cast<std::uint8_t>((in_rgba[i * 4u + 1] * a) / 255u);
+        out_rgba[i * 4u + 2] = static_cast<std::uint8_t>((in_rgba[i * 4u + 2] * a) / 255u);
+        out_rgba[i * 4u + 3] = a;
+    }
 }
 
 void fillOpaquePassthrough(const std::uint8_t* in_rgba, std::uint8_t* out_rgba, std::size_t bytes) {
@@ -157,6 +175,8 @@ void Input::ensureSampler(std::uint32_t width, std::uint32_t height) {
     buffer.size = bytes;
     host().upload_texture(sampler_->texture(), buffer, true, []() noexcept {});
     matte_live_ = false;
+    has_last_alpha_ = false;
+    last_alpha_.clear();
     removerLog(std::format("sampler host texture {}x{} (cyan placeholder)", width_, height_));
 }
 
@@ -182,7 +202,7 @@ void Input::ensureVideoInHostTexture() {
         video_in_allocated_ = true;
         // Never download in the same step as create — that crashed PIXERA.
         video_in_download_allowed_ = false;
-        download_cooldown_frames_ = 45;
+        download_cooldown_frames_ = 20;
         ensureSampler(static_cast<std::uint32_t>(desc.width),
                       static_cast<std::uint32_t>(desc.height));
         {
@@ -190,6 +210,8 @@ void Input::ensureVideoInHostTexture() {
             has_in_ = false;
             latest_in_.clear();
         }
+        has_last_alpha_ = false;
+        last_alpha_.clear();
         last_render_path_.clear();
         removerLog(std::format("video_in HOST texture {}x{} format={} gen={} ({})", desc.width,
                                desc.height, get_format_name(desc.format), gen, reason));
@@ -225,8 +247,8 @@ void Input::ensureVideoInHostTexture() {
             desc.height = static_cast<std::size_t>(prop_h);
             desc.format = prop_fmt;
             allocate(desc, format_explicit ? "props+format" : "props-changed");
-        } else if (!same_res_allocate_tried_ && render_ticks_ > 120) {
-            // Same-resolution live link: props may never change. After ~2s of ticks,
+        } else if (!same_res_allocate_tried_ && render_ticks_ > 45) {
+            // Same-resolution live link: props may never change. After ~0.75s of ticks,
             // create the host texture so PIXERA can write; download arms after cooldown.
             same_res_allocate_tried_ = true;
             TextureDesc desc{};
@@ -329,6 +351,8 @@ void Input::applyMatteSettings() {
     }
     matte_settings_.backend = ::genesis::BgRemoverBackend::Auto;
     matte_settings_.quality = next_q;
+    matte_settings_.rvm_downsample = 0.0f; // honor Fast/Balanced/Quality presets
+    matte_settings_.temporal_alpha = 0.20f;
     // Resolve model only when the worker is (about to be) running — avoid SDL/asset
     // work during cyan scrub-in before Video In is linked.
     if (async_started_ && matte_settings_.model_path.empty()) {
@@ -343,7 +367,8 @@ void Input::applyMatteSettings() {
     matte_settings_applied_ = true;
     if (async_started_) {
         async_.setSettings(matte_settings_);
-        removerLog(std::format("matte settings applied quality={}", q));
+        removerLog(std::format("matte settings applied quality={} ep={}", q,
+                               async_.executionProvider()));
     }
 }
 
@@ -373,11 +398,13 @@ void Input::logMatteStatusMaybe() {
     last_matte_status_ = status;
     last_logged_completed_ = completed;
     removerLog(std::format(
-        "matte status='{}' backend={} rvm={} submitted={} completed={} skipped={} busy={} "
-        "matte_live={} dl_ok={} dl_empty={}",
+        "matte status='{}' backend={} ep={} rvm={} infer={}x{} ms={:.1f} submitted={} completed={} "
+        "skipped={} busy={} matte_live={} dl_ok={} dl_empty={}",
         status, ::genesis::bgRemoverBackendLabel(async_.activeBackend()),
-        async_.isRvmReady() ? 1 : 0, async_.submitted(), completed, async_.skipped(),
-        async_.busy() ? 1 : 0, matte_live_ ? 1 : 0, downloads_ok_.load(), downloads_empty_.load()));
+        async_.executionProvider(), async_.isRvmReady() ? 1 : 0, async_.lastInferWidth(),
+        async_.lastInferHeight(), async_.lastInferMs(), async_.submitted(), completed,
+        async_.skipped(), async_.busy() ? 1 : 0, matte_live_ ? 1 : 0, downloads_ok_.load(),
+        downloads_empty_.load()));
 }
 
 bool Input::initialize() noexcept try {
@@ -436,7 +463,7 @@ ValueSet Input::get_state() noexcept {
     state.set(StateNames::resolution_y, res_y);
     state.set(StateNames::format, get_format_name(format));
     state.set(StateNames::scale_y, 1);
-    state.set(StateNames::frame_rate, 60.0);
+    state.set(StateNames::frame_rate, 50.0);
     return state;
 }
 
@@ -493,18 +520,35 @@ RenderResult Input::render() noexcept try {
         matte_settings_applied_ = false; // force push now that worker exists
         applyMatteSettings();
         async_.reset(w, h);
-        removerLog("async matte worker started (after first video frame)");
+        removerLog(std::format("async matte worker started (after first video frame) ep={}",
+                               async_.executionProvider()));
+    } else {
+        // Live Quality UI changes (setSettings is a no-op when unchanged).
+        applyMatteSettings();
     }
 
     async_.trySubmit(frame.data(), w, h);
     scratch_out_.resize(bytes);
+    const std::size_t pixels = static_cast<std::size_t>(w) * h;
 
-    if (async_.copyLatest(scratch_out_.data(), w, h) && matteHasCoverage(scratch_out_.data(), w, h)) {
-        uploadOutputRgba(scratch_out_.data(), w, h);
+    // Prefer a fresh covered matte; otherwise reuse last alpha on the current camera
+    // RGB so PIXERA stays smooth when RVM is slower than the host download rate.
+    if (async_.copyLatest(scratch_out_.data(), w, h) &&
+        matteHasCoverage(scratch_out_.data(), w, h)) {
+        last_alpha_.resize(pixels);
+        extractAlpha(scratch_out_.data(), last_alpha_.data(), pixels);
+        has_last_alpha_ = true;
         if (!matte_live_) {
             matte_live_ = true;
-            removerLog("matte_live=1 (applies_alpha enabled for cutout)");
+            removerLog(std::format("matte_live=1 ep={} infer={}x{} ({:.1f}ms)",
+                                   async_.executionProvider(), async_.lastInferWidth(),
+                                   async_.lastInferHeight(), async_.lastInferMs()));
         }
+    }
+
+    if (has_last_alpha_ && last_alpha_.size() == pixels) {
+        compositeWithAlpha(frame.data(), last_alpha_.data(), scratch_out_.data(), pixels);
+        uploadOutputRgba(scratch_out_.data(), w, h);
         logPathOnce(last_render_path_, "matte");
         return RenderResult::Succeeded;
     }

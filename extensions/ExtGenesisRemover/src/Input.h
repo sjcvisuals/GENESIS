@@ -76,6 +76,8 @@ private:
     bool same_res_allocate_tried_ = false;
 
     std::vector<std::uint8_t> scratch_out_;
+    std::vector<std::uint8_t> last_alpha_;
+    bool has_last_alpha_ = false;
     std::string last_matte_status_;
     std::uint64_t render_ticks_ = 0;
     std::uint64_t last_logged_completed_ = 0;
