@@ -12,7 +12,7 @@ Write-Host ""
 Write-Host "=== GENESIS Remover diagnose ===" -ForegroundColor Cyan
 Write-Host @"
 
-Step 1 — Prove the matte core outside PIXERA
+Step 1 - Prove the matte core outside PIXERA
   .\scripts\run-remover-camera-debug.ps1
 
   Look at the window:
@@ -23,7 +23,7 @@ Step 1 — Prove the matte core outside PIXERA
     probe backend=... rvm=1   <- RVM/ORT healthy
     status ... completed=N    <- async worker producing mattes
 
-Step 2 — Interpret
+Step 2 - Interpret
   A) Camera debug cutout WORKS, PIXERA still black/cyan/frozen
        -> Bug is ExtGenesisRemover I/O (Video In link / download_texture /
           upload_texture), not RVM. Dump the PIXERA log (below).
@@ -38,7 +38,7 @@ Step 2 — Interpret
        -> Windows camera privacy, another app locking the cam, or wrong --camera N.
           Try: .\scripts\run-remover-camera-debug.ps1 -List
 
-Step 3 — PIXERA path (only after A)
+Step 3 - PIXERA path (only after A)
   Quit PIXERA fully, then:
     .\BUILD-AND-RUN.bat   (or .\scripts\build.ps1 -RemoverOnly)
     .\scripts\install-pixera-remover.ps1

@@ -1,5 +1,5 @@
 # Launch the standalone webcam background-remover (no PIXERA).
-# Use this FIRST when Remover looks wrong in PIXERA — it isolates RVM/matte from host I/O.
+# Use this FIRST when Remover looks wrong in PIXERA - it isolates RVM/matte from host I/O.
 #
 # From the GENESIS repo root (the folder that contains BUILD-AND-RUN.bat):
 #   .\scripts\run-remover-camera-debug.ps1
@@ -43,15 +43,16 @@ if ($Build -or -not (Test-Path $Exe)) {
 }
 
 if (-not (Test-Path $Exe)) {
-    Write-Error "Missing $Exe — build failed or sync skipped."
+    Write-Error "Missing $Exe - build failed or sync skipped."
 }
 
 $WorkDir = Split-Path -Parent $Exe
-$argsList = @()
-if ($List) { $argsList += "--list" }
-else {
-    $argsList += @("--camera", "$Camera")
-    if ($Passthrough) { $argsList += "--passthrough" }
+$argList = @()
+if ($List) {
+    $argList += "--list"
+} else {
+    $argList += @("--camera", "$Camera")
+    if ($Passthrough) { $argList += "--passthrough" }
 }
 
 Write-Host "Launching from $WorkDir" -ForegroundColor Cyan
@@ -67,7 +68,7 @@ Write-Host ""
 
 Push-Location $WorkDir
 try {
-    & $Exe @argsList
+    & $Exe @argList
     exit $LASTEXITCODE
 } finally {
     Pop-Location
