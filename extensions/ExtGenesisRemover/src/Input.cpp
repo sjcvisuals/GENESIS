@@ -9,11 +9,44 @@
 #include <cstring>
 #include <format>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace rxext::genesis_remover {
 
 namespace {
+
+// PIXERA host-texture samples (ExtSampleCPU) use BGRA. We keep RGBA internally for RVM.
+constexpr Format kPixeraHostFormat = Format::B8G8R8A8_UNORM;
+
+bool isBgra(Format format) {
+    return format == Format::B8G8R8A8_UNORM;
+}
+
+void swapRbInPlace(std::uint8_t* px, std::size_t pixels) {
+    for (std::size_t i = 0; i < pixels; ++i) {
+        std::swap(px[i * 4u + 0], px[i * 4u + 2]);
+    }
+}
+
+void hostToRgbaInPlace(std::uint8_t* px, std::size_t pixels, Format host_format) {
+    if (isBgra(host_format)) {
+        swapRbInPlace(px, pixels);
+    }
+}
+
+void rgbaToHost(const std::uint8_t* rgba, std::uint8_t* host, std::size_t pixels, Format host_format) {
+    if (!isBgra(host_format)) {
+        std::memcpy(host, rgba, pixels * 4u);
+        return;
+    }
+    for (std::size_t i = 0; i < pixels; ++i) {
+        host[i * 4u + 0] = rgba[i * 4u + 2]; // B
+        host[i * 4u + 1] = rgba[i * 4u + 1]; // G
+        host[i * 4u + 2] = rgba[i * 4u + 0]; // R
+        host[i * 4u + 3] = rgba[i * 4u + 3]; // A
+    }
+}
 
 std::size_t nonzeroRgbCount(const std::uint8_t* rgba, std::size_t bytes) {
     std::size_t n = 0;
@@ -68,8 +101,8 @@ void fillOpaquePassthrough(const std::uint8_t* in_rgba, std::uint8_t* out_rgba, 
     }
 }
 
-void fillSolid(std::uint8_t* out_rgba, std::size_t bytes, std::uint8_t r, std::uint8_t g,
-               std::uint8_t b) {
+void fillSolidRgba(std::uint8_t* out_rgba, std::size_t bytes, std::uint8_t r, std::uint8_t g,
+                   std::uint8_t b) {
     for (std::size_t i = 0; i + 3 < bytes; i += 4) {
         out_rgba[i + 0] = r;
         out_rgba[i + 1] = g;
@@ -150,7 +183,7 @@ void Input::ensureSampler(std::uint32_t width, std::uint32_t height) {
     try {
         const auto cur = sampler_->texture().desc();
         need_new =
-            (cur.width != width_ || cur.height != height_ || cur.format != Format::R8G8B8A8_UNORM);
+            (cur.width != width_ || cur.height != height_ || cur.format != kPixeraHostFormat);
     } catch (...) {
         need_new = true;
     }
@@ -161,23 +194,28 @@ void Input::ensureSampler(std::uint32_t width, std::uint32_t height) {
     TextureDesc desc{};
     desc.width = width_;
     desc.height = height_;
-    desc.format = Format::R8G8B8A8_UNORM;
+    // Match ExtSampleCPU: PIXERA host textures are BGRA.
+    desc.format = kPixeraHostFormat;
     desc.is_target = true;
     sampler_->set_texture(host().create_texture(desc));
 
     // Cyan = DLL alive, waiting for Video In download (unmistakable diagnostic).
     const std::size_t bytes = static_cast<std::size_t>(width_) * height_ * 4u;
+    const std::size_t pixels = static_cast<std::size_t>(width_) * height_;
     scratch_out_.resize(bytes);
-    fillSolid(scratch_out_.data(), bytes, 0, 220, 255);
+    fillSolidRgba(scratch_out_.data(), bytes, 0, 220, 255);
+    host_upload_.resize(bytes);
+    rgbaToHost(scratch_out_.data(), host_upload_.data(), pixels, kPixeraHostFormat);
     BufferDesc buffer{};
-    buffer.data = scratch_out_.data();
+    buffer.data = host_upload_.data();
     buffer.pitch = static_cast<std::size_t>(width_) * 4u;
     buffer.size = bytes;
     host().upload_texture(sampler_->texture(), buffer, true, []() noexcept {});
     matte_live_ = false;
     has_last_alpha_ = false;
     last_alpha_.clear();
-    removerLog(std::format("sampler host texture {}x{} (cyan placeholder)", width_, height_));
+    removerLog(std::format("sampler host texture {}x{} format={} (cyan placeholder)", width_,
+                           height_, get_format_name(kPixeraHostFormat)));
 }
 
 void Input::ensureVideoInHostTexture() {
@@ -190,7 +228,7 @@ void Input::ensureVideoInHostTexture() {
             return;
         }
         if (desc.format == Format::None) {
-            desc.format = Format::R8G8B8A8_UNORM;
+            desc.format = kPixeraHostFormat;
         }
         desc.is_target = false;
         desc.share_handle = {};
@@ -198,6 +236,7 @@ void Input::ensureVideoInHostTexture() {
         const auto gen = video_in_generation_.fetch_add(1) + 1;
         download_pending_.store(false);
 
+        video_in_host_format_ = desc.format;
         video_in_->set_texture(host().create_texture(desc));
         video_in_allocated_ = true;
         // Never download in the same step as create — that crashed PIXERA.
@@ -224,7 +263,8 @@ void Input::ensureVideoInHostTexture() {
     const int prop_w = video_in_->get_property<int>(SettingNames::resolution_x, 0);
     const int prop_h = video_in_->get_property<int>(SettingNames::resolution_y, 0);
     const std::string format_str(video_in_->get_property(SettingNames::format));
-    const Format prop_fmt = get_format_by_name(format_str, Format::R8G8B8A8_UNORM);
+    // Default BGRA like ExtSampleCPU — RGBA default caused multi-colour feeds.
+    const Format prop_fmt = get_format_by_name(format_str, kPixeraHostFormat);
 
     if (!baseline_captured_ && prop_w > 0 && prop_h > 0) {
         baseline_w_ = prop_w;
@@ -293,9 +333,11 @@ void Input::requestVideoDownload() {
 
     const auto gen = video_in_generation_.load(std::memory_order_acquire);
 
+    const Format host_fmt = desc.format != Format::None ? desc.format : video_in_host_format_;
+
     host().download_texture(
         video_in_->texture(),
-        [this, gen, w = static_cast<std::uint32_t>(desc.width),
+        [this, gen, host_fmt, w = static_cast<std::uint32_t>(desc.width),
          h = static_cast<std::uint32_t>(desc.height)](BufferDesc buffer,
                                                       OnComplete on_complete) mutable noexcept {
             try {
@@ -321,7 +363,13 @@ void Input::requestVideoDownload() {
                                     src + static_cast<std::size_t>(y) * src_pitch,
                                     static_cast<std::size_t>(w) * 4u);
                     }
+                    const std::size_t pixels = static_cast<std::size_t>(w) * h;
+                    hostToRgbaInPlace(packed.data(), pixels, host_fmt);
                     const std::size_t lit = nonzeroRgbCount(packed.data(), expected);
+                    const std::size_t mid = (pixels / 2u) * 4u;
+                    const unsigned pr = packed[mid + 0];
+                    const unsigned pg = packed[mid + 1];
+                    const unsigned pb = packed[mid + 2];
                     {
                         std::lock_guard<std::mutex> lock(frame_mutex_);
                         latest_in_ = std::move(packed);
@@ -331,7 +379,9 @@ void Input::requestVideoDownload() {
                     }
                     const auto n = downloads_ok_.fetch_add(1) + 1;
                     if (n <= 5 || (n % 120) == 0) {
-                        removerLog(std::format("download ok {}x{} nonzero_rgb={} n={}", w, h, lit, n));
+                        removerLog(std::format(
+                            "download ok {}x{} host={} ->rgba nonzero_rgb={} mid_rgb=({},{},{}) n={}",
+                            w, h, get_format_name(host_fmt), lit, pr, pg, pb, n));
                     }
                 }
             } catch (...) {
@@ -378,8 +428,11 @@ void Input::uploadOutputRgba(const std::uint8_t* rgba, std::uint32_t width, std:
     }
     ensureSampler(width, height);
     const std::size_t bytes = static_cast<std::size_t>(width) * height * 4u;
+    const std::size_t pixels = static_cast<std::size_t>(width) * height;
+    host_upload_.resize(bytes);
+    rgbaToHost(rgba, host_upload_.data(), pixels, kPixeraHostFormat);
     BufferDesc buffer{};
-    buffer.data = rgba;
+    buffer.data = host_upload_.data();
     buffer.pitch = static_cast<std::size_t>(width) * 4u;
     buffer.size = bytes;
     host().upload_texture(sampler_->texture(), buffer, true, []() noexcept {});
@@ -447,7 +500,7 @@ ValueSet Input::get_state() noexcept {
     ValueSet state;
     int res_x = static_cast<int>(width_);
     int res_y = static_cast<int>(height_);
-    Format format = Format::R8G8B8A8_UNORM;
+    Format format = kPixeraHostFormat;
     if (sampler_) {
         try {
             const auto desc = sampler_->texture().desc();
@@ -556,12 +609,13 @@ RenderResult Input::render() noexcept try {
     const std::size_t lit = nonzeroRgbCount(frame.data(), bytes);
     if (lit == 0) {
         // Linked but empty — magenta diagnostic.
-        fillSolid(scratch_out_.data(), bytes, 255, 0, 255);
+        fillSolidRgba(scratch_out_.data(), bytes, 255, 0, 255);
         uploadOutputRgba(scratch_out_.data(), w, h);
         logPathOnce(last_render_path_, "input_black_magenta");
         return RenderResult::Succeeded;
     }
 
+    // Correct-color live feed until RVM coverage is ready (was multi-colour under RGBA host).
     fillOpaquePassthrough(frame.data(), scratch_out_.data(), bytes);
     uploadOutputRgba(scratch_out_.data(), w, h);
     logPathOnce(last_render_path_, "opaque_passthrough");

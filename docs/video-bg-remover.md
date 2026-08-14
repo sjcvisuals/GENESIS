@@ -91,4 +91,7 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for: `video_in HOST`, `download armed`, `download ok`, allocate / cyan / magenta stamps.
+Look for: `video_in HOST`, `download armed`, `download ok`, `host=B8G8R8A8_UNORM`,
+`render path=matte`, allocate / cyan / magenta stamps. Stamp must be
+`remover-timeline-v10-bgra-*`. A brief multi-colour feed usually means an older
+RGBA host DLL still loaded — quit PIXERA and reinstall.

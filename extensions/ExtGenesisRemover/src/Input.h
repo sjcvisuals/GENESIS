@@ -57,7 +57,7 @@ private:
     std::uint32_t height_ = 1080;
 
     std::mutex frame_mutex_;
-    std::vector<std::uint8_t> latest_in_;
+    std::vector<std::uint8_t> latest_in_; // always RGBA for RVM / composite
     std::uint32_t in_w_ = 0;
     std::uint32_t in_h_ = 0;
     bool has_in_ = false;
@@ -69,13 +69,16 @@ private:
     bool video_in_download_allowed_ = false;
     std::uint32_t download_cooldown_frames_ = 0;
     std::atomic<std::uint64_t> video_in_generation_{0};
+    // PIXERA host textures are BGRA (ExtSampleCPU). Track per Video In allocate.
+    Format video_in_host_format_ = Format::B8G8R8A8_UNORM;
     bool baseline_captured_ = false;
     int baseline_w_ = 0;
     int baseline_h_ = 0;
     std::string baseline_format_;
     bool same_res_allocate_tried_ = false;
 
-    std::vector<std::uint8_t> scratch_out_;
+    std::vector<std::uint8_t> scratch_out_;  // RGBA working buffer
+    std::vector<std::uint8_t> host_upload_; // BGRA (or RGBA) bytes for PIXERA
     std::vector<std::uint8_t> last_alpha_;
     bool has_last_alpha_ = false;
     std::string last_matte_status_;
