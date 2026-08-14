@@ -91,13 +91,10 @@ bool AsyncMatteWorker::trySubmit(const std::uint8_t* rgba, std::uint32_t width, 
         skipped_.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
-    // One in-flight: skip while processing. If idle with unconsumed pending, replace
-    // (latest-wins) and count the superseded frame as skipped.
-    if (busy_.load(std::memory_order_relaxed)) {
-        skipped_.fetch_add(1, std::memory_order_relaxed);
-        return false;
-    }
-    if (has_pending_) {
+    // Always keep a latest-wins mailbox. Previously we dropped submits while busy,
+    // so after infer finished the worker sat idle until the *next* camera frame
+    // (often cutting matte FPS roughly in half vs infer budget).
+    if (has_pending_ || busy_.load(std::memory_order_relaxed)) {
         skipped_.fetch_add(1, std::memory_order_relaxed);
     }
 

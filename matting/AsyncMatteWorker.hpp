@@ -12,8 +12,9 @@
 
 namespace genesis {
 
-// One-inflight RVM/chroma worker: render thread never blocks on Ort::Run.
-// When the worker is busy, new frames are skipped and the last completed matte is reused.
+    // One-inflight worker with a latest-wins pending mailbox: render never blocks on
+    // Ort::Run. Frames arriving while busy replace pending (not dropped cold), so the
+    // worker starts the newest frame as soon as the current infer finishes.
 class AsyncMatteWorker {
 public:
     AsyncMatteWorker();
@@ -31,7 +32,8 @@ public:
     // Drop pending + latest; reset temporal state. Call on resize.
     void reset(std::uint32_t width, std::uint32_t height);
 
-    // Non-blocking. Copies the frame if the worker can accept it; otherwise skips.
+    // Non-blocking. Copies into the latest-wins pending slot (even if busy).
+    // Returns false only if stopped / invalid. Superseded pending frames count as skipped.
     bool trySubmit(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height);
 
     // Copies the last completed matte (same size). Returns false if none yet.

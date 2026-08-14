@@ -291,7 +291,7 @@ int main(int argc, char** argv) {
     worker.setSettings(settings);
     worker.start();
     logLine("AsyncMatteWorker started (default quality=Fast)");
-    logLine("HUD stamp=remover-camera-debug-fps-v2 (title bar + yellow strip + fps-live.txt)");
+    logLine("HUD stamp=remover-camera-debug-fps-v3 (latest-wins pending + vsync)");
 
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
@@ -302,6 +302,12 @@ int main(int argc, char** argv) {
         SDL_CloseCamera(camera);
         SDL_Quit();
         return 1;
+    }
+    // Without vsync the UI loop spun at ~2000 present/sec and starved ORT CPU threads.
+    if (!SDL_SetRenderVSync(renderer, 1)) {
+        logLine(std::string("SDL_SetRenderVSync failed (continuing): ") + SDL_GetError());
+    } else {
+        logLine("render vsync=on");
     }
 
     SDL_Texture* tex_cam = nullptr;
