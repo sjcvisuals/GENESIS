@@ -42,13 +42,10 @@ try {
 
     if (-not (Test-IsAdmin) -and -not $NoElevate) {
         Write-InstallLog "Not admin - launching elevated copy..." "Yellow"
-        # Single argument string avoids Start-Process array quoting bugs with spaces.
-        $inner = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -PixeraRoot `"$PixeraRoot`" -SourceDir `"$SourceDir`" -NoElevate:`$false"
-        # Force elevated child to skip re-entry loops by always passing explicit paths;
-        # child will still elevate only if needed - pass a marker via env.
-        $inner = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -PixeraRoot `"$PixeraRoot`" -SourceDir `"$SourceDir`""
+        # One argument string: Start-Process array quoting breaks paths with spaces.
+        $arg = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -PixeraRoot `"$PixeraRoot`" -SourceDir `"$SourceDir`" -NoElevate"
         try {
-            $p = Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList $inner -Wait -PassThru
+            $p = Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList $arg -Wait -PassThru
         } catch {
             Write-InstallLog ("UAC elevation failed/cancelled: {0}" -f $_.Exception.Message) "Red"
             Write-InstallLog "Fix: right-click INSTALL-PIXERA-REMOVER.bat -> Run as administrator" "Yellow"
