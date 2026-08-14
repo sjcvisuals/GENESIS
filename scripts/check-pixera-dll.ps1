@@ -47,6 +47,23 @@ if (Test-Path $dml) {
     Write-Host "[WARN] DirectML.dll missing - RVM falls back to CPU" -ForegroundColor Yellow
 }
 
+$ortPath = Join-Path $DllDir "onnxruntime.dll"
+if (Test-Path $ortPath) {
+    $ortInfo = (Get-Item $ortPath).VersionInfo
+    $ortVer = $ortInfo.FileVersion
+    Write-Host ("[INFO] onnxruntime.dll FileVersion={0} ProductVersion={1}" -f $ortVer, $ortInfo.ProductVersion)
+    if ($ortVer -match '^1\.17' -or $ortVer -match '^1\.1[0-9]\.') {
+        Write-Host "[WARN] Remover expects ORT 1.20.x. An older 1.17 DLL causes:" -ForegroundColor Yellow
+        Write-Host "       'requested API version [20] is not available... Current ORT Version is: 1.17.1'" -ForegroundColor Yellow
+        Write-Host "       Rebuild + reinstall so out\ExtGenesisRemover\onnxruntime.dll is 1.20 DirectML." -ForegroundColor Yellow
+        $ok = $false
+    } elseif ($ortVer -and ($ortVer -notmatch '^1\.2')) {
+        Write-Host "[WARN] Unexpected ORT version $ortVer (want 1.20.x)" -ForegroundColor Yellow
+    } else {
+        Write-Host "[OK]  onnxruntime.dll looks like 1.20.x" -ForegroundColor Green
+    }
+}
+
 # Zone.Identifier (Mark-of-the-Web) can make LoadLibrary fail inside some hosts.
 $zone = $DllPath + ":Zone.Identifier"
 if (Test-Path $zone) {
