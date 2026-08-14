@@ -58,6 +58,8 @@ if ($List) {
 Write-Host "Launching from $WorkDir" -ForegroundColor Cyan
 Write-Host "  exe: $Exe"
 Write-Host "  log: $WorkDir\remover-camera-debug.log"
+Write-Host "  live FPS file: $WorkDir\fps-live.txt"
+Write-Host "  Look at the WINDOW TITLE for cam/matte/infer numbers."
 Write-Host "  Left = camera, Right = cutout. Keys: 1/2/3 quality, P passthrough, Esc quit"
 Write-Host ""
 Write-Host "Interpretation:"

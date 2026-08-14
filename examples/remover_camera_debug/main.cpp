@@ -291,6 +291,7 @@ int main(int argc, char** argv) {
     worker.setSettings(settings);
     worker.start();
     logLine("AsyncMatteWorker started (default quality=Fast)");
+    logLine("HUD stamp=remover-camera-debug-fps-v2 (title bar + yellow strip + fps-live.txt)");
 
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
@@ -487,42 +488,64 @@ int main(int argc, char** argv) {
 
         display_fps.tick();
 
-        char overlay[256];
-        std::snprintf(
-            overlay, sizeof(overlay),
-            "cam %.1f fps | matte %.1f fps (infer %.0f ms) | display %.1f fps | %s | sub %llu done %llu skip %llu",
-            cam_fps.fps, matte_fps, worker.lastInferMs(), display_fps.fps,
-            genesis::bgRemoverQualityLabel(settings.quality),
-            static_cast<unsigned long long>(worker.submitted()),
-            static_cast<unsigned long long>(worker.completed()),
-            static_cast<unsigned long long>(worker.skipped()));
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 180);
-        const SDL_FRect bar{0.f, 0.f, static_cast<float>(win_w), 22.f};
-        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-        SDL_RenderFillRect(renderer, &bar);
-        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-        SDL_SetRenderDrawColor(renderer, 240, 240, 245, 255);
-        SDL_RenderDebugText(renderer, 8.f, 6.f, overlay);
+        char line1[192];
+        char line2[192];
+        char title[256];
+        std::snprintf(line1, sizeof(line1),
+                      "CAM %.1f fps   MATTE %.1f fps   INFER %.0f ms   DISPLAY %.1f fps",
+                      cam_fps.fps, matte_fps, worker.lastInferMs(), display_fps.fps);
+        std::snprintf(line2, sizeof(line2),
+                      "quality=%s  submitted=%llu  completed=%llu  skipped=%llu  busy=%d",
+                      genesis::bgRemoverQualityLabel(settings.quality),
+                      static_cast<unsigned long long>(worker.submitted()),
+                      static_cast<unsigned long long>(worker.completed()),
+                      static_cast<unsigned long long>(worker.skipped()),
+                      worker.busy() ? 1 : 0);
+        std::snprintf(title, sizeof(title),
+                      "Remover Camera Debug  |  cam %.0f  matte %.0f  infer %.0fms  |  %s",
+                      cam_fps.fps, matte_fps, worker.lastInferMs(),
+                      genesis::bgRemoverQualityLabel(settings.quality));
+        SDL_SetWindowTitle(window, title);
 
-        char help[128];
-        std::snprintf(help, sizeof(help), "1 Fast  2 Balanced  3 Quality  P passthrough  Esc quit");
-        SDL_RenderDebugText(renderer, 8.f, static_cast<float>(win_h) - 16.f, help);
+        // Tall opaque HUD - SDL_RenderDebugText is 8px; scale 2x so it is readable.
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 220);
+        const SDL_FRect bar{0.f, 0.f, static_cast<float>(win_w), 56.f};
+        SDL_RenderFillRect(renderer, &bar);
+        SDL_SetRenderDrawColor(renderer, 255, 220, 40, 255); // bright yellow strip
+        const SDL_FRect strip{0.f, 56.f, static_cast<float>(win_w), 4.f};
+        SDL_RenderFillRect(renderer, &strip);
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+
+        SDL_SetRenderScale(renderer, 2.0f, 2.0f);
+        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+        SDL_RenderDebugText(renderer, 4.f, 4.f, line1);
+        SDL_SetRenderDrawColor(renderer, 180, 255, 180, 255);
+        SDL_RenderDebugText(renderer, 4.f, 14.f, line2);
+        SDL_SetRenderScale(renderer, 1.0f, 1.0f);
+
+        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+        SDL_RenderDebugText(renderer, 8.f, static_cast<float>(win_h) - 14.f,
+                            "1 Fast  2 Balanced  3 Quality  P passthrough  Esc quit");
 
         SDL_RenderPresent(renderer);
 
-        if (frames - last_status_frames >= 60) {
+        // Refresh on-disk live readout ~2 Hz (easy to glance next to the exe).
+        {
+            static auto last_live = std::chrono::steady_clock::now();
+            const auto now_live = std::chrono::steady_clock::now();
+            if (std::chrono::duration<double>(now_live - last_live).count() >= 0.5) {
+                last_live = now_live;
+                std::ofstream live(exe_dir / "fps-live.txt", std::ios::trunc);
+                if (live) {
+                    live << line1 << '\n' << line2 << '\n';
+                }
+            }
+        }
+
+        if (frames - last_status_frames >= 30) {
             last_status_frames = frames;
-            logLine(std::string("fps cam=") + std::to_string(cam_fps.fps) +
-                    " matte=" + std::to_string(matte_fps) +
-                    " display=" + std::to_string(display_fps.fps) +
-                    " infer_ms=" + std::to_string(worker.lastInferMs()) +
-                    " quality=" + genesis::bgRemoverQualityLabel(settings.quality) +
-                    " backend=" + genesis::bgRemoverBackendLabel(worker.activeBackend()) +
-                    " rvm=" + (worker.isRvmReady() ? "1" : "0") +
-                    " submitted=" + std::to_string(worker.submitted()) +
-                    " completed=" + std::to_string(worker.completed()) +
-                    " skipped=" + std::to_string(worker.skipped()) +
-                    " busy=" + (worker.busy() ? "1" : "0"));
+            logLine(std::string("fps ") + line1 + " | " + line2);
         }
     }
 
