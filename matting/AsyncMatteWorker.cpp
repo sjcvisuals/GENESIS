@@ -1,5 +1,6 @@
 #include "matting/AsyncMatteWorker.hpp"
 
+#include <chrono>
 #include <cstring>
 
 namespace genesis {
@@ -182,7 +183,11 @@ void AsyncMatteWorker::threadMain() {
 
         const std::size_t bytes = static_cast<std::size_t>(w) * h * 4u;
         work_out_.resize(bytes);
+        const auto t0 = std::chrono::steady_clock::now();
         const bool ok = remover_.process(work_in_.data(), work_out_.data(), w, h);
+        const auto t1 = std::chrono::steady_clock::now();
+        const double ms =
+            std::chrono::duration<double, std::milli>(t1 - t0).count();
 
         {
             std::lock_guard lock(mu_);
@@ -195,6 +200,7 @@ void AsyncMatteWorker::threadMain() {
                 rvm_ready_ = remover_.isRvmReady();
                 active_backend_ = remover_.activeBackend();
                 completed_.fetch_add(1, std::memory_order_relaxed);
+                last_infer_ms_.store(ms, std::memory_order_relaxed);
             }
             busy_.store(false, std::memory_order_release);
         }

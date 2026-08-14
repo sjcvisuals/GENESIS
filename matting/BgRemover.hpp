@@ -31,8 +31,9 @@ struct BgRemoverSettings {
     float key_softness = 0.12f;
     // Temporal blend on alpha [0=off, 1=sticky].
     float temporal_alpha = 0.35f;
-    // RVM downsample ratio hint (0.25 ≈ 1080p→~270).
-    float rvm_downsample = 0.25f;
+    // RVM downsample override. 0 = use Quality preset (Fast/Balanced/Quality).
+    // Explicit >0 forces that ratio (e.g. 0.25 ≈ 1080p→~270).
+    float rvm_downsample = 0.0f;
     std::filesystem::path model_path; // empty → assets/matting/rvm_mobilenetv3_fp16.onnx
 };
 

@@ -42,6 +42,8 @@ public:
     std::uint64_t submitted() const { return submitted_.load(std::memory_order_relaxed); }
     std::uint64_t completed() const { return completed_.load(std::memory_order_relaxed); }
     std::uint64_t skipped() const { return skipped_.load(std::memory_order_relaxed); }
+    // Last successful process() duration on the worker thread (milliseconds).
+    double lastInferMs() const { return last_infer_ms_.load(std::memory_order_relaxed); }
 
     // Mirror of worker-side status (best-effort; may lag one frame).
     std::string status() const;
@@ -64,6 +66,7 @@ private:
     std::atomic<std::uint64_t> submitted_{0};
     std::atomic<std::uint64_t> completed_{0};
     std::atomic<std::uint64_t> skipped_{0};
+    std::atomic<double> last_infer_ms_{0.0};
 
     BgRemoverSettings settings_{};
     BgRemover remover_;

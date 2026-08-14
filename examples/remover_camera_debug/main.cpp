@@ -3,6 +3,7 @@
 //
 // Left = camera (opaque). Right = cutout over checkerboard.
 // Keys: 1=Fast 2=Balanced 3=Quality  P=passthrough  Esc=quit
+// Overlay: cam FPS / matte FPS / display FPS / last infer ms
 // Log: remover-camera-debug.log next to the exe (and stdout).
 
 #include "matting/AsyncMatteWorker.hpp"
@@ -47,21 +48,70 @@ void fillOpaque(const std::uint8_t* in, std::uint8_t* out, std::size_t bytes) {
     }
 }
 
-void drawCheckerboard(SDL_Renderer* renderer, int x, int y, int w, int h, int cell) {
-    for (int cy = 0; cy < h; cy += cell) {
-        for (int cx = 0; cx < w; cx += cell) {
-            const bool light = (((cx / cell) + (cy / cell)) & 1) == 0;
-            if (light) {
-                SDL_SetRenderDrawColor(renderer, 55, 55, 60, 255);
-            } else {
-                SDL_SetRenderDrawColor(renderer, 35, 35, 40, 255);
-            }
-            const SDL_FRect r{static_cast<float>(x + cx), static_cast<float>(y + cy),
-                             static_cast<float>(std::min(cell, w - cx)),
-                             static_cast<float>(std::min(cell, h - cy))};
-            SDL_RenderFillRect(renderer, &r);
+// Premultiply current camera RGB with a previously computed alpha (smooth display
+// while RVM runs slower than the camera).
+void compositeWithAlpha(const std::uint8_t* in_rgba, const std::uint8_t* alpha8,
+                        std::uint8_t* out_rgba, std::size_t pixels) {
+    for (std::size_t i = 0; i < pixels; ++i) {
+        const std::uint8_t a = alpha8[i];
+        out_rgba[i * 4 + 0] = static_cast<std::uint8_t>((in_rgba[i * 4 + 0] * a) / 255u);
+        out_rgba[i * 4 + 1] = static_cast<std::uint8_t>((in_rgba[i * 4 + 1] * a) / 255u);
+        out_rgba[i * 4 + 2] = static_cast<std::uint8_t>((in_rgba[i * 4 + 2] * a) / 255u);
+        out_rgba[i * 4 + 3] = a;
+    }
+}
+
+void extractAlpha(const std::uint8_t* rgba, std::uint8_t* alpha8, std::size_t pixels) {
+    for (std::size_t i = 0; i < pixels; ++i) {
+        alpha8[i] = rgba[i * 4 + 3];
+    }
+}
+
+SDL_Texture* makeCheckerTexture(SDL_Renderer* renderer, int cell) {
+    const int size = cell * 2;
+    SDL_Texture* tex =
+        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, size, size);
+    if (!tex) {
+        return nullptr;
+    }
+    std::vector<std::uint8_t> px(static_cast<std::size_t>(size) * size * 4u);
+    for (int y = 0; y < size; ++y) {
+        for (int x = 0; x < size; ++x) {
+            const bool light = (((x / cell) + (y / cell)) & 1) == 0;
+            const std::size_t i = (static_cast<std::size_t>(y) * size + x) * 4u;
+            px[i + 0] = light ? 55 : 35;
+            px[i + 1] = light ? 55 : 35;
+            px[i + 2] = light ? 60 : 40;
+            px[i + 3] = 255;
         }
     }
+    SDL_UpdateTexture(tex, nullptr, px.data(), size * 4);
+    SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_NEAREST);
+    return tex;
+}
+
+void drawCheckerboard(SDL_Renderer* renderer, SDL_Texture* checker, int x, int y, int w, int h) {
+    if (!checker || w <= 0 || h <= 0) {
+        return;
+    }
+    const SDL_FRect dst{static_cast<float>(x), static_cast<float>(y), static_cast<float>(w),
+                        static_cast<float>(h)};
+    // Tile by repeating UV via multiple draws if needed; for simplicity stretch one tile
+    // pattern by filling with tiled quads of the 2-cell texture.
+    float float_w = 0.f;
+    float float_h = 0.f;
+    SDL_GetTextureSize(checker, &float_w, &float_h);
+    const int tw = std::max(1, static_cast<int>(float_w));
+    const int th = std::max(1, static_cast<int>(float_h));
+    for (int cy = 0; cy < h; cy += th) {
+        for (int cx = 0; cx < w; cx += tw) {
+            const SDL_FRect tile{static_cast<float>(x + cx), static_cast<float>(y + cy),
+                                 static_cast<float>(std::min(tw, w - cx)),
+                                 static_cast<float>(std::min(th, h - cy))};
+            SDL_RenderTexture(renderer, checker, nullptr, &tile);
+        }
+    }
+    (void)dst;
 }
 
 bool surfaceToRgba(SDL_Surface* src, std::vector<std::uint8_t>& out_rgba, std::uint32_t& w,
@@ -104,6 +154,24 @@ void printUsage() {
         "  --help         Show this help\n"
         "Keys while running: 1=Fast 2=Balanced 3=Quality  P=passthrough  Esc=quit\n");
 }
+
+struct FpsMeter {
+    using Clock = std::chrono::steady_clock;
+    Clock::time_point window_start = Clock::now();
+    std::uint64_t count = 0;
+    double fps = 0.0;
+
+    void tick() {
+        ++count;
+        const auto now = Clock::now();
+        const double sec = std::chrono::duration<double>(now - window_start).count();
+        if (sec >= 0.5) {
+            fps = static_cast<double>(count) / sec;
+            count = 0;
+            window_start = now;
+        }
+    }
+};
 
 } // namespace
 
@@ -172,7 +240,19 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    SDL_Camera* camera = SDL_OpenCamera(cameras[camera_index], nullptr);
+    // Prefer 720p@30 to keep RVM cost sane; SDL converts if needed.
+    SDL_CameraSpec prefer{};
+    prefer.format = SDL_PIXELFORMAT_UNKNOWN;
+    prefer.width = 1280;
+    prefer.height = 720;
+    prefer.framerate_numerator = 30;
+    prefer.framerate_denominator = 1;
+    SDL_Camera* camera = SDL_OpenCamera(cameras[camera_index], &prefer);
+    if (!camera) {
+        logLine(std::string("SDL_OpenCamera(720p) failed: ") + SDL_GetError() +
+                " - retrying default format");
+        camera = SDL_OpenCamera(cameras[camera_index], nullptr);
+    }
     SDL_free(cameras);
     if (!camera) {
         logLine(std::string("SDL_OpenCamera failed: ") + SDL_GetError());
@@ -183,8 +263,9 @@ int main(int argc, char** argv) {
 
     genesis::BgRemoverSettings settings{};
     settings.backend = genesis::BgRemoverBackend::Auto;
-    settings.quality = genesis::BgRemoverQuality::Balanced;
-    settings.temporal_alpha = 0.25f;
+    settings.quality = genesis::BgRemoverQuality::Fast; // default: prioritize FPS
+    settings.temporal_alpha = 0.20f;
+    settings.rvm_downsample = 0.0f; // honor quality presets
     try {
         settings.model_path =
             genesis::resolveAssetPath("assets/matting/rvm_mobilenetv3_fp16.onnx");
@@ -193,7 +274,6 @@ int main(int argc, char** argv) {
         logLine(std::string("RVM model resolve failed: ") + ex.what());
     }
 
-    // Probe sync init once so we know if ORT/RVM is available before the UI loop.
     {
         genesis::BgRemover probe;
         probe.setSettings(settings);
@@ -202,7 +282,7 @@ int main(int argc, char** argv) {
         logLine(std::string("probe backend=") + genesis::bgRemoverBackendLabel(probe.activeBackend()) +
                 " rvm=" + (probe.isRvmReady() ? "1" : "0") + " status=" + st);
         if (!probe.isRvmReady()) {
-            logLine("WARNING: RVM not ready — will fall back to chroma (green key). "
+            logLine("WARNING: RVM not ready - will fall back to chroma (green key). "
                     "Coffee-shop backgrounds will NOT cut out correctly until ORT+model work.");
         }
     }
@@ -210,11 +290,11 @@ int main(int argc, char** argv) {
     genesis::AsyncMatteWorker worker;
     worker.setSettings(settings);
     worker.start();
-    logLine("AsyncMatteWorker started");
+    logLine("AsyncMatteWorker started (default quality=Fast)");
 
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
-    if (!SDL_CreateWindowAndRenderer("GENESIS Remover Camera Debug — Left: camera | Right: cutout",
+    if (!SDL_CreateWindowAndRenderer("GENESIS Remover Camera Debug | Left: camera | Right: cutout",
                                      1280, 720, SDL_WINDOW_RESIZABLE, &window, &renderer)) {
         logLine(std::string("CreateWindowAndRenderer failed: ") + SDL_GetError());
         worker.stop();
@@ -225,18 +305,26 @@ int main(int argc, char** argv) {
 
     SDL_Texture* tex_cam = nullptr;
     SDL_Texture* tex_matte = nullptr;
+    SDL_Texture* tex_checker = makeCheckerTexture(renderer, 24);
     std::uint32_t tex_w = 0;
     std::uint32_t tex_h = 0;
     std::uint32_t frame_w = 0;
     std::uint32_t frame_h = 0;
     std::vector<std::uint8_t> rgba_in;
     std::vector<std::uint8_t> rgba_out;
+    std::vector<std::uint8_t> last_alpha;
+    bool has_alpha = false;
     bool passthrough_only = start_passthrough;
     std::uint64_t frames = 0;
     std::uint64_t last_status_frames = 0;
+    std::uint64_t last_completed_for_matte_fps = 0;
     bool running = true;
     bool saw_first_frame = false;
     const auto start_tp = std::chrono::steady_clock::now();
+    FpsMeter cam_fps;
+    FpsMeter display_fps;
+    double matte_fps = 0.0;
+    auto matte_fps_window_start = std::chrono::steady_clock::now();
 
     logLine(passthrough_only ? "UI ready (passthrough). Keys: 1/2/3 quality, P matte, Esc quit"
                              : "UI ready. Keys: 1/2/3 quality, P passthrough toggle, Esc quit");
@@ -251,14 +339,17 @@ int main(int argc, char** argv) {
                     running = false;
                 } else if (ev.key.key == SDLK_1) {
                     settings.quality = genesis::BgRemoverQuality::Fast;
+                    settings.rvm_downsample = 0.0f;
                     worker.setSettings(settings);
                     logLine("quality=Fast");
                 } else if (ev.key.key == SDLK_2) {
                     settings.quality = genesis::BgRemoverQuality::Balanced;
+                    settings.rvm_downsample = 0.0f;
                     worker.setSettings(settings);
                     logLine("quality=Balanced");
                 } else if (ev.key.key == SDLK_3) {
                     settings.quality = genesis::BgRemoverQuality::Quality;
+                    settings.rvm_downsample = 0.0f;
                     worker.setSettings(settings);
                     logLine("quality=Quality");
                 } else if (ev.key.key == SDLK_P) {
@@ -277,6 +368,7 @@ int main(int argc, char** argv) {
         SDL_Surface* frame = SDL_AcquireCameraFrame(camera, &ts);
         if (frame) {
             if (surfaceToRgba(frame, rgba_in, frame_w, frame_h)) {
+                cam_fps.tick();
                 if (!saw_first_frame) {
                     saw_first_frame = true;
                     logLine(std::string("first camera frame ok size=") + std::to_string(frame_w) +
@@ -305,6 +397,8 @@ int main(int argc, char** argv) {
                     }
                     tex_w = frame_w;
                     tex_h = frame_h;
+                    has_alpha = false;
+                    last_alpha.clear();
                     worker.reset(frame_w, frame_h);
                     logLine(std::string("camera frame size ") + std::to_string(frame_w) + "x" +
                             std::to_string(frame_h));
@@ -312,13 +406,25 @@ int main(int argc, char** argv) {
                                       static_cast<int>(frame_h));
                 }
 
-                const std::size_t bytes = static_cast<std::size_t>(frame_w) * frame_h * 4u;
+                const std::size_t pixels = static_cast<std::size_t>(frame_w) * frame_h;
+                const std::size_t bytes = pixels * 4u;
                 rgba_out.resize(bytes);
                 if (passthrough_only) {
                     fillOpaque(rgba_in.data(), rgba_out.data(), bytes);
                 } else {
                     worker.trySubmit(rgba_in.data(), frame_w, frame_h);
-                    if (!worker.copyLatest(rgba_out.data(), frame_w, frame_h)) {
+                    // Fresh matte from worker (may be older than this camera frame).
+                    if (worker.copyLatest(rgba_out.data(), frame_w, frame_h)) {
+                        last_alpha.resize(pixels);
+                        extractAlpha(rgba_out.data(), last_alpha.data(), pixels);
+                        has_alpha = true;
+                    }
+                    // Always re-composite current camera RGB with last alpha so the
+                    // right pane tracks camera FPS even when RVM is slower.
+                    if (has_alpha) {
+                        compositeWithAlpha(rgba_in.data(), last_alpha.data(), rgba_out.data(),
+                                           pixels);
+                    } else {
                         fillOpaque(rgba_in.data(), rgba_out.data(), bytes);
                     }
                 }
@@ -342,9 +448,21 @@ int main(int argc, char** argv) {
                 static bool warned = false;
                 if (!warned) {
                     warned = true;
-                    logLine("Still waiting for first camera frame after 8s — check OS camera "
+                    logLine("Still waiting for first camera frame after 8s - check OS camera "
                             "permission / that another app is not locking the camera.");
                 }
+            }
+        }
+
+        {
+            const std::uint64_t completed_now = worker.completed();
+            const auto now = std::chrono::steady_clock::now();
+            const double sec =
+                std::chrono::duration<double>(now - matte_fps_window_start).count();
+            if (sec >= 0.5) {
+                matte_fps = static_cast<double>(completed_now - last_completed_for_matte_fps) / sec;
+                last_completed_for_matte_fps = completed_now;
+                matte_fps_window_start = now;
             }
         }
 
@@ -360,23 +478,51 @@ int main(int argc, char** argv) {
             const SDL_FRect left{0.f, 0.f, static_cast<float>(half), static_cast<float>(win_h)};
             SDL_RenderTexture(renderer, tex_cam, nullptr, &left);
         }
-        drawCheckerboard(renderer, half, 0, win_w - half, win_h, 24);
+        drawCheckerboard(renderer, tex_checker, half, 0, win_w - half, win_h);
         if (tex_matte) {
             const SDL_FRect right{static_cast<float>(half), 0.f, static_cast<float>(win_w - half),
                                   static_cast<float>(win_h)};
             SDL_RenderTexture(renderer, tex_matte, nullptr, &right);
         }
+
+        display_fps.tick();
+
+        char overlay[256];
+        std::snprintf(
+            overlay, sizeof(overlay),
+            "cam %.1f fps | matte %.1f fps (infer %.0f ms) | display %.1f fps | %s | sub %llu done %llu skip %llu",
+            cam_fps.fps, matte_fps, worker.lastInferMs(), display_fps.fps,
+            genesis::bgRemoverQualityLabel(settings.quality),
+            static_cast<unsigned long long>(worker.submitted()),
+            static_cast<unsigned long long>(worker.completed()),
+            static_cast<unsigned long long>(worker.skipped()));
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 180);
+        const SDL_FRect bar{0.f, 0.f, static_cast<float>(win_w), 22.f};
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        SDL_RenderFillRect(renderer, &bar);
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+        SDL_SetRenderDrawColor(renderer, 240, 240, 245, 255);
+        SDL_RenderDebugText(renderer, 8.f, 6.f, overlay);
+
+        char help[128];
+        std::snprintf(help, sizeof(help), "1 Fast  2 Balanced  3 Quality  P passthrough  Esc quit");
+        SDL_RenderDebugText(renderer, 8.f, static_cast<float>(win_h) - 16.f, help);
+
         SDL_RenderPresent(renderer);
 
         if (frames - last_status_frames >= 60) {
             last_status_frames = frames;
-            logLine(std::string("status backend=") +
-                    genesis::bgRemoverBackendLabel(worker.activeBackend()) +
+            logLine(std::string("fps cam=") + std::to_string(cam_fps.fps) +
+                    " matte=" + std::to_string(matte_fps) +
+                    " display=" + std::to_string(display_fps.fps) +
+                    " infer_ms=" + std::to_string(worker.lastInferMs()) +
+                    " quality=" + genesis::bgRemoverQualityLabel(settings.quality) +
+                    " backend=" + genesis::bgRemoverBackendLabel(worker.activeBackend()) +
                     " rvm=" + (worker.isRvmReady() ? "1" : "0") +
                     " submitted=" + std::to_string(worker.submitted()) +
                     " completed=" + std::to_string(worker.completed()) +
                     " skipped=" + std::to_string(worker.skipped()) +
-                    " busy=" + (worker.busy() ? "1" : "0") + " msg=" + worker.status());
+                    " busy=" + (worker.busy() ? "1" : "0"));
         }
     }
 
@@ -386,6 +532,9 @@ int main(int argc, char** argv) {
     }
     if (tex_matte) {
         SDL_DestroyTexture(tex_matte);
+    }
+    if (tex_checker) {
+        SDL_DestroyTexture(tex_checker);
     }
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);

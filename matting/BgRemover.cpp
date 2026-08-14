@@ -23,14 +23,15 @@ float downsampleForQuality(BgRemoverQuality q, float override_ratio) {
     if (override_ratio > 0.0f) {
         return override_ratio;
     }
+    // Stronger downsample = faster CPU ORT. Quality keys must change these.
     switch (q) {
     case BgRemoverQuality::Fast:
-        return 0.2f;
+        return 0.12f;
     case BgRemoverQuality::Quality:
-        return 0.35f;
+        return 0.28f;
     case BgRemoverQuality::Balanced:
     default:
-        return 0.25f;
+        return 0.18f;
     }
 }
 

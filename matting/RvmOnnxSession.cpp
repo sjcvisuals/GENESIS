@@ -11,6 +11,7 @@
 #include <cstring>
 #include <memory>
 #include <stdexcept>
+#include <thread>
 
 namespace genesis {
 
@@ -124,7 +125,11 @@ bool RvmOnnxSession::load(const std::filesystem::path& model_path, std::string* 
 
     try {
         auto* state = new Impl();
-        state->options.SetIntraOpNumThreads(1);
+        // Single-thread ORT left a lot of CPU idle and capped matte FPS hard.
+        const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
+        const int threads = static_cast<int>(std::min(8u, std::max(2u, hw)));
+        state->options.SetIntraOpNumThreads(threads);
+        state->options.SetInterOpNumThreads(1);
         state->options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
         // CPU EP by default. CUDA/DirectML EPs can be added when the matching ORT
         // package is present (optional future GENESIS_ORT_CUDA).
@@ -158,6 +163,14 @@ bool RvmOnnxSession::inferAlpha(const std::uint8_t* in_rgba, std::uint32_t width
     const float ds = std::clamp(downsample_ratio, 0.05f, 1.0f);
     std::uint32_t iw = std::max(1u, static_cast<std::uint32_t>(std::lround(width * ds)));
     std::uint32_t ih = std::max(1u, static_cast<std::uint32_t>(std::lround(height * ds)));
+    // Hard cap infer side so 1080p/4K cams cannot explode CPU cost.
+    constexpr std::uint32_t kMaxInferSide = 384u;
+    if (iw > kMaxInferSide || ih > kMaxInferSide) {
+        const float scale = static_cast<float>(kMaxInferSide) /
+                            static_cast<float>(std::max(iw, ih));
+        iw = std::max(1u, static_cast<std::uint32_t>(std::lround(iw * scale)));
+        ih = std::max(1u, static_cast<std::uint32_t>(std::lround(ih * scale)));
+    }
     // Keep dims even-ish for the network.
     iw = std::max(16u, (iw + 1u) & ~1u);
     ih = std::max(16u, (ih + 1u) & ~1u);
