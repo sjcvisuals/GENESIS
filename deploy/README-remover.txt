@@ -59,7 +59,7 @@ If the resource imports but timeline drag fails
      powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-pixera-remover.ps1
 
 2. Confirm the install printed BUILD_STAMP with:
-     remover-timeline-v4-video-in-20260731
+     remover-timeline-v9-dml-20260814
 
 3. In PIXERA, re-browse to:
      <PIXERA>\data\rxExt\ExtGenesisRemover\ExtGenesisRemover.dll
@@ -76,14 +76,15 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v8c-link-alloc-20260803
+  remover-timeline-v9-dml-20260814
 
-Host-texture I/O. FrameCounter keeps update() running after Video In is linked
-(without it the clip stayed cyan forever). Video In allocates when format/dims
-change from baseline, or after a short same-res timeout. download_texture is
-cooldown-gated after allocate (immediate download crashed PIXERA).
-After install: quit PIXERA, re-import Remover, scrub to cyan, link webcam, wait
-~2s. Dump log: .\scripts\dump-remover-log.ps1
+Host-texture I/O + DirectML RVM (CPU fallback). FrameCounter keeps update()
+running after Video In is linked. Video In allocates on format/dim change or
+after a short same-res timeout; download is cooldown-gated after allocate.
+Output reuses the last alpha on new camera frames (smooth cutout).
+After install: quit PIXERA, re-import Remover, scrub until cyan, link webcam,
+wait ~1s. Log should show ep=DML and render path=matte.
+Dump log: .\scripts\dump-remover-log.ps1
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log

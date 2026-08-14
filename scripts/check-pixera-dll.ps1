@@ -40,6 +40,13 @@ foreach ($item in $required) {
     }
 }
 
+$dml = Join-Path $DllDir "DirectML.dll"
+if (Test-Path $dml) {
+    Write-Host "[OK]  DirectML.dll (GPU RVM path)" -ForegroundColor Green
+} else {
+    Write-Host "[WARN] DirectML.dll missing - RVM falls back to CPU" -ForegroundColor Yellow
+}
+
 # Zone.Identifier (Mark-of-the-Web) can make LoadLibrary fail inside some hosts.
 $zone = $DllPath + ":Zone.Identifier"
 if (Test-Path $zone) {
