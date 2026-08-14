@@ -240,18 +240,32 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Prefer 720p@30 to keep RVM cost sane; SDL converts if needed.
-    SDL_CameraSpec prefer{};
-    prefer.format = SDL_PIXELFORMAT_UNKNOWN;
-    prefer.width = 1280;
-    prefer.height = 720;
-    prefer.framerate_numerator = 30;
-    prefer.framerate_denominator = 1;
-    SDL_Camera* camera = SDL_OpenCamera(cameras[camera_index], &prefer);
+    // Prefer 50fps show-rate capture; fall back to 30/default.
+    SDL_Camera* camera = nullptr;
+    const SDL_CameraSpec prefers[] = {
+        {SDL_PIXELFORMAT_UNKNOWN, SDL_COLORSPACE_UNKNOWN, 960, 540, 50, 1},
+        {SDL_PIXELFORMAT_UNKNOWN, SDL_COLORSPACE_UNKNOWN, 640, 480, 50, 1},
+        {SDL_PIXELFORMAT_UNKNOWN, SDL_COLORSPACE_UNKNOWN, 1280, 720, 50, 1},
+        {SDL_PIXELFORMAT_UNKNOWN, SDL_COLORSPACE_UNKNOWN, 1280, 720, 30, 1},
+    };
+    for (const SDL_CameraSpec& prefer : prefers) {
+        camera = SDL_OpenCamera(cameras[camera_index], &prefer);
+        if (camera) {
+            logLine(std::string("Opened camera[") + std::to_string(camera_index) + "] prefer " +
+                    std::to_string(prefer.width) + "x" + std::to_string(prefer.height) + "@" +
+                    std::to_string(prefer.framerate_numerator));
+            break;
+        }
+        logLine(std::string("OpenCamera prefer ") + std::to_string(prefer.width) + "x" +
+                std::to_string(prefer.height) + "@" + std::to_string(prefer.framerate_numerator) +
+                " failed: " + SDL_GetError());
+    }
     if (!camera) {
-        logLine(std::string("SDL_OpenCamera(720p) failed: ") + SDL_GetError() +
-                " - retrying default format");
         camera = SDL_OpenCamera(cameras[camera_index], nullptr);
+        if (camera) {
+            logLine(std::string("Opened camera[") + std::to_string(camera_index) +
+                    "] default format");
+        }
     }
     SDL_free(cameras);
     if (!camera) {
@@ -259,12 +273,11 @@ int main(int argc, char** argv) {
         SDL_Quit();
         return 1;
     }
-    logLine(std::string("Opened camera[") + std::to_string(camera_index) + "]");
 
     genesis::BgRemoverSettings settings{};
     settings.backend = genesis::BgRemoverBackend::Auto;
     settings.quality = genesis::BgRemoverQuality::Fast; // default: prioritize FPS
-    settings.temporal_alpha = 0.20f;
+    settings.temporal_alpha = 0.12f;
     settings.rvm_downsample = 0.0f; // honor quality presets
     try {
         settings.model_path =
@@ -291,7 +304,7 @@ int main(int argc, char** argv) {
     worker.setSettings(settings);
     worker.start();
     logLine("AsyncMatteWorker started (default quality=Fast)");
-    logLine("HUD stamp=remover-camera-debug-fps-v3 (latest-wins pending + vsync)");
+    logLine("HUD stamp=remover-camera-debug-fps-v4 (fast192 + nearest upsample + 50fps cam try)");
 
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
@@ -498,8 +511,9 @@ int main(int argc, char** argv) {
         char line2[192];
         char title[256];
         std::snprintf(line1, sizeof(line1),
-                      "CAM %.1f fps   MATTE %.1f fps   INFER %.0f ms   DISPLAY %.1f fps",
-                      cam_fps.fps, matte_fps, worker.lastInferMs(), display_fps.fps);
+                      "CAM %.1f fps   MATTE %.1f fps   INFER %.0f ms (%ux%u)   DISPLAY %.1f fps",
+                      cam_fps.fps, matte_fps, worker.lastInferMs(), worker.lastInferWidth(),
+                      worker.lastInferHeight(), display_fps.fps);
         std::snprintf(line2, sizeof(line2),
                       "quality=%s  submitted=%llu  completed=%llu  skipped=%llu  busy=%d",
                       genesis::bgRemoverQualityLabel(settings.quality),
@@ -508,9 +522,9 @@ int main(int argc, char** argv) {
                       static_cast<unsigned long long>(worker.skipped()),
                       worker.busy() ? 1 : 0);
         std::snprintf(title, sizeof(title),
-                      "Remover Camera Debug  |  cam %.0f  matte %.0f  infer %.0fms  |  %s",
-                      cam_fps.fps, matte_fps, worker.lastInferMs(),
-                      genesis::bgRemoverQualityLabel(settings.quality));
+                      "Remover Camera Debug  |  cam %.0f  matte %.0f  infer %.0fms %ux%u  |  %s",
+                      cam_fps.fps, matte_fps, worker.lastInferMs(), worker.lastInferWidth(),
+                      worker.lastInferHeight(), genesis::bgRemoverQualityLabel(settings.quality));
         SDL_SetWindowTitle(window, title);
 
         // Tall opaque HUD - SDL_RenderDebugText is 8px; scale 2x so it is readable.

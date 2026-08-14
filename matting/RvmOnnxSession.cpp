@@ -25,18 +25,58 @@ float fromF16(Ort::Float16_t v) {
     return static_cast<float>(v);
 }
 
+const std::array<Ort::Float16_t, 256>& byteToF16Lut() {
+    static const std::array<Ort::Float16_t, 256> lut = [] {
+        std::array<Ort::Float16_t, 256> t{};
+        for (int i = 0; i < 256; ++i) {
+            t[static_cast<std::size_t>(i)] = toF16(static_cast<float>(i) / 255.0f);
+        }
+        return t;
+    }();
+    return lut;
+}
+
 void resizeRgbNearest(const std::uint8_t* src_rgba, std::uint32_t sw, std::uint32_t sh,
                       std::vector<Ort::Float16_t>& dst_nchw, std::uint32_t dw, std::uint32_t dh) {
     dst_nchw.resize(static_cast<std::size_t>(3) * dw * dh);
+    const auto& lut = byteToF16Lut();
+    std::vector<std::uint32_t> xs(dw);
+    for (std::uint32_t x = 0; x < dw; ++x) {
+        xs[x] = std::min(sw - 1, x * sw / dw);
+    }
+    Ort::Float16_t* plane0 = dst_nchw.data();
+    Ort::Float16_t* plane1 = plane0 + static_cast<std::size_t>(dw) * dh;
+    Ort::Float16_t* plane2 = plane1 + static_cast<std::size_t>(dw) * dh;
     for (std::uint32_t y = 0; y < dh; ++y) {
         const std::uint32_t sy = std::min(sh - 1, y * sh / dh);
+        const std::uint8_t* row = src_rgba + static_cast<std::size_t>(sy) * sw * 4u;
+        const std::size_t row_off = static_cast<std::size_t>(y) * dw;
         for (std::uint32_t x = 0; x < dw; ++x) {
-            const std::uint32_t sx = std::min(sw - 1, x * sw / dw);
-            const std::uint8_t* p = src_rgba + (static_cast<std::size_t>(sy) * sw + sx) * 4u;
-            const std::size_t pix = static_cast<std::size_t>(y) * dw + x;
-            dst_nchw[pix] = toF16(p[0] / 255.0f);
-            dst_nchw[dw * dh + pix] = toF16(p[1] / 255.0f);
-            dst_nchw[2 * dw * dh + pix] = toF16(p[2] / 255.0f);
+            const std::uint8_t* p = row + static_cast<std::size_t>(xs[x]) * 4u;
+            plane0[row_off + x] = lut[p[0]];
+            plane1[row_off + x] = lut[p[1]];
+            plane2[row_off + x] = lut[p[2]];
+        }
+    }
+}
+
+void upsampleAlphaNearest(const float* src, std::uint32_t sw, std::uint32_t sh, std::vector<float>& dst,
+                          std::uint32_t dw, std::uint32_t dh) {
+    dst.resize(static_cast<std::size_t>(dw) * dh);
+    if (sw == 0 || sh == 0) {
+        std::fill(dst.begin(), dst.end(), 0.0f);
+        return;
+    }
+    std::vector<std::uint32_t> xs(dw);
+    for (std::uint32_t x = 0; x < dw; ++x) {
+        xs[x] = std::min(sw - 1, x * sw / dw);
+    }
+    for (std::uint32_t y = 0; y < dh; ++y) {
+        const std::uint32_t sy = std::min(sh - 1, y * sh / dh);
+        const float* src_row = src + static_cast<std::size_t>(sy) * sw;
+        float* dst_row = dst.data() + static_cast<std::size_t>(y) * dw;
+        for (std::uint32_t x = 0; x < dw; ++x) {
+            dst_row[x] = src_row[xs[x]];
         }
     }
 }
@@ -49,12 +89,14 @@ void upsampleAlphaBilinear(const float* src, std::uint32_t sw, std::uint32_t sh,
         return;
     }
     for (std::uint32_t y = 0; y < dh; ++y) {
-        const float fy = (static_cast<float>(y) + 0.5f) * static_cast<float>(sh) / static_cast<float>(dh) - 0.5f;
+        const float fy =
+            (static_cast<float>(y) + 0.5f) * static_cast<float>(sh) / static_cast<float>(dh) - 0.5f;
         const int y0 = std::max(0, static_cast<int>(std::floor(fy)));
         const int y1 = std::min(static_cast<int>(sh) - 1, y0 + 1);
         const float ty = fy - static_cast<float>(y0);
         for (std::uint32_t x = 0; x < dw; ++x) {
-            const float fx = (static_cast<float>(x) + 0.5f) * static_cast<float>(sw) / static_cast<float>(dw) - 0.5f;
+            const float fx =
+                (static_cast<float>(x) + 0.5f) * static_cast<float>(sw) / static_cast<float>(dw) - 0.5f;
             const int x0 = std::max(0, static_cast<int>(std::floor(fx)));
             const int x1 = std::min(static_cast<int>(sw) - 1, x0 + 1);
             const float tx = fx - static_cast<float>(x0);
@@ -77,7 +119,6 @@ struct RvmOnnxSession::Impl {
     std::unique_ptr<Ort::Session> session;
     Ort::AllocatorWithDefaultOptions allocator;
 
-    // Recurrent FP16 state (NCHW). Start as 1x1x1x1 zeros; grow after first frame.
     std::vector<Ort::Float16_t> r1{toF16(0.0f)};
     std::vector<Ort::Float16_t> r2{toF16(0.0f)};
     std::vector<Ort::Float16_t> r3{toF16(0.0f)};
@@ -109,6 +150,8 @@ void RvmOnnxSession::reset() {
     impl_->r2_shape = {1, 1, 1, 1};
     impl_->r3_shape = {1, 1, 1, 1};
     impl_->r4_shape = {1, 1, 1, 1};
+    last_infer_w_ = 0;
+    last_infer_h_ = 0;
 }
 
 bool RvmOnnxSession::load(const std::filesystem::path& model_path, std::string* out_error) {
@@ -125,14 +168,11 @@ bool RvmOnnxSession::load(const std::filesystem::path& model_path, std::string* 
 
     try {
         auto* state = new Impl();
-        // Single-thread ORT left a lot of CPU idle and capped matte FPS hard.
         const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
         const int threads = static_cast<int>(std::min(8u, std::max(2u, hw)));
         state->options.SetIntraOpNumThreads(threads);
         state->options.SetInterOpNumThreads(1);
         state->options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-        // CPU EP by default. CUDA/DirectML EPs can be added when the matching ORT
-        // package is present (optional future GENESIS_ORT_CUDA).
 
 #if defined(_WIN32)
         const std::wstring wpath = model_path.wstring();
@@ -153,27 +193,27 @@ bool RvmOnnxSession::load(const std::filesystem::path& model_path, std::string* 
 }
 
 bool RvmOnnxSession::inferAlpha(const std::uint8_t* in_rgba, std::uint32_t width, std::uint32_t height,
-                                float downsample_ratio, std::vector<float>& out_alpha,
+                                const RvmInferParams& params, std::vector<float>& out_alpha,
                                 std::string* out_error) {
     if (!ready_ || !impl_ || !in_rgba || width == 0 || height == 0) {
         if (out_error) *out_error = "RVM session not ready";
         return false;
     }
 
-    const float ds = std::clamp(downsample_ratio, 0.05f, 1.0f);
+    const float ds = std::clamp(params.downsample_ratio, 0.05f, 1.0f);
     std::uint32_t iw = std::max(1u, static_cast<std::uint32_t>(std::lround(width * ds)));
     std::uint32_t ih = std::max(1u, static_cast<std::uint32_t>(std::lround(height * ds)));
-    // Hard cap infer side so 1080p/4K cams cannot explode CPU cost.
-    constexpr std::uint32_t kMaxInferSide = 384u;
-    if (iw > kMaxInferSide || ih > kMaxInferSide) {
-        const float scale = static_cast<float>(kMaxInferSide) /
-                            static_cast<float>(std::max(iw, ih));
+    const std::uint32_t max_side = std::max<std::uint32_t>(64u, params.max_infer_side);
+    if (iw > max_side || ih > max_side) {
+        const float scale =
+            static_cast<float>(max_side) / static_cast<float>(std::max(iw, ih));
         iw = std::max(1u, static_cast<std::uint32_t>(std::lround(iw * scale)));
         ih = std::max(1u, static_cast<std::uint32_t>(std::lround(ih * scale)));
     }
-    // Keep dims even-ish for the network.
     iw = std::max(16u, (iw + 1u) & ~1u);
     ih = std::max(16u, (ih + 1u) & ~1u);
+    last_infer_w_ = iw;
+    last_infer_h_ = ih;
 
     try {
         resizeRgbNearest(in_rgba, width, height, impl_->src_nchw, iw, ih);
@@ -181,22 +221,27 @@ bool RvmOnnxSession::inferAlpha(const std::uint8_t* in_rgba, std::uint32_t width
         auto memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
         std::array<int64_t, 4> src_shape{1, 3, static_cast<int64_t>(ih), static_cast<int64_t>(iw)};
         Ort::Value src = Ort::Value::CreateTensor<Ort::Float16_t>(
-            memory_info, impl_->src_nchw.data(), impl_->src_nchw.size(), src_shape.data(), src_shape.size());
+            memory_info, impl_->src_nchw.data(), impl_->src_nchw.size(), src_shape.data(),
+            src_shape.size());
 
         Ort::Value r1 = Ort::Value::CreateTensor<Ort::Float16_t>(
-            memory_info, impl_->r1.data(), impl_->r1.size(), impl_->r1_shape.data(), impl_->r1_shape.size());
+            memory_info, impl_->r1.data(), impl_->r1.size(), impl_->r1_shape.data(),
+            impl_->r1_shape.size());
         Ort::Value r2 = Ort::Value::CreateTensor<Ort::Float16_t>(
-            memory_info, impl_->r2.data(), impl_->r2.size(), impl_->r2_shape.data(), impl_->r2_shape.size());
+            memory_info, impl_->r2.data(), impl_->r2.size(), impl_->r2_shape.data(),
+            impl_->r2_shape.size());
         Ort::Value r3 = Ort::Value::CreateTensor<Ort::Float16_t>(
-            memory_info, impl_->r3.data(), impl_->r3.size(), impl_->r3_shape.data(), impl_->r3_shape.size());
+            memory_info, impl_->r3.data(), impl_->r3.size(), impl_->r3_shape.data(),
+            impl_->r3_shape.size());
         Ort::Value r4 = Ort::Value::CreateTensor<Ort::Float16_t>(
-            memory_info, impl_->r4.data(), impl_->r4.size(), impl_->r4_shape.data(), impl_->r4_shape.size());
+            memory_info, impl_->r4.data(), impl_->r4.size(), impl_->r4_shape.data(),
+            impl_->r4_shape.size());
 
-        // Official RVM ONNX expects downsample_ratio as an input; we already resized, so pass 1.
         float ratio = 1.0f;
         std::array<int64_t, 1> ratio_shape{1};
         Ort::Value ds_tensor =
-            Ort::Value::CreateTensor<float>(memory_info, &ratio, 1, ratio_shape.data(), ratio_shape.size());
+            Ort::Value::CreateTensor<float>(memory_info, &ratio, 1, ratio_shape.data(),
+                                            ratio_shape.size());
 
         const char* input_names[] = {"src", "r1i", "r2i", "r3i", "r4i", "downsample_ratio"};
         const char* output_names[] = {"fgr", "pha", "r1o", "r2o", "r3o", "r4o"};
@@ -207,7 +252,6 @@ bool RvmOnnxSession::inferAlpha(const std::uint8_t* in_rgba, std::uint32_t width
         auto outputs = impl_->session->Run(Ort::RunOptions{nullptr}, input_names, inputs.data(),
                                            inputs.size(), output_names, 6);
 
-        // pha: [1,1,H,W] float16
         auto& pha = outputs[1];
         const auto pha_info = pha.GetTensorTypeAndShapeInfo();
         const auto pha_shape = pha_info.GetShape();
@@ -222,7 +266,11 @@ bool RvmOnnxSession::inferAlpha(const std::uint8_t* in_rgba, std::uint32_t width
         for (std::size_t i = 0; i < impl_->pha_f32.size(); ++i) {
             impl_->pha_f32[i] = fromF16(pha_data[i]);
         }
-        upsampleAlphaBilinear(impl_->pha_f32.data(), pw, ph, out_alpha, width, height);
+        if (params.bilinear_upsample) {
+            upsampleAlphaBilinear(impl_->pha_f32.data(), pw, ph, out_alpha, width, height);
+        } else {
+            upsampleAlphaNearest(impl_->pha_f32.data(), pw, ph, out_alpha, width, height);
+        }
 
         auto captureRec = [](Ort::Value& value, std::vector<Ort::Float16_t>& storage,
                              std::vector<int64_t>& shape) {
@@ -262,7 +310,7 @@ bool RvmOnnxSession::load(const std::filesystem::path&, std::string* out_error) 
 
 void RvmOnnxSession::reset() {}
 
-bool RvmOnnxSession::inferAlpha(const std::uint8_t*, std::uint32_t, std::uint32_t, float,
+bool RvmOnnxSession::inferAlpha(const std::uint8_t*, std::uint32_t, std::uint32_t, const RvmInferParams&,
                                 std::vector<float>&, std::string* out_error) {
     if (out_error) *out_error = "ONNX Runtime not enabled";
     return false;

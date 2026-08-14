@@ -56,6 +56,8 @@ public:
     bool isRvmReady() const { return rvm_ready_; }
     BgRemoverBackend activeBackend() const { return active_backend_; }
     const std::string& status() const { return status_; }
+    std::uint32_t lastInferWidth() const;
+    std::uint32_t lastInferHeight() const;
 
     // in_rgba / out_rgba are tightly packed RGBA8, size width*height*4.
     // out may alias in. Returns false on size mismatch.

@@ -198,6 +198,8 @@ void AsyncMatteWorker::threadMain() {
                 active_backend_ = remover_.activeBackend();
                 completed_.fetch_add(1, std::memory_order_relaxed);
                 last_infer_ms_.store(ms, std::memory_order_relaxed);
+                last_infer_w_.store(remover_.lastInferWidth(), std::memory_order_relaxed);
+                last_infer_h_.store(remover_.lastInferHeight(), std::memory_order_relaxed);
             }
             busy_.store(false, std::memory_order_release);
         }

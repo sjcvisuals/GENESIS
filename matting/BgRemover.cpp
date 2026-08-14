@@ -23,16 +23,33 @@ float downsampleForQuality(BgRemoverQuality q, float override_ratio) {
     if (override_ratio > 0.0f) {
         return override_ratio;
     }
-    // Stronger downsample = faster CPU ORT. Quality keys must change these.
+    // Tuned for ~25-50fps CPU targets on laptop webcams.
     switch (q) {
     case BgRemoverQuality::Fast:
-        return 0.12f;
+        return 0.08f;
     case BgRemoverQuality::Quality:
-        return 0.28f;
+        return 0.22f;
     case BgRemoverQuality::Balanced:
     default:
-        return 0.18f;
+        return 0.12f;
     }
+}
+
+std::uint32_t maxInferSideForQuality(BgRemoverQuality q) {
+    switch (q) {
+    case BgRemoverQuality::Fast:
+        return 192u;
+    case BgRemoverQuality::Quality:
+        return 352u;
+    case BgRemoverQuality::Balanced:
+    default:
+        return 256u;
+    }
+}
+
+bool bilinearUpsampleForQuality(BgRemoverQuality q) {
+    // Nearest is much cheaper; bilinear only for Quality.
+    return q == BgRemoverQuality::Quality;
 }
 
 } // namespace
@@ -88,6 +105,14 @@ void BgRemover::resetTemporalState() {
     if (rvm_) {
         rvm_->session.reset();
     }
+}
+
+std::uint32_t BgRemover::lastInferWidth() const {
+    return rvm_ ? rvm_->session.lastInferWidth() : 0u;
+}
+
+std::uint32_t BgRemover::lastInferHeight() const {
+    return rvm_ ? rvm_->session.lastInferHeight() : 0u;
 }
 
 bool BgRemover::tryInitRvm(std::string* out_status) {
@@ -205,9 +230,13 @@ bool BgRemover::processRvm(const std::uint8_t* in_rgba, std::uint8_t* out_rgba, 
     if (!rvm_ || !rvm_->session.ready()) {
         return false;
     }
-    const float ds = downsampleForQuality(settings_.quality, settings_.rvm_downsample);
+    RvmInferParams params{};
+    params.downsample_ratio = downsampleForQuality(settings_.quality, settings_.rvm_downsample);
+    params.max_infer_side = maxInferSideForQuality(settings_.quality);
+    params.bilinear_upsample = bilinearUpsampleForQuality(settings_.quality);
+
     std::string error;
-    if (!rvm_->session.inferAlpha(in_rgba, width, height, ds, rvm_->alpha, &error)) {
+    if (!rvm_->session.inferAlpha(in_rgba, width, height, params, rvm_->alpha, &error)) {
         status_ = error;
         return false;
     }
@@ -216,23 +245,31 @@ bool BgRemover::processRvm(const std::uint8_t* in_rgba, std::uint8_t* out_rgba, 
     if (rvm_->alpha.size() != pixels) {
         return false;
     }
-    if (prev_alpha_.size() != pixels) {
+
+    const float temporal = clampf(settings_.temporal_alpha, 0.0f, 0.95f);
+    const bool use_temporal = temporal > 0.001f;
+    if (use_temporal && prev_alpha_.size() != pixels) {
         prev_alpha_.assign(pixels, 1.0f);
     }
-    const float temporal = clampf(settings_.temporal_alpha, 0.0f, 0.95f);
 
+    // Integer premultiply (avoids per-pixel float RGB conversions).
     for (std::size_t i = 0; i < pixels; ++i) {
-        float alpha = clampf(rvm_->alpha[i], 0.0f, 1.0f);
-        alpha = alpha * (1.0f - temporal) + prev_alpha_[i] * temporal;
-        prev_alpha_[i] = alpha;
-        const float r = in_rgba[i * 4 + 0] / 255.0f;
-        const float g = in_rgba[i * 4 + 1] / 255.0f;
-        const float b = in_rgba[i * 4 + 2] / 255.0f;
-        out_rgba[i * 4 + 0] = static_cast<std::uint8_t>(std::lround(r * alpha * 255.0f));
-        out_rgba[i * 4 + 1] = static_cast<std::uint8_t>(std::lround(g * alpha * 255.0f));
-        out_rgba[i * 4 + 2] = static_cast<std::uint8_t>(std::lround(b * alpha * 255.0f));
-        out_rgba[i * 4 + 3] = static_cast<std::uint8_t>(std::lround(alpha * 255.0f));
+        float a = clampf(rvm_->alpha[i], 0.0f, 1.0f);
+        if (use_temporal) {
+            a = a * (1.0f - temporal) + prev_alpha_[i] * temporal;
+            prev_alpha_[i] = a;
+        }
+        const unsigned au = static_cast<unsigned>(std::lround(a * 255.0f));
+        const std::uint8_t* pin = in_rgba + i * 4u;
+        std::uint8_t* pout = out_rgba + i * 4u;
+        pout[0] = static_cast<std::uint8_t>((static_cast<unsigned>(pin[0]) * au) / 255u);
+        pout[1] = static_cast<std::uint8_t>((static_cast<unsigned>(pin[1]) * au) / 255u);
+        pout[2] = static_cast<std::uint8_t>((static_cast<unsigned>(pin[2]) * au) / 255u);
+        pout[3] = static_cast<std::uint8_t>(au);
     }
+
+    status_ = "rvm " + std::to_string(rvm_->session.lastInferWidth()) + "x" +
+              std::to_string(rvm_->session.lastInferHeight());
     return true;
 }
 
