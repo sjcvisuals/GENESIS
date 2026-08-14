@@ -79,6 +79,12 @@ Log file: `out\RemoverCameraDebug\remover-camera-debug.log`
 
 Keys: `1`/`2`/`3` quality, `P` opaque passthrough, `Esc` quit.
 
+On-screen overlay reports **cam FPS**, **matte FPS** (RVM completes/sec), **infer ms**,
+and **display FPS**. Right pane reuses the last alpha on every camera frame so motion
+stays smooth even when RVM is slower than the camera.
+
+Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
+
 ### PIXERA log after camera debug proves matte
 
 ```powershell
