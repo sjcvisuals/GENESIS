@@ -23,33 +23,34 @@ float downsampleForQuality(BgRemoverQuality q, float override_ratio) {
     if (override_ratio > 0.0f) {
         return override_ratio;
     }
-    // Tuned for ~25-50fps CPU targets on laptop webcams.
+    // Restored sharper presets (DirectML makes these affordable again).
     switch (q) {
     case BgRemoverQuality::Fast:
-        return 0.08f;
+        return 0.20f;
     case BgRemoverQuality::Quality:
-        return 0.22f;
+        return 0.35f;
     case BgRemoverQuality::Balanced:
     default:
-        return 0.12f;
+        return 0.25f;
     }
 }
 
 std::uint32_t maxInferSideForQuality(BgRemoverQuality q) {
     switch (q) {
     case BgRemoverQuality::Fast:
-        return 192u;
+        return 384u;
     case BgRemoverQuality::Quality:
-        return 352u;
+        return 640u;
     case BgRemoverQuality::Balanced:
     default:
-        return 256u;
+        return 512u;
     }
 }
 
 bool bilinearUpsampleForQuality(BgRemoverQuality q) {
-    // Nearest is much cheaper; bilinear only for Quality.
-    return q == BgRemoverQuality::Quality;
+    (void)q;
+    // Always bilinear - nearest looked too blocky on Fast/Balanced.
+    return true;
 }
 
 } // namespace
@@ -115,6 +116,10 @@ std::uint32_t BgRemover::lastInferHeight() const {
     return rvm_ ? rvm_->session.lastInferHeight() : 0u;
 }
 
+std::string BgRemover::executionProvider() const {
+    return rvm_ ? rvm_->session.executionProvider() : std::string{};
+}
+
 bool BgRemover::tryInitRvm(std::string* out_status) {
     if (!rvm_) {
         rvm_ = new RvmState();
@@ -127,7 +132,10 @@ bool BgRemover::tryInitRvm(std::string* out_status) {
         return false;
     }
     if (out_status) {
-        *out_status = "rvm-onnx loaded: " + settings_.model_path.string();
+        *out_status = error.empty()
+                          ? ("rvm-onnx " + rvm_->session.executionProvider() +
+                             " loaded: " + settings_.model_path.string())
+                          : error;
     }
     return true;
 }

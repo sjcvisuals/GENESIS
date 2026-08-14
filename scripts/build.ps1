@@ -96,6 +96,7 @@ function Resolve-BuiltDll([string]$Name, [string]$Config) {
 
 function Find-OnnxRuntimeDll {
     $preferred = @(
+        (Join-Path $RepoRoot "third_party\onnxruntime-win-x64-directml-1.20.1\lib\onnxruntime.dll"),
         (Join-Path $RepoRoot "third_party\onnxruntime-win-x64-1.20.1\lib\onnxruntime.dll"),
         (Join-Path $RepoRoot "third_party\onnxruntime-win-x64-1.19.2\lib\onnxruntime.dll")
     )
@@ -109,6 +110,22 @@ function Find-OnnxRuntimeDll {
             Select-Object -First 1
         if ($hit) { return $hit.FullName }
         $hit = Get-ChildItem -Path $root -Recurse -Filter "onnxruntime.dll" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($hit) { return $hit.FullName }
+    }
+    return $null
+}
+
+function Find-DirectMLDll {
+    $preferred = @(
+        (Join-Path $RepoRoot "third_party\onnxruntime-win-x64-directml-1.20.1\lib\DirectML.dll")
+    )
+    foreach ($c in $preferred) {
+        if (Test-Path $c) { return (Resolve-Path $c).Path }
+    }
+    $root = Join-Path $RepoRoot "third_party"
+    if (Test-Path $root) {
+        $hit = Get-ChildItem -Path $root -Recurse -Filter "DirectML.dll" -ErrorAction SilentlyContinue |
             Select-Object -First 1
         if ($hit) { return $hit.FullName }
     }
@@ -140,11 +157,17 @@ function Sync-OutFolder {
     $assetsSrc = Join-Path $RepoRoot "assets"
     $shaderSrc = Join-Path $BuildDir "shaders\spv"
     $onnx = Find-OnnxRuntimeDll
+    $directml = Find-DirectMLDll
     if (-not $onnx) {
         Write-Host "WARNING: onnxruntime.dll not found under third_party\. Pixera Remover will fail to load." -ForegroundColor Yellow
         Write-Host "Re-run cmake configure so ONNX Runtime is fetched, then rebuild."
     } else {
         Write-Host "ONNX Runtime: $onnx"
+    }
+    if ($directml) {
+        Write-Host "DirectML: $directml"
+    } else {
+        Write-Host "WARNING: DirectML.dll not found - RVM will fall back to CPU if DML EP is unavailable." -ForegroundColor Yellow
     }
 
     # --- Editor (Debug) ---
@@ -181,6 +204,9 @@ function Sync-OutFolder {
         if ($onnx) {
             Copy-Item -Path $onnx -Destination (Join-Path $extOut "onnxruntime.dll") -Force
         }
+        if ($directml) {
+            Copy-Item -Path $directml -Destination (Join-Path $extOut "DirectML.dll") -Force
+        }
     }
 
     # --- Pixera matte-only DLL (Release) ---
@@ -196,6 +222,9 @@ function Sync-OutFolder {
             -Destination (Join-Path $remOut "README.txt") -Force
         if ($onnx) {
             Copy-Item -Path $onnx -Destination (Join-Path $remOut "onnxruntime.dll") -Force
+        }
+        if ($directml) {
+            Copy-Item -Path $directml -Destination (Join-Path $remOut "DirectML.dll") -Force
         }
 
         Assert-File (Join-Path $remOut "ExtGenesisRemover.dll") "Remover DLL"
@@ -232,6 +261,9 @@ log=%TEMP%\ExtGenesisRemover.log
         Sync-Directory (Join-Path $assetsSrc "matting") (Join-Path $camOut "assets\matting")
         if ($onnx) {
             Copy-Item -Path $onnx -Destination (Join-Path $camOut "onnxruntime.dll") -Force
+        }
+        if ($directml) {
+            Copy-Item -Path $directml -Destination (Join-Path $camOut "DirectML.dll") -Force
         }
         Assert-File (Join-Path $camOut "genesis_remover_camera_debug.exe") "camera debug exe"
         Assert-File (Join-Path $camOut "assets\matting\rvm_mobilenetv3_fp16.onnx") "RVM model (camera debug)"

@@ -40,6 +40,7 @@ Required files
   GenesisRemover.manifest.json
   assets/matting/rvm_mobilenetv3_fp16.onnx
   onnxruntime.dll
+  DirectML.dll          (Windows GPU path; CPU still works if missing)
 
 Usage in PIXERA
 ---------------

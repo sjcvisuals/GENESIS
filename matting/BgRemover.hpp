@@ -58,6 +58,8 @@ public:
     const std::string& status() const { return status_; }
     std::uint32_t lastInferWidth() const;
     std::uint32_t lastInferHeight() const;
+    // "DML", "CPU", or empty.
+    std::string executionProvider() const;
 
     // in_rgba / out_rgba are tightly packed RGBA8, size width*height*4.
     // out may alias in. Returns false on size mismatch.

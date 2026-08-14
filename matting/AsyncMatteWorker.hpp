@@ -48,6 +48,7 @@ public:
     double lastInferMs() const { return last_infer_ms_.load(std::memory_order_relaxed); }
     std::uint32_t lastInferWidth() const { return last_infer_w_.load(std::memory_order_relaxed); }
     std::uint32_t lastInferHeight() const { return last_infer_h_.load(std::memory_order_relaxed); }
+    std::string executionProvider() const;
 
     // Mirror of worker-side status (best-effort; may lag one frame).
     std::string status() const;

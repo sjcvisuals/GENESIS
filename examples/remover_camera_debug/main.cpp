@@ -276,8 +276,8 @@ int main(int argc, char** argv) {
 
     genesis::BgRemoverSettings settings{};
     settings.backend = genesis::BgRemoverBackend::Auto;
-    settings.quality = genesis::BgRemoverQuality::Fast; // default: prioritize FPS
-    settings.temporal_alpha = 0.12f;
+    settings.quality = genesis::BgRemoverQuality::Balanced; // sharper default; DML should keep it realtime
+    settings.temporal_alpha = 0.20f;
     settings.rvm_downsample = 0.0f; // honor quality presets
     try {
         settings.model_path =
@@ -303,8 +303,8 @@ int main(int argc, char** argv) {
     genesis::AsyncMatteWorker worker;
     worker.setSettings(settings);
     worker.start();
-    logLine("AsyncMatteWorker started (default quality=Fast)");
-    logLine("HUD stamp=remover-camera-debug-fps-v4 (fast192 + nearest upsample + 50fps cam try)");
+    logLine("AsyncMatteWorker started (default quality=Balanced, DirectML preferred on Windows)");
+    logLine("HUD stamp=remover-camera-debug-fps-v5-dml (restored quality + DirectML EP)");
 
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
@@ -515,7 +515,8 @@ int main(int argc, char** argv) {
                       cam_fps.fps, matte_fps, worker.lastInferMs(), worker.lastInferWidth(),
                       worker.lastInferHeight(), display_fps.fps);
         std::snprintf(line2, sizeof(line2),
-                      "quality=%s  submitted=%llu  completed=%llu  skipped=%llu  busy=%d",
+                      "ep=%s  quality=%s  submitted=%llu  completed=%llu  skipped=%llu  busy=%d",
+                      worker.executionProvider().c_str(),
                       genesis::bgRemoverQualityLabel(settings.quality),
                       static_cast<unsigned long long>(worker.submitted()),
                       static_cast<unsigned long long>(worker.completed()),

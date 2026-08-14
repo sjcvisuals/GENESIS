@@ -140,6 +140,11 @@ BgRemoverBackend AsyncMatteWorker::activeBackend() const {
     return active_backend_;
 }
 
+std::string AsyncMatteWorker::executionProvider() const {
+    std::lock_guard lock(mu_);
+    return remover_.executionProvider();
+}
+
 void AsyncMatteWorker::applySettingsLocked() {
     remover_.setSettings(settings_);
     std::string st;

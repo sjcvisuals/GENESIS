@@ -31,9 +31,9 @@
 
 ## Efficiency
 
-- **RVM MobileNetV3 FP16** via ONNX Runtime (CPU today; CUDA/DirectML EP later)
-- Infer at reduced res (`Fast`/`Balanced`/`Quality` → downsample ~0.2–0.35)
-- **Async by default**: Pixera `render()` never waits on `Ort::Run`. Frames submitted while the worker is busy are skipped; the last completed matte is uploaded (1+ frame latency tradeoff).
+- **RVM MobileNetV3 FP16** via ONNX Runtime (**DirectML/GPU on Windows**, CPU fallback; CUDA EP later)
+- Infer at reduced res (`Fast`/`Balanced`/`Quality` → downsample ~0.20–0.35, bilinear upsample)
+- **Async by default**: Pixera `render()` never waits on `Ort::Run`. Frames submitted while the worker is busy replace a latest-wins pending slot; the last completed matte is reused for display.
 - Chroma key remains the zero-dep fallback for keyed stages
 - No NVIDIA Broadcast SDK install
 

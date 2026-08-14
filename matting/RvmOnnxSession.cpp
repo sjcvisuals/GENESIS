@@ -11,7 +11,9 @@
 #include <cstring>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <thread>
+#include <unordered_map>
 
 namespace genesis {
 
@@ -158,6 +160,7 @@ bool RvmOnnxSession::load(const std::filesystem::path& model_path, std::string* 
     delete impl_;
     impl_ = nullptr;
     ready_ = false;
+    ep_name_.clear();
 
     if (model_path.empty() || !std::filesystem::exists(model_path)) {
         if (out_error) {
@@ -166,25 +169,77 @@ bool RvmOnnxSession::load(const std::filesystem::path& model_path, std::string* 
         return false;
     }
 
+    auto try_create = [&](Ort::SessionOptions& opts, const char* ep_label) -> bool {
+        try {
+#if defined(_WIN32)
+            const std::wstring wpath = model_path.wstring();
+            impl_->session = std::make_unique<Ort::Session>(impl_->env, wpath.c_str(), opts);
+#else
+            impl_->session =
+                std::make_unique<Ort::Session>(impl_->env, model_path.string().c_str(), opts);
+#endif
+            ep_name_ = ep_label;
+            return true;
+        } catch (const std::exception&) {
+            impl_->session.reset();
+            return false;
+        }
+    };
+
     try {
-        auto* state = new Impl();
+        impl_ = new Impl();
+        std::string dml_err;
+
+#if defined(_WIN32) && defined(GENESIS_HAS_ORT_DIRECTML)
+        {
+            Ort::SessionOptions dml_opts;
+            dml_opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+            dml_opts.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
+            dml_opts.DisableMemPattern();
+            dml_opts.SetIntraOpNumThreads(1);
+            dml_opts.SetInterOpNumThreads(1);
+            try {
+                std::unordered_map<std::string, std::string> provider_options{{"device_id", "0"}};
+                dml_opts.AppendExecutionProvider("DML", provider_options);
+                if (try_create(dml_opts, "DML")) {
+                    ready_ = true;
+                    if (out_error) {
+                        *out_error = "rvm-onnx DML loaded: " + model_path.string();
+                    }
+                    return true;
+                }
+            } catch (const std::exception& ex) {
+                dml_err = ex.what();
+            }
+        }
+#endif
+
         const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
         const int threads = static_cast<int>(std::min(8u, std::max(2u, hw)));
-        state->options.SetIntraOpNumThreads(threads);
-        state->options.SetInterOpNumThreads(1);
-        state->options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-
-#if defined(_WIN32)
-        const std::wstring wpath = model_path.wstring();
-        state->session = std::make_unique<Ort::Session>(state->env, wpath.c_str(), state->options);
-#else
-        state->session =
-            std::make_unique<Ort::Session>(state->env, model_path.string().c_str(), state->options);
-#endif
-        impl_ = state;
+        Ort::SessionOptions cpu_opts;
+        cpu_opts.SetIntraOpNumThreads(threads);
+        cpu_opts.SetInterOpNumThreads(1);
+        cpu_opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+        if (!try_create(cpu_opts, "CPU")) {
+            delete impl_;
+            impl_ = nullptr;
+            if (out_error) {
+                *out_error = "ORT load failed (CPU and DML)";
+            }
+            return false;
+        }
         ready_ = true;
+        if (out_error) {
+            if (!dml_err.empty()) {
+                *out_error = "rvm-onnx CPU loaded (DML failed: " + dml_err + "): " + model_path.string();
+            } else {
+                *out_error = "rvm-onnx CPU loaded: " + model_path.string();
+            }
+        }
         return true;
     } catch (const std::exception& ex) {
+        delete impl_;
+        impl_ = nullptr;
         if (out_error) {
             *out_error = std::string("ORT load failed: ") + ex.what();
         }

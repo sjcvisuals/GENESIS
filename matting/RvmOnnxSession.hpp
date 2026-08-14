@@ -27,6 +27,8 @@ public:
     bool load(const std::filesystem::path& model_path, std::string* out_error = nullptr);
     bool ready() const { return ready_; }
     void reset();
+    // "DML" / "CPU" / empty before load.
+    const std::string& executionProvider() const { return ep_name_; }
 
     // in_rgba: full-res RGBA8. Writes soft alpha [0,1] into out_alpha (width*height).
     bool inferAlpha(const std::uint8_t* in_rgba, std::uint32_t width, std::uint32_t height,
@@ -40,6 +42,7 @@ private:
     struct Impl;
     Impl* impl_ = nullptr;
     bool ready_ = false;
+    std::string ep_name_;
     std::uint32_t last_infer_w_ = 0;
     std::uint32_t last_infer_h_ = 0;
 };

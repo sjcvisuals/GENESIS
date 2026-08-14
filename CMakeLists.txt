@@ -175,6 +175,9 @@ target_include_directories(genesis_matting PUBLIC ${CMAKE_SOURCE_DIR})
 target_link_libraries(genesis_matting PUBLIC genesis_platform_core Threads::Threads)
 if(GENESIS_HAS_ONNXRUNTIME)
     target_compile_definitions(genesis_matting PUBLIC GENESIS_HAS_ONNXRUNTIME=1)
+    if(GENESIS_HAS_ORT_DIRECTML)
+        target_compile_definitions(genesis_matting PUBLIC GENESIS_HAS_ORT_DIRECTML=1)
+    endif()
     target_include_directories(genesis_matting PUBLIC "${GENESIS_ONNXRUNTIME_ROOT}/include")
     if(WIN32)
         target_link_libraries(genesis_matting PUBLIC "${GENESIS_ONNXRUNTIME_ROOT}/lib/onnxruntime.lib")
@@ -333,6 +336,13 @@ if(GENESIS_BUILD_EXAMPLES)
                 "${GENESIS_ONNXRUNTIME_ROOT}/lib/onnxruntime.dll"
                 "$<TARGET_FILE_DIR:genesis_remover_camera_debug>/onnxruntime.dll"
             COMMENT "Copying onnxruntime.dll next to genesis_remover_camera_debug")
+        if(EXISTS "${GENESIS_ONNXRUNTIME_ROOT}/lib/DirectML.dll")
+            add_custom_command(TARGET genesis_remover_camera_debug POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${GENESIS_ONNXRUNTIME_ROOT}/lib/DirectML.dll"
+                    "$<TARGET_FILE_DIR:genesis_remover_camera_debug>/DirectML.dll"
+                COMMENT "Copying DirectML.dll next to genesis_remover_camera_debug")
+        endif()
     endif()
     add_custom_command(TARGET genesis_remover_camera_debug POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory
@@ -440,6 +450,14 @@ if(GENESIS_BUILD_RENDERBRIDGE_EXT AND WIN32)
                 "$<TARGET_FILE_DIR:ExtGenesis>/onnxruntime.dll"
             COMMENT "Copying ONNX Runtime next to ExtGenesis"
         )
+        if(EXISTS "${GENESIS_ONNXRUNTIME_ROOT}/lib/DirectML.dll")
+            add_custom_command(TARGET ExtGenesis POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${GENESIS_ONNXRUNTIME_ROOT}/lib/DirectML.dll"
+                    "$<TARGET_FILE_DIR:ExtGenesis>/DirectML.dll"
+                COMMENT "Copying DirectML.dll next to ExtGenesis"
+            )
+        endif()
     endif()
 
     add_custom_target(GenesisDeploy DEPENDS ExtGenesis)
@@ -506,6 +524,14 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
                 "$<TARGET_FILE_DIR:ExtGenesisRemover>/onnxruntime.dll"
             COMMENT "Copying ONNX Runtime next to ExtGenesisRemover"
         )
+        if(EXISTS "${GENESIS_ONNXRUNTIME_ROOT}/lib/DirectML.dll")
+            add_custom_command(TARGET ExtGenesisRemover POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${GENESIS_ONNXRUNTIME_ROOT}/lib/DirectML.dll"
+                    "$<TARGET_FILE_DIR:ExtGenesisRemover>/DirectML.dll"
+                COMMENT "Copying DirectML.dll next to ExtGenesisRemover"
+            )
+        endif()
     endif()
 
     add_custom_target(GenesisRemoverDeploy DEPENDS ExtGenesisRemover)
