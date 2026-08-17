@@ -101,6 +101,11 @@ void RemoverPipeline::ensureVideoIn() {
     video_in_ = std::make_unique<ExternalSharedImage>(*context_, in_cfg);
 }
 
+void RemoverPipeline::forceRecreateVideoIn() {
+    video_in_.reset();
+    ensureVideoIn();
+}
+
 ExternalSharedImage& RemoverPipeline::videoIn() {
     ensureVideoIn();
     return *video_in_;

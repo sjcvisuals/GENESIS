@@ -51,6 +51,9 @@ public:
     // Lazily create DXGI video_in for the current size. No-op if already sized.
     void ensureVideoIn();
 
+    // Drop and recreate video_in (PIXERA sometimes needs a fresh share handle after link).
+    void forceRecreateVideoIn();
+
     void setSettings(const BgRemoverSettings& settings);
 
     // When true, processFrame never blocks on ORT — skips if busy, reuses last matte.

@@ -91,8 +91,9 @@ void Input::registerParameters() {
 }
 
 void Input::setDebugStatus(const std::string& text) {
-    if (debug_status_ && text != last_status_) {
-        last_status_ = text;
+    // Always push - PIXERA string params often look stale if we skip unchanged text.
+    last_status_ = text;
+    if (debug_status_) {
         debug_status_->set_value(text);
     }
 }
@@ -101,15 +102,21 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     if (debug_stage_) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
+    // Short ASCII UI string; trust Debug Stage enum + log STATUS more than this slot.
+    const std::string ui = std::format(
+        "v15 {} nz={} mid=({},{},{}) vin={} repub={}",
+        dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r, dbg.mid_g, dbg.mid_b,
+        dbg.has_video_in ? 1 : 0, video_in_republish_count_);
+    setDebugStatus(ui);
+
     const std::string line = std::format(
         "STATUS stage={} vin={} dl={} nz={} mid=({},{},{},{}) {}x{} matte={} proc={} shared_out={} "
-        "luid={:016x}",
+        "repub={} black_frames={} luid={:016x}",
         dbg.stage ? dbg.stage : "?", dbg.has_video_in ? 1 : 0, dbg.download_ok ? 1 : 0,
         dbg.nonzero_rgb, dbg.mid_r, dbg.mid_g, dbg.mid_b, dbg.mid_a, dbg.width, dbg.height,
         dbg.matte_copied ? 1 : 0, processing_enabled_ ? 1 : 0, shared_output_published_ ? 1 : 0,
-        adapter_luid_);
-    setDebugStatus(line);
-    if (last_stage_ != (dbg.stage ? dbg.stage : "") || (render_ticks_ % 60u) == 1u) {
+        video_in_republish_count_, input_black_frames_, adapter_luid_);
+    if (last_stage_ != (dbg.stage ? dbg.stage : "") || (render_ticks_ % 30u) == 1u) {
         last_stage_ = dbg.stage ? dbg.stage : "";
         removerLog(line);
     }
@@ -143,7 +150,7 @@ void Input::publishPlaceholderSampler() {
     placeholder_published_ = true;
     shared_output_published_ = false;
     removerLog(std::format("placeholder sampler {}x{} (host cyan)", desc.width, desc.height));
-    setDebugStatus("placeholder host cyan — GPU not up yet");
+    setDebugStatus("v15 host cyan - GPU not up yet");
 }
 
 bool Input::initialize() noexcept try {
@@ -162,7 +169,7 @@ bool Input::initialize() noexcept try {
         adapter_luid_ = common::from_hex_string<std::uint64_t>(stream_luid);
     }
 
-    // Accept timeline with host cyan first — Vulkan/ONNX deferred to update().
+    // Accept timeline with host cyan first - Vulkan/ONNX deferred to update().
     publishPlaceholderSampler();
     removerLog("initialize OK (cpu-first placeholder, shared-vulkan deferred)");
     return true;
@@ -236,7 +243,7 @@ bool Input::tryEnsureGpuPipeline() {
                                height_,
                                pipeline_->output().colorExport().win32_handle ? "ok" : "NULL"));
         host().log_info(std::format("GENESIS Remover GPU ready {}x{}", width_, height_));
-        setDebugStatus("shared output published — waiting Video In");
+        setDebugStatus("v15 shared output published - waiting Video In");
         return true;
     } catch (const std::exception& ex) {
         if (adapter_luid_ != 0) {
@@ -329,20 +336,24 @@ void Input::publishVideoIn() {
         return;
     }
 
-    auto allocate = [&](const TextureDesc& desc, const char* reason) {
+    auto allocate = [&](const TextureDesc& desc, const char* reason, bool force_new_image) {
         if (desc.width == 0 || desc.height == 0) {
             return;
         }
         width_ = static_cast<std::uint32_t>(desc.width);
         height_ = static_cast<std::uint32_t>(desc.height);
-        removerLog(std::format("video_in allocate {}x{} format={} ({})", width_, height_,
-                               get_format_name(desc.format), reason));
+        removerLog(std::format("video_in allocate {}x{} format={} force={} ({})", width_, height_,
+                               get_format_name(desc.format), force_new_image ? 1 : 0, reason));
         pipeline_->resize(width_, height_);
-        pipeline_->ensureVideoIn();
+        if (force_new_image) {
+            pipeline_->forceRecreateVideoIn();
+        } else {
+            pipeline_->ensureVideoIn();
+        }
         const auto& exp = pipeline_->videoIn().exportInfo();
         if (!exp.win32_handle) {
             removerLog("video_in share handle NULL");
-            setDebugStatus("video_in share handle NULL");
+            setDebugStatus("v15 video_in share handle NULL");
             return;
         }
         TextureDesc shared = desc;
@@ -360,55 +371,130 @@ void Input::publishVideoIn() {
         };
         video_in_->set_texture(host().create_texture(shared));
         video_in_published_ = true;
+        input_black_frames_ = 0;
         publishSharedOutput();
         enableProcessing();
-        removerLog(std::format("shared VIDEO_IN published {}x{} mem={}", shared.width, shared.height,
-                               exp.memory_size));
-        setDebugStatus(std::format("shared video_in {}x{} — waiting PIXERA write", width_, height_));
+        removerLog(std::format("shared VIDEO_IN published {}x{} mem={} ({})", shared.width,
+                               shared.height, exp.memory_size, reason));
+        setDebugStatus(std::format("v15 shared video_in {}x{} - waiting PIXERA write", width_,
+                                   height_));
     };
 
     update_input_texture(*video_in_, [&](const TextureDesc& desc) {
-        allocate(desc, "update_input_texture");
+        allocate(desc, "update_input_texture", /*force_new_image=*/false);
     });
 
-    if (!pipeline_->hasVideoIn()) {
+    const int prop_w = video_in_->get_property<int>(SettingNames::resolution_x, 0);
+    const int prop_h = video_in_->get_property<int>(SettingNames::resolution_y, 0);
+    const std::string format_str(video_in_->get_property(SettingNames::format));
+    const Format prop_fmt = get_format_by_name(format_str, Format::R8G8B8A8_UNORM);
+
+    if (!baseline_captured_ && prop_w > 0 && prop_h > 0) {
+        baseline_w_ = prop_w;
+        baseline_h_ = prop_h;
+        baseline_format_ = format_str;
+        baseline_captured_ = true;
+        removerLog(std::format("video_in baseline props {}x{} format='{}'", prop_w, prop_h,
+                               format_str));
+    }
+
+    const bool format_explicit = !format_str.empty();
+    const bool dims_changed =
+        baseline_captured_ && (prop_w != baseline_w_ || prop_h != baseline_h_);
+    const bool format_changed = baseline_captured_ && (format_str != baseline_format_);
+    const bool props_usable = prop_w > 0 && prop_h > 0;
+
+    if (video_in_published_ && props_usable && input_black_frames_ > 0 &&
+        (dims_changed || format_changed || format_explicit)) {
         TextureDesc desc{};
-        desc.width = static_cast<std::size_t>(
-            video_in_->get_property<int>(SettingNames::resolution_x, 0));
-        desc.height = static_cast<std::size_t>(
-            video_in_->get_property<int>(SettingNames::resolution_y, 0));
-        const std::string format_str(video_in_->get_property(SettingNames::format));
-        desc.format = get_format_by_name(format_str, Format::R8G8B8A8_UNORM);
-        if (desc.width == 0 || desc.height == 0) {
-            try {
-                const auto cur = video_in_->texture().desc();
-                if (cur.width > 0 && cur.height > 0) {
-                    desc.width = cur.width;
-                    desc.height = cur.height;
-                    if (cur.format != Format::None) {
-                        desc.format = cur.format;
-                    }
-                }
-            } catch (...) {
+        desc.width = static_cast<std::size_t>(prop_w);
+        desc.height = static_cast<std::size_t>(prop_h);
+        desc.format = prop_fmt;
+        baseline_w_ = prop_w;
+        baseline_h_ = prop_h;
+        baseline_format_ = format_str;
+        ++video_in_republish_count_;
+        allocate(desc, "props-relink", /*force_new_image=*/true);
+        return;
+    }
+
+    if (!pipeline_->hasVideoIn()) {
+        if (props_usable && baseline_captured_) {
+            if (format_explicit || dims_changed || format_changed) {
+                TextureDesc desc{};
+                desc.width = static_cast<std::size_t>(prop_w);
+                desc.height = static_cast<std::size_t>(prop_h);
+                desc.format = prop_fmt;
+                allocate(desc, format_explicit ? "props+format" : "props-changed", false);
+            } else if (!same_res_allocate_tried_ && render_ticks_ > 60) {
+                same_res_allocate_tried_ = true;
+                TextureDesc desc{};
+                desc.width = static_cast<std::size_t>(prop_w);
+                desc.height = static_cast<std::size_t>(prop_h);
+                desc.format = prop_fmt;
+                allocate(desc, "same-res-timeout", false);
             }
-        }
-        if (desc.width == 0 || desc.height == 0) {
-            // Same-res link: props may never change — use stream size after a few ticks.
-            if (render_ticks_ > 45 && width_ > 0 && height_ > 0) {
-                desc.width = width_;
-                desc.height = height_;
-                desc.format = Format::R8G8B8A8_UNORM;
-                allocate(desc, "same-res-stream-fallback");
-            } else if ((render_ticks_ % 60u) == 1u) {
-                removerLog(std::format("waiting Video In props {}x{} format='{}' ticks={}",
-                                       video_in_->get_property<int>(SettingNames::resolution_x, 0),
-                                       video_in_->get_property<int>(SettingNames::resolution_y, 0),
-                                       format_str, render_ticks_));
-            }
-        } else {
-            allocate(desc, format_str.empty() ? "props-fallback" : "props+format");
+        } else if ((render_ticks_ % 60u) == 1u) {
+            removerLog(std::format("waiting Video In props {}x{} format='{}' baseline={} ticks={}",
+                                   prop_w, prop_h, format_str, baseline_captured_ ? 1 : 0,
+                                   render_ticks_));
         }
     }
+}
+
+void Input::maybeRepublishVideoInForBlackInput() {
+    if (!pipeline_ || !video_in_published_ || !pipeline_->hasVideoIn()) {
+        return;
+    }
+    if (input_black_frames_ < 90 || video_in_republish_count_ >= 5) {
+        return;
+    }
+    if ((input_black_frames_ % 90u) != 0u) {
+        return;
+    }
+
+    TextureDesc desc{};
+    desc.width = width_;
+    desc.height = height_;
+    desc.format = Format::R8G8B8A8_UNORM;
+    const int prop_w = video_in_->get_property<int>(SettingNames::resolution_x, 0);
+    const int prop_h = video_in_->get_property<int>(SettingNames::resolution_y, 0);
+    if (prop_w > 0 && prop_h > 0) {
+        desc.width = static_cast<std::size_t>(prop_w);
+        desc.height = static_cast<std::size_t>(prop_h);
+        desc.format = get_format_by_name(video_in_->get_property(SettingNames::format),
+                                         Format::R8G8B8A8_UNORM);
+    }
+
+    ++video_in_republish_count_;
+    removerLog(std::format("video_in republish after input_black frames={} n={}",
+                           input_black_frames_, video_in_republish_count_));
+    width_ = static_cast<std::uint32_t>(desc.width);
+    height_ = static_cast<std::uint32_t>(desc.height);
+    pipeline_->resize(width_, height_);
+    pipeline_->forceRecreateVideoIn();
+    const auto& exp = pipeline_->videoIn().exportInfo();
+    if (!exp.win32_handle) {
+        removerLog("republish failed: null handle");
+        return;
+    }
+    TextureDesc shared = desc;
+    if (shared.format == Format::None) {
+        shared.format = Format::R8G8B8A8_UNORM;
+    }
+    shared.is_target = false;
+    shared.share_handle = {
+        kHandleType,
+        reinterpret_cast<Handle>(exp.win32_handle),
+        0,
+        exp.memory_size,
+        0,
+        exp.dedicated,
+    };
+    video_in_->set_texture(host().create_texture(shared));
+    publishSharedOutput();
+    input_black_frames_ = 0;
+    setDebugStatus(std::format("v15 republish #{} - rebinding Video In", video_in_republish_count_));
 }
 
 ValueSet Input::get_state() noexcept {
@@ -473,7 +559,7 @@ RenderResult Input::render() noexcept try {
         (void)frame_counter_->value();
     }
 
-    // PIXERA may skip update — pump GPU + Video In here too.
+    // PIXERA may skip update - pump GPU + Video In here too.
     if (!tryEnsureGpuPipeline()) {
         return RenderResult::Succeeded;
     }
@@ -486,6 +572,12 @@ RenderResult Input::render() noexcept try {
     ::genesis::RemoverFrameDebug dbg{};
     std::string error;
     const bool ok = pipeline_->processFrame(&error, &dbg, /*show_diagnostics=*/true);
+    if (dbg.stage && std::string_view(dbg.stage) == "input_black") {
+        ++input_black_frames_;
+        maybeRepublishVideoInForBlackInput();
+    } else if (dbg.download_ok && dbg.nonzero_rgb > 0) {
+        input_black_frames_ = 0;
+    }
     logStatusMaybe(dbg);
 
     if (dbg.stage && std::string_view(dbg.stage) == "matte") {

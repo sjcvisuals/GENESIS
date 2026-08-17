@@ -38,6 +38,7 @@ private:
     void enableProcessing();
     void setDebugStatus(const std::string& text);
     void logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg);
+    void maybeRepublishVideoInForBlackInput();
 
     std::uint64_t adapter_luid_ = 0;
     std::uint64_t pipeline_adapter_luid_ = 0;
@@ -60,6 +61,13 @@ private:
     bool gpu_failed_ = false;
     bool matte_live_ = false;
     bool video_in_published_ = false;
+    bool baseline_captured_ = false;
+    bool same_res_allocate_tried_ = false;
+    int baseline_w_ = 0;
+    int baseline_h_ = 0;
+    std::string baseline_format_;
+    std::uint32_t input_black_frames_ = 0;
+    std::uint32_t video_in_republish_count_ = 0;
     std::uint64_t render_ticks_ = 0;
     std::string last_stage_;
     std::string last_status_;
