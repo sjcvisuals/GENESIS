@@ -59,7 +59,7 @@ If the resource imports but timeline drag fails
      powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-pixera-remover.ps1
 
 2. Confirm the install printed BUILD_STAMP with:
-     remover-timeline-v12-pump-20260817
+     remover-timeline-v13-blue-20260817
 
 3. In PIXERA, re-browse to:
      <PIXERA>\data\rxExt\ExtGenesisRemover\ExtGenesisRemover.dll
@@ -76,18 +76,16 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v12-pump-20260817
+  remover-timeline-v13-blue-20260817
 
-Host-texture I/O + DirectML RVM (CPU fallback). Sampler/Video In use RGBA host
-textures. Video In downloads are R/B swizzled. update() and render() both pump
-allocate/download (PIXERA sometimes skips one). Stage colours while waiting:
-  cyan  = not allocated yet
-  blue  = host texture ready, waiting pixels
-  orange = downloads empty (link/source not writing)
-After install: quit PIXERA, re-import Remover, scrub, link webcam. Expect cyan
-→ blue → feed → cutout (or orange if Video In is not writing).
-Log should show ep=DML, swap_rb=1, and render path=matte.
-Dump log: .\scripts\dump-remover-log.ps1
+Host-texture I/O + DirectML RVM. Do not pre-allocate Video In before props exist
+(that caused stuck blue: texture ready, PIXERA never writes, download hangs).
+Reallocate on prop relink / empty downloads / blue-stall; hold TextureRef during
+download. Stage colours: cyan=not allocated, blue=waiting pixels,
+orange=empty downloads.
+After install: quit PIXERA, re-import, scrub, link webcam to Video In, wait ~2s.
+Expect cyan → blue briefly → feed → cutout (or orange if source not writing).
+Log: ep=DML, download ok, render path=matte. Dump: .\scripts\dump-remover-log.ps1
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log

@@ -199,14 +199,15 @@ void Input::ensureVideoInHostTexture() {
         return;
     }
 
-    auto allocate = [&](TextureDesc desc, const char* reason) {
+    auto allocate = [&](TextureDesc desc, const char* reason, bool as_target = false) {
         if (desc.width == 0 || desc.height == 0) {
             return;
         }
         if (desc.format == Format::None) {
             desc.format = kPixeraHostFormat;
         }
-        desc.is_target = false;
+        // Default false; blue-stall retry may use is_target=true.
+        desc.is_target = as_target;
         desc.share_handle = {};
 
         const auto gen = video_in_generation_.fetch_add(1) + 1;
@@ -214,10 +215,17 @@ void Input::ensureVideoInHostTexture() {
 
         video_in_->set_texture(host().create_texture(desc));
         video_in_allocated_ = true;
+        allocated_w_ = static_cast<std::uint32_t>(desc.width);
+        allocated_h_ = static_cast<std::uint32_t>(desc.height);
+        allocated_format_ = desc.format;
+        allocate_reason_ = reason;
         // Never download in the same step as create — that crashed PIXERA.
         video_in_download_allowed_ = false;
         download_cooldown_frames_ = 8;
         download_pending_ticks_ = 0;
+        downloads_ok_.store(0);
+        downloads_empty_.store(0);
+        download_hung_resets_ = 0;
         ensureSampler(static_cast<std::uint32_t>(desc.width),
                       static_cast<std::uint32_t>(desc.height));
         {
@@ -228,8 +236,9 @@ void Input::ensureVideoInHostTexture() {
         has_last_alpha_ = false;
         last_alpha_.clear();
         last_render_path_.clear();
-        removerLog(std::format("video_in HOST texture {}x{} format={} gen={} ({})", desc.width,
-                               desc.height, get_format_name(desc.format), gen, reason));
+        removerLog(std::format("video_in HOST texture {}x{} format={} target={} gen={} ({})",
+                               desc.width, desc.height, get_format_name(desc.format),
+                               as_target ? 1 : 0, gen, reason));
     };
 
     update_input_texture(*video_in_, [&](const TextureDesc& desc) {
@@ -250,21 +259,44 @@ void Input::ensureVideoInHostTexture() {
                                format_str));
     }
 
+    const bool format_explicit = !format_str.empty();
+    const bool dims_changed =
+        baseline_captured_ && (prop_w != baseline_w_ || prop_h != baseline_h_);
+    const bool format_changed = baseline_captured_ && (format_str != baseline_format_);
+    const bool props_usable = prop_w > 0 && prop_h > 0;
+
+    // Relink: props changed after we already allocated (common after early allocate).
+    if (video_in_allocated_ && props_usable && downloads_ok_.load() == 0) {
+        const bool size_mismatch =
+            static_cast<std::uint32_t>(prop_w) != allocated_w_ ||
+            static_cast<std::uint32_t>(prop_h) != allocated_h_;
+        const bool fmt_mismatch =
+            format_explicit && prop_fmt != Format::None && prop_fmt != allocated_format_;
+        if (size_mismatch || fmt_mismatch || dims_changed || format_changed) {
+            TextureDesc desc{};
+            desc.width = static_cast<std::size_t>(prop_w);
+            desc.height = static_cast<std::size_t>(prop_h);
+            desc.format = prop_fmt;
+            // Refresh baseline so we don't thrash.
+            baseline_w_ = prop_w;
+            baseline_h_ = prop_h;
+            baseline_format_ = format_str;
+            allocate(desc, "props-relink");
+        }
+    }
+
     // PIXERA live inputs often omit format, so the SDK helper never fires.
-    // Allocate when format is explicit or when props change from the pre-link baseline.
-    if (!video_in_allocated_ && prop_w > 0 && prop_h > 0 && baseline_captured_) {
-        const bool format_explicit = !format_str.empty();
-        const bool dims_changed = (prop_w != baseline_w_ || prop_h != baseline_h_);
-        const bool format_changed = (format_str != baseline_format_);
+    if (!video_in_allocated_ && props_usable && baseline_captured_) {
         if (format_explicit || dims_changed || format_changed) {
             TextureDesc desc{};
             desc.width = static_cast<std::size_t>(prop_w);
             desc.height = static_cast<std::size_t>(prop_h);
             desc.format = prop_fmt;
             allocate(desc, format_explicit ? "props+format" : "props-changed");
-        } else if (!same_res_allocate_tried_ && pump_ticks_ > 30) {
-            // Same-resolution live link: props may never change. Create host texture
-            // so PIXERA can write; download arms after cooldown.
+        } else if (!same_res_allocate_tried_ && pump_ticks_ > 45) {
+            // Same-resolution live link: props may never change. Allocate only after
+            // baseline exists (do NOT allocate at settings size before any props —
+            // that caused stuck blue: texture exists, PIXERA never writes).
             same_res_allocate_tried_ = true;
             TextureDesc desc{};
             desc.width = static_cast<std::size_t>(prop_w);
@@ -274,31 +306,39 @@ void Input::ensureVideoInHostTexture() {
         }
     }
 
-    // Props never populate (common with some live sources) — still allocate at stream size
-    // so a later link has a host texture to write into.
-    if (!video_in_allocated_ && !settings_fallback_allocate_tried_ && pump_ticks_ > 60) {
-        settings_fallback_allocate_tried_ = true;
-        TextureDesc desc{};
-        desc.width = width_ > 0 ? width_ : 1920;
-        desc.height = height_ > 0 ? height_ : 1080;
-        desc.format = kPixeraHostFormat;
-        allocate(desc, "settings-fallback");
-    }
-
-    // Downloads stay empty: recreate once (PIXERA sometimes needs a fresh host texture).
+    // Downloads complete but empty: recreate once.
     if (video_in_allocated_ && video_in_download_allowed_ && !empty_realloc_tried_ &&
-        downloads_ok_.load() == 0 && downloads_empty_.load() >= 90) {
+        downloads_ok_.load() == 0 && downloads_empty_.load() >= 60) {
         empty_realloc_tried_ = true;
         TextureDesc desc{};
-        desc.width = width_ > 0 ? width_ : 1920;
-        desc.height = height_ > 0 ? height_ : 1080;
-        if (prop_w > 0 && prop_h > 0) {
+        desc.width = allocated_w_ > 0 ? allocated_w_ : (width_ > 0 ? width_ : 1920);
+        desc.height = allocated_h_ > 0 ? allocated_h_ : (height_ > 0 ? height_ : 1080);
+        if (props_usable) {
             desc.width = static_cast<std::size_t>(prop_w);
             desc.height = static_cast<std::size_t>(prop_h);
         }
         desc.format = prop_fmt;
         removerLog("video_in realloc after empty downloads");
-        allocate(desc, "empty-realloc");
+        allocate(desc, "empty-realloc", /*as_target=*/true);
+    }
+
+    // Blue stall: download callbacks never return (empty==0, ok==0). Realloc with
+    // is_target=true after a few hung-pending resets.
+    if (video_in_allocated_ && video_in_download_allowed_ && !blue_realloc_tried_ &&
+        downloads_ok_.load() == 0 && downloads_empty_.load() == 0 &&
+        download_hung_resets_ >= 3) {
+        blue_realloc_tried_ = true;
+        TextureDesc desc{};
+        desc.width = allocated_w_ > 0 ? allocated_w_ : (width_ > 0 ? width_ : 1920);
+        desc.height = allocated_h_ > 0 ? allocated_h_ : (height_ > 0 ? height_ : 1080);
+        if (props_usable) {
+            desc.width = static_cast<std::size_t>(prop_w);
+            desc.height = static_cast<std::size_t>(prop_h);
+        }
+        desc.format = prop_fmt;
+        removerLog(std::format("video_in realloc after blue stall hung_resets={} reason={}",
+                               download_hung_resets_, allocate_reason_));
+        allocate(desc, "blue-realloc", /*as_target=*/true);
     }
 
     if (video_in_allocated_ && !video_in_download_allowed_) {
@@ -313,6 +353,12 @@ void Input::ensureVideoInHostTexture() {
     if (!video_in_allocated_ && (pump_ticks_ % 60u) == 1u) {
         removerLog(std::format("waiting link: props {}x{} format='{}' baseline={} pump={}", prop_w,
                                prop_h, format_str, baseline_captured_ ? 1 : 0, pump_ticks_));
+    } else if (video_in_allocated_ && downloads_ok_.load() == 0 && (pump_ticks_ % 90u) == 1u) {
+        removerLog(std::format(
+            "waiting pixels: alloc={}x{} reason={} armed={} pending={} hung={} empty={} props={}x{}",
+            allocated_w_, allocated_h_, allocate_reason_, video_in_download_allowed_ ? 1 : 0,
+            download_pending_.load() ? 1 : 0, download_hung_resets_, downloads_empty_.load(), prop_w,
+            prop_h));
     }
 }
 
@@ -339,12 +385,13 @@ void Input::requestVideoDownload() {
     // If PIXERA never invokes the download callback, pending sticks forever.
     if (download_pending_.load()) {
         ++download_pending_ticks_;
-        if (download_pending_ticks_ < 120) {
+        if (download_pending_ticks_ < 45) {
             return;
         }
         download_pending_.store(false);
         download_pending_ticks_ = 0;
-        removerLog("download pending stuck — reset");
+        ++download_hung_resets_;
+        removerLog(std::format("download pending stuck — reset hung={}", download_hung_resets_));
     }
     if (download_pending_.exchange(true)) {
         return;
@@ -352,10 +399,12 @@ void Input::requestVideoDownload() {
     download_pending_ticks_ = 0;
 
     const auto gen = video_in_generation_.load(std::memory_order_acquire);
+    // Keep an extra acquire while download runs (matches MemoryInputStream::present).
+    const TextureRef keep_alive = video_in_->texture();
 
     host().download_texture(
         video_in_->texture(),
-        [this, gen, w = static_cast<std::uint32_t>(desc.width),
+        [this, gen, keep_alive, w = static_cast<std::uint32_t>(desc.width),
          h = static_cast<std::uint32_t>(desc.height)](BufferDesc buffer,
                                                       OnComplete on_complete) mutable noexcept {
             try {
@@ -408,6 +457,7 @@ void Input::requestVideoDownload() {
             }
             download_pending_.store(false);
             on_complete();
+            (void)keep_alive;
         });
 }
 

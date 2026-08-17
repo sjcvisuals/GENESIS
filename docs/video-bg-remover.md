@@ -92,7 +92,8 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 ```
 
 Look for: `video_in HOST`, `download armed`, `download ok`, `swap_rb=1`,
-`render path=matte`. Stamp must be `remover-timeline-v12-pump-*`.
+`render path=matte`. Stamp must be `remover-timeline-v13-blue-*`.
 
-Waiting colours: **cyan** = not allocated, **blue** = waiting pixels,
-**orange** = empty downloads. Dump log: `.\scripts\dump-remover-log.ps1`.
+Waiting colours: **cyan** = not allocated, **blue** = waiting pixels (download
+may be hung — v13 reallocates), **orange** = empty downloads.
+Dump log: `.\scripts\dump-remover-log.ps1`.

@@ -76,9 +76,14 @@ private:
     int baseline_h_ = 0;
     std::string baseline_format_;
     bool same_res_allocate_tried_ = false;
-    bool settings_fallback_allocate_tried_ = false;
     bool empty_realloc_tried_ = false;
+    bool blue_realloc_tried_ = false;
     std::uint32_t download_pending_ticks_ = 0;
+    std::uint32_t download_hung_resets_ = 0;
+    std::uint32_t allocated_w_ = 0;
+    std::uint32_t allocated_h_ = 0;
+    Format allocated_format_ = Format::None;
+    std::string allocate_reason_;
 
     std::vector<std::uint8_t> scratch_out_;
     std::vector<std::uint8_t> last_alpha_;
