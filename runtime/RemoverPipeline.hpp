@@ -81,6 +81,11 @@ public:
     bool processFrame(std::string* out_error = nullptr, RemoverFrameDebug* debug = nullptr,
                       bool show_diagnostics = true);
 
+    // CPU RGBA8 ingest (D3D11 Video In staging path). rgba=nullptr → waiting_video_in.
+    bool processCpuRgbaFrame(const std::uint8_t* rgba, bool has_input,
+                             std::string* out_error = nullptr, RemoverFrameDebug* debug = nullptr,
+                             bool show_diagnostics = true);
+
     // CPU-only path for smoke tests (no shared-image roundtrip). Sync matte.
     bool processCpuFrame(const std::uint8_t* in_rgba, std::uint8_t* out_rgba, std::uint32_t width,
                          std::uint32_t height);

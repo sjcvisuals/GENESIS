@@ -6,21 +6,22 @@
 #include "common/string.h"
 #include "matting/BgRemover.hpp"
 #include "platform/Paths.hpp"
+#include "rxext_util.h"
 
 #include <algorithm>
 #include <filesystem>
 #include <format>
 #include <string>
 #include <string_view>
-#include <volk.h>
 
 namespace rxext::genesis_remover {
 
 namespace {
+
 #if defined(_WIN32)
-constexpr auto kHandleType = HandleType::OPAQUE_WIN32;
+constexpr auto kOutputHandleType = HandleType::OPAQUE_WIN32;
 #else
-constexpr auto kHandleType = HandleType::OPAQUE_FD;
+constexpr auto kOutputHandleType = HandleType::OPAQUE_FD;
 #endif
 
 int stageToEnum(const char* stage) {
@@ -52,7 +53,6 @@ int stageToEnum(const char* stage) {
 
 Input::Input(std::uint64_t adapter_luid, ValueSet settings)
     : adapter_luid_(adapter_luid), settings_(std::move(settings)) {
-    // Match ExtGenesis: register parameters in the constructor (before initialize).
     const std::filesystem::path module_dir = extensionModuleDirectory();
     const std::filesystem::path roots[] = {module_dir, module_dir / "assets"};
     ::genesis::setAssetSearchRoots(roots);
@@ -62,7 +62,6 @@ Input::Input(std::uint64_t adapter_luid, ValueSet settings)
     time_ = add_parameter<ParameterValue>("time");
     time_->set_property(PropertyNames::purpose, PurposeNames::TimelineTime);
 
-    // Parked playhead still needs update() so Video In can allocate after link.
     frame_counter_ = add_parameter<ParameterValue>("frame_counter");
     frame_counter_->set_property(PropertyNames::purpose, PurposeNames::FrameCounter);
 
@@ -91,7 +90,7 @@ Input::Input(std::uint64_t adapter_luid, ValueSet settings)
     debug_status_->set_property(PropertyNames::group_name, "Debug");
     debug_status_->set_value(std::string("booting"));
 
-    removerLog(std::format("Input ctor ExtGenesis-parity adapter_luid={:016x}", adapter_luid_));
+    removerLog(std::format("Input ctor D3D11-VideoIn adapter_luid={:016x}", adapter_luid_));
 }
 
 Input::~Input() {
@@ -104,8 +103,15 @@ void Input::ensureRemover() {
     }
     remover_ = std::make_unique<::genesis::RemoverPipeline>(adapter_luid_);
     removerLog(std::format("RemoverPipeline ready adapter={:016x}", adapter_luid_));
-    host().log_info(std::format("GENESIS Remover Vulkan ready (adapter_luid={:016x}, matte deferred)",
+    host().log_info(std::format("GENESIS Remover Vulkan output ready (adapter_luid={:016x})",
                                 adapter_luid_));
+}
+
+void Input::ensureD3dVideoIn() {
+    if (d3d_video_in_) {
+        return;
+    }
+    d3d_video_in_ = std::make_unique<D3d11VideoIn>(adapter_luid_);
 }
 
 void Input::applyMatteSettings() {
@@ -139,7 +145,7 @@ void Input::publishTargetTexture() {
     desc.format = Format::R8G8B8A8_UNORM;
     desc.is_target = true;
     desc.share_handle = {
-        kHandleType,
+        kOutputHandleType,
         reinterpret_cast<Handle>(exp.win32_handle),
         0,
         exp.memory_size,
@@ -155,61 +161,39 @@ void Input::publishVideoInTexture() {
         return;
     }
 
-    // Exact ExtGenesis::publishVideoInTexture allocate sequence.
+    // Exact ExtSampleD3D allocate sequence: D3D11 shared texture + D3D11_IMAGE handle.
     auto allocate = [&](const TextureDesc& desc) {
         if (desc.width == 0 || desc.height == 0) {
             return;
         }
         width_ = static_cast<std::uint32_t>(desc.width);
         height_ = static_cast<std::uint32_t>(desc.height);
-        removerLog(std::format("video_in allocate {}x{} format={}", width_, height_,
-                               get_format_name(desc.format)));
+        const Format fmt = desc.format == Format::None ? Format::R8G8B8A8_UNORM : desc.format;
+        removerLog(std::format("video_in allocate {}x{} format={} (D3D11_IMAGE)", width_, height_,
+                               get_format_name(fmt)));
+
+        ensureD3dVideoIn();
+        d3d_video_in_->allocate(width_, height_, fmt);
+
         remover_->resize(width_, height_);
-        const VkFormat vk_fmt = [&]() -> VkFormat {
-            switch (desc.format) {
-            case Format::B8G8R8A8_UNORM:
-                return VK_FORMAT_B8G8R8A8_UNORM;
-            case Format::R16G16B16A16_SFLOAT:
-                return VK_FORMAT_R16G16B16A16_SFLOAT;
-            case Format::R32G32B32A32_SFLOAT:
-                return VK_FORMAT_R32G32B32A32_SFLOAT;
-            default:
-                return VK_FORMAT_R8G8B8A8_UNORM;
-            }
-        }();
-        remover_->ensureVideoIn(vk_fmt);
-        const auto& exp = remover_->videoIn().exportInfo();
-        if (!exp.win32_handle) {
-            throw std::runtime_error("GENESIS Remover video_in share handle is null");
-        }
-        TextureDesc shared = desc;
-        if (shared.format == Format::None) {
-            shared.format = Format::R8G8B8A8_UNORM;
-        }
-        // Advertise the format we actually allocated (must match Vulkan image + mem size).
-        shared.is_target = false;
-        shared.share_handle = {
-            kHandleType,
-            reinterpret_cast<Handle>(exp.win32_handle),
-            0,
-            exp.memory_size,
-            0,
-            exp.dedicated,
-        };
-        video_in_->set_texture(host().create_texture(shared));
         publishTargetTexture();
+
+        TextureDesc shared = desc;
+        shared.format = fmt;
+        shared.is_target = false;
+        shared.share_handle = {HandleType::D3D11_IMAGE,
+                               reinterpret_cast<Handle>(d3d_video_in_->shareHandle())};
+        video_in_->set_texture(host().create_texture(shared));
+        video_in_ready_ = true;
         applyMatteSettings();
         remover_->setAsyncEnabled(true);
-        removerLog(std::format("shared VIDEO_IN {}x{} format={} vk={} mem={}", shared.width,
-                               shared.height, get_format_name(shared.format),
-                               static_cast<int>(vk_fmt), exp.memory_size));
+        removerLog(std::format("shared VIDEO_IN {}x{} format={} handle=D3D11_IMAGE", shared.width,
+                               shared.height, get_format_name(shared.format)));
     };
 
-    // Official helper: fires only when host sets resolution_x/y AND format.
     update_input_texture(*video_in_, allocate);
 
-    // ExtGenesis narrow fallback when format property is missing but size is known.
-    if (!remover_->hasVideoIn()) {
+    if (!video_in_ready_) {
         TextureDesc desc{};
         desc.width = static_cast<std::size_t>(
             video_in_->get_property<int>(SettingNames::resolution_x, 0));
@@ -231,7 +215,7 @@ void Input::publishVideoInTexture() {
             }
         }
         if (desc.width > 0 && desc.height > 0) {
-            removerLog("video_in allocate via ExtGenesis fallback");
+            removerLog("video_in allocate via ExtGenesis fallback (D3D11)");
             allocate(desc);
         } else if ((render_ticks_ % 60u) == 1u) {
             removerLog(std::format(
@@ -247,7 +231,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     if (debug_stage_) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
-    const std::string ui = std::format("v17 {} nz={} mid=({},{},{}) vin={}",
+    const std::string ui = std::format("v18 {} nz={} mid=({},{},{}) vin={}",
                                        dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r,
                                        dbg.mid_g, dbg.mid_b, dbg.has_video_in ? 1 : 0);
     if (debug_status_) {
@@ -269,7 +253,6 @@ bool Input::initialize() noexcept try {
                            adapter_luid_, kRemoverBuildStamp));
     host().log_info(std::format("initializing GENESIS Remover stream '{}' ({})", handle,
                                 kRemoverBuildStamp));
-    // ExtGenesis: initialize delegates to update_settings (shared output only).
     return update_settings(std::move(settings_));
 } catch (const std::exception& ex) {
     removerLog(std::format("initialize exception: {}", ex.what()));
@@ -291,12 +274,11 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     removerLog(std::format("update_settings {}x{} adapter={:016x}", width_, height_,
                            adapter_luid_));
 
-    // Timeline-safe (ExtGenesis): publish shared output only. Video In in update().
     ensureRemover();
     remover_->resize(width_, height_);
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v17 shared output ready - link Video In"));
+        debug_status_->set_value(std::string("v18 D3D11 Video In - link feed"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -333,7 +315,6 @@ ValueSet Input::get_state() noexcept {
 
 string Input::get_property(string_view name) noexcept {
     if (name == PropertyNames::applies_alpha) {
-        // ExtGenesis always returns true for Remover mode.
         return string("true");
     }
     return {};
@@ -368,19 +349,43 @@ RenderResult Input::render() noexcept try {
     }
 
     ensureRemover();
-    // Texture publish stays in update() only (ExtGenesis parity).
 
-    if (remover_->hasVideoIn() && !remover_->asyncEnabled()) {
+    ::genesis::RemoverFrameDebug dbg{};
+    std::string error;
+
+    if (!video_in_ready_ || !d3d_video_in_ || !d3d_video_in_->hasTexture()) {
+        (void)remover_->processCpuRgbaFrame(nullptr, false, &error, &dbg, true);
+        logStatusMaybe(dbg);
+        return RenderResult::Succeeded;
+    }
+
+    if (!remover_->asyncEnabled()) {
         applyMatteSettings();
         remover_->setAsyncEnabled(true);
     }
 
-    ::genesis::RemoverFrameDebug dbg{};
-    std::string error;
-    if (!remover_->processFrame(&error, &dbg, /*show_diagnostics=*/true)) {
-        if (!error.empty() && (render_ticks_ % 60u) == 1u) {
-            removerLog(std::format("processFrame: {}", error));
+    if (!d3d_video_in_->downloadRgba8(d3d_rgba_)) {
+        dbg.width = width_;
+        dbg.height = height_;
+        dbg.has_video_in = true;
+        dbg.download_ok = false;
+        dbg.stage = "download_fail";
+        // Blue diagnostic via CPU path helper: upload solid through processCpu after fake fail.
+        std::vector<std::uint8_t> blue(static_cast<std::size_t>(width_) * height_ * 4u, 0);
+        for (std::size_t i = 0; i + 3 < blue.size(); i += 4) {
+            blue[i + 0] = 30;
+            blue[i + 1] = 90;
+            blue[i + 2] = 220;
+            blue[i + 3] = 255;
         }
+        (void)remover_->uploadOutputRgba8(blue.data());
+        logStatusMaybe(dbg);
+        return RenderResult::Succeeded;
+    }
+
+    (void)remover_->processCpuRgbaFrame(d3d_rgba_.data(), true, &error, &dbg, true);
+    if (!error.empty() && (render_ticks_ % 60u) == 1u) {
+        removerLog(std::format("processCpuRgbaFrame: {}", error));
     }
     logStatusMaybe(dbg);
     return RenderResult::Succeeded;

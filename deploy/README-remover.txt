@@ -59,7 +59,7 @@ If the resource imports but timeline drag fails
      powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-pixera-remover.ps1
 
 2. Confirm the install printed BUILD_STAMP with:
-     remover-timeline-v17-fp16-20260817
+     remover-timeline-v18-d3d11vin-20260817
 
 3. In PIXERA, re-browse to:
      <PIXERA>\data\rxExt\ExtGenesisRemover\ExtGenesisRemover.dll
@@ -76,16 +76,17 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v17-fp16-20260817
+  remover-timeline-v18-d3d11vin-20260817
 
-v17 = ExtGenesis Background Remover texture contract (ExtSampleD3D pattern):
-  DLL allocates shared Vulkan memory; PIXERA writes Video In; we read on GPU.
-  No host download_texture. No placeholder sampler. No republish heuristics.
+v18 = ExtSampleD3D Video In + Vulkan output:
+  Video In uses D3D11_IMAGE (PIXERA D3D engine can write).
+  Output sampler stays Vulkan OPAQUE_WIN32.
+  No host download_texture.
 
 Stage colours (until Video In has pixels):
   cyan   = waiting for Video In link (normal)
-  blue   = Vulkan shared read failed
-  orange = linked but PIXERA wrote zeros (check Adapter LUID)
+  blue   = D3D staging download failed
+  orange = linked but PIXERA wrote zeros (check Adapter LUID / media playing)
   live   = passthrough then matte
 
 Critical: set device Adapter LUID to the PIXERA engine GPU (non-zero).

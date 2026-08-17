@@ -3,18 +3,20 @@
 #include "WinPrefix.h"
 #include "rxext_client.h"
 
+#include "D3d11VideoIn.h"
 #include "runtime/RemoverPipeline.hpp"
 
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace rxext::genesis_remover {
 
-// Matte-only PIXERA extension. Texture I/O matches ExtGenesis Background Remover
-// mode and ExtSampleD3D: DLL allocates shared GPU memory, PIXERA writes Video In,
-// extension reads via Vulkan (not host download_texture).
+// Matte-only PIXERA extension.
+// Output sampler: Vulkan OPAQUE_WIN32 (PIXERA reads).
+// Video In: D3D11_IMAGE (ExtSampleD3D) — PIXERA's D3D engine writes here.
 class Input : public rxext::InputStream {
 public:
     Input(std::uint64_t adapter_luid, ValueSet settings);
@@ -31,6 +33,7 @@ public:
 
 private:
     void ensureRemover();
+    void ensureD3dVideoIn();
     void applyMatteSettings();
     void publishTargetTexture();
     void publishVideoInTexture();
@@ -47,10 +50,13 @@ private:
     ParameterString* debug_status_ = nullptr;
 
     std::unique_ptr<::genesis::RemoverPipeline> remover_;
+    std::unique_ptr<D3d11VideoIn> d3d_video_in_;
+    std::vector<std::uint8_t> d3d_rgba_;
     std::uint32_t width_ = 1920;
     std::uint32_t height_ = 1080;
     std::uint64_t render_ticks_ = 0;
     std::string last_stage_;
+    bool video_in_ready_ = false;
 };
 
 } // namespace rxext::genesis_remover
