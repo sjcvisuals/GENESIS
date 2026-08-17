@@ -7,6 +7,7 @@
 #include "rxext_util.h"
 
 #include <format>
+#include <stdexcept>
 
 namespace rxext::genesis_remover {
 
@@ -26,6 +27,9 @@ bool Device::initialize() noexcept try {
         host().log_error("GENESIS Remover: adapter LUID is 0 - set device Adapter LUID to the "
                          "PIXERA engine GPU or shared textures will stay black");
     }
+
+    // ExtSampleD3D: one D3D11 device + shared fence for the whole StreamDevice.
+    d3d_ = std::make_shared<SharedD3d11>(adapter_luid_);
     return true;
 } catch (const std::exception& ex) {
     removerLog(std::format("Device::initialize exception: {}", ex.what()));
@@ -58,11 +62,46 @@ vector<ValueSet> Device::enumerate_stream_settings() noexcept {
 
 InputStream* Device::create_input_stream(ValueSet settings) noexcept try {
     removerLog("Device::create_input_stream");
-    return new Input(adapter_luid_, std::move(settings));
+    if (!d3d_) {
+        throw std::runtime_error("Device D3D11 not initialized");
+    }
+    return new Input(d3d_, adapter_luid_, std::move(settings));
 } catch (const std::exception& ex) {
     removerLog(std::format("create_input_stream exception: {}", ex.what()));
     host().log_error(ex.what());
     return nullptr;
+}
+
+SyncDesc Device::before_render() noexcept {
+    return get_sync_desc();
+}
+
+void Device::render() noexcept {
+    // ExtSampleD3D: wait until PIXERA signals the next fence value (Video In ready).
+    if (d3d_) {
+        d3d_->wait(++d3d_->fenceCounter());
+    }
+}
+
+SyncDesc Device::after_render() noexcept {
+    if (d3d_) {
+        d3d_->signal(++d3d_->fenceCounter());
+    }
+    return get_sync_desc();
+}
+
+SyncDesc Device::get_sync_desc() noexcept {
+    if (!d3d_ || !d3d_->fenceShareHandle()) {
+        return {};
+    }
+    return {
+        SyncStrategy::TimelineSemaphore,
+        ShareHandle{
+            HandleType::D3D_FENCE,
+            reinterpret_cast<Handle>(d3d_->fenceShareHandle()),
+        },
+        d3d_->fenceCounter(),
+    };
 }
 
 } // namespace rxext::genesis_remover

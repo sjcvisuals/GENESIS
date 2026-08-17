@@ -1,28 +1,29 @@
-# Quick checklist after installing Remover v18 (D3D11 Video In).
+# Quick checklist after installing Remover v19 (D3D11 + Device fence).
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\pixera-remover-debug.ps1
 
 $ErrorActionPreference = "Continue"
 Write-Host @"
 
-GENESIS Remover v18 - D3D11_IMAGE Video In (ExtSampleD3D)
-=========================================================
-v17 still orange: Vulkan OPAQUE_WIN32 Video In stayed black even with FP16
-  (mem still ~8.8MB). PIXERA's D3D engine writes D3D11 shared textures.
+GENESIS Remover v19 - D3D11_IMAGE + Device D3D_FENCE (ExtSampleD3D)
+===================================================================
+v18 still orange: textures were D3D11_IMAGE but Device had no timeline fence.
+  ExtSampleD3D publishes D3D_FENCE SyncDesc so PIXERA can write Video In.
 
-v18 contract:
-  - Video In  = D3D11_IMAGE (ExtSampleD3D SHARED|SHARED_NTHANDLE)
-  - Output    = Vulkan OPAQUE_WIN32 sampler (unchanged)
-  - Matte     = D3D staging download -> RVM -> upload Vulkan out
+v19 contract:
+  - Device owns one D3D11 device + shared ID3D11Fence (TimelineSemaphore)
+  - Video In  = D3D11_IMAGE on that same device
+  - Output    = Vulkan OPAQUE_WIN32 sampler
+  - Matte     = after fence wait -> staging download -> RVM -> Vulkan out
 
 1) Quit PIXERA completely
 2) git pull
 3) BUILD-REMOVER.bat
-4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v18-d3d11vin-*)
+4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v19-d3d-fence-*)
 5) Re-import ExtGenesisRemover.dll
 6) On the Remover DEVICE, set Adapter LUID to the PIXERA engine GPU
 7) Add Remover to timeline (cyan until Video In is linked is correct)
-8) Link webcam/media to Video In
-9) Expect: shared VIDEO_IN ... handle=D3D11_IMAGE, then nz>0 / passthrough / matte
+8) Link webcam/media to Video In (ensure media is playing)
+9) Expect: SharedD3d11 ready ... fence, VIDEO_IN D3D11_IMAGE, then nz>0
 10) Dump log if needed:
 
 "@

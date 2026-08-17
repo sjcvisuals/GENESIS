@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <format>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -51,8 +52,8 @@ int stageToEnum(const char* stage) {
 }
 } // namespace
 
-Input::Input(std::uint64_t adapter_luid, ValueSet settings)
-    : adapter_luid_(adapter_luid), settings_(std::move(settings)) {
+Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, ValueSet settings)
+    : d3d_(std::move(d3d)), adapter_luid_(adapter_luid), settings_(std::move(settings)) {
     const std::filesystem::path module_dir = extensionModuleDirectory();
     const std::filesystem::path roots[] = {module_dir, module_dir / "assets"};
     ::genesis::setAssetSearchRoots(roots);
@@ -90,7 +91,7 @@ Input::Input(std::uint64_t adapter_luid, ValueSet settings)
     debug_status_->set_property(PropertyNames::group_name, "Debug");
     debug_status_->set_value(std::string("booting"));
 
-    removerLog(std::format("Input ctor D3D11-VideoIn adapter_luid={:016x}", adapter_luid_));
+    removerLog(std::format("Input ctor D3D11+fence VideoIn adapter_luid={:016x}", adapter_luid_));
 }
 
 Input::~Input() {
@@ -111,7 +112,10 @@ void Input::ensureD3dVideoIn() {
     if (d3d_video_in_) {
         return;
     }
-    d3d_video_in_ = std::make_unique<D3d11VideoIn>(adapter_luid_);
+    if (!d3d_) {
+        throw std::runtime_error("Input: SharedD3d11 is null");
+    }
+    d3d_video_in_ = std::make_unique<D3d11VideoIn>(d3d_->device(), d3d_->context());
 }
 
 void Input::applyMatteSettings() {
@@ -231,7 +235,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     if (debug_stage_) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
-    const std::string ui = std::format("v18 {} nz={} mid=({},{},{}) vin={}",
+    const std::string ui = std::format("v19 {} nz={} mid=({},{},{}) vin={}",
                                        dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r,
                                        dbg.mid_g, dbg.mid_b, dbg.has_video_in ? 1 : 0);
     if (debug_status_) {
@@ -278,7 +282,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     remover_->resize(width_, height_);
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v18 D3D11 Video In - link feed"));
+        debug_status_->set_value(std::string("v19 D3D11+fence Video In - link feed"));
     }
     return true;
 } catch (const std::exception& ex) {

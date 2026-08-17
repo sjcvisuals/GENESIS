@@ -11,7 +11,7 @@ if (-not (Test-Path $log)) {
 }
 
 Write-Host ""
-Write-Host "==== stamp (must be v18-d3d11vin) ====" -ForegroundColor Cyan
+Write-Host "==== stamp (must be v19-d3d-fence) ====" -ForegroundColor Cyan
 Select-String -Path $log -Pattern "remover-timeline-" | ForEach-Object { $_.Line } |
     ForEach-Object { if ($_ -match '\[(remover-timeline-[^\]]+)\]') { $Matches[1] } } |
     Group-Object | Sort-Object Count -Descending |

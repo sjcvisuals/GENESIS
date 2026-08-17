@@ -4,6 +4,7 @@
 #include "rxext_client.h"
 
 #include "D3d11VideoIn.h"
+#include "SharedD3d11.h"
 #include "runtime/RemoverPipeline.hpp"
 
 #include <cstdint>
@@ -14,12 +15,11 @@
 
 namespace rxext::genesis_remover {
 
-// Matte-only PIXERA extension.
-// Output sampler: Vulkan OPAQUE_WIN32 (PIXERA reads).
-// Video In: D3D11_IMAGE (ExtSampleD3D) — PIXERA's D3D engine writes here.
+// Output sampler: Vulkan OPAQUE_WIN32.
+// Video In: D3D11_IMAGE on Device's SharedD3d11 (+ Device D3D_FENCE timeline).
 class Input : public rxext::InputStream {
 public:
-    Input(std::uint64_t adapter_luid, ValueSet settings);
+    Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, ValueSet settings);
     ~Input() override;
 
     bool initialize() noexcept override;
@@ -39,6 +39,7 @@ private:
     void publishVideoInTexture();
     void logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg);
 
+    std::shared_ptr<SharedD3d11> d3d_;
     std::uint64_t adapter_luid_ = 0;
     ValueSet settings_;
     ParameterTexture* sampler_ = nullptr;

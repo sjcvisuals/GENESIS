@@ -2,116 +2,19 @@
 #include "D3d11VideoIn.h"
 
 #include "RemoverLog.h"
-
-#include "d3d11/ComPointer.h"
+#include "SharedD3d11.h"
 #include "rxext_util.h"
 
-// Full Windows headers needed for ACL / CreateSharedHandle security descriptor.
-#ifdef WIN32_LEAN_AND_MEAN
-#undef WIN32_LEAN_AND_MEAN
-#endif
-#include <Windows.h>
-#include <aclapi.h>
 #include <d3d11.h>
 #include <dxgi.h>
-#include <dxgi1_2.h> // IDXGIResource1::CreateSharedHandle
+#include <dxgi1_2.h>
 
 #include <cstring>
 #include <format>
 #include <stdexcept>
 
-#pragma comment(lib, "d3d11.lib")
-#pragma comment(lib, "dxgi.lib")
-#pragma comment(lib, "advapi32.lib")
-
 namespace rxext::genesis_remover {
 namespace {
-
-// Same Everyone+Admin DACL as ExtSampleD3D getSecurityAttributes.cpp (cross-process NT handle).
-const SECURITY_ATTRIBUTES& sharedSecurityAttributes() {
-    class Holder {
-    public:
-        Holder() {
-            if (!init()) {
-                release();
-                throw std::runtime_error("D3d11VideoIn: security attributes init failed");
-            }
-        }
-        ~Holder() { release(); }
-        const SECURITY_ATTRIBUTES& get() const { return sa_; }
-
-    private:
-        PSID everyone_ = nullptr;
-        PSID admin_ = nullptr;
-        PACL acl_ = nullptr;
-        PSECURITY_DESCRIPTOR sd_ = nullptr;
-        SECURITY_ATTRIBUTES sa_{};
-
-        void release() {
-            if (everyone_) {
-                FreeSid(everyone_);
-                everyone_ = nullptr;
-            }
-            if (admin_) {
-                FreeSid(admin_);
-                admin_ = nullptr;
-            }
-            if (acl_) {
-                LocalFree(acl_);
-                acl_ = nullptr;
-            }
-            if (sd_) {
-                LocalFree(sd_);
-                sd_ = nullptr;
-            }
-        }
-
-        bool init() {
-            EXPLICIT_ACCESS ea[2]{};
-            SID_IDENTIFIER_AUTHORITY world = SECURITY_WORLD_SID_AUTHORITY;
-            SID_IDENTIFIER_AUTHORITY nt = SECURITY_NT_AUTHORITY;
-            if (!AllocateAndInitializeSid(&world, 1, SECURITY_WORLD_RID, 0, 0, 0, 0, 0, 0, 0,
-                                          &everyone_)) {
-                return false;
-            }
-            ea[0].grfAccessPermissions = KEY_ALL_ACCESS;
-            ea[0].grfAccessMode = SET_ACCESS;
-            ea[0].grfInheritance = NO_INHERITANCE;
-            ea[0].Trustee.TrusteeForm = TRUSTEE_IS_SID;
-            ea[0].Trustee.TrusteeType = TRUSTEE_IS_GROUP;
-            ea[0].Trustee.ptstrName = reinterpret_cast<LPTSTR>(everyone_);
-
-            if (!AllocateAndInitializeSid(&nt, 2, SECURITY_BUILTIN_DOMAIN_RID,
-                                          DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &admin_)) {
-                release();
-                return false;
-            }
-            ea[1].grfAccessPermissions = KEY_ALL_ACCESS;
-            ea[1].grfAccessMode = SET_ACCESS;
-            ea[1].grfInheritance = NO_INHERITANCE;
-            ea[1].Trustee.TrusteeForm = TRUSTEE_IS_SID;
-            ea[1].Trustee.TrusteeType = TRUSTEE_IS_GROUP;
-            ea[1].Trustee.ptstrName = reinterpret_cast<LPTSTR>(admin_);
-
-            if (SetEntriesInAcl(2, ea, nullptr, &acl_) != ERROR_SUCCESS) {
-                release();
-                return false;
-            }
-            sd_ = static_cast<PSECURITY_DESCRIPTOR>(LocalAlloc(LPTR, SECURITY_DESCRIPTOR_MIN_LENGTH));
-            if (!sd_ || !InitializeSecurityDescriptor(sd_, SECURITY_DESCRIPTOR_REVISION) ||
-                !SetSecurityDescriptorDacl(sd_, TRUE, acl_, FALSE)) {
-                release();
-                return false;
-            }
-            sa_.nLength = sizeof(SECURITY_ATTRIBUTES);
-            sa_.lpSecurityDescriptor = sd_;
-            sa_.bInheritHandle = FALSE;
-            return true;
-        }
-    };
-    static Holder holder;
-    return holder.get();
-}
 
 DXGI_FORMAT toDxgi(Format format) {
     switch (format) {
@@ -130,29 +33,6 @@ DXGI_FORMAT toDxgi(Format format) {
     default:
         return DXGI_FORMAT_R8G8B8A8_UNORM;
     }
-}
-
-LUID toLuid(std::uint64_t value) {
-    LUID luid{};
-    luid.LowPart = static_cast<DWORD>(value & 0xffffffffu);
-    luid.HighPart = static_cast<LONG>(value >> 32);
-    return luid;
-}
-
-ComPointer<IDXGIAdapter1> findAdapter(IDXGIFactory1& factory, LUID want) {
-    ComPointer<IDXGIAdapter1> adapter;
-    for (UINT i = 0; factory.EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i) {
-        if (want.HighPart == 0 && want.LowPart == 0) {
-            return adapter;
-        }
-        DXGI_ADAPTER_DESC1 desc{};
-        adapter->GetDesc1(&desc);
-        if (desc.AdapterLuid.HighPart == want.HighPart && desc.AdapterLuid.LowPart == want.LowPart) {
-            return adapter;
-        }
-        adapter.release();
-    }
-    return {};
 }
 
 std::uint8_t clampU8(float v) {
@@ -198,40 +78,15 @@ float halfToFloat(std::uint16_t h) {
 
 } // namespace
 
-D3d11VideoIn::D3d11VideoIn(std::uint64_t adapter_luid) : adapter_luid_(adapter_luid) {
-    ComPointer<IDXGIFactory1> factory;
-    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))) || !factory) {
-        throw std::runtime_error("D3d11VideoIn: CreateDXGIFactory1 failed");
+D3d11VideoIn::D3d11VideoIn(ID3D11Device* device, ID3D11DeviceContext* context)
+    : device_(device), context_(context) {
+    if (!device_ || !context_) {
+        throw std::runtime_error("D3d11VideoIn: null device/context");
     }
-    const LUID luid = toLuid(adapter_luid_);
-    ComPointer<IDXGIAdapter1> adapter = findAdapter(*factory, luid);
-    if (!adapter) {
-        throw std::runtime_error("D3d11VideoIn: adapter LUID not found");
-    }
-
-    const D3D_FEATURE_LEVEL level = D3D_FEATURE_LEVEL_11_0;
-    ID3D11Device* device = nullptr;
-    ID3D11DeviceContext* context = nullptr;
-    if (FAILED(D3D11CreateDevice(adapter, D3D_DRIVER_TYPE_UNKNOWN, nullptr, 0, &level, 1,
-                                 D3D11_SDK_VERSION, &device, nullptr, &context)) ||
-        !device || !context) {
-        throw std::runtime_error("D3d11VideoIn: D3D11CreateDevice failed");
-    }
-    device_ = device;
-    context_ = context;
-    removerLog(std::format("D3d11VideoIn device ready adapter_luid={:016x}", adapter_luid_));
 }
 
 D3d11VideoIn::~D3d11VideoIn() {
     destroyTexture();
-    if (context_) {
-        context_->Release();
-        context_ = nullptr;
-    }
-    if (device_) {
-        device_->Release();
-        device_ = nullptr;
-    }
 }
 
 void D3d11VideoIn::destroyTexture() {
@@ -273,7 +128,7 @@ void D3d11VideoIn::allocate(std::uint32_t width, std::uint32_t height, Format fo
     desc.SampleDesc = {1, 0};
     desc.Usage = D3D11_USAGE_DEFAULT;
     desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-    // ExtSampleD3D: SHARED | SHARED_NTHANDLE is what finally lets PIXERA write pixels.
+    // ExtSampleD3D: SHARED | SHARED_NTHANDLE (keyed mutex → black).
     desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
 
     if (FAILED(device_->CreateTexture2D(&desc, nullptr, &texture_)) || !texture_) {

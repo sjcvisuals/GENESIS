@@ -59,7 +59,7 @@ If the resource imports but timeline drag fails
      powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-pixera-remover.ps1
 
 2. Confirm the install printed BUILD_STAMP with:
-     remover-timeline-v18-d3d11vin-20260817
+     remover-timeline-v19-d3d-fence-20260817
 
 3. In PIXERA, re-browse to:
      <PIXERA>\data\rxExt\ExtGenesisRemover\ExtGenesisRemover.dll
@@ -76,12 +76,12 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v18-d3d11vin-20260817
+  remover-timeline-v19-d3d-fence-20260817
 
-v18 = ExtSampleD3D Video In + Vulkan output:
-  Video In uses D3D11_IMAGE (PIXERA D3D engine can write).
-  Output sampler stays Vulkan OPAQUE_WIN32.
-  No host download_texture.
+v19 = ExtSampleD3D full sync:
+  Device publishes D3D_FENCE TimelineSemaphore (before/after_render).
+  Video In = D3D11_IMAGE on the same D3D11 device as the fence.
+  Output sampler = Vulkan OPAQUE_WIN32.
 
 Stage colours (until Video In has pixels):
   cyan   = waiting for Video In link (normal)
