@@ -8,8 +8,7 @@
 
 namespace rxext::genesis_remover {
 
-// Host-texture Remover device: no D3D11/Vulkan shared images.
-// PIXERA fills a host Video In texture; we download → matte → upload sampler.
+// Shared-Vulkan Remover device (same I/O model as ExtGenesis Background Remover).
 class Device : public rxext::StreamDevice {
 public:
     explicit Device(ValueSet settings);

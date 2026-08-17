@@ -4,6 +4,30 @@
 #include <stdexcept>
 
 namespace genesis {
+namespace {
+
+std::size_t countNonzeroRgb(const std::uint8_t* rgba, std::size_t bytes) {
+    std::size_t n = 0;
+    for (std::size_t i = 0; i + 3 < bytes; i += 4) {
+        if (rgba[i] | rgba[i + 1] | rgba[i + 2]) {
+            ++n;
+        }
+    }
+    return n;
+}
+
+void sampleMid(const std::uint8_t* rgba, std::uint32_t w, std::uint32_t h, RemoverFrameDebug& d) {
+    if (!rgba || w == 0 || h == 0) {
+        return;
+    }
+    const std::size_t mid = (static_cast<std::size_t>(w) * h / 2u) * 4u;
+    d.mid_r = rgba[mid + 0];
+    d.mid_g = rgba[mid + 1];
+    d.mid_b = rgba[mid + 2];
+    d.mid_a = rgba[mid + 3];
+}
+
+} // namespace
 
 RemoverPipeline::RemoverPipeline(std::uint64_t adapter_luid) {
     VulkanContextConfig config{};
@@ -11,8 +35,6 @@ RemoverPipeline::RemoverPipeline(std::uint64_t adapter_luid) {
     config.enable_validation = false;
     context_ = std::make_unique<VulkanContext>(config);
     // Do not resize, create video_in, load ONNX, or start async here.
-    // PIXERA timeline placement calls initialize() and must get a shared sampler
-    // without those heavier steps (see ExtGenesisRemover Input).
 }
 
 RemoverPipeline::~RemoverPipeline() {
@@ -29,6 +51,16 @@ void RemoverPipeline::ensureScratch() {
     }
 }
 
+void RemoverPipeline::fillSolid(std::uint8_t r, std::uint8_t g, std::uint8_t b) {
+    ensureScratch();
+    for (std::size_t i = 0; i + 3 < scratch_out_.size(); i += 4) {
+        scratch_out_[i + 0] = r;
+        scratch_out_[i + 1] = g;
+        scratch_out_[i + 2] = b;
+        scratch_out_[i + 3] = 255;
+    }
+}
+
 void RemoverPipeline::resize(std::uint32_t width, std::uint32_t height) {
     if (width == 0 || height == 0) {
         return;
@@ -39,14 +71,12 @@ void RemoverPipeline::resize(std::uint32_t width, std::uint32_t height) {
     width_ = width;
     height_ = height;
 
-    // Output first — this is what PIXERA samples on the timeline.
     ExternalRenderTargetConfig out_cfg{};
     out_cfg.width = width_;
     out_cfg.height = height_;
     output_ = std::make_unique<ExternalRenderTarget>(*context_, out_cfg);
 
     ensureScratch();
-    // Keep existing video_in only if size matches; otherwise drop and recreate lazily.
     if (video_in_ && (video_in_->extent().width != width_ || video_in_->extent().height != height_)) {
         video_in_.reset();
     }
@@ -130,7 +160,6 @@ void RemoverPipeline::setAsyncEnabled(bool enabled) {
 
 void RemoverPipeline::setSettings(const BgRemoverSettings& settings) {
     remover_.setSettings(settings);
-    // Defer ONNX load until first processFrame / async start so timeline init stays light.
     if (remover_initialized_) {
         remover_.initialize(nullptr);
     }
@@ -165,24 +194,62 @@ bool RemoverPipeline::uploadOutputRgba8(const std::uint8_t* rgba) {
     return output_ && output_->uploadColorRgba8(rgba);
 }
 
-bool RemoverPipeline::processFrame(std::string* out_error) {
+bool RemoverPipeline::processFrame(std::string* out_error, RemoverFrameDebug* debug,
+                                   bool show_diagnostics) {
+    RemoverFrameDebug local{};
+    RemoverFrameDebug& d = debug ? *debug : local;
+    d.width = width_;
+    d.height = height_;
+    d.has_video_in = static_cast<bool>(video_in_);
+
     if (!output_) {
+        d.stage = "no_output";
         if (out_error) *out_error = "RemoverPipeline output not sized";
         return false;
     }
     if (!video_in_) {
-        // No video connected yet — publish transparent frame so timeline stays alive.
-        ensureScratch();
-        std::memset(scratch_out_.data(), 0, scratch_out_.size());
+        // Cyan = shared output live, waiting for Video In allocate / link.
+        d.stage = "waiting_video_in";
+        if (show_diagnostics) {
+            fillSolid(0, 220, 255);
+        } else {
+            ensureScratch();
+            std::memset(scratch_out_.data(), 0, scratch_out_.size());
+        }
         if (!output_->uploadColorRgba8(scratch_out_.data())) {
+            d.stage = "error";
             if (out_error) *out_error = "output upload failed";
             return false;
         }
         return true;
     }
     if (!video_in_->downloadRgba8(scratch_in_)) {
+        d.stage = "download_fail";
+        if (show_diagnostics) {
+            fillSolid(30, 90, 220); // blue = Vulkan shared read failed
+        }
+        if (show_diagnostics) {
+            (void)output_->uploadColorRgba8(scratch_out_.data());
+        }
         if (out_error) *out_error = "video download failed";
         return false;
+    }
+    d.download_ok = true;
+    d.nonzero_rgb = countNonzeroRgb(scratch_in_.data(), scratch_in_.size());
+    sampleMid(scratch_in_.data(), width_, height_, d);
+
+    if (d.nonzero_rgb == 0) {
+        // Orange = shared Video In bound but PIXERA wrote zeros / not writing yet.
+        d.stage = "input_black";
+        if (show_diagnostics) {
+            fillSolid(255, 140, 0);
+            if (!output_->uploadColorRgba8(scratch_out_.data())) {
+                d.stage = "error";
+                if (out_error) *out_error = "output upload failed";
+                return false;
+            }
+            return true;
+        }
     }
 
     ensureRemoverInitialized();
@@ -191,20 +258,28 @@ bool RemoverPipeline::processFrame(std::string* out_error) {
         ensureAsyncStarted();
         async_.trySubmit(scratch_in_.data(), width_, height_);
         if (!async_.copyLatest(scratch_out_.data(), width_, height_)) {
-            // Show opaque passthrough until the first matte completes (was full
-            // transparent → looked permanently black on the timeline).
             const std::size_t bytes = scratch_out_.size();
             std::memcpy(scratch_out_.data(), scratch_in_.data(), bytes);
             for (std::size_t i = 3; i < bytes; i += 4) {
                 scratch_out_[i] = 255;
             }
+            d.stage = "passthrough";
+            d.matte_copied = false;
+        } else {
+            d.stage = "matte";
+            d.matte_copied = true;
         }
     } else if (!remover_.process(scratch_in_.data(), scratch_out_.data(), width_, height_)) {
+        d.stage = "error";
         if (out_error) *out_error = "matte process failed";
         return false;
+    } else {
+        d.stage = "matte";
+        d.matte_copied = true;
     }
 
     if (!output_->uploadColorRgba8(scratch_out_.data())) {
+        d.stage = "error";
         if (out_error) *out_error = "output upload failed";
         return false;
     }

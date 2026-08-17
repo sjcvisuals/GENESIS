@@ -59,7 +59,7 @@ If the resource imports but timeline drag fails
      powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-pixera-remover.ps1
 
 2. Confirm the install printed BUILD_STAMP with:
-     remover-timeline-v13-blue-20260817
+     remover-timeline-v14-shared-20260817
 
 3. In PIXERA, re-browse to:
      <PIXERA>\data\rxExt\ExtGenesisRemover\ExtGenesisRemover.dll
@@ -76,16 +76,17 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v13-blue-20260817
+  remover-timeline-v14-shared-20260817
 
-Host-texture I/O + DirectML RVM. Do not pre-allocate Video In before props exist
-(that caused stuck blue: texture ready, PIXERA never writes, download hangs).
-Reallocate on prop relink / empty downloads / blue-stall; hold TextureRef during
-download. Stage colours: cyan=not allocated, blue=waiting pixels,
-orange=empty downloads.
-After install: quit PIXERA, re-import, scrub, link webcam to Video In, wait ~2s.
-Expect cyan → blue briefly → feed → cutout (or orange if source not writing).
-Log: ep=DML, download ok, render path=matte. Dump: .\scripts\dump-remover-log.ps1
+Shared-Vulkan I/O (same as ExtGenesis Background Remover). Host download_texture
+on Video In hangs forever in PIXERA (the old blue stall) — abandoned.
+Stage colours on the shared output:
+  cyan   = waiting Video In publish
+  blue   = Vulkan shared read failed
+  orange = Video In bound but pixels are zero
+  live   = passthrough then matte cutout
+In PIXERA, open Remover params → Debug Stage / Debug Status.
+Dump: .\scripts\dump-remover-log.ps1   or   .\scripts\pixera-remover-debug.ps1
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log

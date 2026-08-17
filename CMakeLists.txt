@@ -487,9 +487,9 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_BINARY_DIR}
     )
-    # Host-texture I/O (download/upload) + CPU matte. No D3D11/Vulkan shared images —
-    # those stayed black with live PIXERA Video In. Do not link genesis_runtime.
-    target_link_libraries(ExtGenesisRemover PRIVATE genesis_matting)
+    # Host download_texture on Video In hangs in PIXERA. Use the same shared-Vulkan
+    # RemoverPipeline path as ExtGenesis Background Remover mode.
+    target_link_libraries(ExtGenesisRemover PRIVATE genesis_remover_core)
     if(MSVC AND GENESIS_HAS_ONNXRUNTIME)
         target_link_options(ExtGenesisRemover PRIVATE "/DELAYLOAD:onnxruntime.dll")
         target_link_libraries(ExtGenesisRemover PRIVATE delayimp)

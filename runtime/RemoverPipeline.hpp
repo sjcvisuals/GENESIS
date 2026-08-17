@@ -13,6 +13,22 @@
 
 namespace genesis {
 
+// Per-frame diagnostics for PIXERA Remover debugging (shared Vulkan path).
+struct RemoverFrameDebug {
+    const char* stage = "none"; // no_output / waiting_video_in / download_fail /
+                                // input_black / passthrough / matte / error
+    bool has_video_in = false;
+    bool download_ok = false;
+    bool matte_copied = false;
+    std::size_t nonzero_rgb = 0;
+    unsigned mid_r = 0;
+    unsigned mid_g = 0;
+    unsigned mid_b = 0;
+    unsigned mid_a = 0;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+};
+
 // Headless Pixera-style remover: shared video in → matte → exportable RGBA out.
 // Used by ExtGenesis Remover mode and ExtGenesisRemover.
 //
@@ -56,7 +72,10 @@ public:
     VulkanContext& context() { return *context_; }
 
     // Download video_in → matte → upload into output color image.
-    bool processFrame(std::string* out_error = nullptr);
+    // When show_diagnostics is true, waiting/black stages use solid colours instead of
+    // transparent black so PIXERA shows the stall stage (cyan / blue / orange).
+    bool processFrame(std::string* out_error = nullptr, RemoverFrameDebug* debug = nullptr,
+                      bool show_diagnostics = true);
 
     // CPU-only path for smoke tests (no shared-image roundtrip). Sync matte.
     bool processCpuFrame(const std::uint8_t* in_rgba, std::uint8_t* out_rgba, std::uint32_t width,
@@ -72,6 +91,7 @@ private:
     void ensureAsyncStarted();
     void ensureRemoverInitialized();
     void ensureScratch();
+    void fillSolid(std::uint8_t r, std::uint8_t g, std::uint8_t b);
 
     std::unique_ptr<VulkanContext> context_;
     std::unique_ptr<ExternalSharedImage> video_in_;
