@@ -296,7 +296,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     remover_->resize(width_, height_);
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v16 shared output ready - link Video In"));
+        debug_status_->set_value(std::string("v17 shared output ready - link Video In"));
     }
     return true;
 } catch (const std::exception& ex) {
