@@ -5,7 +5,7 @@ $ErrorActionPreference = "Continue"
 $log = Join-Path $env:TEMP "ExtGenesisRemover.log"
 Write-Host "Log: $log"
 if (-not (Test-Path $log)) {
-    Write-Host "MISSING — PIXERA has not loaded ExtGenesisRemover.dll yet (or wrong DLL path)." -ForegroundColor Red
+    Write-Host "MISSING - PIXERA has not loaded ExtGenesisRemover.dll yet (or wrong DLL path)." -ForegroundColor Red
     Write-Host "After install, fully quit PIXERA, re-import the Remover DLL, scrub onto the clip."
     exit 1
 }
@@ -35,4 +35,4 @@ Write-Host "==== last 40 lines ====" -ForegroundColor Cyan
 Get-Content $log -Tail 40
 
 Write-Host ""
-Write-Host "Also check the Debug Status / Debug Stage parameters on the Remover resource in PIXERA."
+Write-Host "Also check Debug Status / Debug Stage on the Remover resource in PIXERA."
