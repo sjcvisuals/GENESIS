@@ -91,7 +91,7 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for `STATUS stage=` lines and stamp `remover-timeline-v14-shared-*`.
+Look for `STATUS stage=` lines and stamp `remover-timeline-v16-parity-*`.
 
 | Colour / stage | Meaning |
 |----------------|---------|

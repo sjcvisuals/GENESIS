@@ -11,7 +11,7 @@ if (-not (Test-Path $log)) {
 }
 
 Write-Host ""
-Write-Host "==== stamp (must be v14-shared) ====" -ForegroundColor Cyan
+Write-Host "==== stamp (must be v16-parity) ====" -ForegroundColor Cyan
 Select-String -Path $log -Pattern "remover-timeline-" | ForEach-Object { $_.Line } |
     ForEach-Object { if ($_ -match '\[(remover-timeline-[^\]]+)\]') { $Matches[1] } } |
     Group-Object | Sort-Object Count -Descending |
@@ -35,4 +35,4 @@ Write-Host "==== last 40 lines ====" -ForegroundColor Cyan
 Get-Content $log -Tail 40
 
 Write-Host ""
-Write-Host "Also check Debug Status / Debug Stage on the Remover resource in PIXERA."
+Write-Host "Also check Debug Stage (enum) on the Remover resource - Debug Status string may lag in PIXERA."

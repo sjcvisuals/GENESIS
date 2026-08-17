@@ -12,8 +12,9 @@
 
 namespace rxext::genesis_remover {
 
-// Shared-Vulkan Remover (same path as ExtGenesis Background Remover mode).
-// Host download_texture on Video In hangs in PIXERA (stuck blue) — do not use it.
+// Matte-only PIXERA extension. Texture I/O matches ExtGenesis Background Remover
+// mode and ExtSampleD3D: DLL allocates shared GPU memory, PIXERA writes Video In,
+// extension reads via Vulkan (not host download_texture).
 class Input : public rxext::InputStream {
 public:
     Input(std::uint64_t adapter_luid, ValueSet settings);
@@ -29,48 +30,27 @@ public:
     SyncDesc after_render() noexcept override;
 
 private:
-    void registerParameters();
-    void publishPlaceholderSampler();
-    bool tryEnsureGpuPipeline();
+    void ensureRemover();
     void applyMatteSettings();
-    void publishSharedOutput();
-    void publishVideoIn();
-    void enableProcessing();
-    void setDebugStatus(const std::string& text);
+    void publishTargetTexture();
+    void publishVideoInTexture();
     void logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg);
-    void maybeRepublishVideoInForBlackInput();
 
     std::uint64_t adapter_luid_ = 0;
-    std::uint64_t pipeline_adapter_luid_ = 0;
     ValueSet settings_;
     ParameterTexture* sampler_ = nullptr;
     ParameterTexture* video_in_ = nullptr;
     ParameterInt* quality_ = nullptr;
     ParameterValue* time_ = nullptr;
     ParameterValue* frame_counter_ = nullptr;
-    ParameterString* debug_status_ = nullptr;
     ParameterInt* debug_stage_ = nullptr;
+    ParameterString* debug_status_ = nullptr;
 
-    std::unique_ptr<::genesis::RemoverPipeline> pipeline_;
+    std::unique_ptr<::genesis::RemoverPipeline> remover_;
     std::uint32_t width_ = 1920;
     std::uint32_t height_ = 1080;
-    bool params_registered_ = false;
-    bool placeholder_published_ = false;
-    bool shared_output_published_ = false;
-    bool processing_enabled_ = false;
-    bool gpu_failed_ = false;
-    bool matte_live_ = false;
-    bool video_in_published_ = false;
-    bool baseline_captured_ = false;
-    bool same_res_allocate_tried_ = false;
-    int baseline_w_ = 0;
-    int baseline_h_ = 0;
-    std::string baseline_format_;
-    std::uint32_t input_black_frames_ = 0;
-    std::uint32_t video_in_republish_count_ = 0;
     std::uint64_t render_ticks_ = 0;
     std::string last_stage_;
-    std::string last_status_;
 };
 
 } // namespace rxext::genesis_remover

@@ -11,15 +11,21 @@
 namespace rxext::genesis_remover {
 
 Device::Device(ValueSet settings) : settings_(std::move(settings)) {
-    removerLog("Device ctor (shared-vulkan)");
+    removerLog("Device ctor");
 }
 
 bool Device::initialize() noexcept try {
     const string luid_hex = settings_.get(SettingNames::adapter_luid, string("0000000000000000"));
     adapter_luid_ = common::from_hex_string<std::uint64_t>(luid_hex);
     removerLog(std::format("Device::initialize adapter_luid={:016x}", adapter_luid_));
-    host().log_info(std::format("GENESIS Remover shared-vulkan device ready (adapter_luid={:016x})",
+    host().log_info(std::format("GENESIS Remover device ready (adapter_luid={:016x})",
                                 adapter_luid_));
+    if (adapter_luid_ == 0) {
+        removerLog("WARNING: adapter_luid is 0 - PIXERA must inject the engine GPU LUID "
+                   "or shared Video In stays black/orange");
+        host().log_error("GENESIS Remover: adapter LUID is 0 - set device Adapter LUID to the "
+                         "PIXERA engine GPU or shared textures will stay black");
+    }
     return true;
 } catch (const std::exception& ex) {
     removerLog(std::format("Device::initialize exception: {}", ex.what()));

@@ -1,33 +1,27 @@
-# Quick checklist after installing Remover v14 (shared Vulkan).
+# Quick checklist after installing Remover v16 (ExtGenesis parity).
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\pixera-remover-debug.ps1
 
 $ErrorActionPreference = "Continue"
 Write-Host @"
 
-GENESIS Remover v14 - PIXERA debug checklist
-============================================
-v13 and earlier used host download_texture for Video In. That API never
-completes in PIXERA (stuck blue). v14 uses the SAME shared-Vulkan path as
-the working ExtGenesis Background Remover mode.
+GENESIS Remover v16 - ExtGenesis texture parity
+===============================================
+RenderBridge contract (ExtSampleD3D / ExtGenesis Background Remover):
+  - Extension allocates shared GPU texture for Video In (is_target=false)
+  - PIXERA writes into that share handle every frame
+  - Extension reads via Vulkan (NOT host download_texture)
+  - Extension publishes shared sampler (is_target=true)
 
 1) Quit PIXERA completely
-2) git pull  (branch cursor/remover-camera-debug-7628)
+2) git pull
 3) BUILD-REMOVER.bat
-4) INSTALL-PIXERA-REMOVER.bat   (confirm stamp remover-timeline-v14-shared-*)
-5) Re-import ExtGenesisRemover.dll from data\rxExt\ExtGenesisRemover\
-6) Add Remover to timeline, scrub until you see CYAN
-7) Link webcam / media to parameter Video In
-8) Watch colour + Debug Stage / Debug Status on the Remover resource:
-
-   cyan     waiting_video_in   - link Video In (or wait ~1s for auto allocate)
-   blue     download_fail      - Vulkan shared read failed (dump log)
-   orange   input_black        - PIXERA not writing into shared texture yet
-   live     passthrough/matte  - working
-
-9) Dump log:
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dump-remover-log.ps1
-
-Paste the latest STATUS lines + stamp if it still fails.
+4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v16-parity-*)
+5) Re-import ExtGenesisRemover.dll
+6) On the Remover DEVICE, set Adapter LUID to the PIXERA engine GPU
+   (if it is 0000000000000000, orange/black is expected)
+7) Add Remover to timeline (cyan until Video In is linked is correct)
+8) Link webcam/media to Video In
+9) Dump log if needed:
 
 "@
 

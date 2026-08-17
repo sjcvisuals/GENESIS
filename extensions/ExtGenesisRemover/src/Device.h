@@ -8,7 +8,6 @@
 
 namespace rxext::genesis_remover {
 
-// Shared-Vulkan Remover device (same I/O model as ExtGenesis Background Remover).
 class Device : public rxext::StreamDevice {
 public:
     explicit Device(ValueSet settings);

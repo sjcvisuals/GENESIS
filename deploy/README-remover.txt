@@ -59,7 +59,7 @@ If the resource imports but timeline drag fails
      powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-pixera-remover.ps1
 
 2. Confirm the install printed BUILD_STAMP with:
-     remover-timeline-v15-orange-20260817
+     remover-timeline-v16-parity-20260817
 
 3. In PIXERA, re-browse to:
      <PIXERA>\data\rxExt\ExtGenesisRemover\ExtGenesisRemover.dll
@@ -76,17 +76,20 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v15-orange-20260817
+  remover-timeline-v16-parity-20260817
 
-Shared-Vulkan I/O (same as ExtGenesis Background Remover). Host download_texture
-on Video In hangs forever in PIXERA (the old blue stall) — abandoned.
-Stage colours on the shared output:
-  cyan   = waiting Video In publish
+v16 = ExtGenesis Background Remover texture contract (ExtSampleD3D pattern):
+  DLL allocates shared Vulkan memory; PIXERA writes Video In; we read on GPU.
+  No host download_texture. No placeholder sampler. No republish heuristics.
+
+Stage colours (until Video In has pixels):
+  cyan   = waiting for Video In link (normal)
   blue   = Vulkan shared read failed
-  orange = Video In bound but pixels are zero
-  live   = passthrough then matte cutout
-In PIXERA, open Remover params → Debug Stage / Debug Status.
-Dump: .\scripts\dump-remover-log.ps1   or   .\scripts\pixera-remover-debug.ps1
+  orange = linked but PIXERA wrote zeros (check Adapter LUID)
+  live   = passthrough then matte
+
+Critical: set device Adapter LUID to the PIXERA engine GPU (non-zero).
+Dump: .\scripts\dump-remover-log.ps1
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log
