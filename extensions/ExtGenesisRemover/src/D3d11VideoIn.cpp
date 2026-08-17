@@ -14,6 +14,7 @@
 #include <aclapi.h>
 #include <d3d11.h>
 #include <dxgi.h>
+#include <dxgi1_2.h> // IDXGIResource1::CreateSharedHandle
 
 #include <cstring>
 #include <format>
@@ -30,7 +31,12 @@ namespace {
 const SECURITY_ATTRIBUTES& sharedSecurityAttributes() {
     class Holder {
     public:
-        Holder() { init(); }
+        Holder() {
+            if (!init()) {
+                release();
+                throw std::runtime_error("D3d11VideoIn: security attributes init failed");
+            }
+        }
         ~Holder() { release(); }
         const SECURITY_ATTRIBUTES& get() const { return sa_; }
 
@@ -274,14 +280,15 @@ void D3d11VideoIn::allocate(std::uint32_t width, std::uint32_t height, Format fo
         throw std::runtime_error("D3d11VideoIn: CreateTexture2D failed");
     }
 
-    ComPointer<IDXGIResource1> dxgi_res;
+    IDXGIResource1* dxgi_res = nullptr;
     if (FAILED(texture_->QueryInterface(IID_PPV_ARGS(&dxgi_res))) || !dxgi_res) {
         destroyTexture();
         throw std::runtime_error("D3d11VideoIn: IDXGIResource1 QI failed");
     }
-    if (FAILED(dxgi_res->CreateSharedHandle(&sharedSecurityAttributes(), GENERIC_ALL, nullptr,
-                                            &share_handle_)) ||
-        !share_handle_) {
+    const HRESULT share_hr = dxgi_res->CreateSharedHandle(
+        &sharedSecurityAttributes(), GENERIC_ALL, nullptr, &share_handle_);
+    dxgi_res->Release();
+    if (FAILED(share_hr) || !share_handle_) {
         destroyTexture();
         throw std::runtime_error("D3d11VideoIn: CreateSharedHandle failed");
     }
