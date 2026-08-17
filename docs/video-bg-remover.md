@@ -91,9 +91,14 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for: `video_in HOST`, `download armed`, `download ok`, `swap_rb=1`,
-`render path=matte`. Stamp must be `remover-timeline-v13-blue-*`.
+Look for `STATUS stage=` lines and stamp `remover-timeline-v14-shared-*`.
 
-Waiting colours: **cyan** = not allocated, **blue** = waiting pixels (download
-may be hung — v13 reallocates), **orange** = empty downloads.
-Dump log: `.\scripts\dump-remover-log.ps1`.
+| Colour / stage | Meaning |
+|----------------|---------|
+| cyan / `waiting_video_in` | shared output OK, Video In not published |
+| blue / `download_fail` | Vulkan shared read failed |
+| orange / `input_black` | Video In bound, PIXERA wrote zeros |
+| `passthrough` / `matte` | working |
+
+Also check Remover params **Debug Stage** / **Debug Status**.
+Checklist: `.\scripts\pixera-remover-debug.ps1`
