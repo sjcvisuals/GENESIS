@@ -59,7 +59,7 @@ If the resource imports but timeline drag fails
      powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-pixera-remover.ps1
 
 2. Confirm the install printed BUILD_STAMP with:
-     remover-timeline-v11-rgba-20260814
+     remover-timeline-v12-pump-20260817
 
 3. In PIXERA, re-browse to:
      <PIXERA>\data\rxExt\ExtGenesisRemover\ExtGenesisRemover.dll
@@ -76,16 +76,16 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v11-rgba-20260814
+  remover-timeline-v12-pump-20260817
 
 Host-texture I/O + DirectML RVM (CPU fallback). Sampler/Video In use RGBA host
-textures (BGRA uploads appeared yellow in PIXERA). Video In downloads are R/B
-swizzled for correct colour. FrameCounter keeps update() running after Video In
-is linked. Video In allocates on format/dim change or after a short same-res
-timeout; download is cooldown-gated after allocate. Output reuses the last alpha
-on new camera frames (smooth cutout).
-After install: quit PIXERA, re-import Remover, scrub until cyan (not yellow),
-link webcam, wait ~1s. Expect correct-color passthrough first, then cutout.
+textures. Video In downloads are R/B swizzled. update() and render() both pump
+allocate/download (PIXERA sometimes skips one). Stage colours while waiting:
+  cyan  = not allocated yet
+  blue  = host texture ready, waiting pixels
+  orange = downloads empty (link/source not writing)
+After install: quit PIXERA, re-import Remover, scrub, link webcam. Expect cyan
+→ blue → feed → cutout (or orange if Video In is not writing).
 Log should show ep=DML, swap_rb=1, and render path=matte.
 Dump log: .\scripts\dump-remover-log.ps1
 

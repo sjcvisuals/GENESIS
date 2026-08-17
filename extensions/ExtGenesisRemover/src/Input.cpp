@@ -216,7 +216,8 @@ void Input::ensureVideoInHostTexture() {
         video_in_allocated_ = true;
         // Never download in the same step as create — that crashed PIXERA.
         video_in_download_allowed_ = false;
-        download_cooldown_frames_ = 20;
+        download_cooldown_frames_ = 8;
+        download_pending_ticks_ = 0;
         ensureSampler(static_cast<std::uint32_t>(desc.width),
                       static_cast<std::uint32_t>(desc.height));
         {
@@ -238,7 +239,6 @@ void Input::ensureVideoInHostTexture() {
     const int prop_w = video_in_->get_property<int>(SettingNames::resolution_x, 0);
     const int prop_h = video_in_->get_property<int>(SettingNames::resolution_y, 0);
     const std::string format_str(video_in_->get_property(SettingNames::format));
-    // Default BGRA like ExtSampleCPU — RGBA default caused multi-colour feeds.
     const Format prop_fmt = get_format_by_name(format_str, kPixeraHostFormat);
 
     if (!baseline_captured_ && prop_w > 0 && prop_h > 0) {
@@ -262,9 +262,9 @@ void Input::ensureVideoInHostTexture() {
             desc.height = static_cast<std::size_t>(prop_h);
             desc.format = prop_fmt;
             allocate(desc, format_explicit ? "props+format" : "props-changed");
-        } else if (!same_res_allocate_tried_ && render_ticks_ > 45) {
-            // Same-resolution live link: props may never change. After ~0.75s of ticks,
-            // create the host texture so PIXERA can write; download arms after cooldown.
+        } else if (!same_res_allocate_tried_ && pump_ticks_ > 30) {
+            // Same-resolution live link: props may never change. Create host texture
+            // so PIXERA can write; download arms after cooldown.
             same_res_allocate_tried_ = true;
             TextureDesc desc{};
             desc.width = static_cast<std::size_t>(prop_w);
@@ -272,6 +272,33 @@ void Input::ensureVideoInHostTexture() {
             desc.format = prop_fmt;
             allocate(desc, "same-res-timeout");
         }
+    }
+
+    // Props never populate (common with some live sources) — still allocate at stream size
+    // so a later link has a host texture to write into.
+    if (!video_in_allocated_ && !settings_fallback_allocate_tried_ && pump_ticks_ > 60) {
+        settings_fallback_allocate_tried_ = true;
+        TextureDesc desc{};
+        desc.width = width_ > 0 ? width_ : 1920;
+        desc.height = height_ > 0 ? height_ : 1080;
+        desc.format = kPixeraHostFormat;
+        allocate(desc, "settings-fallback");
+    }
+
+    // Downloads stay empty: recreate once (PIXERA sometimes needs a fresh host texture).
+    if (video_in_allocated_ && video_in_download_allowed_ && !empty_realloc_tried_ &&
+        downloads_ok_.load() == 0 && downloads_empty_.load() >= 90) {
+        empty_realloc_tried_ = true;
+        TextureDesc desc{};
+        desc.width = width_ > 0 ? width_ : 1920;
+        desc.height = height_ > 0 ? height_ : 1080;
+        if (prop_w > 0 && prop_h > 0) {
+            desc.width = static_cast<std::size_t>(prop_w);
+            desc.height = static_cast<std::size_t>(prop_h);
+        }
+        desc.format = prop_fmt;
+        removerLog("video_in realloc after empty downloads");
+        allocate(desc, "empty-realloc");
     }
 
     if (video_in_allocated_ && !video_in_download_allowed_) {
@@ -283,10 +310,16 @@ void Input::ensureVideoInHostTexture() {
         }
     }
 
-    if (!video_in_allocated_ && (render_ticks_ % 60u) == 1u) {
-        removerLog(std::format("waiting link: props {}x{} format='{}' baseline={}", prop_w, prop_h,
-                               format_str, baseline_captured_ ? 1 : 0));
+    if (!video_in_allocated_ && (pump_ticks_ % 60u) == 1u) {
+        removerLog(std::format("waiting link: props {}x{} format='{}' baseline={} pump={}", prop_w,
+                               prop_h, format_str, baseline_captured_ ? 1 : 0, pump_ticks_));
     }
+}
+
+void Input::pumpVideoIn() {
+    ++pump_ticks_;
+    ensureVideoInHostTexture();
+    requestVideoDownload();
 }
 
 void Input::requestVideoDownload() {
@@ -302,9 +335,21 @@ void Input::requestVideoDownload() {
     if (desc.width == 0 || desc.height == 0 || !video_in_->texture()) {
         return;
     }
+
+    // If PIXERA never invokes the download callback, pending sticks forever.
+    if (download_pending_.load()) {
+        ++download_pending_ticks_;
+        if (download_pending_ticks_ < 120) {
+            return;
+        }
+        download_pending_.store(false);
+        download_pending_ticks_ = 0;
+        removerLog("download pending stuck — reset");
+    }
     if (download_pending_.exchange(true)) {
         return;
     }
+    download_pending_ticks_ = 0;
 
     const auto gen = video_in_generation_.load(std::memory_order_acquire);
 
@@ -409,6 +454,20 @@ void Input::uploadOutputRgba(const std::uint8_t* rgba, std::uint32_t width, std:
     host().upload_texture(sampler_->texture(), buffer, true, []() noexcept {});
 }
 
+void Input::uploadSolidDiagnostic(std::uint8_t r, std::uint8_t g, std::uint8_t b, const char* path) {
+    if (last_render_path_ == path && (render_ticks_ % 30u) != 0u) {
+        return;
+    }
+    const std::uint32_t w = width_ > 0 ? width_ : 1920;
+    const std::uint32_t h = height_ > 0 ? height_ : 1080;
+    ensureSampler(w, h);
+    const std::size_t bytes = static_cast<std::size_t>(w) * h * 4u;
+    scratch_out_.resize(bytes);
+    fillSolidRgba(scratch_out_.data(), bytes, r, g, b);
+    uploadOutputRgba(scratch_out_.data(), w, h);
+    logPathOnce(last_render_path_, path);
+}
+
 void Input::logMatteStatusMaybe() {
     if (!async_started_) {
         return;
@@ -501,9 +560,8 @@ string Input::get_property(string_view name) noexcept {
 
 bool Input::update() noexcept try {
     touchHostClock();
-    ensureVideoInHostTexture();
     // Do not call applyMatteSettings / start ORT here — scrub-in must stay light.
-    requestVideoDownload();
+    pumpVideoIn();
     return true;
 } catch (const std::exception& ex) {
     removerLog(std::format("update exception: {}", ex.what()));
@@ -513,6 +571,8 @@ bool Input::update() noexcept try {
 RenderResult Input::render() noexcept try {
     touchHostClock();
     ++render_ticks_;
+    // PIXERA may call render without update (or the reverse). Pump both paths.
+    pumpVideoIn();
     logMatteStatusMaybe();
 
     std::vector<std::uint8_t> frame;
@@ -528,8 +588,17 @@ RenderResult Input::render() noexcept try {
     }
 
     if (frame.empty() || w == 0 || h == 0) {
-        // Keep cyan placeholder visible so we know the DLL is rendering.
-        logPathOnce(last_render_path_, "waiting_download_cyan");
+        // Stage colours so "just cyan" tells us where we stalled:
+        // cyan  = not allocated yet / waiting Video In props
+        // blue  = host texture ready, waiting for first download bytes
+        // orange = downloads firing but empty (PIXERA not writing)
+        if (!video_in_allocated_) {
+            uploadSolidDiagnostic(0, 220, 255, "waiting_allocate_cyan");
+        } else if (downloads_empty_.load() > 0 && downloads_ok_.load() == 0) {
+            uploadSolidDiagnostic(255, 140, 0, "waiting_download_orange");
+        } else {
+            uploadSolidDiagnostic(30, 90, 220, "waiting_download_blue");
+        }
         return RenderResult::Succeeded;
     }
 

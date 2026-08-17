@@ -34,8 +34,10 @@ private:
     void ensureSampler(std::uint32_t width, std::uint32_t height);
     void ensureVideoInHostTexture();
     void requestVideoDownload();
+    void pumpVideoIn();
     void applyMatteSettings();
     void uploadOutputRgba(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height);
+    void uploadSolidDiagnostic(std::uint8_t r, std::uint8_t g, std::uint8_t b, const char* path);
     void touchHostClock();
     void logMatteStatusMaybe();
 
@@ -74,11 +76,15 @@ private:
     int baseline_h_ = 0;
     std::string baseline_format_;
     bool same_res_allocate_tried_ = false;
+    bool settings_fallback_allocate_tried_ = false;
+    bool empty_realloc_tried_ = false;
+    std::uint32_t download_pending_ticks_ = 0;
 
     std::vector<std::uint8_t> scratch_out_;
     std::vector<std::uint8_t> last_alpha_;
     bool has_last_alpha_ = false;
     std::string last_matte_status_;
+    std::uint64_t pump_ticks_ = 0;
     std::uint64_t render_ticks_ = 0;
     std::uint64_t last_logged_completed_ = 0;
     std::string last_render_path_;
