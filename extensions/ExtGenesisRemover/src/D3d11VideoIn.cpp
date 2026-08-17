@@ -2,7 +2,7 @@
 #include "D3d11VideoIn.h"
 
 #include "RemoverLog.h"
-#include "SharedD3d11.h"
+#include "SharedSecurity.h"
 #include "rxext_util.h"
 
 #include <d3d11.h>

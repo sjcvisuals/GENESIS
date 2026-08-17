@@ -9,12 +9,8 @@ struct ID3D11DeviceContext;
 struct ID3D11Device5;
 struct ID3D11DeviceContext4;
 struct ID3D11Fence;
-struct SECURITY_ATTRIBUTES;
 
 namespace rxext::genesis_remover {
-
-// Everyone+Admin DACL for CreateSharedHandle (same as ExtSampleD3D).
-const SECURITY_ATTRIBUTES& sharedSecurityAttributes();
 
 // One D3D11 device + timeline fence per StreamDevice (ExtSampleD3D pattern).
 // PIXERA writes Video In only when this fence handshake is published.

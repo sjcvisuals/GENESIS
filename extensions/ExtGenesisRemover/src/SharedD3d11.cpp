@@ -1,14 +1,11 @@
 #include "WinPrefix.h"
 #include "SharedD3d11.h"
+#include "SharedSecurity.h"
 
 #include "RemoverLog.h"
 
 #include "d3d11/ComPointer.h"
 
-#ifdef WIN32_LEAN_AND_MEAN
-#undef WIN32_LEAN_AND_MEAN
-#endif
-#include <Windows.h>
 #include <aclapi.h>
 #include <d3d11_4.h>
 #include <dxgi.h>
