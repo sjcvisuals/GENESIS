@@ -78,10 +78,9 @@ If the resource imports but timeline drag fails
 Build stamp in logs / BUILD_STAMP.txt:
   remover-timeline-v20-d3d-io-20260817
 
-v19 = ExtSampleD3D full sync:
-  Device publishes D3D_FENCE TimelineSemaphore (before/after_render).
-  Video In = D3D11_IMAGE on the same D3D11 device as the fence.
-  Output sampler = Vulkan OPAQUE_WIN32.
+v20 = ExtSampleD3D full D3D11 I/O:
+  Device D3D_FENCE timeline + Video In and sampler both D3D11_IMAGE.
+  Matte is CPU/ORT; PIXERA never sees Vulkan share handles.
 
 Stage colours (until Video In has pixels):
   cyan   = waiting for Video In link (normal)
