@@ -48,10 +48,11 @@ public:
     // Creates/resizes the exportable output. Does not create video_in or load ONNX.
     void resize(std::uint32_t width, std::uint32_t height);
 
-    // Lazily create DXGI video_in for the current size. No-op if already sized.
-    void ensureVideoIn();
+    // Lazily create shared video_in. Recreates when size OR format changes.
+    // format must match the TextureDesc advertised to PIXERA (e.g. R16G16B16A16_SFLOAT).
+    void ensureVideoIn(VkFormat format = VK_FORMAT_R8G8B8A8_UNORM);
 
-    // Drop and recreate video_in (PIXERA sometimes needs a fresh share handle after link).
+    // Drop and recreate video_in at the last ensureVideoIn format.
     void forceRecreateVideoIn();
 
     void setSettings(const BgRemoverSettings& settings);
@@ -107,6 +108,7 @@ private:
     std::vector<std::uint8_t> scratch_out_;
     std::uint32_t width_ = 0;
     std::uint32_t height_ = 0;
+    VkFormat video_in_format_ = VK_FORMAT_R8G8B8A8_UNORM;
 };
 
 } // namespace genesis

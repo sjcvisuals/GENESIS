@@ -15,7 +15,7 @@ RenderBridge contract (ExtSampleD3D / ExtGenesis Background Remover):
 1) Quit PIXERA completely
 2) git pull
 3) BUILD-REMOVER.bat
-4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v16-parity-*)
+4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v17-fp16-*)
 5) Re-import ExtGenesisRemover.dll
 6) On the Remover DEVICE, set Adapter LUID to the PIXERA engine GPU
    (if it is 0000000000000000, orange/black is expected)

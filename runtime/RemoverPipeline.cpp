@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <stdexcept>
+#include <volk.h>
 
 namespace genesis {
 namespace {
@@ -88,22 +89,26 @@ void RemoverPipeline::resize(std::uint32_t width, std::uint32_t height) {
     }
 }
 
-void RemoverPipeline::ensureVideoIn() {
+void RemoverPipeline::ensureVideoIn(VkFormat format) {
     if (width_ == 0 || height_ == 0) {
         throw std::runtime_error("RemoverPipeline::ensureVideoIn: call resize first");
     }
-    if (video_in_ && video_in_->extent().width == width_ && video_in_->extent().height == height_) {
+    if (video_in_ && video_in_->extent().width == width_ &&
+        video_in_->extent().height == height_ && video_in_->format() == format) {
+        video_in_format_ = format;
         return;
     }
+    video_in_format_ = format;
     ExternalSharedImageConfig in_cfg{};
     in_cfg.width = width_;
     in_cfg.height = height_;
+    in_cfg.format = format;
     video_in_ = std::make_unique<ExternalSharedImage>(*context_, in_cfg);
 }
 
 void RemoverPipeline::forceRecreateVideoIn() {
     video_in_.reset();
-    ensureVideoIn();
+    ensureVideoIn(video_in_format_);
 }
 
 ExternalSharedImage& RemoverPipeline::videoIn() {

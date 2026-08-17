@@ -12,6 +12,7 @@
 #include <format>
 #include <string>
 #include <string_view>
+#include <volk.h>
 
 namespace rxext::genesis_remover {
 
@@ -164,7 +165,19 @@ void Input::publishVideoInTexture() {
         removerLog(std::format("video_in allocate {}x{} format={}", width_, height_,
                                get_format_name(desc.format)));
         remover_->resize(width_, height_);
-        remover_->ensureVideoIn();
+        const VkFormat vk_fmt = [&]() -> VkFormat {
+            switch (desc.format) {
+            case Format::B8G8R8A8_UNORM:
+                return VK_FORMAT_B8G8R8A8_UNORM;
+            case Format::R16G16B16A16_SFLOAT:
+                return VK_FORMAT_R16G16B16A16_SFLOAT;
+            case Format::R32G32B32A32_SFLOAT:
+                return VK_FORMAT_R32G32B32A32_SFLOAT;
+            default:
+                return VK_FORMAT_R8G8B8A8_UNORM;
+            }
+        }();
+        remover_->ensureVideoIn(vk_fmt);
         const auto& exp = remover_->videoIn().exportInfo();
         if (!exp.win32_handle) {
             throw std::runtime_error("GENESIS Remover video_in share handle is null");
@@ -173,6 +186,7 @@ void Input::publishVideoInTexture() {
         if (shared.format == Format::None) {
             shared.format = Format::R8G8B8A8_UNORM;
         }
+        // Advertise the format we actually allocated (must match Vulkan image + mem size).
         shared.is_target = false;
         shared.share_handle = {
             kHandleType,
@@ -186,8 +200,9 @@ void Input::publishVideoInTexture() {
         publishTargetTexture();
         applyMatteSettings();
         remover_->setAsyncEnabled(true);
-        removerLog(std::format("shared VIDEO_IN {}x{} mem={}", shared.width, shared.height,
-                               exp.memory_size));
+        removerLog(std::format("shared VIDEO_IN {}x{} format={} vk={} mem={}", shared.width,
+                               shared.height, get_format_name(shared.format),
+                               static_cast<int>(vk_fmt), exp.memory_size));
     };
 
     // Official helper: fires only when host sets resolution_x/y AND format.
@@ -232,7 +247,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     if (debug_stage_) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
-    const std::string ui = std::format("v16 {} nz={} mid=({},{},{}) vin={}",
+    const std::string ui = std::format("v17 {} nz={} mid=({},{},{}) vin={}",
                                        dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r,
                                        dbg.mid_g, dbg.mid_b, dbg.has_video_in ? 1 : 0);
     if (debug_status_) {

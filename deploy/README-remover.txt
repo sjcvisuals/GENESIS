@@ -59,7 +59,7 @@ If the resource imports but timeline drag fails
      powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-pixera-remover.ps1
 
 2. Confirm the install printed BUILD_STAMP with:
-     remover-timeline-v16-parity-20260817
+     remover-timeline-v17-fp16-20260817
 
 3. In PIXERA, re-browse to:
      <PIXERA>\data\rxExt\ExtGenesisRemover\ExtGenesisRemover.dll
@@ -76,9 +76,9 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v16-parity-20260817
+  remover-timeline-v17-fp16-20260817
 
-v16 = ExtGenesis Background Remover texture contract (ExtSampleD3D pattern):
+v17 = ExtGenesis Background Remover texture contract (ExtSampleD3D pattern):
   DLL allocates shared Vulkan memory; PIXERA writes Video In; we read on GPU.
   No host download_texture. No placeholder sampler. No republish heuristics.
 
