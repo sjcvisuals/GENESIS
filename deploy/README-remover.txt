@@ -59,7 +59,7 @@ If the resource imports but timeline drag fails
      powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-pixera-remover.ps1
 
 2. Confirm the install printed BUILD_STAMP with:
-     remover-timeline-v19-d3d-fence-20260817
+     remover-timeline-v20-d3d-io-20260817
 
 3. In PIXERA, re-browse to:
      <PIXERA>\data\rxExt\ExtGenesisRemover\ExtGenesisRemover.dll
@@ -76,7 +76,7 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v19-d3d-fence-20260817
+  remover-timeline-v20-d3d-io-20260817
 
 v19 = ExtSampleD3D full sync:
   Device publishes D3D_FENCE TimelineSemaphore (before/after_render).

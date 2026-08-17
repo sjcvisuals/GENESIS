@@ -3,7 +3,7 @@
 #include "WinPrefix.h"
 #include "rxext_client.h"
 
-#include "D3d11VideoIn.h"
+#include "D3d11SharedTexture.h"
 #include "SharedD3d11.h"
 #include "runtime/RemoverPipeline.hpp"
 
@@ -15,8 +15,8 @@
 
 namespace rxext::genesis_remover {
 
-// Output sampler: Vulkan OPAQUE_WIN32.
-// Video In: D3D11_IMAGE on Device's SharedD3d11 (+ Device D3D_FENCE timeline).
+// Full ExtSampleD3D I/O: Video In + sampler are both D3D11_IMAGE on Device's
+// SharedD3d11 (+ D3D_FENCE timeline). Matte runs on CPU via RemoverPipeline.
 class Input : public rxext::InputStream {
 public:
     Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, ValueSet settings);
@@ -33,7 +33,7 @@ public:
 
 private:
     void ensureRemover();
-    void ensureD3dVideoIn();
+    void ensureD3dTextures();
     void applyMatteSettings();
     void publishTargetTexture();
     void publishVideoInTexture();
@@ -51,8 +51,10 @@ private:
     ParameterString* debug_status_ = nullptr;
 
     std::unique_ptr<::genesis::RemoverPipeline> remover_;
-    std::unique_ptr<D3d11VideoIn> d3d_video_in_;
-    std::vector<std::uint8_t> d3d_rgba_;
+    std::unique_ptr<D3d11SharedTexture> d3d_output_;
+    std::unique_ptr<D3d11SharedTexture> d3d_video_in_;
+    std::vector<std::uint8_t> d3d_rgba_in_;
+    std::vector<std::uint8_t> d3d_rgba_out_;
     std::uint32_t width_ = 1920;
     std::uint32_t height_ = 1080;
     std::uint64_t render_ticks_ = 0;

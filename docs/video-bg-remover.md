@@ -91,7 +91,7 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for `STATUS stage=` lines and stamp `remover-timeline-v19-d3d-fence-*`.
+Look for `STATUS stage=` lines and stamp `remover-timeline-v20-d3d-io-*`.
 
 | Colour / stage | Meaning |
 |----------------|---------|

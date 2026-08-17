@@ -1,5 +1,5 @@
 #include "WinPrefix.h"
-#include "D3d11VideoIn.h"
+#include "D3d11SharedTexture.h"
 
 #include "RemoverLog.h"
 #include "SharedSecurity.h"
@@ -78,21 +78,25 @@ float halfToFloat(std::uint16_t h) {
 
 } // namespace
 
-D3d11VideoIn::D3d11VideoIn(ID3D11Device* device, ID3D11DeviceContext* context)
+D3d11SharedTexture::D3d11SharedTexture(ID3D11Device* device, ID3D11DeviceContext* context)
     : device_(device), context_(context) {
     if (!device_ || !context_) {
-        throw std::runtime_error("D3d11VideoIn: null device/context");
+        throw std::runtime_error("D3d11SharedTexture: null device/context");
     }
 }
 
-D3d11VideoIn::~D3d11VideoIn() {
+D3d11SharedTexture::~D3d11SharedTexture() {
     destroyTexture();
 }
 
-void D3d11VideoIn::destroyTexture() {
+void D3d11SharedTexture::destroyTexture() {
     if (share_handle_) {
         CloseHandle(share_handle_);
         share_handle_ = nullptr;
+    }
+    if (rtv_) {
+        rtv_->Release();
+        rtv_ = nullptr;
     }
     if (staging_) {
         staging_->Release();
@@ -105,13 +109,16 @@ void D3d11VideoIn::destroyTexture() {
     width_ = 0;
     height_ = 0;
     format_ = Format::None;
+    is_target_ = false;
 }
 
-void D3d11VideoIn::allocate(std::uint32_t width, std::uint32_t height, Format format) {
+void D3d11SharedTexture::allocate(std::uint32_t width, std::uint32_t height, Format format,
+                                  bool is_target) {
     if (width == 0 || height == 0) {
-        throw std::runtime_error("D3d11VideoIn: invalid extent");
+        throw std::runtime_error("D3d11SharedTexture: invalid extent");
     }
-    if (texture_ && width_ == width && height_ == height && format_ == format) {
+    if (texture_ && width_ == width && height_ == height && format_ == format &&
+        is_target_ == is_target) {
         return;
     }
     destroyTexture();
@@ -128,45 +135,65 @@ void D3d11VideoIn::allocate(std::uint32_t width, std::uint32_t height, Format fo
     desc.SampleDesc = {1, 0};
     desc.Usage = D3D11_USAGE_DEFAULT;
     desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    if (is_target) {
+        desc.BindFlags |= D3D11_BIND_RENDER_TARGET;
+    }
     // ExtSampleD3D: SHARED | SHARED_NTHANDLE (keyed mutex → black).
     desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
 
     if (FAILED(device_->CreateTexture2D(&desc, nullptr, &texture_)) || !texture_) {
-        throw std::runtime_error("D3d11VideoIn: CreateTexture2D failed");
+        throw std::runtime_error("D3d11SharedTexture: CreateTexture2D failed");
     }
 
     IDXGIResource1* dxgi_res = nullptr;
     if (FAILED(texture_->QueryInterface(IID_PPV_ARGS(&dxgi_res))) || !dxgi_res) {
         destroyTexture();
-        throw std::runtime_error("D3d11VideoIn: IDXGIResource1 QI failed");
+        throw std::runtime_error("D3d11SharedTexture: IDXGIResource1 QI failed");
     }
     const HRESULT share_hr = dxgi_res->CreateSharedHandle(
         &sharedSecurityAttributes(), GENERIC_ALL, nullptr, &share_handle_);
     dxgi_res->Release();
     if (FAILED(share_hr) || !share_handle_) {
         destroyTexture();
-        throw std::runtime_error("D3d11VideoIn: CreateSharedHandle failed");
+        throw std::runtime_error("D3d11SharedTexture: CreateSharedHandle failed");
+    }
+
+    if (is_target) {
+        if (FAILED(device_->CreateRenderTargetView(texture_, nullptr, &rtv_)) || !rtv_) {
+            destroyTexture();
+            throw std::runtime_error("D3d11SharedTexture: CreateRenderTargetView failed");
+        }
     }
 
     D3D11_TEXTURE2D_DESC staging_desc = desc;
     staging_desc.Usage = D3D11_USAGE_STAGING;
     staging_desc.BindFlags = 0;
-    staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    staging_desc.CPUAccessFlags = is_target ? D3D11_CPU_ACCESS_WRITE : D3D11_CPU_ACCESS_READ;
     staging_desc.MiscFlags = 0;
     if (FAILED(device_->CreateTexture2D(&staging_desc, nullptr, &staging_)) || !staging_) {
         destroyTexture();
-        throw std::runtime_error("D3d11VideoIn: staging CreateTexture2D failed");
+        throw std::runtime_error("D3d11SharedTexture: staging CreateTexture2D failed");
     }
 
     width_ = width;
     height_ = height;
     format_ = resolved;
-    removerLog(std::format("D3d11VideoIn allocate {}x{} format={} dxgi={}", width_, height_,
-                           get_format_name(format_), static_cast<int>(dxgi)));
+    is_target_ = is_target;
+    removerLog(std::format("D3d11SharedTexture allocate {}x{} format={} dxgi={} target={}", width_,
+                           height_, get_format_name(format_), static_cast<int>(dxgi),
+                           is_target_ ? 1 : 0));
 }
 
-bool D3d11VideoIn::downloadRgba8(std::vector<std::uint8_t>& out_rgba) {
-    if (!texture_ || !staging_ || !context_ || width_ == 0 || height_ == 0) {
+void D3d11SharedTexture::clear(float r, float g, float b, float a) {
+    if (!rtv_ || !context_) {
+        return;
+    }
+    const float color[4] = {r, g, b, a};
+    context_->ClearRenderTargetView(rtv_, color);
+}
+
+bool D3d11SharedTexture::downloadRgba8(std::vector<std::uint8_t>& out_rgba) {
+    if (!texture_ || !staging_ || !context_ || width_ == 0 || height_ == 0 || is_target_) {
         return false;
     }
     context_->CopyResource(staging_, texture_);
@@ -227,6 +254,27 @@ bool D3d11VideoIn::downloadRgba8(std::vector<std::uint8_t>& out_rgba) {
     }
 
     context_->Unmap(staging_, 0);
+    return true;
+}
+
+bool D3d11SharedTexture::uploadRgba8(const std::uint8_t* rgba, std::uint32_t width,
+                                     std::uint32_t height) {
+    if (!rgba || !texture_ || !staging_ || !context_ || !is_target_ || width != width_ ||
+        height != height_ || format_ != Format::R8G8B8A8_UNORM) {
+        return false;
+    }
+
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if (FAILED(context_->Map(staging_, 0, D3D11_MAP_WRITE, 0, &mapped)) || !mapped.pData) {
+        return false;
+    }
+    auto* dst = static_cast<std::uint8_t*>(mapped.pData);
+    for (std::uint32_t y = 0; y < height_; ++y) {
+        std::memcpy(dst + static_cast<std::size_t>(y) * mapped.RowPitch,
+                    rgba + static_cast<std::size_t>(y) * width_ * 4u, width_ * 4u);
+    }
+    context_->Unmap(staging_, 0);
+    context_->CopyResource(texture_, staging_);
     return true;
 }
 

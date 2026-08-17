@@ -6,6 +6,8 @@
 #include "common/string.h"
 #include "rxext_util.h"
 
+#include <d3d11.h>
+
 #include <format>
 #include <stdexcept>
 
@@ -80,12 +82,18 @@ void Device::render() noexcept {
     // ExtSampleD3D: wait until PIXERA signals the next fence value (Video In ready).
     if (d3d_) {
         d3d_->wait(++d3d_->fenceCounter());
+        if (d3d_->context()) {
+            d3d_->context()->Flush();
+        }
     }
 }
 
 SyncDesc Device::after_render() noexcept {
     if (d3d_) {
         d3d_->signal(++d3d_->fenceCounter());
+        if (d3d_->context()) {
+            d3d_->context()->Flush();
+        }
     }
     return get_sync_desc();
 }

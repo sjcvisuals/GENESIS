@@ -19,12 +19,6 @@ namespace rxext::genesis_remover {
 
 namespace {
 
-#if defined(_WIN32)
-constexpr auto kOutputHandleType = HandleType::OPAQUE_WIN32;
-#else
-constexpr auto kOutputHandleType = HandleType::OPAQUE_FD;
-#endif
-
 int stageToEnum(const char* stage) {
     if (!stage) {
         return 0;
@@ -91,7 +85,7 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
     debug_status_->set_property(PropertyNames::group_name, "Debug");
     debug_status_->set_value(std::string("booting"));
 
-    removerLog(std::format("Input ctor D3D11+fence VideoIn adapter_luid={:016x}", adapter_luid_));
+    removerLog(std::format("Input ctor full-D3D11 I/O adapter_luid={:016x}", adapter_luid_));
 }
 
 Input::~Input() {
@@ -102,20 +96,21 @@ void Input::ensureRemover() {
     if (remover_) {
         return;
     }
+    // Vulkan context still used internally for matte scratch; PIXERA only sees D3D11_IMAGE.
     remover_ = std::make_unique<::genesis::RemoverPipeline>(adapter_luid_);
     removerLog(std::format("RemoverPipeline ready adapter={:016x}", adapter_luid_));
-    host().log_info(std::format("GENESIS Remover Vulkan output ready (adapter_luid={:016x})",
-                                adapter_luid_));
 }
 
-void Input::ensureD3dVideoIn() {
-    if (d3d_video_in_) {
-        return;
-    }
+void Input::ensureD3dTextures() {
     if (!d3d_) {
         throw std::runtime_error("Input: SharedD3d11 is null");
     }
-    d3d_video_in_ = std::make_unique<D3d11VideoIn>(d3d_->device(), d3d_->context());
+    if (!d3d_output_) {
+        d3d_output_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
+    }
+    if (!d3d_video_in_) {
+        d3d_video_in_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
+    }
 }
 
 void Input::applyMatteSettings() {
@@ -136,28 +131,21 @@ void Input::applyMatteSettings() {
 }
 
 void Input::publishTargetTexture() {
-    if (!remover_ || !sampler_ || !remover_->hasOutput()) {
+    if (!sampler_ || !d3d_) {
         return;
     }
-    const auto& exp = remover_->output().colorExport();
-    if (!exp.win32_handle) {
-        throw std::runtime_error("GENESIS Remover output share handle is null");
-    }
+    ensureD3dTextures();
+    d3d_output_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true);
+
     TextureDesc desc{};
-    desc.width = remover_->output().extent().width;
-    desc.height = remover_->output().extent().height;
+    desc.width = width_;
+    desc.height = height_;
     desc.format = Format::R8G8B8A8_UNORM;
     desc.is_target = true;
-    desc.share_handle = {
-        kOutputHandleType,
-        reinterpret_cast<Handle>(exp.win32_handle),
-        0,
-        exp.memory_size,
-        0,
-        exp.dedicated,
-    };
+    desc.share_handle = {HandleType::D3D11_IMAGE,
+                         reinterpret_cast<Handle>(d3d_output_->shareHandle())};
     sampler_->set_texture(host().create_texture(desc));
-    removerLog(std::format("shared OUTPUT {}x{} mem={}", desc.width, desc.height, exp.memory_size));
+    removerLog(std::format("shared OUTPUT {}x{} handle=D3D11_IMAGE", desc.width, desc.height));
 }
 
 void Input::publishVideoInTexture() {
@@ -165,7 +153,6 @@ void Input::publishVideoInTexture() {
         return;
     }
 
-    // Exact ExtSampleD3D allocate sequence: D3D11 shared texture + D3D11_IMAGE handle.
     auto allocate = [&](const TextureDesc& desc) {
         if (desc.width == 0 || desc.height == 0) {
             return;
@@ -176,9 +163,8 @@ void Input::publishVideoInTexture() {
         removerLog(std::format("video_in allocate {}x{} format={} (D3D11_IMAGE)", width_, height_,
                                get_format_name(fmt)));
 
-        ensureD3dVideoIn();
-        d3d_video_in_->allocate(width_, height_, fmt);
-
+        ensureD3dTextures();
+        d3d_video_in_->allocate(width_, height_, fmt, /*is_target=*/false);
         remover_->resize(width_, height_);
         publishTargetTexture();
 
@@ -219,7 +205,7 @@ void Input::publishVideoInTexture() {
             }
         }
         if (desc.width > 0 && desc.height > 0) {
-            removerLog("video_in allocate via ExtGenesis fallback (D3D11)");
+            removerLog("video_in allocate via fallback (D3D11)");
             allocate(desc);
         } else if ((render_ticks_ % 60u) == 1u) {
             removerLog(std::format(
@@ -235,7 +221,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     if (debug_stage_) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
-    const std::string ui = std::format("v19 {} nz={} mid=({},{},{}) vin={}",
+    const std::string ui = std::format("v20 {} nz={} mid=({},{},{}) vin={}",
                                        dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r,
                                        dbg.mid_g, dbg.mid_b, dbg.has_video_in ? 1 : 0);
     if (debug_status_) {
@@ -282,7 +268,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     remover_->resize(width_, height_);
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v19 D3D11+fence Video In - link feed"));
+        debug_status_->set_value(std::string("v20 full D3D11 I/O - link Video In"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -353,12 +339,18 @@ RenderResult Input::render() noexcept try {
     }
 
     ensureRemover();
+    ensureD3dTextures();
 
     ::genesis::RemoverFrameDebug dbg{};
     std::string error;
 
     if (!video_in_ready_ || !d3d_video_in_ || !d3d_video_in_->hasTexture()) {
-        (void)remover_->processCpuRgbaFrame(nullptr, false, &error, &dbg, true);
+        (void)remover_->processCpuRgbaFrame(nullptr, false, &error, &dbg, true, &d3d_rgba_out_);
+        if (d3d_output_ && d3d_output_->hasTexture() && !d3d_rgba_out_.empty()) {
+            (void)d3d_output_->uploadRgba8(d3d_rgba_out_.data(), width_, height_);
+        } else if (d3d_output_ && d3d_output_->hasTexture()) {
+            d3d_output_->clear(0.0f, 0.86f, 1.0f, 1.0f); // cyan
+        }
         logStatusMaybe(dbg);
         return RenderResult::Succeeded;
     }
@@ -368,26 +360,26 @@ RenderResult Input::render() noexcept try {
         remover_->setAsyncEnabled(true);
     }
 
-    if (!d3d_video_in_->downloadRgba8(d3d_rgba_)) {
+    if (!d3d_video_in_->downloadRgba8(d3d_rgba_in_)) {
         dbg.width = width_;
         dbg.height = height_;
         dbg.has_video_in = true;
         dbg.download_ok = false;
         dbg.stage = "download_fail";
-        // Blue diagnostic via CPU path helper: upload solid through processCpu after fake fail.
-        std::vector<std::uint8_t> blue(static_cast<std::size_t>(width_) * height_ * 4u, 0);
-        for (std::size_t i = 0; i + 3 < blue.size(); i += 4) {
-            blue[i + 0] = 30;
-            blue[i + 1] = 90;
-            blue[i + 2] = 220;
-            blue[i + 3] = 255;
+        if (d3d_output_ && d3d_output_->hasTexture()) {
+            d3d_output_->clear(0.12f, 0.35f, 0.86f, 1.0f); // blue
         }
-        (void)remover_->uploadOutputRgba8(blue.data());
         logStatusMaybe(dbg);
         return RenderResult::Succeeded;
     }
 
-    (void)remover_->processCpuRgbaFrame(d3d_rgba_.data(), true, &error, &dbg, true);
+    (void)remover_->processCpuRgbaFrame(d3d_rgba_in_.data(), true, &error, &dbg, true,
+                                        &d3d_rgba_out_);
+    if (d3d_output_ && d3d_output_->hasTexture() && !d3d_rgba_out_.empty()) {
+        if (!d3d_output_->uploadRgba8(d3d_rgba_out_.data(), width_, height_)) {
+            removerLog("D3D output uploadRgba8 failed");
+        }
+    }
     if (!error.empty() && (render_ticks_ % 60u) == 1u) {
         removerLog(std::format("processCpuRgbaFrame: {}", error));
     }

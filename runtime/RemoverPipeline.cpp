@@ -206,18 +206,38 @@ bool RemoverPipeline::uploadOutputRgba8(const std::uint8_t* rgba) {
 
 bool RemoverPipeline::processCpuRgbaFrame(const std::uint8_t* rgba, bool has_input,
                                           std::string* out_error, RemoverFrameDebug* debug,
-                                          bool show_diagnostics) {
+                                          bool show_diagnostics,
+                                          std::vector<std::uint8_t>* out_rgba) {
     RemoverFrameDebug local{};
     RemoverFrameDebug& d = debug ? *debug : local;
     d.width = width_;
     d.height = height_;
     d.has_video_in = has_input;
 
-    if (!output_) {
+    auto publish_out = [&]() -> bool {
+        if (out_rgba) {
+            *out_rgba = scratch_out_;
+        }
+        if (output_) {
+            if (!output_->uploadColorRgba8(scratch_out_.data())) {
+                d.stage = "error";
+                if (out_error) *out_error = "output upload failed";
+                return false;
+            }
+        } else if (!out_rgba) {
+            d.stage = "no_output";
+            if (out_error) *out_error = "RemoverPipeline output not sized";
+            return false;
+        }
+        return true;
+    };
+
+    if (width_ == 0 || height_ == 0) {
         d.stage = "no_output";
-        if (out_error) *out_error = "RemoverPipeline output not sized";
+        if (out_error) *out_error = "RemoverPipeline not sized";
         return false;
     }
+
     if (!has_input || !rgba) {
         d.stage = "waiting_video_in";
         if (show_diagnostics) {
@@ -226,12 +246,7 @@ bool RemoverPipeline::processCpuRgbaFrame(const std::uint8_t* rgba, bool has_inp
             ensureScratch();
             std::memset(scratch_out_.data(), 0, scratch_out_.size());
         }
-        if (!output_->uploadColorRgba8(scratch_out_.data())) {
-            d.stage = "error";
-            if (out_error) *out_error = "output upload failed";
-            return false;
-        }
-        return true;
+        return publish_out();
     }
 
     ensureScratch();
@@ -252,12 +267,7 @@ bool RemoverPipeline::processCpuRgbaFrame(const std::uint8_t* rgba, bool has_inp
         d.stage = "input_black";
         if (show_diagnostics) {
             fillSolid(255, 140, 0);
-            if (!output_->uploadColorRgba8(scratch_out_.data())) {
-                d.stage = "error";
-                if (out_error) *out_error = "output upload failed";
-                return false;
-            }
-            return true;
+            return publish_out();
         }
     }
 
@@ -286,12 +296,7 @@ bool RemoverPipeline::processCpuRgbaFrame(const std::uint8_t* rgba, bool has_inp
         d.matte_copied = true;
     }
 
-    if (!output_->uploadColorRgba8(scratch_out_.data())) {
-        d.stage = "error";
-        if (out_error) *out_error = "output upload failed";
-        return false;
-    }
-    return true;
+    return publish_out();
 }
 
 bool RemoverPipeline::processFrame(std::string* out_error, RemoverFrameDebug* debug,
