@@ -76,16 +76,16 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v27-delay-stats-20260818
+  remover-timeline-v28-vin-target-20260818
 
-v27 = one-frame delayed readback + full-frame stats (max_rgb / corners):
-  v26 proved PIXERA writes opaque black (mid A→255, RGB=0, FP16 raw zeros).
-  Delay Map processing by 1 frame in case fence signals before color.
-  Log frame stats=max_rgb/nz/corners — if max_rgb>0 feed exists (letterbox mid).
-  Video In back to ExtSampleD3D SRV-only.
-  If still opaque_black: A/B test ExtSampleD3D with the SAME Video In link.
+v28 = Video In published as is_target=true (SRV|RTV):
+  v27 frame stats proved entire 1920x1080 is opaque black (max_rgb=0, A=1).
+  Host clears the share but never blits the feed when is_target=false.
+  Publish Video In as a render target so PIXERA can composite into it.
+  Expect nz>0 / passthrough if that was the missing flag; else still opaque_black
+  → A/B ExtSampleD3D with the same Video In link (PIXERA routing).
 
-v26 = continuous STATUS; orange; PIXERA wrote (0,0,0,1).
+v27 = delay + stats; confirmed full-frame opaque black from PIXERA.
 
 Stage colours (until Video In has pixels):
   cyan   = waiting for Video In link (normal)

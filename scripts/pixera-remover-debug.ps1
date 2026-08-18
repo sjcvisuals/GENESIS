@@ -1,29 +1,25 @@
-# Quick checklist after installing Remover v27 (delay + frame stats).
+# Quick checklist after installing Remover v28 (Video In is_target=true).
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\pixera-remover-debug.ps1
 
 $ErrorActionPreference = "Continue"
 Write-Host @"
 
-GENESIS Remover v27 - delay-stats
-=================================
-v26: download OK, PIXERA writes opaque black (mid A=255, RGB=0).
+GENESIS Remover v28 - vin-target
+================================
+v27: entire frame opaque black (max_rgb=0, A=1) — PIXERA clears, never blits feed.
 
-v27:
-  - Process previous frame (1-frame delay) in case fence is early
-  - Log frame stats: max_rgb, corners (letterbox check)
-  - Video In = ExtSampleD3D SRV-only again
-
-If still orange with max_rgb=0:
-  A/B test ExtSampleD3D with the SAME Video In media link.
-  If Sample is also black → PIXERA routing/source, not Remover.
-  If Sample shows video → Remover read path still wrong.
+v28: publish Video In as is_target=1 (SRV|RTV) so PIXERA can composite into it.
 
 1) Quit PIXERA completely
 2) git pull
 3) BUILD-REMOVER.bat
-4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v27-delay-stats-*)
+4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v28-vin-target-*)
 5) Re-import, Adapter LUID, Video In PLAYING
-6) Dump log — send STATUS + any 'frame stats' / 'opaque_black' lines
+6) Dump log — want nz>0 or frame stats max_rgb>0
+
+If still max_rgb=0: load ExtSampleD3D with the SAME Video In link.
+  Sample black too → PIXERA source/routing
+  Sample shows video → report back
 
 "@
 

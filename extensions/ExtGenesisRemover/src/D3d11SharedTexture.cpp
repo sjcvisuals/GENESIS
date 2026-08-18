@@ -386,7 +386,8 @@ bool D3d11SharedTexture::downloadRgba8(std::vector<std::uint8_t>& out_rgba, long
     if (out_hr) {
         *out_hr = S_OK;
     }
-    if (!texture_ || !staging_ || !context_ || width_ == 0 || height_ == 0 || is_target_) {
+    // Video In may be is_target=true (RTV for PIXERA composite) but still needs CPU readback.
+    if (!texture_ || !staging_ || !context_ || width_ == 0 || height_ == 0) {
         if (out_hr) {
             *out_hr = E_INVALIDARG;
         }

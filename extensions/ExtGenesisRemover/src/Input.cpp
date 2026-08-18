@@ -168,23 +168,25 @@ void Input::publishVideoInTexture() {
                                get_format_name(fmt)));
 
         ensureD3dTextures();
-        // Allocate Video In with RTV+SRV. No GPU writes before publish (v25
-        // UpdateSubresource/Flush/blit hung PIXERA right after VIDEO_IN).
-        d3d_video_in_->allocate(width_, height_, fmt, /*is_target=*/false);
+        // PIXERA clears our share to opaque black (max_rgb=0, A=1) when is_target=false.
+        // Publish as a render target (SRV|RTV + is_target=true) so the host can composite
+        // the Video In feed into it — ExtSampleD3D samples an input, but Remover needs
+        // PIXERA to WRITE the feed.
+        d3d_video_in_->allocate(width_, height_, fmt, /*is_target=*/true);
         remover_->resize(width_, height_);
         publishTargetTexture();
 
         TextureDesc shared = desc;
         shared.format = fmt;
-        shared.is_target = false;
+        shared.is_target = true;
         shared.share_handle = {HandleType::D3D11_IMAGE,
                                reinterpret_cast<Handle>(d3d_video_in_->shareHandle())};
         video_in_->set_texture(host().create_texture(shared));
         video_in_ready_ = true;
         applyMatteSettings();
-        removerLog(std::format("shared VIDEO_IN {}x{} format={} handle=D3D11_IMAGE rtv={}",
-                               shared.width, shared.height, get_format_name(shared.format),
-                               d3d_video_in_->rtv() ? 1 : 0));
+        removerLog(std::format(
+            "shared VIDEO_IN {}x{} format={} handle=D3D11_IMAGE is_target=1 rtv={}", shared.width,
+            shared.height, get_format_name(shared.format), d3d_video_in_->rtv() ? 1 : 0));
         have_delayed_frame_ = false;
         d3d_rgba_delayed_.clear();
     };
@@ -229,7 +231,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     if (debug_stage_) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
-    const std::string ui = std::format("v27 {} nz={} mid=({},{},{}) vin={}",
+    const std::string ui = std::format("v28 {} nz={} mid=({},{},{}) vin={}",
                                        dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r,
                                        dbg.mid_g, dbg.mid_b, dbg.has_video_in ? 1 : 0);
     if (debug_status_) {
@@ -282,7 +284,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     remover_->resize(width_, height_);
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v27 delay+stats - link Video In"));
+        debug_status_->set_value(std::string("v28 vin-target - link Video In"));
     }
     return true;
 } catch (const std::exception& ex) {

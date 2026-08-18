@@ -25,7 +25,8 @@ public:
     D3d11SharedTexture(const D3d11SharedTexture&) = delete;
     D3d11SharedTexture& operator=(const D3d11SharedTexture&) = delete;
 
-    // is_target=true → BIND_RENDER_TARGET (output sampler). false → Video In.
+    // is_target=true → BIND_RENDER_TARGET. Video In may also be a target so PIXERA
+    // can composite the feed (opaque-black clear alone means host never blitted).
     void allocate(std::uint32_t width, std::uint32_t height, Format format, bool is_target);
     bool hasTexture() const { return texture_ != nullptr; }
     std::uint32_t width() const { return width_; }
