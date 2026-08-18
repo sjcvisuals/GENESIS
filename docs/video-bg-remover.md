@@ -91,17 +91,16 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for `STATUS stage=` lines and stamp `remover-timeline-v34-private-map-*`.
+Look for `STATUS stage=` lines and stamp `remover-timeline-v35-live-blit-*`.
 
 | Colour / stage | Meaning |
 |----------------|---------|
 | cyan / `waiting_video_in` | Video In slot empty — drag Live Input in |
-| blue / `download_fail` | private Map or pipeline failed |
+| blue / `download_fail` | live path missing RTV/SRV |
 | `passthrough` / `matte` | live upright feed then cutout |
 
-v34: never Map/CopyResource shared output (that froze v33); blit → private Map after
-`waitGpuIdle`; clear shared on empty / unlink. Watch for `frozen_suspect` if mid stays
-constant (PIXERA not rewriting Video In).
+v35: live GPU blit every frame (no per-frame Map/idle stall); matte Map throttled.
+Watch for `frozen_suspect` if mid stays constant (PIXERA not rewriting Video In).
 
 Also check Remover params **Debug Stage** / **Debug Status**.
 Checklist: `.\scripts\pixera-remover-debug.ps1`

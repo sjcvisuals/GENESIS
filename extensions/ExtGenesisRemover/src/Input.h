@@ -17,9 +17,8 @@
 
 namespace rxext::genesis_remover {
 
-// GPU blit Video In → shared output (live). Map a private RGBA8 RT only (never Map
-// Video In or shared output — that froze PIXERA on one frame). Matte uploads go to
-// the private RT then blit → shared (no CopyResource on the share PIXERA samples).
+// Live: GPU blit Video In -> shared output every frame (ExtSampleD3D; no Map/Flush stall).
+// Matte: throttled blit -> private RGBA8 -> waitGpuIdle -> Map private; blit matte -> shared.
 class Input : public rxext::InputStream {
 public:
     Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, ValueSet settings);

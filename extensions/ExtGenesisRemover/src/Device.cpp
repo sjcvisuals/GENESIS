@@ -103,9 +103,8 @@ SyncDesc Device::after_render() noexcept {
     if (d3d_) {
         d3d_->noteSyncCallback();
         d3d_->signal(++d3d_->fenceCounter());
-        if (d3d_->context()) {
-            d3d_->context()->Flush();
-        }
+        // No Flush — ExtSampleD3D does not Flush after signal; Flush here stalled the
+        // PIXERA fence handshake and correlated with a frozen first Video In frame.
     }
     return get_sync_desc();
 }

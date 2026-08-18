@@ -76,33 +76,32 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v34-private-map-20260818
+  remover-timeline-v35-live-blit-20260818
 
-v34 = never Map/CopyResource shared textures PIXERA samples:
-  v33 upright but frozen — Map of shared output raced (nz=0 most frames) and
-  stuck the compositor on one face. Fix: GPU blit Video In → shared every
-  frame (ExtSampleD3D); blit → private RGBA8 RT; waitGpuIdle; Map private only.
-  Matte uploads to private then blit → shared. Clear shared on nz=0 / unlink.
-  Logs frozen_suspect if mid pixels unchanged for 90 frames.
+v35 = live blit every frame like ExtSampleD3D; matte Map throttled:
+  v34 still froze - waitGpuIdle+Map+matte every frame stalled the fence
+  signal so PIXERA stopped rewriting Video In. Also nz=0 clear wiped live
+  frames (black/blue flashes). Fix: blit live with no idle/Map; matte every
+  4th tick only; never clear shared after a live blit; no Flush after fence
+  signal. dump-remover-log.ps1 ASCII-only (em-dash broke PowerShell).
 
-v33 = Hypothesis B: never Map Video In; blit → Map output; flip Y (upright,
-  still froze).
+v34 = private Map after waitGpuIdle (still froze from per-frame stall).
 
-v32 = Device fence + GPU blit proof (camera visible = PIXERA writes).
+v33 = blit then Map shared output (upright, froze compositor).
 
 Preview vs Output: set Adapter LUID to that engine's GPU.
 
-Workflow: empty Video In until link → drag Live Input → live upright feed → cutout.
+Workflow: empty Video In until link -> drag Live Input -> live upright feed -> cutout.
 
 Stage colours:
   cyan   = waiting for Video In link (empty slot)
-  blue   = private Map / pipeline fail
+  blue   = live path missing RTV/SRV
   live   = GPU blit passthrough then matte
 
 Dump: .\scripts\dump-remover-log.ps1
-Expect stamp v34-private-map and:
-  gpu_blit×2 ...
-  private_after_blit nz>0 (and mid changing each dump)
+Expect stamp v35-live-blit and:
+  gpu_blit live ...
+  private_after_blit nz>0 with changing mid=
   STATUS stage=passthrough|matte
   no frozen_suspect
 

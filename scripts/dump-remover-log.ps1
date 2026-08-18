@@ -11,7 +11,7 @@ if (-not (Test-Path $log)) {
 }
 
 Write-Host ""
-Write-Host "==== stamp (must be v34-private-map) ====" -ForegroundColor Cyan
+Write-Host "==== stamp (must be v35-live-blit) ====" -ForegroundColor Cyan
 Select-String -Path $log -Pattern "remover-timeline-" | ForEach-Object { $_.Line } |
     ForEach-Object { if ($_ -match '\[(remover-timeline-[^\]]+)\]') { $Matches[1] } } |
     Group-Object | Sort-Object Count -Descending |
@@ -36,4 +36,4 @@ Get-Content $log -Tail 40
 Write-Host ""
 Write-Host "Expect live upright camera (not frozen/upside-down), then cutout."
 Write-Host "Adapter LUID = PREVIEW engine GPU when testing preview."
-Write-Host "If frozen_suspect appears with constant mid= — PIXERA is not rewriting Video In."
+Write-Host "If frozen_suspect appears with constant mid= then PIXERA is not rewriting Video In."
