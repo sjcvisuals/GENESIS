@@ -76,41 +76,30 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v32-fence-blit-20260818
+  remover-timeline-v33-blit-map-out-20260818
 
-v32 = Hypothesis A: ExtSampleD3D Device D3D_FENCE + D3D11_IMAGE + GPU blit:
-  Video In slot stays empty until you drag Live Input into it (correct).
-  Device publishes TimelineSemaphore (D3D_FENCE) so PIXERA can write the feed.
-  Video In is_target=false (match ExtSampleD3D; v28 is_target=true still zeros).
-  After fence waitCpu: GPU blit Video In → output FIRST (visual proof), then
-  CPU Map for matte. If preview shows camera but map_nz=0 → Map bug.
-  If blit also black → PIXERA not filling share (LUID / engine / link).
+v33 = Hypothesis B: never Map Video In; blit → Map output; flip Y:
+  v32 showed camera via GPU blit but frozen on first frame + upside down;
+  Map of Video In always nz=0 while blit showed pixels. CopyResource/Map on
+  Video In fights PIXERA updates. Fix: blit only (V-flipped UVs), Map our
+  RGBA8 output for matte; leave blit on screen until covered matte.
 
-Preview vs Output engines:
-  Each engine has its own GPU. Set Remover device Adapter LUID to THAT engine's
-  LUID (non-zero). Wrong LUID → shared textures stay black on that engine.
-  Test preview and output separately if they use different adapters.
+v32 = Device fence + GPU blit proof (camera visible = PIXERA writes).
 
-Workflow:
-  1) Place Remover on timeline — Video In may show [] / not distributed (OK).
-  2) Drag Live Input (verified on another layer) into Remover Video In.
-  3) Expect log: video_in allocate + shared VIDEO_IN is_target=0 + gpu_blit
-  4) Preview should show camera (blit) then cutout (matte) when nz>0.
+Preview vs Output: set Adapter LUID to that engine's GPU.
 
-v31 = Vulkan shared + FP16 match; dl=1 but nz=0 (no Device fence / D3D11_IMAGE).
+Workflow: empty Video In until link → drag Live Input → live upright feed → cutout.
 
 Stage colours:
   cyan   = waiting for Video In link (empty slot)
-  blue   = fence wait / Map failed
-  orange = Map zeros (and no usable blit)
-  live   = GPU blit and/or passthrough/matte
+  blue   = fence wait / output Map failed
+  live   = GPU blit passthrough then matte
 
 Dump: .\scripts\dump-remover-log.ps1
-Expect stamp v32-fence-blit and:
-  Device::before_render fence...
-  shared VIDEO_IN ... is_target=0
-  gpu_blit Video In → output
-  STATUS ... nz>0  OR  map_nz=0 blitted=1
+Expect stamp v33-blit-map-out and:
+  gpu_blit ... (no Video In Map)
+  out_after_blit nz>0
+  STATUS stage=passthrough|matte
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log
