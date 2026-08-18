@@ -78,10 +78,10 @@ InputStream* Device::create_input_stream(ValueSet settings) noexcept try {
 SyncDesc Device::before_render() noexcept {
     if (d3d_) {
         d3d_->noteSyncCallback();
-        if ((d3d_->syncCallbacks() % 60u) == 1u) {
+        const auto n = d3d_->syncCallbacks();
+        if (n <= 15u || (n % 60u) == 1u) {
             removerLog(std::format("Device::before_render fence counter={} completed={} calls={}",
-                                   d3d_->fenceCounter(), d3d_->completedValue(),
-                                   d3d_->syncCallbacks()));
+                                   d3d_->fenceCounter(), d3d_->completedValue(), n));
         }
     }
     return get_sync_desc();

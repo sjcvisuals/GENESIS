@@ -139,16 +139,14 @@ void D3d11SharedTexture::allocate(std::uint32_t width, std::uint32_t height, For
     desc.Format = dxgi;
     desc.SampleDesc = {1, 0};
     desc.Usage = D3D11_USAGE_DEFAULT;
-    // Match ExtSampleD3D TextureDesc: Video In = SRV only; sampler/output = SRV|RTV.
-    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-    if (is_target) {
-        desc.BindFlags |= D3D11_BIND_RENDER_TARGET;
-    }
+    // Always SRV. Also try RTV on Video In so PIXERA can OM-blit into the share
+    // (ExtSampleD3D uses SRV-only; Remover saw zeros — PIXERA may need RTV).
+    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
     // ExtSampleD3D: SHARED | SHARED_NTHANDLE (keyed mutex → black).
     desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
 
     if (FAILED(device_->CreateTexture2D(&desc, nullptr, &texture_)) || !texture_) {
-        // Fallback: SRV-only (strict ExtSampleD3D) if RTV+share rejects the format.
+        // Fallback: ExtSampleD3D bind flags (SRV only for Video In, SRV|RTV for output).
         desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
         if (is_target) {
             desc.BindFlags |= D3D11_BIND_RENDER_TARGET;
@@ -227,31 +225,9 @@ bool D3d11SharedTexture::fillSentinelMagenta() {
     if (!texture_ || !context_ || width_ == 0 || height_ == 0) {
         return false;
     }
-    if (rtv_ && (format_ == Format::R8G8B8A8_UNORM || format_ == Format::R16G16B16A16_SFLOAT)) {
+    // Prefer RTV Clear (no Flush — Flush before PIXERA open hung v25).
+    if (rtv_) {
         clear(1.0f, 0.0f, 1.0f, 1.0f);
-        context_->Flush();
-        return true;
-    }
-    // 1x1 mid-pixel UpdateSubresource (full-frame FP16 upload can stall PIXERA open).
-    const UINT mx = width_ / 2u;
-    const UINT my = height_ / 2u;
-    D3D11_BOX box{};
-    box.left = mx;
-    box.top = my;
-    box.front = 0;
-    box.right = mx + 1;
-    box.bottom = my + 1;
-    box.back = 1;
-    if (format_ == Format::R8G8B8A8_UNORM) {
-        const std::uint8_t px[4] = {255, 0, 255, 255};
-        context_->UpdateSubresource(texture_, 0, &box, px, 4u, 0);
-        context_->Flush();
-        return true;
-    }
-    if (format_ == Format::R16G16B16A16_SFLOAT) {
-        const std::uint16_t px[4] = {0x3C00, 0x0000, 0x3C00, 0x3C00}; // (1,0,1,1)
-        context_->UpdateSubresource(texture_, 0, &box, px, 8u, 0);
-        context_->Flush();
         return true;
     }
     return false;
@@ -321,6 +297,14 @@ bool D3d11SharedTexture::mapStagingToRgba8(std::vector<std::uint8_t>& out_rgba, 
             }
         }
     } else if (format_ == Format::R16G16B16A16_SFLOAT) {
+        const std::uint32_t mx = width_ / 2u;
+        const std::uint32_t my = height_ / 2u;
+        const auto* mid_src = reinterpret_cast<const std::uint16_t*>(
+            base + static_cast<std::size_t>(my) * row_pitch + static_cast<std::size_t>(mx) * 8u);
+        const std::uint16_t raw0 = mid_src[0];
+        const std::uint16_t raw1 = mid_src[1];
+        const std::uint16_t raw2 = mid_src[2];
+        const std::uint16_t raw3 = mid_src[3];
         for (std::uint32_t y = 0; y < height_; ++y) {
             const auto* src =
                 reinterpret_cast<const std::uint16_t*>(base + static_cast<std::size_t>(y) * row_pitch);
@@ -330,6 +314,21 @@ bool D3d11SharedTexture::mapStagingToRgba8(std::vector<std::uint8_t>& out_rgba, 
                 dst[x * 4u + 1] = clampU8(halfToFloat(src[x * 4u + 1]));
                 dst[x * 4u + 2] = clampU8(halfToFloat(src[x * 4u + 2]));
                 dst[x * 4u + 3] = clampU8(halfToFloat(src[x * 4u + 3]));
+            }
+        }
+        bool any = false;
+        for (unsigned char b : out_rgba) {
+            if (b) {
+                any = true;
+                break;
+            }
+        }
+        if (!any) {
+            static unsigned zero_logs = 0;
+            if ((zero_logs++ % 30u) == 0u) {
+                removerLog(std::format(
+                    "FP16 raw mid=({:04x},{:04x},{:04x},{:04x}) converted all zero", raw0, raw1,
+                    raw2, raw3));
             }
         }
     } else if (format_ == Format::R32G32B32A32_SFLOAT) {

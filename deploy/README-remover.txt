@@ -76,15 +76,14 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v25-gpublit-20260818
+  remover-timeline-v26-cpu-rtv-20260818
 
-v25 = GPU blit Video In → output (ExtSampleD3D) + CPU read from output:
-  v24 download worked but pixels were zero (input_black).
-  Now GPU-sample shared Video In into output, then read RGBA8 from output for matte.
-  1x1 mid magenta sentinel: if mid stays magenta, PIXERA never wrote.
-  On input_black, keep GPU blit on screen (no orange cover) so you can SEE the feed.
+v26 = restore v24 CPU path + Video In RTV (no GPU blit / no pre-publish GPU write):
+  v25 hung black again right after VIDEO_IN (GPU blit / UpdateSubresource+Flush).
+  Expect continuous STATUS like v24. Video In now SRV|RTV so PIXERA can OM-blit.
+  FP16 raw mid bits logged when converted pixels are all zero.
 
-v24 = blocking Map after fence; dl=1 but nz=0 (orange).
+v25 = GPU blit; hung after VIDEO_IN publish.
 
 Stage colours (until Video In has pixels):
   cyan   = waiting for Video In link (normal)

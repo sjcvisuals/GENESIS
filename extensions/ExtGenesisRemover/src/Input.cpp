@@ -113,9 +113,7 @@ void Input::ensureD3dTextures() {
     if (!d3d_video_in_) {
         d3d_video_in_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
     }
-    if (!passthrough_) {
-        passthrough_ = std::make_unique<D3d11Passthrough>(d3d_->device());
-    }
+    // Passthrough kept available but unused in v26 (GPU blit hung after VIDEO_IN in v25).
 }
 
 void Input::applyMatteSettings() {
@@ -170,25 +168,23 @@ void Input::publishVideoInTexture() {
                                get_format_name(fmt)));
 
         ensureD3dTextures();
+        // Allocate Video In with RTV+SRV. No GPU writes before publish (v25
+        // UpdateSubresource/Flush/blit hung PIXERA right after VIDEO_IN).
         d3d_video_in_->allocate(width_, height_, fmt, /*is_target=*/false);
-        if (d3d_video_in_->fillSentinelMagenta()) {
-            removerLog("video_in 1x1 mid magenta sentinel (if mid stays magenta, PIXERA is not writing)");
-        }
         remover_->resize(width_, height_);
         publishTargetTexture();
 
         TextureDesc shared = desc;
         shared.format = fmt;
         shared.is_target = false;
-        // Match ExtSampleD3D: type + handle only.
         shared.share_handle = {HandleType::D3D11_IMAGE,
                                reinterpret_cast<Handle>(d3d_video_in_->shareHandle())};
         video_in_->set_texture(host().create_texture(shared));
         video_in_ready_ = true;
         applyMatteSettings();
-        // Keep matte sync until first gated download succeeds (async start can mask hangs).
-        removerLog(std::format("shared VIDEO_IN {}x{} format={} handle=D3D11_IMAGE", shared.width,
-                               shared.height, get_format_name(shared.format)));
+        removerLog(std::format("shared VIDEO_IN {}x{} format={} handle=D3D11_IMAGE rtv={}",
+                               shared.width, shared.height, get_format_name(shared.format),
+                               d3d_video_in_->rtv() ? 1 : 0));
     };
 
     update_input_texture(*video_in_, allocate);
@@ -231,7 +227,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     if (debug_stage_) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
-    const std::string ui = std::format("v25 {} nz={} mid=({},{},{}) vin={}",
+    const std::string ui = std::format("v26 {} nz={} mid=({},{},{}) vin={}",
                                        dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r,
                                        dbg.mid_g, dbg.mid_b, dbg.has_video_in ? 1 : 0);
     if (debug_status_) {
@@ -284,7 +280,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     remover_->resize(width_, height_);
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v25 gpu-blit - link Video In"));
+        debug_status_->set_value(std::string("v26 cpu+rtv - link Video In"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -371,14 +367,14 @@ RenderResult Input::render() noexcept try {
         return RenderResult::Succeeded;
     }
 
-    if ((render_ticks_ % 30u) == 1u) {
+    // Heartbeat: first frames after VIDEO_IN must appear or PIXERA hung on share open.
+    if (render_ticks_ <= 5u || (render_ticks_ % 30u) == 1u) {
         removerLog(std::format("render vin-ready enter ticks={} fence={}/{}", render_ticks_,
                                d3d_ ? d3d_->completedValue() : 0,
                                d3d_ ? d3d_->fenceCounter() : 0));
     }
 
     // Device::render already GPU-Waited fenceCounter. Only Map after that value completes.
-    // Mapping while GPU Wait is still pending = solid black hang (no further STATUS).
     const std::uint64_t wait_for = d3d_ ? d3d_->fenceCounter() : 0;
     if (d3d_ && wait_for > 0 && !d3d_->waitCpu(wait_for, 100)) {
         dbg.width = width_;
@@ -386,7 +382,7 @@ RenderResult Input::render() noexcept try {
         dbg.has_video_in = true;
         dbg.download_ok = false;
         dbg.stage = "download_fail";
-        if ((render_ticks_ % 30u) == 1u) {
+        if (render_ticks_ <= 5u || (render_ticks_ % 30u) == 1u) {
             removerLog(std::format(
                 "fence wait timeout wait_for={} completed={} - skip Map (avoid hang)",
                 wait_for, d3d_->completedValue()));
@@ -398,46 +394,20 @@ RenderResult Input::render() noexcept try {
         return RenderResult::Succeeded;
     }
 
-    if ((render_ticks_ % 30u) == 1u) {
-        removerLog(std::format("download begin vin=1 wait_for={} completed={}", wait_for,
-                               d3d_ ? d3d_->completedValue() : 0));
-    }
-
-    // ExtSampleD3D path: GPU-sample Video In into output (proves PIXERA writes without CPU Map).
-    bool gpu_blit = false;
-    if (passthrough_ && passthrough_->ready() && d3d_video_in_->srv() && d3d_output_->rtv()) {
-        passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_output_->rtv(), width_,
-                           height_);
-        gpu_blit = true;
-    }
-
-    // Prefer reading the blitted RGBA8 output for matte (FP16 Video In → shader convert).
-    // Fall back to direct Video In staging download if blit unavailable.
+    // v24 path only: CPU download Video In. GPU blit after Map hung PIXERA in v25.
     long map_hr = 0;
-    bool got_cpu = false;
-    if (gpu_blit && d3d_output_) {
-        got_cpu = d3d_output_->downloadTargetRgba8(d3d_rgba_in_, &map_hr);
-        if ((render_ticks_ % 30u) == 1u) {
-            removerLog(std::format("cpu from OUTPUT blit ok={} hr=0x{:08x}", got_cpu ? 1 : 0,
-                                   static_cast<unsigned long>(map_hr)));
-        }
-    }
-    if (!got_cpu) {
-        got_cpu = d3d_video_in_->downloadRgba8(d3d_rgba_in_, &map_hr);
-        if ((render_ticks_ % 30u) == 1u) {
-            removerLog(std::format("cpu from VIDEO_IN ok={} hr=0x{:08x} fmt={}", got_cpu ? 1 : 0,
-                                   static_cast<unsigned long>(map_hr),
-                                   get_format_name(d3d_video_in_->format())));
-        }
-    }
-
-    if (!got_cpu) {
+    if (!d3d_video_in_->downloadRgba8(d3d_rgba_in_, &map_hr)) {
         dbg.width = width_;
         dbg.height = height_;
         dbg.has_video_in = true;
         dbg.download_ok = false;
         dbg.stage = "download_fail";
-        if (!gpu_blit && d3d_output_ && d3d_output_->hasTexture()) {
+        if (render_ticks_ <= 5u || (render_ticks_ % 30u) == 1u) {
+            removerLog(std::format("download Map/copy failed hr=0x{:08x} fmt={}",
+                                   static_cast<unsigned long>(map_hr),
+                                   get_format_name(d3d_video_in_->format())));
+        }
+        if (d3d_output_ && d3d_output_->hasTexture()) {
             d3d_output_->clear(0.12f, 0.35f, 0.86f, 1.0f); // blue
         }
         logStatusMaybe(dbg);
@@ -451,25 +421,13 @@ RenderResult Input::render() noexcept try {
 
     (void)remover_->processCpuRgbaFrame(d3d_rgba_in_.data(), true, &error, &dbg, true,
                                         &d3d_rgba_out_);
-
-    // If input is black/sentinel, leave GPU blit on screen (don't cover with orange).
-    // Magenta mid → PIXERA never wrote. Zero mid after sentinel → PIXERA wrote black.
-    const bool keep_blit =
-        gpu_blit && (dbg.nonzero_rgb == 0 || D3d11SharedTexture::looksLikeSentinel(d3d_rgba_in_));
-    if (keep_blit) {
-        if ((render_ticks_ % 30u) == 1u) {
-            D3d11SharedTexture::logMidRaw(d3d_rgba_in_, Format::R8G8B8A8_UNORM, width_, height_,
-                                          "input_black");
-            if (D3d11SharedTexture::looksLikeSentinel(d3d_rgba_in_)) {
-                removerLog("SENTINEL STILL PRESENT - PIXERA is not writing Video In");
-            } else {
-                removerLog("GPU blit kept; CPU sees zeros - PIXERA wrote black or feed is black");
-            }
+    if (dbg.nonzero_rgb == 0 && (render_ticks_ % 30u) == 1u) {
+        if (D3d11SharedTexture::looksLikeSentinel(d3d_rgba_in_)) {
+            removerLog("SENTINEL STILL PRESENT - PIXERA is not writing Video In");
+        } else {
+            removerLog("input_black: PIXERA wrote zeros (check Video In media is playing)");
         }
-        logStatusMaybe(dbg);
-        return RenderResult::Succeeded;
     }
-
     if (d3d_output_ && d3d_output_->hasTexture() && !d3d_rgba_out_.empty()) {
         if (!d3d_output_->uploadRgba8(d3d_rgba_out_.data(), width_, height_)) {
             removerLog("D3D output uploadRgba8 failed");
