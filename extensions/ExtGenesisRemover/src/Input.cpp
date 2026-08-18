@@ -6,50 +6,50 @@
 #include "common/string.h"
 #include "matting/BgRemover.hpp"
 #include "platform/Paths.hpp"
-#include "renderer/vulkan/ExternalRenderTarget.hpp"
+#include "rxext_util.h"
 
-#include <volk.h>
+#include <Windows.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <format>
+#include <stdexcept>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace rxext::genesis_remover {
 
 namespace {
-#if defined(_WIN32)
-constexpr auto kHandleType = HandleType::OPAQUE_WIN32;
-#else
-constexpr auto kHandleType = HandleType::OPAQUE_FD;
-#endif
 
 int stageToEnum(const char* stage) {
-    if (!stage) return 0;
-    if (std::string_view(stage) == "waiting_video_in") return 1;
-    if (std::string_view(stage) == "download_fail") return 2;
-    if (std::string_view(stage) == "input_black") return 3;
-    if (std::string_view(stage) == "passthrough") return 4;
-    if (std::string_view(stage) == "matte") return 5;
-    if (std::string_view(stage) == "error") return 6;
+    if (!stage) {
+        return 0;
+    }
+    const std::string_view s(stage);
+    if (s == "waiting_video_in") {
+        return 1;
+    }
+    if (s == "download_fail") {
+        return 2;
+    }
+    if (s == "input_black") {
+        return 3;
+    }
+    if (s == "passthrough") {
+        return 4;
+    }
+    if (s == "matte") {
+        return 5;
+    }
+    if (s == "error") {
+        return 6;
+    }
     return 0;
 }
 } // namespace
 
-Input::Input(std::uint64_t adapter_luid, ValueSet settings)
-    : adapter_luid_(adapter_luid), settings_(std::move(settings)) {
-    removerLog(std::format("Input ctor shared-vulkan adapter_luid={:016x}", adapter_luid_));
-}
-
-Input::~Input() {
-    removerLog("Input dtor");
-}
-
-void Input::registerParameters() {
-    if (params_registered_) {
-        return;
-    }
+Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, ValueSet settings)
+    : d3d_(std::move(d3d)), adapter_luid_(adapter_luid), settings_(std::move(settings)) {
     const std::filesystem::path module_dir = extensionModuleDirectory();
     const std::filesystem::path roots[] = {module_dir, module_dir / "assets"};
     ::genesis::setAssetSearchRoots(roots);
@@ -59,7 +59,6 @@ void Input::registerParameters() {
     time_ = add_parameter<ParameterValue>("time");
     time_->set_property(PropertyNames::purpose, PurposeNames::TimelineTime);
 
-    // Keep update() alive when playhead is parked (needed after Video In link).
     frame_counter_ = add_parameter<ParameterValue>("frame_counter");
     frame_counter_->set_property(PropertyNames::purpose, PurposeNames::FrameCounter);
 
@@ -88,14 +87,147 @@ void Input::registerParameters() {
     debug_status_->set_property(PropertyNames::group_name, "Debug");
     debug_status_->set_value(std::string("booting"));
 
-    params_registered_ = true;
-    removerLog("parameters registered (shared-vulkan + debug)");
+    removerLog(std::format("Input ctor full-D3D11 I/O adapter_luid={:016x}", adapter_luid_));
 }
 
-void Input::setDebugStatus(const std::string& text) {
-    if (debug_status_ && text != last_status_) {
-        last_status_ = text;
-        debug_status_->set_value(text);
+Input::~Input() {
+    removerLog("Input dtor");
+}
+
+void Input::ensureRemover() {
+    if (remover_) {
+        return;
+    }
+    // Vulkan context still used internally for matte scratch; PIXERA only sees D3D11_IMAGE.
+    remover_ = std::make_unique<::genesis::RemoverPipeline>(adapter_luid_);
+    removerLog(std::format("RemoverPipeline ready adapter={:016x}", adapter_luid_));
+}
+
+void Input::ensureD3dTextures() {
+    if (!d3d_) {
+        throw std::runtime_error("Input: SharedD3d11 is null");
+    }
+    if (!d3d_output_) {
+        d3d_output_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
+    }
+    if (!d3d_video_in_) {
+        d3d_video_in_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
+    }
+    // Passthrough: ExtSampleD3D GPU blit Video In → output (proves PIXERA write
+    // without relying on CPU Map, which can read zeros even when SRV has data).
+    if (!passthrough_) {
+        passthrough_ = std::make_unique<D3d11Passthrough>(d3d_->device());
+    }
+}
+
+void Input::applyMatteSettings() {
+    if (!remover_) {
+        return;
+    }
+    ::genesis::BgRemoverSettings matte = remover_->remover().settings();
+    const int q = quality_ ? std::clamp(quality_->value(), 0, 2) : 1;
+    const auto next_q = static_cast<::genesis::BgRemoverQuality>(q);
+    if (matte.backend == ::genesis::BgRemoverBackend::Auto && matte.quality == next_q) {
+        return;
+    }
+    matte.backend = ::genesis::BgRemoverBackend::Auto;
+    matte.quality = next_q;
+    matte.rvm_downsample = 0.0f;
+    matte.temporal_alpha = 0.20f;
+    remover_->setSettings(matte);
+}
+
+void Input::publishTargetTexture() {
+    if (!sampler_ || !d3d_) {
+        return;
+    }
+    ensureD3dTextures();
+    d3d_output_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true);
+
+    TextureDesc desc{};
+    desc.width = width_;
+    desc.height = height_;
+    desc.format = Format::R8G8B8A8_UNORM;
+    desc.is_target = true;
+    // Match ExtSampleD3D: type + handle only (process_id = 0).
+    desc.share_handle = {HandleType::D3D11_IMAGE,
+                         reinterpret_cast<Handle>(d3d_output_->shareHandle())};
+    sampler_->set_texture(host().create_texture(desc));
+    removerLog(std::format("shared OUTPUT {}x{} handle=D3D11_IMAGE", desc.width, desc.height));
+}
+
+void Input::publishVideoInTexture() {
+    if (!video_in_ || !remover_) {
+        return;
+    }
+
+    auto allocate = [&](const TextureDesc& desc) {
+        if (desc.width == 0 || desc.height == 0) {
+            return;
+        }
+        width_ = static_cast<std::uint32_t>(desc.width);
+        height_ = static_cast<std::uint32_t>(desc.height);
+        const Format fmt = desc.format == Format::None ? Format::R8G8B8A8_UNORM : desc.format;
+        removerLog(std::format("video_in allocate {}x{} format={} (D3D11_IMAGE)", width_, height_,
+                               get_format_name(fmt)));
+
+        ensureD3dTextures();
+        // ExtSampleD3D Video In: SRV only (is_target=false). v28 tried is_target=true
+        // and still got full-frame zeros — match the sample that PIXERA knows how to fill.
+        d3d_video_in_->allocate(width_, height_, fmt, /*is_target=*/false);
+        remover_->resize(width_, height_);
+        publishTargetTexture();
+
+        TextureDesc shared = desc;
+        shared.format = fmt;
+        shared.is_target = false;
+        shared.share_handle = {HandleType::D3D11_IMAGE,
+                               reinterpret_cast<Handle>(d3d_video_in_->shareHandle())};
+        video_in_->set_texture(host().create_texture(shared));
+        video_in_ready_ = true;
+        applyMatteSettings();
+        removerLog(std::format(
+            "shared VIDEO_IN {}x{} format={} handle=D3D11_IMAGE is_target=0 srv={} (link feed now)",
+            shared.width, shared.height, get_format_name(shared.format),
+            d3d_video_in_->srv() ? 1 : 0));
+        have_delayed_frame_ = false;
+        d3d_rgba_delayed_.clear();
+        matte_live_ = false;
+    };
+
+    update_input_texture(*video_in_, allocate);
+
+    if (!video_in_ready_) {
+        TextureDesc desc{};
+        desc.width = static_cast<std::size_t>(
+            video_in_->get_property<int>(SettingNames::resolution_x, 0));
+        desc.height = static_cast<std::size_t>(
+            video_in_->get_property<int>(SettingNames::resolution_y, 0));
+        desc.format = get_format_by_name(video_in_->get_property(SettingNames::format),
+                                         Format::R8G8B8A8_UNORM);
+        if (desc.width == 0 || desc.height == 0) {
+            try {
+                const auto cur = video_in_->texture().desc();
+                if (cur.width > 0 && cur.height > 0) {
+                    desc.width = cur.width;
+                    desc.height = cur.height;
+                    if (cur.format != Format::None) {
+                        desc.format = cur.format;
+                    }
+                }
+            } catch (...) {
+            }
+        }
+        if (desc.width > 0 && desc.height > 0) {
+            removerLog("video_in allocate via fallback (D3D11)");
+            allocate(desc);
+        } else if ((render_ticks_ % 60u) == 1u) {
+            removerLog(std::format(
+                "waiting Video In link (props {}x{} format='{}') - cyan is correct until then",
+                video_in_->get_property<int>(SettingNames::resolution_x, 0),
+                video_in_->get_property<int>(SettingNames::resolution_y, 0),
+                std::string(video_in_->get_property(SettingNames::format))));
+        }
     }
 }
 
@@ -103,49 +235,26 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     if (debug_stage_) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
-    const std::string line = std::format(
-        "STATUS stage={} vin={} dl={} nz={} mid=({},{},{},{}) {}x{} matte={} proc={} shared_out={} "
-        "luid={:016x}",
-        dbg.stage ? dbg.stage : "?", dbg.has_video_in ? 1 : 0, dbg.download_ok ? 1 : 0,
-        dbg.nonzero_rgb, dbg.mid_r, dbg.mid_g, dbg.mid_b, dbg.mid_a, dbg.width, dbg.height,
-        dbg.matte_copied ? 1 : 0, processing_enabled_ ? 1 : 0, shared_output_published_ ? 1 : 0,
-        adapter_luid_);
-    setDebugStatus(line);
-    if (last_stage_ != (dbg.stage ? dbg.stage : "") || (render_ticks_ % 60u) == 1u) {
+    const std::string ui = std::format("v32 {} nz={} mid=({},{},{}) vin={}",
+                                       dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r,
+                                       dbg.mid_g, dbg.mid_b, dbg.has_video_in ? 1 : 0);
+    if (debug_status_) {
+        debug_status_->set_value(ui);
+    }
+    if (last_stage_ != (dbg.stage ? dbg.stage : "") || (render_ticks_ % 30u) == 1u) {
         last_stage_ = dbg.stage ? dbg.stage : "";
-        removerLog(line);
+        const std::uint64_t fence_c = d3d_ ? d3d_->fenceCounter() : 0;
+        const std::uint64_t fence_done = d3d_ ? d3d_->completedValue() : 0;
+        const std::uint64_t sync_n = d3d_ ? d3d_->syncCallbacks() : 0;
+        const int sent =
+            (!d3d_rgba_in_.empty() && D3d11SharedTexture::looksLikeSentinel(d3d_rgba_in_)) ? 1 : 0;
+        removerLog(std::format(
+            "STATUS stage={} vin={} dl={} nz={} mid=({},{},{},{}) {}x{} matte={} luid={:016x} "
+            "fence={}/{} sync={} sent={}",
+            dbg.stage ? dbg.stage : "?", dbg.has_video_in ? 1 : 0, dbg.download_ok ? 1 : 0,
+            dbg.nonzero_rgb, dbg.mid_r, dbg.mid_g, dbg.mid_b, dbg.mid_a, dbg.width, dbg.height,
+            dbg.matte_copied ? 1 : 0, adapter_luid_, fence_done, fence_c, sync_n, sent));
     }
-}
-
-void Input::publishPlaceholderSampler() {
-    if (!sampler_) {
-        return;
-    }
-    TextureDesc desc{};
-    desc.width = static_cast<std::size_t>(std::max<std::uint32_t>(width_, 2));
-    desc.height = static_cast<std::size_t>(std::max<std::uint32_t>(height_, 2));
-    desc.format = Format::R8G8B8A8_UNORM;
-    desc.is_target = true;
-    sampler_->set_texture(host().create_texture(desc));
-
-    // Host cyan until shared Vulkan output is published.
-    const std::size_t bytes = desc.width * desc.height * 4u;
-    std::vector<std::uint8_t> cyan(bytes);
-    for (std::size_t i = 0; i + 3 < bytes; i += 4) {
-        cyan[i + 0] = 0;
-        cyan[i + 1] = 220;
-        cyan[i + 2] = 255;
-        cyan[i + 3] = 255;
-    }
-    BufferDesc buffer{};
-    buffer.data = cyan.data();
-    buffer.pitch = desc.width * 4u;
-    buffer.size = bytes;
-    host().upload_texture(sampler_->texture(), buffer, true, []() noexcept {});
-    placeholder_published_ = true;
-    shared_output_published_ = false;
-    removerLog(std::format("placeholder sampler {}x{} (host cyan)", desc.width, desc.height));
-    setDebugStatus("placeholder host cyan — GPU not up yet");
 }
 
 bool Input::initialize() noexcept try {
@@ -154,20 +263,7 @@ bool Input::initialize() noexcept try {
                            adapter_luid_, kRemoverBuildStamp));
     host().log_info(std::format("initializing GENESIS Remover stream '{}' ({})", handle,
                                 kRemoverBuildStamp));
-
-    registerParameters();
-
-    width_ = settings_.get<std::uint32_t>(SettingNames::resolution_x, 1920);
-    height_ = settings_.get<std::uint32_t>(SettingNames::resolution_y, 1080);
-    if (const string stream_luid = settings_.get(SettingNames::adapter_luid, string{});
-        !stream_luid.empty()) {
-        adapter_luid_ = common::from_hex_string<std::uint64_t>(stream_luid);
-    }
-
-    // Accept timeline with host cyan first — Vulkan/ONNX deferred to update().
-    publishPlaceholderSampler();
-    removerLog("initialize OK (cpu-first placeholder, shared-vulkan deferred)");
-    return true;
+    return update_settings(std::move(settings_));
 } catch (const std::exception& ex) {
     removerLog(std::format("initialize exception: {}", ex.what()));
     try {
@@ -188,245 +284,20 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     removerLog(std::format("update_settings {}x{} adapter={:016x}", width_, height_,
                            adapter_luid_));
 
-    if (pipeline_ && pipeline_adapter_luid_ != adapter_luid_) {
-        pipeline_.reset();
-        processing_enabled_ = false;
-        shared_output_published_ = false;
-        video_in_published_ = false;
-        gpu_failed_ = false;
-        matte_live_ = false;
-    }
-
-    if (!shared_output_published_) {
-        if (!params_registered_) {
-            registerParameters();
-        }
-        publishPlaceholderSampler();
-    } else if (pipeline_) {
-        try {
-            pipeline_->resize(width_, height_);
-            publishSharedOutput();
-        } catch (const std::exception& ex) {
-            removerLog(std::format("resize/publish after settings failed: {}", ex.what()));
-            publishPlaceholderSampler();
-        }
+    ensureRemover();
+    remover_->resize(width_, height_);
+    publishTargetTexture();
+    if (debug_status_) {
+        debug_status_->set_value(std::string("v32 fence+blit - Video In slot empty until you link"));
     }
     return true;
 } catch (const std::exception& ex) {
     removerLog(std::format("update_settings exception: {}", ex.what()));
     try {
-        publishPlaceholderSampler();
+        host().log_error(std::format("GENESIS Remover settings failed: {}", ex.what()));
     } catch (...) {
     }
-    return true;
-}
-
-bool Input::tryEnsureGpuPipeline() {
-    if (pipeline_) {
-        return true;
-    }
-    if (gpu_failed_) {
-        return false;
-    }
-    try {
-        removerLog(std::format("creating RemoverPipeline adapter={:016x}", adapter_luid_));
-        pipeline_ = std::make_unique<::genesis::RemoverPipeline>(adapter_luid_);
-        pipeline_adapter_luid_ = adapter_luid_;
-        pipeline_->resize(width_, height_);
-        publishSharedOutput();
-        removerLog(std::format("RemoverPipeline GPU output published {}x{} handle={}", width_,
-                               height_,
-                               pipeline_->output().colorExport().win32_handle ? "ok" : "NULL"));
-        host().log_info(std::format("GENESIS Remover GPU ready {}x{}", width_, height_));
-        setDebugStatus("shared output published — waiting Video In");
-        return true;
-    } catch (const std::exception& ex) {
-        if (adapter_luid_ != 0) {
-            removerLog(std::format("pipeline adapter fail ({}); retry LUID 0", ex.what()));
-            try {
-                pipeline_ = std::make_unique<::genesis::RemoverPipeline>(0);
-                pipeline_adapter_luid_ = 0;
-                adapter_luid_ = 0;
-                pipeline_->resize(width_, height_);
-                publishSharedOutput();
-                removerLog("RemoverPipeline GPU output published (default GPU)");
-                return true;
-            } catch (const std::exception& ex2) {
-                removerLog(std::format("GPU pipeline failed: {}", ex2.what()));
-                host().log_error(std::format("GENESIS Remover GPU unavailable: {}", ex2.what()));
-                pipeline_.reset();
-                gpu_failed_ = true;
-                publishPlaceholderSampler();
-                setDebugStatus(std::format("GPU FAIL: {}", ex2.what()));
-                return false;
-            }
-        }
-        removerLog(std::format("GPU pipeline failed: {}", ex.what()));
-        host().log_error(std::format("GENESIS Remover GPU unavailable: {}", ex.what()));
-        pipeline_.reset();
-        gpu_failed_ = true;
-        publishPlaceholderSampler();
-        setDebugStatus(std::format("GPU FAIL: {}", ex.what()));
-        return false;
-    }
-}
-
-void Input::applyMatteSettings() {
-    if (!pipeline_) {
-        return;
-    }
-    ::genesis::BgRemoverSettings matte = pipeline_->remover().settings();
-    const int q = quality_ ? std::clamp(quality_->value(), 0, 2) : 1;
-    const auto next_q = static_cast<::genesis::BgRemoverQuality>(q);
-    matte.backend = ::genesis::BgRemoverBackend::Auto;
-    matte.quality = next_q;
-    matte.rvm_downsample = 0.0f;
-    matte.temporal_alpha = 0.20f;
-    pipeline_->setSettings(matte);
-}
-
-void Input::enableProcessing() {
-    if (!pipeline_ || processing_enabled_) {
-        return;
-    }
-    applyMatteSettings();
-    pipeline_->setAsyncEnabled(true);
-    processing_enabled_ = true;
-    removerLog(std::format("processing enabled status={} ep={}", pipeline_->remover().status(),
-                           pipeline_->asyncWorker().executionProvider()));
-    host().log_info(std::format("GENESIS Remover processing enabled ({})",
-                                pipeline_->remover().status()));
-}
-
-void Input::publishSharedOutput() {
-    if (!pipeline_ || !sampler_ || !pipeline_->hasOutput()) {
-        return;
-    }
-    const auto& exp = pipeline_->output().colorExport();
-    if (!exp.win32_handle) {
-        throw std::runtime_error("GENESIS Remover output share handle is null");
-    }
-    TextureDesc desc{};
-    desc.width = pipeline_->output().extent().width;
-    desc.height = pipeline_->output().extent().height;
-    desc.format = Format::R8G8B8A8_UNORM;
-    desc.is_target = true;
-    desc.share_handle = {
-        kHandleType,
-        reinterpret_cast<Handle>(exp.win32_handle),
-        0,
-        exp.memory_size,
-        0,
-        exp.dedicated,
-    };
-    sampler_->set_texture(host().create_texture(desc));
-    shared_output_published_ = true;
-    placeholder_published_ = false;
-    removerLog(std::format("shared OUTPUT published {}x{} mem={} dedicated={}", desc.width,
-                           desc.height, exp.memory_size, exp.dedicated ? 1 : 0));
-}
-
-void Input::publishVideoIn() {
-    if (!video_in_ || !pipeline_) {
-        return;
-    }
-
-    auto allocate = [&](const TextureDesc& desc, const char* reason) {
-        if (desc.width == 0 || desc.height == 0) {
-            return;
-        }
-        width_ = static_cast<std::uint32_t>(desc.width);
-        height_ = static_cast<std::uint32_t>(desc.height);
-        const Format pixera_fmt =
-            desc.format == Format::None ? Format::R8G8B8A8_UNORM : desc.format;
-        const VkFormat vk_fmt = [&]() -> VkFormat {
-            switch (pixera_fmt) {
-            case Format::B8G8R8A8_UNORM:
-                return VK_FORMAT_B8G8R8A8_UNORM;
-            case Format::R16G16B16A16_SFLOAT:
-                return VK_FORMAT_R16G16B16A16_SFLOAT;
-            case Format::R32G32B32A32_SFLOAT:
-                return VK_FORMAT_R32G32B32A32_SFLOAT;
-            default:
-                return VK_FORMAT_R8G8B8A8_UNORM;
-            }
-        }();
-        removerLog(std::format("video_in allocate {}x{} format={} vk={} ({})", width_, height_,
-                               get_format_name(pixera_fmt), static_cast<int>(vk_fmt), reason));
-        pipeline_->resize(width_, height_);
-        // Must match PIXERA's requested format (often FP16). v14 called ensureVideoIn()
-        // with default RGBA8 while advertising FP16 → shared readback stayed black.
-        pipeline_->ensureVideoIn(vk_fmt);
-        const auto& exp = pipeline_->videoIn().exportInfo();
-        if (!exp.win32_handle) {
-            removerLog("video_in share handle NULL");
-            setDebugStatus("video_in share handle NULL");
-            return;
-        }
-        TextureDesc shared = desc;
-        shared.format = pixera_fmt;
-        shared.is_target = false;
-        shared.share_handle = {
-            kHandleType,
-            reinterpret_cast<Handle>(exp.win32_handle),
-            0,
-            exp.memory_size,
-            0,
-            exp.dedicated,
-        };
-        video_in_->set_texture(host().create_texture(shared));
-        video_in_published_ = true;
-        publishSharedOutput();
-        enableProcessing();
-        removerLog(std::format("shared VIDEO_IN published {}x{} format={} mem={}", shared.width,
-                               shared.height, get_format_name(shared.format), exp.memory_size));
-        setDebugStatus(std::format("shared video_in {}x{} {} — waiting PIXERA write", width_,
-                                   height_, get_format_name(shared.format)));
-    };
-
-    update_input_texture(*video_in_, [&](const TextureDesc& desc) {
-        allocate(desc, "update_input_texture");
-    });
-
-    if (!pipeline_->hasVideoIn()) {
-        TextureDesc desc{};
-        desc.width = static_cast<std::size_t>(
-            video_in_->get_property<int>(SettingNames::resolution_x, 0));
-        desc.height = static_cast<std::size_t>(
-            video_in_->get_property<int>(SettingNames::resolution_y, 0));
-        const std::string format_str(video_in_->get_property(SettingNames::format));
-        desc.format = get_format_by_name(format_str, Format::R8G8B8A8_UNORM);
-        if (desc.width == 0 || desc.height == 0) {
-            try {
-                const auto cur = video_in_->texture().desc();
-                if (cur.width > 0 && cur.height > 0) {
-                    desc.width = cur.width;
-                    desc.height = cur.height;
-                    if (cur.format != Format::None) {
-                        desc.format = cur.format;
-                    }
-                }
-            } catch (...) {
-            }
-        }
-        if (desc.width == 0 || desc.height == 0) {
-            // Same-res link: props may never change — use stream size after a few ticks.
-            if (render_ticks_ > 45 && width_ > 0 && height_ > 0) {
-                desc.width = width_;
-                desc.height = height_;
-                // Prefer PIXERA's format property even when dims came from stream defaults.
-                desc.format = get_format_by_name(format_str, Format::R16G16B16A16_SFLOAT);
-                allocate(desc, "same-res-stream-fallback");
-            } else if ((render_ticks_ % 60u) == 1u) {
-                removerLog(std::format("waiting Video In props {}x{} format='{}' ticks={}",
-                                       video_in_->get_property<int>(SettingNames::resolution_x, 0),
-                                       video_in_->get_property<int>(SettingNames::resolution_y, 0),
-                                       format_str, render_ticks_));
-            }
-        } else {
-            allocate(desc, format_str.empty() ? "props-fallback" : "props+format");
-        }
-    }
+    return false;
 }
 
 ValueSet Input::get_state() noexcept {
@@ -449,13 +320,12 @@ ValueSet Input::get_state() noexcept {
     state.set(StateNames::resolution_y, res_y);
     state.set(StateNames::format, get_format_name(format));
     state.set(StateNames::scale_y, 1);
-    state.set(StateNames::frame_rate, 50.0);
     return state;
 }
 
 string Input::get_property(string_view name) noexcept {
     if (name == PropertyNames::applies_alpha) {
-        // Avoid black timeline until we have a covered matte.
+        // false until matte — transparent black looks like "nothing" in preview.
         return string(matte_live_ ? "true" : "false");
     }
     return {};
@@ -468,10 +338,8 @@ bool Input::update() noexcept try {
     if (frame_counter_) {
         (void)frame_counter_->value();
     }
-    if (!tryEnsureGpuPipeline()) {
-        return true;
-    }
-    publishVideoIn();
+    ensureRemover();
+    publishVideoInTexture();
     return true;
 } catch (const std::exception& ex) {
     removerLog(std::format("update exception: {}", ex.what()));
@@ -491,37 +359,140 @@ RenderResult Input::render() noexcept try {
         (void)frame_counter_->value();
     }
 
-    // PIXERA may skip update — pump GPU + Video In here too.
-    if (!tryEnsureGpuPipeline()) {
-        return RenderResult::Succeeded;
-    }
-    publishVideoIn();
-
-    if (pipeline_->hasVideoIn() && !processing_enabled_) {
-        enableProcessing();
-    }
+    ensureRemover();
+    ensureD3dTextures();
 
     ::genesis::RemoverFrameDebug dbg{};
     std::string error;
-    const bool ok = pipeline_->processFrame(&error, &dbg, /*show_diagnostics=*/true);
-    logStatusMaybe(dbg);
 
-    if (dbg.stage && std::string_view(dbg.stage) == "matte") {
-        if (!matte_live_) {
-            matte_live_ = true;
-            removerLog(std::format("matte_live=1 ep={} status={}",
-                                   pipeline_->asyncWorker().executionProvider(),
-                                   pipeline_->remover().status()));
+    if (!video_in_ready_ || !d3d_video_in_ || !d3d_video_in_->hasTexture()) {
+        (void)remover_->processCpuRgbaFrame(nullptr, false, &error, &dbg, true, &d3d_rgba_out_);
+        if (d3d_output_ && d3d_output_->hasTexture() && !d3d_rgba_out_.empty()) {
+            (void)d3d_output_->uploadRgba8(d3d_rgba_out_.data(), width_, height_);
+        } else if (d3d_output_ && d3d_output_->hasTexture()) {
+            d3d_output_->clear(0.0f, 0.86f, 1.0f, 1.0f); // cyan
+        }
+        logStatusMaybe(dbg);
+        return RenderResult::Succeeded;
+    }
+
+    // Heartbeat: first frames after VIDEO_IN must appear or PIXERA hung on share open.
+    if (render_ticks_ <= 5u || (render_ticks_ % 30u) == 1u) {
+        removerLog(std::format("render vin-ready enter ticks={} fence={}/{}", render_ticks_,
+                               d3d_ ? d3d_->completedValue() : 0,
+                               d3d_ ? d3d_->fenceCounter() : 0));
+    }
+
+    // Device::render already GPU-Waited fenceCounter. Only touch GPU after that value completes.
+    const std::uint64_t wait_for = d3d_ ? d3d_->fenceCounter() : 0;
+    if (d3d_ && wait_for > 0 && !d3d_->waitCpu(wait_for, 100)) {
+        dbg.width = width_;
+        dbg.height = height_;
+        dbg.has_video_in = true;
+        dbg.download_ok = false;
+        dbg.stage = "download_fail";
+        if (render_ticks_ <= 5u || (render_ticks_ % 30u) == 1u) {
+            removerLog(std::format(
+                "fence wait timeout wait_for={} completed={} - skip blit/Map (avoid hang)",
+                wait_for, d3d_->completedValue()));
+        }
+        if (d3d_output_ && d3d_output_->hasTexture()) {
+            d3d_output_->clear(0.12f, 0.35f, 0.86f, 1.0f); // blue
+        }
+        logStatusMaybe(dbg);
+        return RenderResult::Succeeded;
+    }
+
+    // Hypothesis A proof: ExtSampleD3D GPU blit Video In → output BEFORE CPU Map.
+    // If the preview shows the camera here, PIXERA is writing and Map-only was the bug.
+    // If still black/orange, PIXERA is not filling the shared D3D11_IMAGE.
+    bool blitted = false;
+    if (passthrough_ && passthrough_->ready() && d3d_video_in_->srv() && d3d_output_ &&
+        d3d_output_->rtv()) {
+        passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_output_->rtv(), width_,
+                           height_);
+        blitted = true;
+        if (render_ticks_ <= 8u || (render_ticks_ % 60u) == 1u) {
+            removerLog(std::format("gpu_blit Video In → output {}x{} fmt={}", width_, height_,
+                                   get_format_name(d3d_video_in_->format())));
         }
     }
 
-    if (!ok && !error.empty() && (render_ticks_ % 60u) == 1u) {
-        removerLog(std::format("processFrame: {}", error));
+    long map_hr = 0;
+    if (!d3d_video_in_->downloadRgba8(d3d_rgba_in_, &map_hr)) {
+        dbg.width = width_;
+        dbg.height = height_;
+        dbg.has_video_in = true;
+        dbg.download_ok = false;
+        dbg.stage = "download_fail";
+        if (render_ticks_ <= 5u || (render_ticks_ % 30u) == 1u) {
+            removerLog(std::format("download Map/copy failed hr=0x{:08x} fmt={} blitted={}",
+                                   static_cast<unsigned long>(map_hr),
+                                   get_format_name(d3d_video_in_->format()), blitted ? 1 : 0));
+        }
+        // Keep GPU blit result if any; else blue.
+        if (!blitted && d3d_output_ && d3d_output_->hasTexture()) {
+            d3d_output_->clear(0.12f, 0.35f, 0.86f, 1.0f);
+        }
+        logStatusMaybe(dbg);
+        return RenderResult::Succeeded;
     }
+
+    if (!have_delayed_frame_) {
+        d3d_rgba_delayed_ = d3d_rgba_in_;
+        have_delayed_frame_ = true;
+        dbg.width = width_;
+        dbg.height = height_;
+        dbg.has_video_in = true;
+        dbg.download_ok = true;
+        dbg.stage = blitted ? "passthrough" : "input_black";
+        if (!blitted && d3d_output_ && d3d_output_->hasTexture()) {
+            d3d_output_->clear(1.0f, 0.55f, 0.0f, 1.0f); // orange first map frame
+        }
+        logStatusMaybe(dbg);
+        return RenderResult::Succeeded;
+    }
+
+    std::swap(d3d_rgba_delayed_, d3d_rgba_in_);
+
+    if ((render_ticks_ % 30u) == 1u) {
+        D3d11SharedTexture::logFrameStats(d3d_rgba_in_, width_, height_, "frame");
+    }
+
+    if (!remover_->asyncEnabled()) {
+        applyMatteSettings();
+        remover_->setAsyncEnabled(true);
+    }
+
+    (void)remover_->processCpuRgbaFrame(d3d_rgba_in_.data(), true, &error, &dbg, true,
+                                        &d3d_rgba_out_);
+    if (dbg.nonzero_rgb == 0 && (render_ticks_ % 30u) == 1u) {
+        removerLog(std::format(
+            "map_nz=0 blitted={} — if preview shows camera, Map path is wrong; if black, "
+            "PIXERA is not writing D3D11_IMAGE (check ExtSampleD3D + same LUID engine)",
+            blitted ? 1 : 0));
+    }
+
+    // Prefer matte/passthrough CPU upload when we have non-zero pixels; else leave GPU blit.
+    if (dbg.nonzero_rgb > 0 && d3d_output_ && d3d_output_->hasTexture() && !d3d_rgba_out_.empty()) {
+        if (!d3d_output_->uploadRgba8(d3d_rgba_out_.data(), width_, height_)) {
+            removerLog("D3D output uploadRgba8 failed");
+        }
+        if (dbg.stage && std::string_view(dbg.stage) == "matte") {
+            matte_live_ = true;
+        }
+    } else if (!blitted && d3d_output_ && d3d_output_->hasTexture() && !d3d_rgba_out_.empty()) {
+        // Diagnostic colour from processCpuRgbaFrame (orange/cyan).
+        (void)d3d_output_->uploadRgba8(d3d_rgba_out_.data(), width_, height_);
+    }
+
+    if (!error.empty() && (render_ticks_ % 60u) == 1u) {
+        removerLog(std::format("processCpuRgbaFrame: {}", error));
+    }
+    logStatusMaybe(dbg);
     return RenderResult::Succeeded;
 } catch (const std::exception& ex) {
     removerLog(std::format("render exception: {}", ex.what()));
-    setDebugStatus(std::format("render exception: {}", ex.what()));
     return RenderResult::Succeeded;
 }
 

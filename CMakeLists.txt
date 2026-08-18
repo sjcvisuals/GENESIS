@@ -475,6 +475,9 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         ${EXT_REMOVER_DIR}/src/Extension.cpp
         ${EXT_REMOVER_DIR}/src/Device.cpp
         ${EXT_REMOVER_DIR}/src/Input.cpp
+        ${EXT_REMOVER_DIR}/src/D3d11SharedTexture.cpp
+        ${EXT_REMOVER_DIR}/src/D3d11Passthrough.cpp
+        ${EXT_REMOVER_DIR}/src/SharedD3d11.cpp
         ${EXT_REMOVER_DIR}/src/ModulePaths.cpp
         ${EXT_REMOVER_DIR}/src/RemoverLog.cpp
         ${RX_SDK_DIR}/libs/common/string.cpp
@@ -487,10 +490,9 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_BINARY_DIR}
     )
-    # Host download_texture on Video In hangs in PIXERA (v29/v30). Use the same
-    # shared-Vulkan RemoverPipeline as ExtGenesis Background Remover, with Video In
-    # format matched to PIXERA (often FP16) — v14 defaulted RGBA8 and stayed black.
-    target_link_libraries(ExtGenesisRemover PRIVATE genesis_remover_core)
+    # Hypothesis A: ExtSampleD3D Device D3D_FENCE + D3D11_IMAGE Video In/Out.
+    # GPU blit proves PIXERA write; CPU Map feeds RemoverPipeline matte.
+    target_link_libraries(ExtGenesisRemover PRIVATE genesis_remover_core d3d11 dxgi d3dcompiler)
     if(MSVC AND GENESIS_HAS_ONNXRUNTIME)
         target_link_options(ExtGenesisRemover PRIVATE "/DELAYLOAD:onnxruntime.dll")
         target_link_libraries(ExtGenesisRemover PRIVATE delayimp)

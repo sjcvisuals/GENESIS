@@ -3,21 +3,25 @@
 #include "WinPrefix.h"
 #include "rxext_client.h"
 
+#include "D3d11SharedTexture.h"
+#include "SharedD3d11.h"
+#include "D3d11Passthrough.h"
 #include "runtime/RemoverPipeline.hpp"
 
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace rxext::genesis_remover {
 
-// Shared-Vulkan Remover (same path as ExtGenesis Background Remover mode).
-// Host download_texture on Video In hangs in PIXERA (v29/v30 proven) — do not use it.
-// Video In Vulkan format MUST match PIXERA (often R16G16B16A16_SFLOAT).
+// Full ExtSampleD3D I/O: Device D3D_FENCE timeline + D3D11_IMAGE Video In/Out.
+// Video In stays empty until PIXERA links a feed (update_input_texture).
+// GPU blit first (prove write); CPU Map → RemoverPipeline matte when nz>0.
 class Input : public rxext::InputStream {
 public:
-    Input(std::uint64_t adapter_luid, ValueSet settings);
+    Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, ValueSet settings);
     ~Input() override;
 
     bool initialize() noexcept override;
@@ -30,40 +34,38 @@ public:
     SyncDesc after_render() noexcept override;
 
 private:
-    void registerParameters();
-    void publishPlaceholderSampler();
-    bool tryEnsureGpuPipeline();
+    void ensureRemover();
+    void ensureD3dTextures();
     void applyMatteSettings();
-    void publishSharedOutput();
-    void publishVideoIn();
-    void enableProcessing();
-    void setDebugStatus(const std::string& text);
+    void publishTargetTexture();
+    void publishVideoInTexture();
     void logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg);
 
+    std::shared_ptr<SharedD3d11> d3d_;
     std::uint64_t adapter_luid_ = 0;
-    std::uint64_t pipeline_adapter_luid_ = 0;
     ValueSet settings_;
     ParameterTexture* sampler_ = nullptr;
     ParameterTexture* video_in_ = nullptr;
     ParameterInt* quality_ = nullptr;
     ParameterValue* time_ = nullptr;
     ParameterValue* frame_counter_ = nullptr;
-    ParameterString* debug_status_ = nullptr;
     ParameterInt* debug_stage_ = nullptr;
+    ParameterString* debug_status_ = nullptr;
 
-    std::unique_ptr<::genesis::RemoverPipeline> pipeline_;
+    std::unique_ptr<::genesis::RemoverPipeline> remover_;
+    std::unique_ptr<D3d11SharedTexture> d3d_output_;
+    std::unique_ptr<D3d11SharedTexture> d3d_video_in_;
+    std::unique_ptr<D3d11Passthrough> passthrough_;
+    std::vector<std::uint8_t> d3d_rgba_in_;
+    std::vector<std::uint8_t> d3d_rgba_delayed_;
+    std::vector<std::uint8_t> d3d_rgba_out_;
     std::uint32_t width_ = 1920;
     std::uint32_t height_ = 1080;
-    bool params_registered_ = false;
-    bool placeholder_published_ = false;
-    bool shared_output_published_ = false;
-    bool processing_enabled_ = false;
-    bool gpu_failed_ = false;
-    bool matte_live_ = false;
-    bool video_in_published_ = false;
     std::uint64_t render_ticks_ = 0;
     std::string last_stage_;
-    std::string last_status_;
+    bool video_in_ready_ = false;
+    bool have_delayed_frame_ = false;
+    bool matte_live_ = false;
 };
 
 } // namespace rxext::genesis_remover

@@ -76,31 +76,41 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v31-shared-fp16-20260818
+  remover-timeline-v32-fence-blit-20260818
 
-v31 = shared-Vulkan RemoverPipeline + match PIXERA FP16 (ExtGenesis path):
-  v29/v30 proved host download_texture on Video In never completes (freezes
-  the extension until PIXERA restarts). SDK only uses download_texture for
-  output RTs (MemoryOutputStream), not inputs.
-  Restore ExtGenesis-style OPAQUE_WIN32 shared Video In. Critical fix vs v14:
-  ensureVideoIn(VkFormat) must match PIXERA (often R16G16B16A16_SFLOAT);
-  default RGBA8 while advertising FP16 caused black readback.
-  Cyan/blue/orange diagnostics via processFrame show_diagnostics.
+v32 = Hypothesis A: ExtSampleD3D Device D3D_FENCE + D3D11_IMAGE + GPU blit:
+  Video In slot stays empty until you drag Live Input into it (correct).
+  Device publishes TimelineSemaphore (D3D_FENCE) so PIXERA can write the feed.
+  Video In is_target=false (match ExtSampleD3D; v28 is_target=true still zeros).
+  After fence waitCpu: GPU blit Video In → output FIRST (visual proof), then
+  CPU Map for matte. If preview shows camera but map_nz=0 → Map bug.
+  If blit also black → PIXERA not filling share (LUID / engine / link).
 
-v30 = forced RGBA8 host; download still hung (format was not the only issue).
+Preview vs Output engines:
+  Each engine has its own GPU. Set Remover device Adapter LUID to THAT engine's
+  LUID (non-zero). Wrong LUID → shared textures stay black on that engine.
+  Test preview and output separately if they use different adapters.
+
+Workflow:
+  1) Place Remover on timeline — Video In may show [] / not distributed (OK).
+  2) Drag Live Input (verified on another layer) into Remover Video In.
+  3) Expect log: video_in allocate + shared VIDEO_IN is_target=0 + gpu_blit
+  4) Preview should show camera (blit) then cutout (matte) when nz>0.
+
+v31 = Vulkan shared + FP16 match; dl=1 but nz=0 (no Device fence / D3D11_IMAGE).
 
 Stage colours:
-  cyan   = waiting Video In
-  blue   = shared read failed
-  orange = linked but zeros
-  live   = passthrough then matte
+  cyan   = waiting for Video In link (empty slot)
+  blue   = fence wait / Map failed
+  orange = Map zeros (and no usable blit)
+  live   = GPU blit and/or passthrough/matte
 
-Critical: set device Adapter LUID to the PIXERA engine GPU (non-zero).
 Dump: .\scripts\dump-remover-log.ps1
-Expect stamp v31-shared-fp16 and:
-  video_in allocate ... format=R16G16B16A16_SFLOAT
-  shared VIDEO_IN published ... format=R16G16B16A16_SFLOAT
-  STATUS stage=passthrough|matte nz=...
+Expect stamp v32-fence-blit and:
+  Device::before_render fence...
+  shared VIDEO_IN ... is_target=0
+  gpu_blit Video In → output
+  STATUS ... nz>0  OR  map_nz=0 blitted=1
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log

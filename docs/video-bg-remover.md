@@ -91,17 +91,17 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for `STATUS stage=` lines and stamp `remover-timeline-v31-shared-fp16-*`.
+Look for `STATUS stage=` lines and stamp `remover-timeline-v32-fence-blit-*`.
 
 | Colour / stage | Meaning |
 |----------------|---------|
-| cyan / `waiting_video_in` | shared output OK, Video In not published |
-| blue / `download_fail` | shared Vulkan read failed |
-| orange / `input_black` | Video In bound, PIXERA wrote zeros |
+| cyan / `waiting_video_in` | Video In slot empty — drag Live Input in |
+| blue / `download_fail` | fence wait or Map failed |
+| orange / `input_black` | Map zeros (see if GPU blit still shows camera) |
 | `passthrough` / `matte` | working |
 
-v31: host `download_texture` on Video In hangs (do not use). Shared-Vulkan path
-matches PIXERA FP16 via `ensureVideoIn(VkFormat)` like ExtGenesis Background Remover.
+v32: Device D3D_FENCE + D3D11_IMAGE + GPU blit before Map. Preview and Output
+engines need the Remover Adapter LUID set to **that** engine's GPU.
 
 Also check Remover params **Debug Stage** / **Debug Status**.
 Checklist: `.\scripts\pixera-remover-debug.ps1`

@@ -11,7 +11,7 @@ if (-not (Test-Path $log)) {
 }
 
 Write-Host ""
-Write-Host "==== stamp (must be v31-shared-fp16) ====" -ForegroundColor Cyan
+Write-Host "==== stamp (must be v32-fence-blit) ====" -ForegroundColor Cyan
 Select-String -Path $log -Pattern "remover-timeline-" | ForEach-Object { $_.Line } |
     ForEach-Object { if ($_ -match '\[(remover-timeline-[^\]]+)\]') { $Matches[1] } } |
     Group-Object | Sort-Object Count -Descending |
@@ -19,20 +19,22 @@ Select-String -Path $log -Pattern "remover-timeline-" | ForEach-Object { $_.Line
 
 Write-Host ""
 Write-Host "==== latest STATUS lines (stage machine) ====" -ForegroundColor Cyan
-Write-Host "  cyan/waiting_video_in = shared out OK, Video In not published yet"
-Write-Host "  blue/download_fail    = shared Vulkan read failed"
-Write-Host "  orange/input_black    = shared Video In bound but pixels are zero"
-Write-Host "  passthrough / matte   = working (feed then cutout)"
+Write-Host "  cyan/waiting_video_in = empty Video In slot (link Live Input)"
+Write-Host "  blue/download_fail    = fence wait or Map failed"
+Write-Host "  orange/input_black    = Map zeros (check if preview still shows blit)"
+Write-Host "  passthrough / matte   = working"
 Select-String -Path $log -Pattern "STATUS stage=" | Select-Object -Last 15 | ForEach-Object { $_.Line }
 
 Write-Host ""
 Write-Host "==== key events ====" -ForegroundColor Cyan
-Select-String -Path $log -Pattern "RemoverPipeline|shared OUTPUT|video_in allocate|shared VIDEO_IN|STATUS stage=|matte_live|GPU FAIL|processFrame|placeholder" |
-    Select-Object -Last 30 | ForEach-Object { $_.Line }
+Select-String -Path $log -Pattern "Device::before_render|SharedD3d11 ready|shared OUTPUT|video_in allocate|shared VIDEO_IN|gpu_blit|map_nz|STATUS stage=|matte_live|waiting Video In link|fence wait" |
+    Select-Object -Last 35 | ForEach-Object { $_.Line }
 
 Write-Host ""
 Write-Host "==== last 40 lines ====" -ForegroundColor Cyan
 Get-Content $log -Tail 40
 
 Write-Host ""
-Write-Host "Also check Debug Stage (enum) on the Remover resource - Debug Status string may lag in PIXERA."
+Write-Host "Video In slot empty until you drag Live Input in = expected."
+Write-Host "Set Adapter LUID to the PREVIEW engine GPU when testing preview; OUTPUT engine LUID for output."
+Write-Host "Also check Debug Stage on the Remover resource."
