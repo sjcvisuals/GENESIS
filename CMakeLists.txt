@@ -478,7 +478,6 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         ${EXT_REMOVER_DIR}/src/D3d11SharedTexture.cpp
         ${EXT_REMOVER_DIR}/src/D3d11Passthrough.cpp
         ${EXT_REMOVER_DIR}/src/SharedD3d11.cpp
-        ${EXT_REMOVER_DIR}/src/MatteCaptureWorker.cpp
         ${EXT_REMOVER_DIR}/src/ModulePaths.cpp
         ${EXT_REMOVER_DIR}/src/RemoverLog.cpp
         ${RX_SDK_DIR}/libs/common/string.cpp
@@ -491,13 +490,8 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_BINARY_DIR}
     )
-    # Hypothesis A: ExtSampleD3D Device D3D_FENCE + D3D11_IMAGE Video In/Out.
-    # GPU blit proves PIXERA write; CPU Map feeds RemoverPipeline matte.
-    target_link_libraries(ExtGenesisRemover PRIVATE genesis_matting d3d11 dxgi d3dcompiler)
-    if(MSVC AND GENESIS_HAS_ONNXRUNTIME)
-        target_link_options(ExtGenesisRemover PRIVATE "/DELAYLOAD:onnxruntime.dll")
-        target_link_libraries(ExtGenesisRemover PRIVATE delayimp)
-    endif()
+    # v43: D3D11 live blit only — do NOT link ORT/matting (in-process ORT freezes PIXERA).
+    target_link_libraries(ExtGenesisRemover PRIVATE genesis_platform_core d3d11 dxgi d3dcompiler)
     target_compile_definitions(ExtGenesisRemover PRIVATE
         NOMINMAX
         WIN32_LEAN_AND_MEAN
@@ -521,22 +515,6 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
             "$<TARGET_FILE_DIR:ExtGenesisRemover>/GenesisRemover.manifest.json"
         COMMENT "Copying ExtGenesisRemover assets next to DLL"
     )
-    if(GENESIS_HAS_ONNXRUNTIME)
-        add_custom_command(TARGET ExtGenesisRemover POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${GENESIS_ONNXRUNTIME_ROOT}/lib/onnxruntime.dll"
-                "$<TARGET_FILE_DIR:ExtGenesisRemover>/onnxruntime.dll"
-            COMMENT "Copying ONNX Runtime next to ExtGenesisRemover"
-        )
-        if(EXISTS "${GENESIS_ONNXRUNTIME_ROOT}/lib/DirectML.dll")
-            add_custom_command(TARGET ExtGenesisRemover POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${GENESIS_ONNXRUNTIME_ROOT}/lib/DirectML.dll"
-                    "$<TARGET_FILE_DIR:ExtGenesisRemover>/DirectML.dll"
-                COMMENT "Copying DirectML.dll next to ExtGenesisRemover"
-            )
-        endif()
-    endif()
 
     add_custom_target(GenesisRemoverDeploy DEPENDS ExtGenesisRemover)
     if(TARGET GenesisDeploy)

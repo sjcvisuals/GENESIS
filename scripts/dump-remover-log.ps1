@@ -11,7 +11,7 @@ if (-not (Test-Path $log)) {
 }
 
 Write-Host ""
-Write-Host "==== stamp (must be v42-preload-cpu) ====" -ForegroundColor Cyan
+Write-Host "==== stamp (must be v43-live-blit) ====" -ForegroundColor Cyan
 Select-String -Path $log -Pattern "remover-timeline-" | ForEach-Object { $_.Line } |
     ForEach-Object { if ($_ -match '\[(remover-timeline-[^\]]+)\]') { $Matches[1] } } |
     Group-Object | Sort-Object Count -Descending |
@@ -20,20 +20,19 @@ Select-String -Path $log -Pattern "remover-timeline-" | ForEach-Object { $_.Line
 Write-Host ""
 Write-Host "==== latest STATUS lines (stage machine) ====" -ForegroundColor Cyan
 Write-Host "  cyan/waiting_video_in = empty Video In slot (link Live Input)"
-Write-Host "  passthrough           = live blit (matte not ready yet)"
-Write-Host "  matte                 = cutout on shared output"
+Write-Host "  passthrough           = live blit (lime must keep moving)"
 Select-String -Path $log -Pattern "STATUS stage=" | Select-Object -Last 15 | ForEach-Object { $_.Line }
 
 Write-Host ""
 Write-Host "==== key events ====" -ForegroundColor Cyan
-Select-String -Path $log -Pattern "preload|BgRemover|MatteCaptureWorker|worker_capture|worker RVM|worker matte|kick capture|gpu_present|matte_ok|CAPTURE share|STATUS stage=|applied worker|ep=|engine_ready" |
-    Select-Object -Last 50 | ForEach-Object { $_.Line }
+Select-String -Path $log -Pattern "gpu_present|shared VIDEO_IN|STATUS stage=|live blit|ORT|MatteCapture|BgRemover" |
+    Select-Object -Last 40 | ForEach-Object { $_.Line }
 
 Write-Host ""
 Write-Host "==== last 40 lines ====" -ForegroundColor Cyan
 Get-Content $log -Tail 40
 
 Write-Host ""
-Write-Host "Expect LIVE camera (continuously moving lime) then person cutout."
-Write-Host "Look for preload OK, then nz>0, ep=CPU, worker matte_ok."
+Write-Host "Expect LIVE camera with continuously moving lime heartbeat."
+Write-Host "No ORT/MatteCaptureWorker lines (matte disabled in-process)."
 Write-Host "Adapter LUID = PREVIEW engine GPU when testing preview."

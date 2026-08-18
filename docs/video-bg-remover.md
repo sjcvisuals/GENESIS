@@ -91,18 +91,20 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for `STATUS stage=` lines and stamp `remover-timeline-v42-preload-cpu-*`.
+Look for `STATUS stage=` lines and stamp `remover-timeline-v43-live-blit-*`.
 
 | Colour / stage | Meaning |
 |----------------|---------|
 | cyan / `waiting_video_in` | Video In slot empty — drag Live Input in |
-| `passthrough` | live blit (waiting on first background matte) |
-| `matte` | person cutout |
+| `passthrough` | live blit (v36 path; lime heartbeat must keep moving) |
 
-v42: D3D11-only PIXERA path (no RemoverPipeline/Vulkan). CPU RVM **preloads** while cyan
-before any capture. Capture share is **released before** ORT infer. Expect
-`BgRemover ready ep=CPU` / `preload OK` before the first kick, then `worker RVM process end`
-and `matte_ok` while lime keeps moving.
+v43: **live blit only** inside PIXERA. v39–v42 proved that loading ONNX Runtime
+in-process freezes PIXERA (log dies at `BgRemover initialize begin` / RVM begin;
+lime freezes with the camera). Person cutout still works in
+`.\scripts\run-remover-camera-debug.ps1` outside PIXERA. In-PIXERA cutout needs an
+out-of-process matte helper next.
+
+Expect continuously moving lime heartbeat with stamp v43-live-blit.
 
 Also check Remover params **Debug Stage** / **Debug Status**.
 Checklist: `.\scripts\pixera-remover-debug.ps1`

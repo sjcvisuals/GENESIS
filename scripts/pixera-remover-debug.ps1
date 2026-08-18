@@ -4,21 +4,21 @@
 $ErrorActionPreference = "Continue"
 Write-Host @"
 
-GENESIS Remover v42 - preload CPU RVM (no Vulkan)
-=================================================
-Worker preloads ORT CPU before any capture kick.
-Capture share is released before RVM infer.
-PIXERA DLL no longer links RemoverPipeline/Vulkan.
+GENESIS Remover v43 - live blit only (no ORT in PIXERA)
+=======================================================
+In-process ONNX Runtime freezes PIXERA (v39-v42).
+This build is the proven v36 live path: GPU blit + lime heartbeat.
+Person cutout: use .\scripts\run-remover-camera-debug.ps1 outside PIXERA.
+Timeline cutout needs out-of-process matte (next).
 
 Expect:
-  'preload OK' before first kick
-  continuously moving lime
-  worker RVM process end + matte_ok
+  continuously moving camera + lime stripe
+  NO MatteCaptureWorker / BgRemover / ORT log lines
 
 1) Quit PIXERA completely
 2) git pull
 3) BUILD-REMOVER.bat
-4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v42-preload-cpu-*)
+4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v43-live-blit-*)
 5) Re-import ExtGenesisRemover.dll
 6) Adapter LUID = preview GPU; drag Live Input
 7) Dump log

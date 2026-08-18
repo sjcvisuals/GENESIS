@@ -76,21 +76,21 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v42-preload-cpu-20260818
+  remover-timeline-v43-live-blit-20260818
 
-v42 = preload CPU RVM + release share before infer (no Vulkan in PIXERA DLL path):
-  v41 got nz>0 then froze during BgRemover/ORT init while the capture share was still
-  open; Input also constructed RemoverPipeline/Vulkan on the preview GPU.
-  Fix: link genesis_matting only (no remover_core/Vulkan); preload ORT on worker
-  start before kicks; release OpenSharedResource before process().
+v43 = live blit only in PIXERA (no ORT in-process):
+  v42 froze immediately at `BgRemover initialize begin` — loading onnxruntime into
+  the PIXERA process locks the preview (lime + camera freeze; engine_ready never 1).
+  Cutout remains proven outside PIXERA via camera-debug. Next step for timeline
+  cutout is an out-of-process matte helper (not in-DLL ORT).
 
-v41 = gentle capture but ORT init while share held still stalled PIXERA.
-v40 = OpenSharedResource storm + Flush.
-v36 = blit-only diagnostic (live feed proven).
+v42 = preload CPU RVM still froze at ORT init.
+v41–v38 = capture/DML/Video In variants; all froze once matte/ORT touched the GPU.
+v36 = blit-only diagnostic (live feed proven) — restored as v43 default.
 
 Dump: .\scripts\dump-remover-log.ps1
-Expect stamp v42-preload-cpu, preload OK before kick, ep=CPU, matte_ok,
-continuously moving lime.
+Expect stamp v43-live-blit, continuous gpu_present live, moving lime.
+No MatteCaptureWorker / BgRemover / ORT lines.
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log

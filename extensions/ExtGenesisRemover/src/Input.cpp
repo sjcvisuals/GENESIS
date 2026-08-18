@@ -10,7 +10,6 @@
 #include <Windows.h>
 #include <d3d11.h>
 
-#include <algorithm>
 #include <filesystem>
 #include <format>
 #include <stdexcept>
@@ -67,32 +66,24 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
     video_in_->set_property(PropertyNames::name, "Video In");
     video_in_->set_property(PropertyNames::group_name, "Input");
 
-    quality_ = add_parameter<ParameterInt>("quality");
-    quality_->set_property(PropertyNames::name, "Quality");
-    quality_->set_property(PropertyNames::group_name, "Matte");
-    quality_->set_property<std::vector<std::string>>(PropertyNames::enum_names,
-                                                      {"Fast", "Balanced", "Quality"});
-    quality_->set_value(0); // Fast — CPU RVM in PIXERA
-
     debug_stage_ = add_parameter<ParameterInt>("debug_stage");
     debug_stage_->set_property(PropertyNames::name, "Debug Stage");
     debug_stage_->set_property(PropertyNames::group_name, "Debug");
     debug_stage_->set_property<std::vector<std::string>>(
         PropertyNames::enum_names,
         {"none", "waiting_video_in (cyan)", "download_fail (blue)", "input_black (orange)",
-         "passthrough", "matte", "error"});
+         "passthrough (live blit)", "matte (disabled)", "error"});
     debug_stage_->set_value(0);
 
     debug_status_ = add_parameter<ParameterString>("debug_status");
     debug_status_->set_property(PropertyNames::name, "Debug Status");
     debug_status_->set_property(PropertyNames::group_name, "Debug");
-    debug_status_->set_value(std::string("booting"));
+    debug_status_->set_value(std::string("v43 live blit only (no ORT in-process)"));
 
-    removerLog(std::format("Input ctor full-D3D11 I/O adapter_luid={:016x}", adapter_luid_));
+    removerLog(std::format("Input ctor v43 live-blit-only adapter_luid={:016x}", adapter_luid_));
 }
 
 Input::~Input() {
-    matte_worker_.reset();
     removerLog("Input dtor");
 }
 
@@ -106,23 +97,8 @@ void Input::ensureD3dTextures() {
     if (!d3d_video_in_) {
         d3d_video_in_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
     }
-    if (!d3d_capture_share_) {
-        d3d_capture_share_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
-    }
-    if (!d3d_matte_tex_) {
-        d3d_matte_tex_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
-    }
     if (!passthrough_) {
         passthrough_ = std::make_unique<D3d11Passthrough>(d3d_->device());
-    }
-}
-
-void Input::ensureWorker() {
-    if (!matte_worker_) {
-        matte_worker_ = std::make_unique<MatteCaptureWorker>(adapter_luid_);
-    }
-    if (quality_) {
-        matte_worker_->setQuality(quality_->value());
     }
 }
 
@@ -132,17 +108,8 @@ void Input::clearVideoInLink(const char* reason) {
     }
     removerLog(std::format("video_in cleared ({})", reason ? reason : "?"));
     video_in_ready_ = false;
-    matte_live_ = false;
-    if (matte_worker_) {
-        matte_worker_->setCaptureShare(nullptr, 0, 0);
-    }
     if (d3d_video_in_) {
         d3d_video_in_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
-    }
-    d3d_capture_share_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
-    last_capture_kick_tick_ = 0;
-    if (d3d_matte_tex_) {
-        d3d_matte_tex_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
     }
     if (video_in_) {
         try {
@@ -152,12 +119,6 @@ void Input::clearVideoInLink(const char* reason) {
     }
     if (d3d_output_ && d3d_output_->hasTexture()) {
         d3d_output_->clear(0.0f, 0.86f, 1.0f, 1.0f);
-    }
-}
-
-void Input::applyMatteSettings() {
-    if (matte_worker_ && quality_) {
-        matte_worker_->setQuality(quality_->value());
     }
 }
 
@@ -195,12 +156,7 @@ void Input::publishVideoInTexture() {
                                get_format_name(fmt)));
 
         ensureD3dTextures();
-        ensureWorker();
         d3d_video_in_->allocate(width_, height_, fmt, /*is_target=*/false);
-        d3d_capture_share_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
-                                     /*publish_share=*/true);
-        d3d_matte_tex_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
-                                 /*publish_share=*/false);
         publishTargetTexture();
 
         TextureDesc shared = desc;
@@ -210,15 +166,11 @@ void Input::publishVideoInTexture() {
                                reinterpret_cast<Handle>(d3d_video_in_->shareHandle())};
         video_in_->set_texture(host().create_texture(shared));
         video_in_ready_ = true;
-        matte_live_ = false;
-        last_capture_kick_tick_ = 0;
-        applyMatteSettings();
-        matte_worker_->setCaptureShare(d3d_capture_share_->shareHandle(), width_, height_);
         removerLog(std::format(
-            "shared VIDEO_IN {}x{} format={} handle=D3D11_IMAGE is_target=0 srv={} (link feed now)",
+            "shared VIDEO_IN {}x{} format={} handle=D3D11_IMAGE is_target=0 srv={} (live blit only)",
             shared.width, shared.height, get_format_name(shared.format),
             d3d_video_in_->srv() ? 1 : 0));
-        removerLog("capture share ready (single buffer; worker Maps this, never Video In)");
+        removerLog("matte DISABLED in-process (ORT init freezes PIXERA; use camera-debug for RVM)");
     };
 
     update_input_texture(*video_in_, allocate);
@@ -265,9 +217,8 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     if (debug_stage_) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
-    const std::string ui = std::format("v42 {} nz={} mid=({},{},{}) vin={}",
-                                       dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r,
-                                       dbg.mid_g, dbg.mid_b, dbg.has_video_in ? 1 : 0);
+    const std::string ui = std::format("v43 {} vin={} (live blit, no ORT)",
+                                       dbg.stage ? dbg.stage : "?", dbg.has_video_in ? 1 : 0);
     if (debug_status_) {
         debug_status_->set_value(ui);
     }
@@ -309,15 +260,12 @@ bool Input::update_settings(ValueSet settings) noexcept try {
         !stream_luid.empty()) {
         adapter_luid_ = common::from_hex_string<std::uint64_t>(stream_luid);
     }
-    removerLog(std::format("update_settings {}x{} adapter={:016x}", width_, height_,
-                           adapter_luid_));
+    removerLog(std::format("update_settings {}x{} adapter={:016x} (live blit only, no ORT worker)",
+                           width_, height_, adapter_luid_));
 
-    // Start worker early so CPU RVM preloads while cyan (before Video In / live blit).
-    ensureWorker();
-    applyMatteSettings();
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v42 D3D11-only + preloaded CPU RVM"));
+        debug_status_->set_value(std::string("v43 live blit only — ORT disabled in PIXERA"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -354,7 +302,7 @@ ValueSet Input::get_state() noexcept {
 
 string Input::get_property(string_view name) noexcept {
     if (name == PropertyNames::applies_alpha) {
-        return string(matte_live_ ? "true" : "false");
+        return string("false");
     }
     return {};
 }
@@ -421,86 +369,20 @@ RenderResult Input::render() noexcept try {
         return RenderResult::Succeeded;
     }
 
-    ensureWorker();
-    applyMatteSettings();
+    // v36 proven path: GPU sample Video In -> shared output + moving lime heartbeat.
+    // No Map, no Flush, no second device, no ORT.
+    d3d_output_->clear(0.0f, 0.0f, 0.0f, 1.0f);
+    passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_output_->rtv(), width_, height_);
+    passthrough_->drawHeartbeat(d3d_->context(), d3d_output_->rtv(), width_, height_,
+                                render_ticks_);
 
-    // Apply ONLY real cutout frames. Worker "passthrough" uploads must NOT set matte_live_
-    // — that abandoned the live Video In blit and looked like a ~1s freeze (v38 symptom).
-    std::uint32_t mw = 0;
-    std::uint32_t mh = 0;
-    ::genesis::RemoverFrameDebug worker_dbg{};
-    if (matte_worker_->tryTakeMatte(worker_matte_rgba_, mw, mh, &worker_dbg) && mw == width_ &&
-        mh == height_ && !worker_matte_rgba_.empty()) {
-        const bool is_matte =
-            worker_dbg.stage && std::string_view(worker_dbg.stage) == "matte" &&
-            worker_dbg.nonzero_rgb > 0;
-        if (is_matte) {
-            d3d_matte_tex_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
-                                     /*publish_share=*/false);
-            if (d3d_matte_tex_->uploadRgba8UpdateSubresource(worker_matte_rgba_.data(), width_,
-                                                             height_)) {
-                matte_live_ = true;
-                dbg = worker_dbg;
-                removerLog(std::format("applied worker matte nz={}", dbg.nonzero_rgb));
-            }
-        } else if ((render_ticks_ % 60u) == 1u) {
-            removerLog(std::format("ignore worker non-matte stage={}",
-                                   worker_dbg.stage ? worker_dbg.stage : "?"));
-        }
-    }
-
-    // Present: live Video In until a real matte exists (v36 path must stay live).
-    if (matte_live_ && d3d_matte_tex_ && d3d_matte_tex_->srv()) {
-        passthrough_->draw(d3d_->context(), d3d_matte_tex_->srv(), d3d_output_->rtv(), width_,
-                           height_);
-        dbg.width = width_;
-        dbg.height = height_;
-        dbg.has_video_in = true;
-        dbg.download_ok = true;
-        dbg.matte_copied = true;
-        dbg.stage = "matte";
-    } else {
-        d3d_output_->clear(0.0f, 0.0f, 0.0f, 1.0f);
-        passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_output_->rtv(), width_,
-                           height_);
-        passthrough_->drawHeartbeat(d3d_->context(), d3d_output_->rtv(), width_, height_,
-                                    render_ticks_);
-        dbg.width = width_;
-        dbg.height = height_;
-        dbg.has_video_in = true;
-        dbg.stage = "passthrough";
-    }
-
-    // Blit Video In -> capture share only when CPU RVM is preloaded and worker is idle.
-    // No Flush. No RemoverPipeline/Vulkan on this device.
-    constexpr std::uint64_t kFirstKickTick = 90;
-    constexpr std::uint64_t kKickInterval = 180;
-    if (matte_worker_ && matte_worker_->engineReady() && !matte_worker_->busy() &&
-        render_ticks_ >= kFirstKickTick &&
-        (last_capture_kick_tick_ == 0 ||
-         render_ticks_ - last_capture_kick_tick_ >= kKickInterval) &&
-        d3d_capture_share_ && d3d_capture_share_->rtv() && d3d_capture_share_->shareHandle()) {
-        if (d3d_capture_share_->width() != width_ || d3d_capture_share_->height() != height_) {
-            d3d_capture_share_->allocate(width_, height_, Format::R8G8B8A8_UNORM,
-                                        /*is_target=*/true, /*publish_share=*/true);
-            matte_worker_->setCaptureShare(d3d_capture_share_->shareHandle(), width_, height_);
-        }
-        passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_capture_share_->rtv(),
-                           width_, height_);
-        if (matte_worker_->kick()) {
-            last_capture_kick_tick_ = render_ticks_;
-            removerLog(std::format("kick capture-share tick={} (engine ready, share released before RVM)",
-                                   render_ticks_));
-        }
-    } else if (matte_worker_ && !matte_worker_->engineReady() && (render_ticks_ % 60u) == 1u) {
-        removerLog("waiting CPU RVM preload before first capture kick");
-    }
+    dbg.width = width_;
+    dbg.height = height_;
+    dbg.has_video_in = true;
+    dbg.stage = "passthrough";
 
     if (render_ticks_ <= 8u || (render_ticks_ % 60u) == 1u) {
-        removerLog(std::format("gpu_present {} {}x{} matte_live={} worker_busy={} engine_ready={}",
-                               matte_live_ ? "worker" : "live", width_, height_,
-                               matte_live_ ? 1 : 0, matte_worker_ && matte_worker_->busy() ? 1 : 0,
-                               matte_worker_ && matte_worker_->engineReady() ? 1 : 0));
+        removerLog(std::format("gpu_present live {}x{} (v43 blit-only, no ORT)", width_, height_));
     }
 
     logStatusMaybe(dbg);
