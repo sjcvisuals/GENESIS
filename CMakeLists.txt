@@ -475,9 +475,6 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         ${EXT_REMOVER_DIR}/src/Extension.cpp
         ${EXT_REMOVER_DIR}/src/Device.cpp
         ${EXT_REMOVER_DIR}/src/Input.cpp
-        ${EXT_REMOVER_DIR}/src/D3d11SharedTexture.cpp
-        ${EXT_REMOVER_DIR}/src/D3d11Passthrough.cpp
-        ${EXT_REMOVER_DIR}/src/SharedD3d11.cpp
         ${EXT_REMOVER_DIR}/src/ModulePaths.cpp
         ${EXT_REMOVER_DIR}/src/RemoverLog.cpp
         ${RX_SDK_DIR}/libs/common/string.cpp
@@ -490,9 +487,9 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_BINARY_DIR}
     )
-    # Output: Vulkan OPAQUE_WIN32 (PIXERA samples).
-    # Video In: D3D11_IMAGE (ExtSampleD3D) — PIXERA D3D engine writes the feed.
-    target_link_libraries(ExtGenesisRemover PRIVATE genesis_remover_core d3d11 dxgi d3dcompiler)
+    # Host-texture I/O (download/upload) + CPU matte. Shared D3D11 Video In stayed
+    # opaque-black with live PIXERA feeds (v18–v28). Match ExtSampleCPU/Shader.
+    target_link_libraries(ExtGenesisRemover PRIVATE genesis_matting)
     if(MSVC AND GENESIS_HAS_ONNXRUNTIME)
         target_link_options(ExtGenesisRemover PRIVATE "/DELAYLOAD:onnxruntime.dll")
         target_link_libraries(ExtGenesisRemover PRIVATE delayimp)

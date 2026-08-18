@@ -11,7 +11,7 @@ if (-not (Test-Path $log)) {
 }
 
 Write-Host ""
-Write-Host "==== stamp (must be v28-vin-target) ====" -ForegroundColor Cyan
+Write-Host "==== stamp (must be v29-host) ====" -ForegroundColor Cyan
 Select-String -Path $log -Pattern "remover-timeline-" | ForEach-Object { $_.Line } |
     ForEach-Object { if ($_ -match '\[(remover-timeline-[^\]]+)\]') { $Matches[1] } } |
     Group-Object | Sort-Object Count -Descending |
@@ -20,14 +20,14 @@ Select-String -Path $log -Pattern "remover-timeline-" | ForEach-Object { $_.Line
 Write-Host ""
 Write-Host "==== latest STATUS lines (stage machine) ====" -ForegroundColor Cyan
 Write-Host "  cyan/waiting_video_in = shared out OK, Video In not published yet"
-Write-Host "  blue/download_fail    = Vulkan read of shared Video In failed"
-Write-Host "  orange/input_black    = shared Video In bound but pixels are zero"
+Write-Host "  blue/download_fail    = download empty/abandoned"
+Write-Host "  orange/input_black    = download ok but pixels are zero"
 Write-Host "  passthrough / matte   = working (feed then cutout)"
 Select-String -Path $log -Pattern "STATUS stage=" | Select-Object -Last 15 | ForEach-Object { $_.Line }
 
 Write-Host ""
 Write-Host "==== key events ====" -ForegroundColor Cyan
-Select-String -Path $log -Pattern "shared OUTPUT|shared VIDEO_IN|processing enabled|matte_live|GPU FAIL|placeholder sampler|video_in allocate|SENTINEL|input_black|FP16 raw|frame stats|opaque_black" |
+Select-String -Path $log -Pattern "video_in HOST|download armed|download ok|download ABANDONED|STATUS stage=|matte_live|sampler host|opaque_passthrough|waiting_download" |
     Select-Object -Last 25 | ForEach-Object { $_.Line }
 
 Write-Host ""

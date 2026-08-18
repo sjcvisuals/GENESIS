@@ -76,16 +76,18 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v28-vin-target-20260818
+  remover-timeline-v29-host-20260818
 
-v28 = Video In published as is_target=true (SRV|RTV):
-  v27 frame stats proved entire 1920x1080 is opaque black (max_rgb=0, A=1).
-  Host clears the share but never blits the feed when is_target=false.
-  Publish Video In as a render target so PIXERA can composite into it.
-  Expect nz>0 / passthrough if that was the missing flag; else still opaque_black
-  → A/B ExtSampleD3D with the same Video In link (PIXERA routing).
+v29 = restore HOST-texture Video In (ExtSampleCPU/Shader path):
+  v18–v28 D3D11 shared Video In: download/fence worked but PIXERA never blitted
+  the feed (full-frame max_rgb=0 / opaque black). Prior commits already noted
+  shared D3D11 stayed black; host create/download/upload got live pixels.
+  Restore host path with BGRA swizzle + download abandon after ~90 ticks
+  (avoids the old hung-blue scrub stall).
+  Cyan = waiting download; magenta = linked empty; live = passthrough then matte.
+  Log STATUS stage=passthrough|input_black with nz=/mid=.
 
-v27 = delay + stats; confirmed full-frame opaque black from PIXERA.
+v28 = Video In is_target; still full-frame zeros.
 
 Stage colours (until Video In has pixels):
   cyan   = waiting for Video In link (normal)

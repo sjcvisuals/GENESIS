@@ -3,53 +3,137 @@
 
 #include "ModulePaths.h"
 #include "RemoverLog.h"
-#include "common/string.h"
-#include "matting/BgRemover.hpp"
 #include "platform/Paths.hpp"
-#include "rxext_util.h"
-
-#include <Windows.h>
 
 #include <algorithm>
-#include <filesystem>
+#include <cstring>
 #include <format>
-#include <stdexcept>
 #include <string>
-#include <string_view>
+#include <utility>
+#include <vector>
 
 namespace rxext::genesis_remover {
 
 namespace {
 
-int stageToEnum(const char* stage) {
-    if (!stage) {
-        return 0;
-    }
-    const std::string_view s(stage);
-    if (s == "waiting_video_in") {
-        return 1;
-    }
-    if (s == "download_fail") {
-        return 2;
-    }
-    if (s == "input_black") {
-        return 3;
-    }
-    if (s == "passthrough") {
-        return 4;
-    }
-    if (s == "matte") {
-        return 5;
-    }
-    if (s == "error") {
-        return 6;
-    }
-    return 0;
+// PIXERA host-texture samples (ExtSampleCPU) use BGRA. We keep RGBA internally for RVM.
+constexpr Format kPixeraHostFormat = Format::B8G8R8A8_UNORM;
+
+bool isBgra(Format format) {
+    return format == Format::B8G8R8A8_UNORM;
 }
+
+void swapRbInPlace(std::uint8_t* px, std::size_t pixels) {
+    for (std::size_t i = 0; i < pixels; ++i) {
+        std::swap(px[i * 4u + 0], px[i * 4u + 2]);
+    }
+}
+
+void hostToRgbaInPlace(std::uint8_t* px, std::size_t pixels, Format host_format) {
+    if (isBgra(host_format)) {
+        swapRbInPlace(px, pixels);
+    }
+}
+
+void rgbaToHost(const std::uint8_t* rgba, std::uint8_t* host, std::size_t pixels, Format host_format) {
+    if (!isBgra(host_format)) {
+        std::memcpy(host, rgba, pixels * 4u);
+        return;
+    }
+    for (std::size_t i = 0; i < pixels; ++i) {
+        host[i * 4u + 0] = rgba[i * 4u + 2]; // B
+        host[i * 4u + 1] = rgba[i * 4u + 1]; // G
+        host[i * 4u + 2] = rgba[i * 4u + 0]; // R
+        host[i * 4u + 3] = rgba[i * 4u + 3]; // A
+    }
+}
+
+std::size_t nonzeroRgbCount(const std::uint8_t* rgba, std::size_t bytes) {
+    std::size_t n = 0;
+    for (std::size_t i = 0; i + 3 < bytes; i += 4) {
+        if (rgba[i] | rgba[i + 1] | rgba[i + 2]) {
+            ++n;
+        }
+    }
+    return n;
+}
+
+bool matteHasCoverage(const std::uint8_t* rgba, std::uint32_t w, std::uint32_t h) {
+    if (!rgba || w == 0 || h == 0) {
+        return false;
+    }
+    const std::size_t pixels = static_cast<std::size_t>(w) * h;
+    const std::size_t step = std::max<std::size_t>(1, pixels / 8192u);
+    std::size_t hits = 0;
+    unsigned max_a = 0;
+    for (std::size_t i = 0; i < pixels; i += step) {
+        const unsigned a = rgba[i * 4u + 3u];
+        max_a = std::max(max_a, a);
+        if (a > 8) {
+            ++hits;
+        }
+    }
+    // Soft gate: RVM often has sparse person coverage; don't block matte_live forever.
+    return max_a > 24 && hits >= 3;
+}
+
+void extractAlpha(const std::uint8_t* rgba, std::uint8_t* alpha8, std::size_t pixels) {
+    for (std::size_t i = 0; i < pixels; ++i) {
+        alpha8[i] = rgba[i * 4u + 3u];
+    }
+}
+
+void compositeWithAlpha(const std::uint8_t* in_rgba, const std::uint8_t* alpha8,
+                        std::uint8_t* out_rgba, std::size_t pixels) {
+    for (std::size_t i = 0; i < pixels; ++i) {
+        const std::uint8_t a = alpha8[i];
+        out_rgba[i * 4u + 0] = static_cast<std::uint8_t>((in_rgba[i * 4u + 0] * a) / 255u);
+        out_rgba[i * 4u + 1] = static_cast<std::uint8_t>((in_rgba[i * 4u + 1] * a) / 255u);
+        out_rgba[i * 4u + 2] = static_cast<std::uint8_t>((in_rgba[i * 4u + 2] * a) / 255u);
+        out_rgba[i * 4u + 3] = a;
+    }
+}
+
+void fillOpaquePassthrough(const std::uint8_t* in_rgba, std::uint8_t* out_rgba, std::size_t bytes) {
+    std::memcpy(out_rgba, in_rgba, bytes);
+    for (std::size_t i = 3; i < bytes; i += 4) {
+        out_rgba[i] = 255;
+    }
+}
+
+void fillSolidRgba(std::uint8_t* out_rgba, std::size_t bytes, std::uint8_t r, std::uint8_t g,
+                   std::uint8_t b) {
+    for (std::size_t i = 0; i + 3 < bytes; i += 4) {
+        out_rgba[i + 0] = r;
+        out_rgba[i + 1] = g;
+        out_rgba[i + 2] = b;
+        out_rgba[i + 3] = 255;
+    }
+}
+
+void logPathOnce(std::string& last, const char* path) {
+    if (last == path) {
+        return;
+    }
+    last = path;
+    removerLog(std::format("render path={}", path));
+}
+
 } // namespace
 
-Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, ValueSet settings)
-    : d3d_(std::move(d3d)), adapter_luid_(adapter_luid), settings_(std::move(settings)) {
+Input::Input(ValueSet settings) : settings_(std::move(settings)) {
+    removerLog("Input ctor (host-texture)");
+}
+
+Input::~Input() {
+    async_.stop();
+    removerLog("Input dtor");
+}
+
+void Input::registerParameters() {
+    if (params_registered_) {
+        return;
+    }
     const std::filesystem::path module_dir = extensionModuleDirectory();
     const std::filesystem::path roots[] = {module_dir, module_dir / "assets"};
     ::genesis::setAssetSearchRoots(roots);
@@ -59,6 +143,8 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
     time_ = add_parameter<ParameterValue>("time");
     time_->set_property(PropertyNames::purpose, PurposeNames::TimelineTime);
 
+    // Needed so update() keeps running after a Video In link while the playhead
+    // is parked (otherwise we stay on cyan forever).
     frame_counter_ = add_parameter<ParameterValue>("frame_counter");
     frame_counter_->set_property(PropertyNames::purpose, PurposeNames::FrameCounter);
 
@@ -73,193 +159,339 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
                                                       {"Fast", "Balanced", "Quality"});
     quality_->set_value(1);
 
-    debug_stage_ = add_parameter<ParameterInt>("debug_stage");
-    debug_stage_->set_property(PropertyNames::name, "Debug Stage");
-    debug_stage_->set_property(PropertyNames::group_name, "Debug");
-    debug_stage_->set_property<std::vector<std::string>>(
-        PropertyNames::enum_names,
-        {"none", "waiting_video_in (cyan)", "download_fail (blue)", "input_black (orange)",
-         "passthrough", "matte", "error"});
-    debug_stage_->set_value(0);
-
-    debug_status_ = add_parameter<ParameterString>("debug_status");
-    debug_status_->set_property(PropertyNames::name, "Debug Status");
-    debug_status_->set_property(PropertyNames::group_name, "Debug");
-    debug_status_->set_value(std::string("booting"));
-
-    removerLog(std::format("Input ctor full-D3D11 I/O adapter_luid={:016x}", adapter_luid_));
+    params_registered_ = true;
+    removerLog("parameters registered (host-texture path)");
 }
 
-Input::~Input() {
-    removerLog("Input dtor");
+void Input::touchHostClock() {
+    if (time_) {
+        (void)time_->value();
+    }
+    if (frame_counter_) {
+        (void)frame_counter_->value();
+    }
 }
 
-void Input::ensureRemover() {
-    if (remover_) {
+void Input::ensureSampler(std::uint32_t width, std::uint32_t height) {
+    if (!sampler_ || width == 0 || height == 0) {
         return;
     }
-    // Vulkan context still used internally for matte scratch; PIXERA only sees D3D11_IMAGE.
-    remover_ = std::make_unique<::genesis::RemoverPipeline>(adapter_luid_);
-    removerLog(std::format("RemoverPipeline ready adapter={:016x}", adapter_luid_));
-}
+    width_ = width;
+    height_ = height;
 
-void Input::ensureD3dTextures() {
-    if (!d3d_) {
-        throw std::runtime_error("Input: SharedD3d11 is null");
+    bool need_new = true;
+    try {
+        const auto cur = sampler_->texture().desc();
+        need_new =
+            (cur.width != width_ || cur.height != height_ || cur.format != kPixeraHostFormat);
+    } catch (...) {
+        need_new = true;
     }
-    if (!d3d_output_) {
-        d3d_output_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
-    }
-    if (!d3d_video_in_) {
-        d3d_video_in_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
-    }
-    // Passthrough kept available but unused in v26 (GPU blit hung after VIDEO_IN in v25).
-}
-
-void Input::applyMatteSettings() {
-    if (!remover_) {
+    if (!need_new) {
         return;
     }
-    ::genesis::BgRemoverSettings matte = remover_->remover().settings();
-    const int q = quality_ ? std::clamp(quality_->value(), 0, 2) : 1;
-    const auto next_q = static_cast<::genesis::BgRemoverQuality>(q);
-    if (matte.backend == ::genesis::BgRemoverBackend::Auto && matte.quality == next_q) {
-        return;
-    }
-    matte.backend = ::genesis::BgRemoverBackend::Auto;
-    matte.quality = next_q;
-    matte.rvm_downsample = 0.0f;
-    matte.temporal_alpha = 0.20f;
-    remover_->setSettings(matte);
-}
-
-void Input::publishTargetTexture() {
-    if (!sampler_ || !d3d_) {
-        return;
-    }
-    ensureD3dTextures();
-    d3d_output_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true);
 
     TextureDesc desc{};
     desc.width = width_;
     desc.height = height_;
-    desc.format = Format::R8G8B8A8_UNORM;
+    // Match ExtSampleCPU: PIXERA host textures are BGRA.
+    desc.format = kPixeraHostFormat;
     desc.is_target = true;
-    // Match ExtSampleD3D: type + handle only (process_id = 0).
-    desc.share_handle = {HandleType::D3D11_IMAGE,
-                         reinterpret_cast<Handle>(d3d_output_->shareHandle())};
     sampler_->set_texture(host().create_texture(desc));
-    removerLog(std::format("shared OUTPUT {}x{} handle=D3D11_IMAGE", desc.width, desc.height));
+
+    // Cyan = DLL alive, waiting for Video In download (unmistakable diagnostic).
+    const std::size_t bytes = static_cast<std::size_t>(width_) * height_ * 4u;
+    const std::size_t pixels = static_cast<std::size_t>(width_) * height_;
+    scratch_out_.resize(bytes);
+    fillSolidRgba(scratch_out_.data(), bytes, 0, 220, 255);
+    host_upload_.resize(bytes);
+    rgbaToHost(scratch_out_.data(), host_upload_.data(), pixels, kPixeraHostFormat);
+    BufferDesc buffer{};
+    buffer.data = host_upload_.data();
+    buffer.pitch = static_cast<std::size_t>(width_) * 4u;
+    buffer.size = bytes;
+    host().upload_texture(sampler_->texture(), buffer, true, []() noexcept {});
+    matte_live_ = false;
+    has_last_alpha_ = false;
+    last_alpha_.clear();
+    removerLog(std::format("sampler host texture {}x{} format={} (cyan placeholder)", width_,
+                           height_, get_format_name(kPixeraHostFormat)));
 }
 
-void Input::publishVideoInTexture() {
-    if (!video_in_ || !remover_) {
+void Input::ensureVideoInHostTexture() {
+    if (!video_in_) {
         return;
     }
 
-    auto allocate = [&](const TextureDesc& desc) {
+    auto allocate = [&](TextureDesc desc, const char* reason) {
         if (desc.width == 0 || desc.height == 0) {
             return;
         }
-        width_ = static_cast<std::uint32_t>(desc.width);
-        height_ = static_cast<std::uint32_t>(desc.height);
-        const Format fmt = desc.format == Format::None ? Format::R8G8B8A8_UNORM : desc.format;
-        removerLog(std::format("video_in allocate {}x{} format={} (D3D11_IMAGE)", width_, height_,
-                               get_format_name(fmt)));
+        if (desc.format == Format::None) {
+            desc.format = kPixeraHostFormat;
+        }
+        desc.is_target = false;
+        desc.share_handle = {};
 
-        ensureD3dTextures();
-        // PIXERA clears our share to opaque black (max_rgb=0, A=1) when is_target=false.
-        // Publish as a render target (SRV|RTV + is_target=true) so the host can composite
-        // the Video In feed into it — ExtSampleD3D samples an input, but Remover needs
-        // PIXERA to WRITE the feed.
-        d3d_video_in_->allocate(width_, height_, fmt, /*is_target=*/true);
-        remover_->resize(width_, height_);
-        publishTargetTexture();
+        const auto gen = video_in_generation_.fetch_add(1) + 1;
+        download_pending_.store(false);
+        download_pending_since_tick_.store(0);
 
-        TextureDesc shared = desc;
-        shared.format = fmt;
-        shared.is_target = true;
-        shared.share_handle = {HandleType::D3D11_IMAGE,
-                               reinterpret_cast<Handle>(d3d_video_in_->shareHandle())};
-        video_in_->set_texture(host().create_texture(shared));
-        video_in_ready_ = true;
-        applyMatteSettings();
-        removerLog(std::format(
-            "shared VIDEO_IN {}x{} format={} handle=D3D11_IMAGE is_target=1 rtv={}", shared.width,
-            shared.height, get_format_name(shared.format), d3d_video_in_->rtv() ? 1 : 0));
-        have_delayed_frame_ = false;
-        d3d_rgba_delayed_.clear();
+        video_in_host_format_ = desc.format;
+        video_in_->set_texture(host().create_texture(desc));
+        video_in_allocated_ = true;
+        // Never download in the same step as create — that crashed PIXERA.
+        video_in_download_allowed_ = false;
+        download_cooldown_frames_ = 20;
+        ensureSampler(static_cast<std::uint32_t>(desc.width),
+                      static_cast<std::uint32_t>(desc.height));
+        {
+            std::lock_guard<std::mutex> lock(frame_mutex_);
+            has_in_ = false;
+            latest_in_.clear();
+        }
+        has_last_alpha_ = false;
+        last_alpha_.clear();
+        last_render_path_.clear();
+        removerLog(std::format("video_in HOST texture {}x{} format={} gen={} ({})", desc.width,
+                               desc.height, get_format_name(desc.format), gen, reason));
     };
 
-    update_input_texture(*video_in_, allocate);
+    update_input_texture(*video_in_, [&](const TextureDesc& desc) {
+        allocate(desc, "update_input_texture");
+    });
 
-    if (!video_in_ready_) {
-        TextureDesc desc{};
-        desc.width = static_cast<std::size_t>(
-            video_in_->get_property<int>(SettingNames::resolution_x, 0));
-        desc.height = static_cast<std::size_t>(
-            video_in_->get_property<int>(SettingNames::resolution_y, 0));
-        desc.format = get_format_by_name(video_in_->get_property(SettingNames::format),
-                                         Format::R8G8B8A8_UNORM);
-        if (desc.width == 0 || desc.height == 0) {
-            try {
-                const auto cur = video_in_->texture().desc();
-                if (cur.width > 0 && cur.height > 0) {
-                    desc.width = cur.width;
-                    desc.height = cur.height;
-                    if (cur.format != Format::None) {
-                        desc.format = cur.format;
-                    }
-                }
-            } catch (...) {
-            }
+    const int prop_w = video_in_->get_property<int>(SettingNames::resolution_x, 0);
+    const int prop_h = video_in_->get_property<int>(SettingNames::resolution_y, 0);
+    const std::string format_str(video_in_->get_property(SettingNames::format));
+    // Default BGRA like ExtSampleCPU — RGBA default caused multi-colour feeds.
+    const Format prop_fmt = get_format_by_name(format_str, kPixeraHostFormat);
+
+    if (!baseline_captured_ && prop_w > 0 && prop_h > 0) {
+        baseline_w_ = prop_w;
+        baseline_h_ = prop_h;
+        baseline_format_ = format_str;
+        baseline_captured_ = true;
+        removerLog(std::format("video_in baseline props {}x{} format='{}'", prop_w, prop_h,
+                               format_str));
+    }
+
+    // PIXERA live inputs often omit format, so the SDK helper never fires.
+    // Allocate when format is explicit or when props change from the pre-link baseline.
+    if (!video_in_allocated_ && prop_w > 0 && prop_h > 0 && baseline_captured_) {
+        const bool format_explicit = !format_str.empty();
+        const bool dims_changed = (prop_w != baseline_w_ || prop_h != baseline_h_);
+        const bool format_changed = (format_str != baseline_format_);
+        if (format_explicit || dims_changed || format_changed) {
+            TextureDesc desc{};
+            desc.width = static_cast<std::size_t>(prop_w);
+            desc.height = static_cast<std::size_t>(prop_h);
+            desc.format = prop_fmt;
+            allocate(desc, format_explicit ? "props+format" : "props-changed");
+        } else if (!same_res_allocate_tried_ && render_ticks_ > 45) {
+            // Same-resolution live link: props may never change. After ~0.75s of ticks,
+            // create the host texture so PIXERA can write; download arms after cooldown.
+            same_res_allocate_tried_ = true;
+            TextureDesc desc{};
+            desc.width = static_cast<std::size_t>(prop_w);
+            desc.height = static_cast<std::size_t>(prop_h);
+            desc.format = prop_fmt;
+            allocate(desc, "same-res-timeout");
         }
-        if (desc.width > 0 && desc.height > 0) {
-            removerLog("video_in allocate via fallback (D3D11)");
-            allocate(desc);
-        } else if ((render_ticks_ % 60u) == 1u) {
-            removerLog(std::format(
-                "waiting Video In link (props {}x{} format='{}') - cyan is correct until then",
-                video_in_->get_property<int>(SettingNames::resolution_x, 0),
-                video_in_->get_property<int>(SettingNames::resolution_y, 0),
-                std::string(video_in_->get_property(SettingNames::format))));
+    }
+
+    if (video_in_allocated_ && !video_in_download_allowed_) {
+        if (download_cooldown_frames_ > 0) {
+            --download_cooldown_frames_;
+        } else {
+            video_in_download_allowed_ = true;
+            removerLog("video_in download armed");
         }
+    }
+
+    if (!video_in_allocated_ && (render_ticks_ % 60u) == 1u) {
+        removerLog(std::format("waiting link: props {}x{} format='{}' baseline={}", prop_w, prop_h,
+                               format_str, baseline_captured_ ? 1 : 0));
     }
 }
 
-void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
-    if (debug_stage_) {
-        debug_stage_->set_value(stageToEnum(dbg.stage));
+void Input::requestVideoDownload() {
+    if (!video_in_ || !video_in_download_allowed_) {
+        return;
     }
-    const std::string ui = std::format("v28 {} nz={} mid=({},{},{}) vin={}",
-                                       dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r,
-                                       dbg.mid_g, dbg.mid_b, dbg.has_video_in ? 1 : 0);
-    if (debug_status_) {
-        debug_status_->set_value(ui);
+    TextureDesc desc{};
+    try {
+        desc = video_in_->texture().desc();
+    } catch (...) {
+        return;
     }
-    if (last_stage_ != (dbg.stage ? dbg.stage : "") || (render_ticks_ % 30u) == 1u) {
-        last_stage_ = dbg.stage ? dbg.stage : "";
-        const std::uint64_t fence_c = d3d_ ? d3d_->fenceCounter() : 0;
-        const std::uint64_t fence_done = d3d_ ? d3d_->completedValue() : 0;
-        const std::uint64_t sync_n = d3d_ ? d3d_->syncCallbacks() : 0;
-        const int sent =
-            (!d3d_rgba_in_.empty() && D3d11SharedTexture::looksLikeSentinel(d3d_rgba_in_)) ? 1 : 0;
-        removerLog(std::format(
-            "STATUS stage={} vin={} dl={} nz={} mid=({},{},{},{}) {}x{} matte={} luid={:016x} "
-            "fence={}/{} sync={} sent={}",
-            dbg.stage ? dbg.stage : "?", dbg.has_video_in ? 1 : 0, dbg.download_ok ? 1 : 0,
-            dbg.nonzero_rgb, dbg.mid_r, dbg.mid_g, dbg.mid_b, dbg.mid_a, dbg.width, dbg.height,
-            dbg.matte_copied ? 1 : 0, adapter_luid_, fence_done, fence_c, sync_n, sent));
+    if (desc.width == 0 || desc.height == 0 || !video_in_->texture()) {
+        return;
     }
+    // Abandon hung download_texture (PIXERA sometimes never completes — was stuck blue).
+    if (download_pending_.load()) {
+        const auto since = download_pending_since_tick_.load();
+        if (since > 0 && render_ticks_ > since + 90u) {
+            download_pending_.store(false);
+            download_pending_since_tick_.store(0);
+            const auto n = downloads_abandoned_.fetch_add(1) + 1;
+            if (n <= 8 || (n % 60) == 0) {
+                removerLog(std::format("download ABANDONED after {} ticks (n={})",
+                                       render_ticks_ - since, n));
+            }
+        } else {
+            return;
+        }
+    }
+    if (download_pending_.exchange(true)) {
+        return;
+    }
+    download_pending_since_tick_.store(render_ticks_ == 0 ? 1 : render_ticks_);
+
+    const auto gen = video_in_generation_.load(std::memory_order_acquire);
+
+    const Format host_fmt = desc.format != Format::None ? desc.format : video_in_host_format_;
+
+    host().download_texture(
+        video_in_->texture(),
+        [this, gen, host_fmt, w = static_cast<std::uint32_t>(desc.width),
+         h = static_cast<std::uint32_t>(desc.height)](BufferDesc buffer,
+                                                      OnComplete on_complete) mutable noexcept {
+            try {
+                if (gen != video_in_generation_.load(std::memory_order_acquire)) {
+                    download_pending_.store(false);
+                    download_pending_since_tick_.store(0);
+                    on_complete();
+                    return;
+                }
+                const std::size_t expected = static_cast<std::size_t>(w) * h * 4u;
+                if (!buffer.data || buffer.size < expected || w == 0 || h == 0) {
+                    const auto n = downloads_empty_.fetch_add(1) + 1;
+                    if (n <= 5 || (n % 120) == 0) {
+                        removerLog(std::format("download empty/short size={} expected={} n={}",
+                                               buffer.size, expected, n));
+                    }
+                } else {
+                    std::vector<std::uint8_t> packed(expected);
+                    const auto* src = static_cast<const std::uint8_t*>(buffer.data);
+                    const std::size_t src_pitch =
+                        buffer.pitch > 0 ? buffer.pitch : static_cast<std::size_t>(w) * 4u;
+                    for (std::uint32_t y = 0; y < h; ++y) {
+                        std::memcpy(packed.data() + static_cast<std::size_t>(y) * w * 4u,
+                                    src + static_cast<std::size_t>(y) * src_pitch,
+                                    static_cast<std::size_t>(w) * 4u);
+                    }
+                    const std::size_t pixels = static_cast<std::size_t>(w) * h;
+                    hostToRgbaInPlace(packed.data(), pixels, host_fmt);
+                    const std::size_t lit = nonzeroRgbCount(packed.data(), expected);
+                    const std::size_t mid = (pixels / 2u) * 4u;
+                    const unsigned pr = packed[mid + 0];
+                    const unsigned pg = packed[mid + 1];
+                    const unsigned pb = packed[mid + 2];
+                    {
+                        std::lock_guard<std::mutex> lock(frame_mutex_);
+                        latest_in_ = std::move(packed);
+                        in_w_ = w;
+                        in_h_ = h;
+                        has_in_ = true;
+                    }
+                    const auto n = downloads_ok_.fetch_add(1) + 1;
+                    if (n <= 8 || (n % 60) == 0) {
+                        removerLog(std::format(
+                            "STATUS stage={} vin=1 dl=1 nz={} mid=({},{},{}) {}x{} host={} n={}",
+                            lit > 0 ? "passthrough" : "input_black", lit, pr, pg, pb, w, h,
+                            get_format_name(host_fmt), n));
+                    }
+                }
+            } catch (...) {
+                removerLog("download callback exception");
+            }
+            download_pending_.store(false);
+            download_pending_since_tick_.store(0);
+            on_complete();
+        });
+}
+
+void Input::applyMatteSettings() {
+    const int q = quality_ ? std::clamp(quality_->value(), 0, 2) : 1;
+    const auto next_q = static_cast<::genesis::BgRemoverQuality>(q);
+    if (matte_settings_applied_ && matte_settings_.backend == ::genesis::BgRemoverBackend::Auto &&
+        matte_settings_.quality == next_q) {
+        return;
+    }
+    matte_settings_.backend = ::genesis::BgRemoverBackend::Auto;
+    matte_settings_.quality = next_q;
+    matte_settings_.rvm_downsample = 0.0f; // honor Fast/Balanced/Quality presets
+    matte_settings_.temporal_alpha = 0.20f;
+    // Resolve model only when the worker is (about to be) running — avoid SDL/asset
+    // work during cyan scrub-in before Video In is linked.
+    if (async_started_ && matte_settings_.model_path.empty()) {
+        try {
+            matte_settings_.model_path =
+                ::genesis::resolveAssetPath("assets/matting/rvm_mobilenetv3_fp16.onnx");
+            removerLog(std::format("RVM model: {}", matte_settings_.model_path.string()));
+        } catch (const std::exception& ex) {
+            removerLog(std::format("RVM model resolve failed: {}", ex.what()));
+        }
+    }
+    matte_settings_applied_ = true;
+    if (async_started_) {
+        async_.setSettings(matte_settings_);
+        removerLog(std::format("matte settings applied quality={} ep={}", q,
+                               async_.executionProvider()));
+    }
+}
+
+void Input::uploadOutputRgba(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height) {
+    if (!sampler_ || !rgba || width == 0 || height == 0) {
+        return;
+    }
+    ensureSampler(width, height);
+    const std::size_t bytes = static_cast<std::size_t>(width) * height * 4u;
+    const std::size_t pixels = static_cast<std::size_t>(width) * height;
+    host_upload_.resize(bytes);
+    rgbaToHost(rgba, host_upload_.data(), pixels, kPixeraHostFormat);
+    BufferDesc buffer{};
+    buffer.data = host_upload_.data();
+    buffer.pitch = static_cast<std::size_t>(width) * 4u;
+    buffer.size = bytes;
+    host().upload_texture(sampler_->texture(), buffer, true, []() noexcept {});
+}
+
+void Input::logMatteStatusMaybe() {
+    if (!async_started_) {
+        return;
+    }
+    const auto completed = async_.completed();
+    const std::string status = async_.status();
+    if (status == last_matte_status_ && completed == last_logged_completed_ &&
+        (render_ticks_ % 120u) != 0u) {
+        return;
+    }
+    last_matte_status_ = status;
+    last_logged_completed_ = completed;
+    removerLog(std::format(
+        "matte status='{}' backend={} ep={} rvm={} infer={}x{} ms={:.1f} submitted={} completed={} "
+        "skipped={} busy={} matte_live={} dl_ok={} dl_empty={}",
+        status, ::genesis::bgRemoverBackendLabel(async_.activeBackend()),
+        async_.executionProvider(), async_.isRvmReady() ? 1 : 0, async_.lastInferWidth(),
+        async_.lastInferHeight(), async_.lastInferMs(), async_.submitted(), completed,
+        async_.skipped(), async_.busy() ? 1 : 0, matte_live_ ? 1 : 0, downloads_ok_.load(),
+        downloads_empty_.load()));
 }
 
 bool Input::initialize() noexcept try {
     const std::string handle = settings_.get(SettingNames::handle, "main");
-    removerLog(std::format("initialize begin handle='{}' adapter_luid={:016x} ({})", handle,
-                           adapter_luid_, kRemoverBuildStamp));
+    removerLog(std::format("initialize begin handle='{}' ({})", handle, kRemoverBuildStamp));
     host().log_info(std::format("initializing GENESIS Remover stream '{}' ({})", handle,
                                 kRemoverBuildStamp));
-    return update_settings(std::move(settings_));
+
+    registerParameters();
+    width_ = settings_.get<std::uint32_t>(SettingNames::resolution_x, 1920);
+    height_ = settings_.get<std::uint32_t>(SettingNames::resolution_y, 1080);
+    ensureSampler(width_, height_);
+    removerLog("initialize OK (host-texture path)");
+    return true;
 } catch (const std::exception& ex) {
     removerLog(std::format("initialize exception: {}", ex.what()));
     try {
@@ -273,34 +505,22 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     settings_ = std::move(settings);
     width_ = settings_.get<std::uint32_t>(SettingNames::resolution_x, 1920);
     height_ = settings_.get<std::uint32_t>(SettingNames::resolution_y, 1080);
-    if (const string stream_luid = settings_.get(SettingNames::adapter_luid, string{});
-        !stream_luid.empty()) {
-        adapter_luid_ = common::from_hex_string<std::uint64_t>(stream_luid);
+    removerLog(std::format("update_settings {}x{}", width_, height_));
+    if (!params_registered_) {
+        registerParameters();
     }
-    removerLog(std::format("update_settings {}x{} adapter={:016x}", width_, height_,
-                           adapter_luid_));
-
-    ensureRemover();
-    remover_->resize(width_, height_);
-    publishTargetTexture();
-    if (debug_status_) {
-        debug_status_->set_value(std::string("v28 vin-target - link Video In"));
-    }
+    ensureSampler(width_, height_);
     return true;
 } catch (const std::exception& ex) {
     removerLog(std::format("update_settings exception: {}", ex.what()));
-    try {
-        host().log_error(std::format("GENESIS Remover settings failed: {}", ex.what()));
-    } catch (...) {
-    }
-    return false;
+    return true;
 }
 
 ValueSet Input::get_state() noexcept {
     ValueSet state;
     int res_x = static_cast<int>(width_);
     int res_y = static_cast<int>(height_);
-    Format format = Format::R8G8B8A8_UNORM;
+    Format format = kPixeraHostFormat;
     if (sampler_) {
         try {
             const auto desc = sampler_->texture().desc();
@@ -316,162 +536,113 @@ ValueSet Input::get_state() noexcept {
     state.set(StateNames::resolution_y, res_y);
     state.set(StateNames::format, get_format_name(format));
     state.set(StateNames::scale_y, 1);
+    state.set(StateNames::frame_rate, 50.0);
     return state;
 }
 
 string Input::get_property(string_view name) noexcept {
     if (name == PropertyNames::applies_alpha) {
-        return string("true");
+        // false until covered matte is live — live webcam A=0 + applies_alpha=true = black.
+        return string(matte_live_ ? "true" : "false");
     }
     return {};
 }
 
 bool Input::update() noexcept try {
-    if (time_) {
-        (void)time_->value();
-    }
-    if (frame_counter_) {
-        (void)frame_counter_->value();
-    }
-    ensureRemover();
-    publishVideoInTexture();
+    touchHostClock();
+    ensureVideoInHostTexture();
+    // Do not call applyMatteSettings / start ORT here — scrub-in must stay light.
+    requestVideoDownload();
     return true;
 } catch (const std::exception& ex) {
     removerLog(std::format("update exception: {}", ex.what()));
     return true;
 }
 
-SyncDesc Input::before_render() noexcept {
-    return {};
-}
-
 RenderResult Input::render() noexcept try {
+    touchHostClock();
     ++render_ticks_;
-    if (time_) {
-        (void)time_->value();
-    }
-    if (frame_counter_) {
-        (void)frame_counter_->value();
-    }
+    logMatteStatusMaybe();
 
-    ensureRemover();
-    ensureD3dTextures();
-
-    ::genesis::RemoverFrameDebug dbg{};
-    std::string error;
-
-    if (!video_in_ready_ || !d3d_video_in_ || !d3d_video_in_->hasTexture()) {
-        (void)remover_->processCpuRgbaFrame(nullptr, false, &error, &dbg, true, &d3d_rgba_out_);
-        if (d3d_output_ && d3d_output_->hasTexture() && !d3d_rgba_out_.empty()) {
-            (void)d3d_output_->uploadRgba8(d3d_rgba_out_.data(), width_, height_);
-        } else if (d3d_output_ && d3d_output_->hasTexture()) {
-            d3d_output_->clear(0.0f, 0.86f, 1.0f, 1.0f); // cyan
+    std::vector<std::uint8_t> frame;
+    std::uint32_t w = 0;
+    std::uint32_t h = 0;
+    {
+        std::lock_guard<std::mutex> lock(frame_mutex_);
+        if (has_in_ && !latest_in_.empty()) {
+            frame = latest_in_;
+            w = in_w_;
+            h = in_h_;
         }
-        logStatusMaybe(dbg);
+    }
+
+    if (frame.empty() || w == 0 || h == 0) {
+        // Keep cyan placeholder visible so we know the DLL is rendering.
+        logPathOnce(last_render_path_, "waiting_download_cyan");
         return RenderResult::Succeeded;
     }
 
-    // Heartbeat: first frames after VIDEO_IN must appear or PIXERA hung on share open.
-    if (render_ticks_ <= 5u || (render_ticks_ % 30u) == 1u) {
-        removerLog(std::format("render vin-ready enter ticks={} fence={}/{}", render_ticks_,
-                               d3d_ ? d3d_->completedValue() : 0,
-                               d3d_ ? d3d_->fenceCounter() : 0));
-    }
-
-    // Device::render already GPU-Waited fenceCounter. Only Map after that value completes.
-    const std::uint64_t wait_for = d3d_ ? d3d_->fenceCounter() : 0;
-    if (d3d_ && wait_for > 0 && !d3d_->waitCpu(wait_for, 100)) {
-        dbg.width = width_;
-        dbg.height = height_;
-        dbg.has_video_in = true;
-        dbg.download_ok = false;
-        dbg.stage = "download_fail";
-        if (render_ticks_ <= 5u || (render_ticks_ % 30u) == 1u) {
-            removerLog(std::format(
-                "fence wait timeout wait_for={} completed={} - skip Map (avoid hang)",
-                wait_for, d3d_->completedValue()));
-        }
-        if (d3d_output_ && d3d_output_->hasTexture()) {
-            d3d_output_->clear(0.12f, 0.35f, 0.86f, 1.0f); // blue
-        }
-        logStatusMaybe(dbg);
+    const std::size_t bytes = static_cast<std::size_t>(w) * h * 4u;
+    if (frame.size() < bytes) {
         return RenderResult::Succeeded;
     }
 
-    // v24 CPU download. One-frame delay: PIXERA may signal fence before color lands;
-    // process previous download while copying the current one.
-    long map_hr = 0;
-    if (!d3d_video_in_->downloadRgba8(d3d_rgba_in_, &map_hr)) {
-        dbg.width = width_;
-        dbg.height = height_;
-        dbg.has_video_in = true;
-        dbg.download_ok = false;
-        dbg.stage = "download_fail";
-        if (render_ticks_ <= 5u || (render_ticks_ % 30u) == 1u) {
-            removerLog(std::format("download Map/copy failed hr=0x{:08x} fmt={}",
-                                   static_cast<unsigned long>(map_hr),
-                                   get_format_name(d3d_video_in_->format())));
-        }
-        if (d3d_output_ && d3d_output_->hasTexture()) {
-            d3d_output_->clear(0.12f, 0.35f, 0.86f, 1.0f); // blue
-        }
-        logStatusMaybe(dbg);
-        return RenderResult::Succeeded;
-    }
-
-    if (!have_delayed_frame_) {
-        d3d_rgba_delayed_ = d3d_rgba_in_;
-        have_delayed_frame_ = true;
-        if (d3d_output_ && d3d_output_->hasTexture()) {
-            d3d_output_->clear(1.0f, 0.55f, 0.0f, 1.0f); // orange first frame
-        }
-        dbg.width = width_;
-        dbg.height = height_;
-        dbg.has_video_in = true;
-        dbg.download_ok = true;
-        dbg.stage = "input_black";
-        logStatusMaybe(dbg);
-        return RenderResult::Succeeded;
-    }
-
-    std::swap(d3d_rgba_delayed_, d3d_rgba_in_);
-
-    if ((render_ticks_ % 30u) == 1u) {
-        D3d11SharedTexture::logFrameStats(d3d_rgba_in_, width_, height_, "frame");
-    }
-
-    if (!remover_->asyncEnabled()) {
+    if (!async_started_) {
+        async_.start();
+        async_started_ = true;
+        matte_settings_applied_ = false; // force push now that worker exists
         applyMatteSettings();
-        remover_->setAsyncEnabled(true);
+        async_.reset(w, h);
+        removerLog(std::format("async matte worker started (after first video frame) ep={}",
+                               async_.executionProvider()));
+    } else {
+        // Live Quality UI changes (setSettings is a no-op when unchanged).
+        applyMatteSettings();
     }
 
-    (void)remover_->processCpuRgbaFrame(d3d_rgba_in_.data(), true, &error, &dbg, true,
-                                        &d3d_rgba_out_);
-    if (dbg.nonzero_rgb == 0 && (render_ticks_ % 30u) == 1u) {
-        if (dbg.mid_a >= 250) {
-            removerLog("opaque_black: PIXERA wrote A=1 RGB=0 — check Video In source is playing "
-                       "(test ExtSampleD3D with the same link)");
-        } else {
-            removerLog("input_black: all RGB zero (raw clear or empty feed)");
+    async_.trySubmit(frame.data(), w, h);
+    scratch_out_.resize(bytes);
+    const std::size_t pixels = static_cast<std::size_t>(w) * h;
+
+    // Prefer a fresh covered matte; otherwise reuse last alpha on the current camera
+    // RGB so PIXERA stays smooth when RVM is slower than the host download rate.
+    if (async_.copyLatest(scratch_out_.data(), w, h) &&
+        matteHasCoverage(scratch_out_.data(), w, h)) {
+        last_alpha_.resize(pixels);
+        extractAlpha(scratch_out_.data(), last_alpha_.data(), pixels);
+        has_last_alpha_ = true;
+        if (!matte_live_) {
+            matte_live_ = true;
+            removerLog(std::format("matte_live=1 ep={} infer={}x{} ({:.1f}ms)",
+                                   async_.executionProvider(), async_.lastInferWidth(),
+                                   async_.lastInferHeight(), async_.lastInferMs()));
         }
     }
-    if (d3d_output_ && d3d_output_->hasTexture() && !d3d_rgba_out_.empty()) {
-        if (!d3d_output_->uploadRgba8(d3d_rgba_out_.data(), width_, height_)) {
-            removerLog("D3D output uploadRgba8 failed");
-        }
+
+    if (has_last_alpha_ && last_alpha_.size() == pixels) {
+        compositeWithAlpha(frame.data(), last_alpha_.data(), scratch_out_.data(), pixels);
+        uploadOutputRgba(scratch_out_.data(), w, h);
+        logPathOnce(last_render_path_, "matte");
+        return RenderResult::Succeeded;
     }
-    if (!error.empty() && (render_ticks_ % 60u) == 1u) {
-        removerLog(std::format("processCpuRgbaFrame: {}", error));
+
+    const std::size_t lit = nonzeroRgbCount(frame.data(), bytes);
+    if (lit == 0) {
+        // Linked but empty — magenta diagnostic.
+        fillSolidRgba(scratch_out_.data(), bytes, 255, 0, 255);
+        uploadOutputRgba(scratch_out_.data(), w, h);
+        logPathOnce(last_render_path_, "input_black_magenta");
+        return RenderResult::Succeeded;
     }
-    logStatusMaybe(dbg);
+
+    // Correct-color live feed until RVM coverage is ready (was multi-colour under RGBA host).
+    fillOpaquePassthrough(frame.data(), scratch_out_.data(), bytes);
+    uploadOutputRgba(scratch_out_.data(), w, h);
+    logPathOnce(last_render_path_, "opaque_passthrough");
     return RenderResult::Succeeded;
 } catch (const std::exception& ex) {
     removerLog(std::format("render exception: {}", ex.what()));
     return RenderResult::Succeeded;
-}
-
-SyncDesc Input::after_render() noexcept {
-    return {};
 }
 
 } // namespace rxext::genesis_remover
