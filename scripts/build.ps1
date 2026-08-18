@@ -215,6 +215,10 @@ function Sync-OutFolder {
         $remOut = Join-Path $OutDir "ExtGenesisRemover"
         New-Item -ItemType Directory -Force -Path $remOut | Out-Null
         Copy-Item -Path $removerDll -Destination (Join-Path $remOut "ExtGenesisRemover.dll") -Force
+        $matteHost = Resolve-BuiltExe "GenesisRemoverMatteHost.exe" $PixeraConfig
+        if ($matteHost) {
+            Copy-Item -Path $matteHost -Destination (Join-Path $remOut "GenesisRemoverMatteHost.exe") -Force
+        }
         Sync-Directory (Join-Path $assetsSrc "matting") (Join-Path $remOut "assets\matting")
         Copy-Item -Path (Join-Path $RepoRoot "deploy\GenesisRemover.manifest.json") `
             -Destination (Join-Path $remOut "GenesisRemover.manifest.json") -Force
@@ -228,6 +232,7 @@ function Sync-OutFolder {
         }
 
         Assert-File (Join-Path $remOut "ExtGenesisRemover.dll") "Remover DLL"
+        Assert-File (Join-Path $remOut "GenesisRemoverMatteHost.exe") "out-of-process matte host"
         Assert-File (Join-Path $remOut "onnxruntime.dll") "onnxruntime.dll next to Remover"
         Assert-File (Join-Path $remOut "assets\matting\rvm_mobilenetv3_fp16.onnx") "RVM model"
 
@@ -238,16 +243,19 @@ function Sync-OutFolder {
         }
 
         $stamp = @"
-build=remover-timeline-v43-live-blit-20260818
+build=remover-timeline-v44-oop-matte-20260818
 dll=$remOut\ExtGenesisRemover.dll
+host=$remOut\GenesisRemoverMatteHost.exe
 time=$(Get-Date -Format o)
 size=$remSize
 log=%TEMP%\ExtGenesisRemover.log
-ep=DirectML-preferred
+host_log=%TEMP%\GenesisRemoverMatteHost.log
+ep=CPU-out-of-process
 "@
         Set-Content -Path (Join-Path $remOut "BUILD_STAMP.txt") -Value $stamp -Encoding ASCII
         Write-Host "Wrote BUILD_STAMP.txt (prove PIXERA is using this build)"
         Write-Host "Timeline diagnostics log: %TEMP%\ExtGenesisRemover.log"
+        Write-Host "Matte host log: %TEMP%\GenesisRemoverMatteHost.log"
     }
 
     # --- Standalone webcam BG-remover debug (isolates matte from PIXERA) ---

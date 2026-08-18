@@ -1,0 +1,365 @@
+// Out-of-process RVM host for ExtGenesisRemover.
+// ORT must NOT load inside PIXERA (v39–v42 froze the preview). This exe owns ORT.
+//
+// IPC: Local\GenesisRemoverMatteIpc_v44 + Kick/Stop events.
+// Log: %TEMP%\GenesisRemoverMatteHost.log
+
+#include "MatteIpc.h"
+#include "matting/BgRemover.hpp"
+#include "platform/Paths.hpp"
+
+#include <Windows.h>
+#include <d3d11_1.h>
+#include <dxgi.h>
+
+#include <chrono>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <thread>
+#include <vector>
+
+#pragma comment(lib, "d3d11.lib")
+#pragma comment(lib, "dxgi.lib")
+
+namespace {
+
+std::ofstream g_log;
+
+void logLine(const std::string& line) {
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch())
+                        .count();
+    const std::string full = std::to_string(ms) + " [matte-host] " + line;
+    if (g_log) {
+        g_log << full << '\n';
+        g_log.flush();
+    }
+}
+
+LUID toLuid(std::uint64_t value) {
+    LUID luid{};
+    luid.LowPart = static_cast<DWORD>(value & 0xffffffffu);
+    luid.HighPart = static_cast<LONG>(value >> 32);
+    return luid;
+}
+
+IDXGIAdapter1* findAdapter(IDXGIFactory1& factory, LUID want) {
+    IDXGIAdapter1* adapter = nullptr;
+    for (UINT i = 0; factory.EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i) {
+        if (want.HighPart == 0 && want.LowPart == 0) {
+            return adapter;
+        }
+        DXGI_ADAPTER_DESC1 desc{};
+        adapter->GetDesc1(&desc);
+        if (desc.AdapterLuid.HighPart == want.HighPart && desc.AdapterLuid.LowPart == want.LowPart) {
+            return adapter;
+        }
+        adapter->Release();
+        adapter = nullptr;
+    }
+    return nullptr;
+}
+
+std::size_t countNz(const std::uint8_t* rgba, std::size_t bytes) {
+    std::size_t n = 0;
+    for (std::size_t i = 0; i + 3 < bytes; i += 4) {
+        if (rgba[i] | rgba[i + 1] | rgba[i + 2]) {
+            ++n;
+        }
+    }
+    return n;
+}
+
+struct CaptureState {
+    ID3D11Device* device = nullptr;
+    ID3D11DeviceContext* context = nullptr;
+    ID3D11Texture2D* opened = nullptr;
+    ID3D11Texture2D* staging = nullptr;
+    HANDLE opened_handle = nullptr;
+    std::uint32_t w = 0;
+    std::uint32_t h = 0;
+
+    void releaseOpened() {
+        if (staging) {
+            staging->Release();
+            staging = nullptr;
+        }
+        if (opened) {
+            opened->Release();
+            opened = nullptr;
+        }
+        opened_handle = nullptr;
+        w = h = 0;
+    }
+
+    void releaseAll() {
+        releaseOpened();
+        if (context) {
+            context->Release();
+            context = nullptr;
+        }
+        if (device) {
+            device->Release();
+            device = nullptr;
+        }
+    }
+
+    bool ensureDevice(std::uint64_t luid) {
+        if (device && context) {
+            return true;
+        }
+        IDXGIFactory1* factory = nullptr;
+        if (FAILED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), reinterpret_cast<void**>(&factory))) ||
+            !factory) {
+            logLine("CreateDXGIFactory1 failed");
+            return false;
+        }
+        IDXGIAdapter1* adapter = findAdapter(*factory, toLuid(luid));
+        factory->Release();
+        if (!adapter) {
+            logLine("adapter not found");
+            return false;
+        }
+        const D3D_FEATURE_LEVEL level = D3D_FEATURE_LEVEL_11_0;
+        const HRESULT hr =
+            D3D11CreateDevice(adapter, D3D_DRIVER_TYPE_UNKNOWN, nullptr, 0, &level, 1,
+                              D3D11_SDK_VERSION, &device, nullptr, &context);
+        adapter->Release();
+        if (FAILED(hr) || !device || !context) {
+            logLine("D3D11CreateDevice failed");
+            releaseAll();
+            return false;
+        }
+        logLine("D3D device ready");
+        return true;
+    }
+
+    bool openCapture(HANDLE handle, std::uint32_t width, std::uint32_t height) {
+        if (!handle || width == 0 || height == 0) {
+            return false;
+        }
+        if (opened_handle == handle && opened && staging && w == width && h == height) {
+            return true;
+        }
+        releaseOpened();
+
+        ID3D11Device1* device1 = nullptr;
+        if (FAILED(device->QueryInterface(__uuidof(ID3D11Device1),
+                                          reinterpret_cast<void**>(&device1))) ||
+            !device1) {
+            logLine("ID3D11Device1 QI failed");
+            return false;
+        }
+        ID3D11Texture2D* tex = nullptr;
+        const HRESULT open_hr =
+            device1->OpenSharedResource1(handle, __uuidof(ID3D11Texture2D),
+                                         reinterpret_cast<void**>(&tex));
+        device1->Release();
+        if (FAILED(open_hr) || !tex) {
+            logLine("OpenSharedResource1 failed hr=" + std::to_string(static_cast<unsigned long>(open_hr)));
+            return false;
+        }
+        D3D11_TEXTURE2D_DESC desc{};
+        tex->GetDesc(&desc);
+        D3D11_TEXTURE2D_DESC staging_desc = desc;
+        staging_desc.Usage = D3D11_USAGE_STAGING;
+        staging_desc.BindFlags = 0;
+        staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        staging_desc.MiscFlags = 0;
+        ID3D11Texture2D* st = nullptr;
+        if (FAILED(device->CreateTexture2D(&staging_desc, nullptr, &st)) || !st) {
+            tex->Release();
+            logLine("staging CreateTexture2D failed");
+            return false;
+        }
+        opened = tex;
+        staging = st;
+        opened_handle = handle;
+        w = width;
+        h = height;
+        logLine("opened CAPTURE share " + std::to_string(width) + "x" + std::to_string(height));
+        return true;
+    }
+
+    bool mapToRgba(std::vector<std::uint8_t>& out) {
+        if (!opened || !staging || !context) {
+            return false;
+        }
+        context->CopyResource(staging, opened);
+        D3D11_QUERY_DESC qd{};
+        qd.Query = D3D11_QUERY_EVENT;
+        ID3D11Query* q = nullptr;
+        if (SUCCEEDED(device->CreateQuery(&qd, &q)) && q) {
+            context->End(q);
+            while (context->GetData(q, nullptr, 0, 0) == S_FALSE) {
+                Sleep(1);
+            }
+            q->Release();
+        }
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if (FAILED(context->Map(staging, 0, D3D11_MAP_READ, 0, &mapped)) || !mapped.pData) {
+            logLine("Map failed");
+            return false;
+        }
+        out.resize(static_cast<std::size_t>(w) * h * 4u);
+        auto* src = static_cast<const std::uint8_t*>(mapped.pData);
+        for (std::uint32_t y = 0; y < h; ++y) {
+            std::memcpy(out.data() + static_cast<std::size_t>(y) * w * 4u,
+                        src + static_cast<std::size_t>(y) * mapped.RowPitch, w * 4u);
+        }
+        context->Unmap(staging, 0);
+        return true;
+    }
+};
+
+} // namespace
+
+int main() {
+    wchar_t temp[MAX_PATH]{};
+    GetTempPathW(MAX_PATH, temp);
+    const std::filesystem::path log_path =
+        std::filesystem::path(temp) / "GenesisRemoverMatteHost.log";
+    g_log.open(log_path, std::ios::app);
+
+    wchar_t module[MAX_PATH]{};
+    GetModuleFileNameW(nullptr, module, MAX_PATH);
+    const std::filesystem::path module_dir = std::filesystem::path(module).parent_path();
+    const std::filesystem::path roots[] = {module_dir, module_dir / "assets"};
+    genesis::setAssetSearchRoots(roots);
+
+    logLine("start " + module_dir.string());
+
+    HANDLE mapping = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, L"Local\\GenesisRemoverMatteIpc_v44");
+    if (!mapping) {
+        mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
+                                     static_cast<DWORD>(genesis::matte_ipc::kMappingBytes),
+                                     L"Local\\GenesisRemoverMatteIpc_v44");
+    }
+    if (!mapping) {
+        logLine("Open/CreateFileMapping failed");
+        return 1;
+    }
+    void* view = MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, genesis::matte_ipc::kMappingBytes);
+    if (!view) {
+        logLine("MapViewOfFile failed");
+        CloseHandle(mapping);
+        return 1;
+    }
+    HANDLE kick = OpenEventW(SYNCHRONIZE | EVENT_MODIFY_STATE, FALSE,
+                             L"Local\\GenesisRemoverMatteKick_v44");
+    HANDLE stop = OpenEventW(SYNCHRONIZE | EVENT_MODIFY_STATE, FALSE,
+                             L"Local\\GenesisRemoverMatteStop_v44");
+    if (!kick) {
+        kick = CreateEventW(nullptr, FALSE, FALSE, L"Local\\GenesisRemoverMatteKick_v44");
+    }
+    if (!stop) {
+        stop = CreateEventW(nullptr, TRUE, FALSE, L"Local\\GenesisRemoverMatteStop_v44");
+    }
+    if (!kick || !stop) {
+        logLine("Open/CreateEvent failed");
+        return 1;
+    }
+
+    auto* hdr = static_cast<genesis::matte_ipc::Header*>(view);
+    if (hdr->magic != genesis::matte_ipc::kMagic) {
+        std::memset(hdr, 0, sizeof(*hdr));
+        hdr->magic = genesis::matte_ipc::kMagic;
+        hdr->version = genesis::matte_ipc::kVersion;
+    }
+    hdr->host_pid = GetCurrentProcessId();
+
+    genesis::BgRemover remover;
+    genesis::BgRemoverSettings settings;
+    settings.backend = genesis::BgRemoverBackend::Auto;
+    settings.quality = genesis::BgRemoverQuality::Fast;
+    settings.prefer_cpu_ep = true;
+    settings.temporal_alpha = 0.20f;
+    remover.setSettings(settings);
+    std::string status;
+    logLine("BgRemover initialize begin (CPU EP, separate process)");
+    if (!remover.initialize(&status)) {
+        logLine("BgRemover init failed: " + status);
+        std::snprintf(hdr->status, sizeof(hdr->status), "%s", status.c_str());
+        return 2;
+    }
+    logLine("BgRemover ready ep=" + remover.executionProvider() + " " + status);
+    std::snprintf(hdr->status, sizeof(hdr->status), "%s", status.c_str());
+    hdr->host_ready = 1;
+
+    CaptureState capture;
+    std::vector<std::uint8_t> scratch_in;
+    std::vector<std::uint8_t> scratch_out;
+    std::uint64_t last_kick = 0;
+
+    for (;;) {
+        HANDLE waits[] = {stop, kick};
+        const DWORD wr = WaitForMultipleObjects(2, waits, FALSE, 200);
+        if (wr == WAIT_OBJECT_0) {
+            logLine("stop event");
+            break;
+        }
+
+        if (hdr->kick_seq == last_kick) {
+            continue;
+        }
+        last_kick = hdr->kick_seq;
+        const std::uint32_t w = hdr->width;
+        const std::uint32_t h = hdr->height;
+        const HANDLE cap_handle = reinterpret_cast<HANDLE>(static_cast<uintptr_t>(hdr->capture_handle));
+        logLine("kick seq=" + std::to_string(last_kick) + " " + std::to_string(w) + "x" +
+                std::to_string(h));
+
+        if (w == 0 || h == 0 || w > genesis::matte_ipc::kMaxWidth ||
+            h > genesis::matte_ipc::kMaxHeight || !cap_handle) {
+            logLine("bad kick params");
+            continue;
+        }
+
+        if (!capture.ensureDevice(hdr->adapter_luid) ||
+            !capture.openCapture(cap_handle, w, h)) {
+            continue;
+        }
+
+        Sleep(50);
+
+        if (!capture.mapToRgba(scratch_in)) {
+            continue;
+        }
+        capture.releaseOpened();
+
+        const std::size_t nz = countNz(scratch_in.data(), scratch_in.size());
+        logLine("capture nz=" + std::to_string(nz));
+        if (nz == 0) {
+            continue;
+        }
+
+        scratch_out.resize(scratch_in.size());
+        logLine("RVM process begin ep=" + remover.executionProvider());
+        const bool ok = remover.process(scratch_in.data(), scratch_out.data(), w, h);
+        logLine(std::string("RVM process end ok=") + (ok ? "1" : "0"));
+        if (!ok) {
+            continue;
+        }
+
+        const std::size_t out_nz = countNz(scratch_out.data(), scratch_out.size());
+        std::memcpy(genesis::matte_ipc::pixels(hdr), scratch_out.data(), scratch_out.size());
+        hdr->result_nz = static_cast<std::uint32_t>(out_nz);
+        hdr->result_ok = 1;
+        std::snprintf(hdr->stage, sizeof(hdr->stage), "matte");
+        hdr->done_seq = last_kick;
+        logLine("matte_ok nz=" + std::to_string(out_nz) + " seq=" + std::to_string(last_kick));
+    }
+
+    capture.releaseAll();
+    hdr->host_ready = 0;
+    UnmapViewOfFile(view);
+    CloseHandle(mapping);
+    CloseHandle(kick);
+    CloseHandle(stop);
+    logLine("exit");
+    return 0;
+}

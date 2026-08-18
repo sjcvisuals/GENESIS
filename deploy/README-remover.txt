@@ -76,21 +76,21 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v43-live-blit-20260818
+  remover-timeline-v44-oop-matte-20260818
 
-v43 = live blit only in PIXERA (no ORT in-process):
-  v42 froze immediately at `BgRemover initialize begin` — loading onnxruntime into
-  the PIXERA process locks the preview (lime + camera freeze; engine_ready never 1).
-  Cutout remains proven outside PIXERA via camera-debug. Next step for timeline
-  cutout is an out-of-process matte helper (not in-DLL ORT).
+v44 = live blit in PIXERA + out-of-process RVM host:
+  v43 confirmed live works without ORT. Cutout needs ORT, but ORT-in-process
+  freezes PIXERA (v39–v42). Fix: GenesisRemoverMatteHost.exe loads ORT;
+  DLL blits Video In -> capture share, duplicates handle, kicks host; host
+  returns RGBA via shared memory; DLL UpdateSubresource + blit.
 
-v42 = preload CPU RVM still froze at ORT init.
-v41–v38 = capture/DML/Video In variants; all froze once matte/ORT touched the GPU.
-v36 = blit-only diagnostic (live feed proven) — restored as v43 default.
+v43 = live blit only (no matte).
+v42–v38 = in-process ORT / capture variants (froze).
+v36 = blit-only diagnostic (live proven).
 
 Dump: .\scripts\dump-remover-log.ps1
-Expect stamp v43-live-blit, continuous gpu_present live, moving lime.
-No MatteCaptureWorker / BgRemover / ORT lines.
+Expect stamp v44-oop-matte, host_ready=1, applied host matte, moving lime until cutout.
+Host log: %TEMP%\GenesisRemoverMatteHost.log
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log

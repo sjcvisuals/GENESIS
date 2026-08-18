@@ -4,25 +4,35 @@
 $ErrorActionPreference = "Continue"
 Write-Host @"
 
-GENESIS Remover v43 - live blit only (no ORT in PIXERA)
-=======================================================
-In-process ONNX Runtime freezes PIXERA (v39-v42).
-This build is the proven v36 live path: GPU blit + lime heartbeat.
-Person cutout: use .\scripts\run-remover-camera-debug.ps1 outside PIXERA.
-Timeline cutout needs out-of-process matte (next).
+GENESIS Remover v44 - live blit + out-of-process matte
+=====================================================
+PIXERA DLL: live Video In blit (no ORT).
+GenesisRemoverMatteHost.exe: loads ORT, Maps capture share, returns cutout via IPC.
 
 Expect:
-  continuously moving camera + lime stripe
-  NO MatteCaptureWorker / BgRemover / ORT log lines
+  moving lime while host loads
+  host_ready=1, MatteHostClient kick, applied host matte
+  person cutout (stage=matte)
+
+Also check %TEMP%\GenesisRemoverMatteHost.log
 
 1) Quit PIXERA completely
 2) git pull
 3) BUILD-REMOVER.bat
-4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v43-live-blit-*)
-5) Re-import ExtGenesisRemover.dll
+4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v44-oop-matte-*)
+5) Re-import ExtGenesisRemover.dll (MatteHost.exe must sit next to DLL)
 6) Adapter LUID = preview GPU; drag Live Input
 7) Dump log
 
 "@
 
 & "$PSScriptRoot\dump-remover-log.ps1"
+
+$hostLog = Join-Path $env:TEMP "GenesisRemoverMatteHost.log"
+Write-Host ""
+Write-Host "==== matte host log (tail) ====" -ForegroundColor Cyan
+if (Test-Path $hostLog) {
+    Get-Content $hostLog -Tail 30
+} else {
+    Write-Host "MISSING $hostLog — host did not start (DLL launch failed or exe missing)."
+}

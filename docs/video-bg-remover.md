@@ -91,20 +91,18 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for `STATUS stage=` lines and stamp `remover-timeline-v43-live-blit-*`.
+Look for `STATUS stage=` lines and stamp `remover-timeline-v44-oop-matte-*`.
 
 | Colour / stage | Meaning |
 |----------------|---------|
 | cyan / `waiting_video_in` | Video In slot empty — drag Live Input in |
-| `passthrough` | live blit (v36 path; lime heartbeat must keep moving) |
+| `passthrough` | live blit (lime moving; waiting on matte host) |
+| `matte` | person cutout from out-of-process host |
 
-v43: **live blit only** inside PIXERA. v39–v42 proved that loading ONNX Runtime
-in-process freezes PIXERA (log dies at `BgRemover initialize begin` / RVM begin;
-lime freezes with the camera). Person cutout still works in
-`.\scripts\run-remover-camera-debug.ps1` outside PIXERA. In-PIXERA cutout needs an
-out-of-process matte helper next.
+v44: PIXERA DLL stays on the proven live blit (no ORT in-process).
+`GenesisRemoverMatteHost.exe` loads ORT, Maps our capture share, returns RGBA via
+shared memory. Expect `MatteHost launched`, `host_ready=1`, host log `matte_ok`,
+then `applied host matte` while lime stays live until cutout appears.
 
-Expect continuously moving lime heartbeat with stamp v43-live-blit.
-
-Also check Remover params **Debug Stage** / **Debug Status**.
+Also check `%TEMP%\GenesisRemoverMatteHost.log`.
 Checklist: `.\scripts\pixera-remover-debug.ps1`

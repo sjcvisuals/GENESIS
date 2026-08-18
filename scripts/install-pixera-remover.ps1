@@ -133,6 +133,7 @@ try {
 
     $required = @(
         (Join-Path $dest "ExtGenesisRemover.dll"),
+        (Join-Path $dest "GenesisRemoverMatteHost.exe"),
         (Join-Path $dest "onnxruntime.dll"),
         (Join-Path $dest "assets\matting\rvm_mobilenetv3_fp16.onnx")
     )
@@ -147,6 +148,7 @@ try {
     Write-InstallLog "Installed OK." "Green"
     Write-InstallLog ("DLL LastWriteTime: {0}" -f $dll.LastWriteTime)
     Write-InstallLog ("DLL Size:          {0:N0} bytes" -f $dll.Length)
+    Write-InstallLog ("MatteHost:         {0}" -f (Join-Path $dest "GenesisRemoverMatteHost.exe"))
     Write-InstallLog ("onnxruntime.dll FileVersion={0}" -f $ortVer)
     if ($ortVer -and ($ortVer -notmatch '^1\.2')) {
         Write-InstallLog ("WARNING: expected onnxruntime 1.20.x (got {0})" -f $ortVer) "Yellow"
@@ -156,16 +158,17 @@ try {
         Get-Content (Join-Path $dest "BUILD_STAMP.txt") | ForEach-Object { Write-InstallLog ("  {0}" -f $_) }
     }
     if (Test-Path (Join-Path $dest "DirectML.dll")) {
-        Write-InstallLog "DirectML.dll: present (GPU RVM path)" "Green"
+        Write-InstallLog "DirectML.dll: present (host may use DML; DLL does not load ORT)" "Green"
     } else {
-        Write-InstallLog "DirectML.dll: MISSING (RVM will use CPU)" "Yellow"
+        Write-InstallLog "DirectML.dll: MISSING (host uses CPU ORT)" "Yellow"
     }
 
     Write-Host ""
     Write-Host "In PIXERA:" -ForegroundColor Green
     Write-Host "  Re-import:"
     Write-Host "    $(Join-Path $dest 'ExtGenesisRemover.dll')"
-    Write-Host "  Stamp must be: remover-timeline-v43-live-blit-20260818"
+    Write-Host "  Stamp must be: remover-timeline-v44-oop-matte-20260818"
+    Write-Host "  Matte host auto-launches; log: %TEMP%\GenesisRemoverMatteHost.log"
     Write-Host ("Install log: {0}" -f $LogPath)
     exit 0
 }

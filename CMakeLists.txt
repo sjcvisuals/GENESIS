@@ -478,6 +478,7 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         ${EXT_REMOVER_DIR}/src/D3d11SharedTexture.cpp
         ${EXT_REMOVER_DIR}/src/D3d11Passthrough.cpp
         ${EXT_REMOVER_DIR}/src/SharedD3d11.cpp
+        ${EXT_REMOVER_DIR}/src/MatteHostClient.cpp
         ${EXT_REMOVER_DIR}/src/ModulePaths.cpp
         ${EXT_REMOVER_DIR}/src/RemoverLog.cpp
         ${RX_SDK_DIR}/libs/common/string.cpp
@@ -490,7 +491,7 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_BINARY_DIR}
     )
-    # v43: D3D11 live blit only — do NOT link ORT/matting (in-process ORT freezes PIXERA).
+    # v44: D3D11 live blit in PIXERA; ORT runs in GenesisRemoverMatteHost.exe (not linked here).
     target_link_libraries(ExtGenesisRemover PRIVATE genesis_platform_core d3d11 dxgi d3dcompiler)
     target_compile_definitions(ExtGenesisRemover PRIVATE
         NOMINMAX
@@ -504,6 +505,24 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/rxExt/ExtGenesisRemover"
     )
 
+    add_executable(GenesisRemoverMatteHost
+        ${EXT_REMOVER_DIR}/matte_host/main.cpp
+    )
+    target_include_directories(GenesisRemoverMatteHost PRIVATE
+        ${EXT_REMOVER_DIR}/src
+        ${CMAKE_SOURCE_DIR}
+        ${CMAKE_BINARY_DIR}
+    )
+    target_link_libraries(GenesisRemoverMatteHost PRIVATE genesis_matting d3d11 dxgi)
+    target_compile_definitions(GenesisRemoverMatteHost PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    set_target_properties(GenesisRemoverMatteHost PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/rxExt/ExtGenesisRemover"
+    )
+    if(MSVC AND GENESIS_HAS_ONNXRUNTIME)
+        target_link_options(GenesisRemoverMatteHost PRIVATE "/DELAYLOAD:onnxruntime.dll")
+        target_link_libraries(GenesisRemoverMatteHost PRIVATE delayimp)
+    endif()
+
     add_custom_command(TARGET ExtGenesisRemover POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "$<TARGET_FILE_DIR:ExtGenesisRemover>/assets/matting"
@@ -515,10 +534,27 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
             "$<TARGET_FILE_DIR:ExtGenesisRemover>/GenesisRemover.manifest.json"
         COMMENT "Copying ExtGenesisRemover assets next to DLL"
     )
+    add_dependencies(ExtGenesisRemover GenesisRemoverMatteHost)
+    if(GENESIS_HAS_ONNXRUNTIME)
+        add_custom_command(TARGET GenesisRemoverMatteHost POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${GENESIS_ONNXRUNTIME_ROOT}/lib/onnxruntime.dll"
+                "$<TARGET_FILE_DIR:GenesisRemoverMatteHost>/onnxruntime.dll"
+            COMMENT "Copying ONNX Runtime next to MatteHost"
+        )
+        if(EXISTS "${GENESIS_ONNXRUNTIME_ROOT}/lib/DirectML.dll")
+            add_custom_command(TARGET GenesisRemoverMatteHost POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${GENESIS_ONNXRUNTIME_ROOT}/lib/DirectML.dll"
+                    "$<TARGET_FILE_DIR:GenesisRemoverMatteHost>/DirectML.dll"
+                COMMENT "Copying DirectML.dll next to MatteHost"
+            )
+        endif()
+    endif()
 
-    add_custom_target(GenesisRemoverDeploy DEPENDS ExtGenesisRemover)
+    add_custom_target(GenesisRemoverDeploy DEPENDS ExtGenesisRemover GenesisRemoverMatteHost)
     if(TARGET GenesisDeploy)
-        add_dependencies(GenesisDeploy ExtGenesisRemover)
+        add_dependencies(GenesisDeploy ExtGenesisRemover GenesisRemoverMatteHost)
     endif()
 endif()
 
