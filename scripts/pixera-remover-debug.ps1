@@ -1,26 +1,29 @@
-# Quick checklist after installing Remover v26 (v24 CPU path + Video In RTV).
+# Quick checklist after installing Remover v27 (delay + frame stats).
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\pixera-remover-debug.ps1
 
 $ErrorActionPreference = "Continue"
 Write-Host @"
 
-GENESIS Remover v26 - cpu-rtv
-=============================
-v25 hung black again right after VIDEO_IN (GPU blit path).
+GENESIS Remover v27 - delay-stats
+=================================
+v26: download OK, PIXERA writes opaque black (mid A=255, RGB=0).
 
-v26:
-  - Same CPU download as v24 (STATUS must keep printing)
-  - Video In allocated with SRV|RTV (PIXERA may need RTV to write)
-  - No GPU write/Flush before publish
-  - FP16 raw mid bits when pixels stay zero
+v27:
+  - Process previous frame (1-frame delay) in case fence is early
+  - Log frame stats: max_rgb, corners (letterbox check)
+  - Video In = ExtSampleD3D SRV-only again
+
+If still orange with max_rgb=0:
+  A/B test ExtSampleD3D with the SAME Video In media link.
+  If Sample is also black → PIXERA routing/source, not Remover.
+  If Sample shows video → Remover read path still wrong.
 
 1) Quit PIXERA completely
 2) git pull
 3) BUILD-REMOVER.bat
-4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v26-cpu-rtv-*)
-5) Re-import ExtGenesisRemover.dll
-6) Adapter LUID + Video In with media PLAYING
-7) Dump log — need continuous STATUS after VIDEO_IN + any FP16 raw mid= lines
+4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v27-delay-stats-*)
+5) Re-import, Adapter LUID, Video In PLAYING
+6) Dump log — send STATUS + any 'frame stats' / 'opaque_black' lines
 
 "@
 

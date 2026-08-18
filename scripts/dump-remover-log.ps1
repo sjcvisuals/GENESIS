@@ -11,7 +11,7 @@ if (-not (Test-Path $log)) {
 }
 
 Write-Host ""
-Write-Host "==== stamp (must be v26-cpu-rtv) ====" -ForegroundColor Cyan
+Write-Host "==== stamp (must be v27-delay-stats) ====" -ForegroundColor Cyan
 Select-String -Path $log -Pattern "remover-timeline-" | ForEach-Object { $_.Line } |
     ForEach-Object { if ($_ -match '\[(remover-timeline-[^\]]+)\]') { $Matches[1] } } |
     Group-Object | Sort-Object Count -Descending |
@@ -27,7 +27,7 @@ Select-String -Path $log -Pattern "STATUS stage=" | Select-Object -Last 15 | For
 
 Write-Host ""
 Write-Host "==== key events ====" -ForegroundColor Cyan
-Select-String -Path $log -Pattern "shared OUTPUT|shared VIDEO_IN|processing enabled|matte_live|GPU FAIL|placeholder sampler|video_in allocate|SENTINEL|input_black|FP16 raw" |
+Select-String -Path $log -Pattern "shared OUTPUT|shared VIDEO_IN|processing enabled|matte_live|GPU FAIL|placeholder sampler|video_in allocate|SENTINEL|input_black|FP16 raw|frame stats|opaque_black" |
     Select-Object -Last 25 | ForEach-Object { $_.Line }
 
 Write-Host ""

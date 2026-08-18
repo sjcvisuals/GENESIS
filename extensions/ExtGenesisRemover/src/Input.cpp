@@ -185,6 +185,8 @@ void Input::publishVideoInTexture() {
         removerLog(std::format("shared VIDEO_IN {}x{} format={} handle=D3D11_IMAGE rtv={}",
                                shared.width, shared.height, get_format_name(shared.format),
                                d3d_video_in_->rtv() ? 1 : 0));
+        have_delayed_frame_ = false;
+        d3d_rgba_delayed_.clear();
     };
 
     update_input_texture(*video_in_, allocate);
@@ -227,7 +229,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     if (debug_stage_) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
-    const std::string ui = std::format("v26 {} nz={} mid=({},{},{}) vin={}",
+    const std::string ui = std::format("v27 {} nz={} mid=({},{},{}) vin={}",
                                        dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r,
                                        dbg.mid_g, dbg.mid_b, dbg.has_video_in ? 1 : 0);
     if (debug_status_) {
@@ -280,7 +282,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     remover_->resize(width_, height_);
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v26 cpu+rtv - link Video In"));
+        debug_status_->set_value(std::string("v27 delay+stats - link Video In"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -394,7 +396,8 @@ RenderResult Input::render() noexcept try {
         return RenderResult::Succeeded;
     }
 
-    // v24 path only: CPU download Video In. GPU blit after Map hung PIXERA in v25.
+    // v24 CPU download. One-frame delay: PIXERA may signal fence before color lands;
+    // process previous download while copying the current one.
     long map_hr = 0;
     if (!d3d_video_in_->downloadRgba8(d3d_rgba_in_, &map_hr)) {
         dbg.width = width_;
@@ -414,6 +417,27 @@ RenderResult Input::render() noexcept try {
         return RenderResult::Succeeded;
     }
 
+    if (!have_delayed_frame_) {
+        d3d_rgba_delayed_ = d3d_rgba_in_;
+        have_delayed_frame_ = true;
+        if (d3d_output_ && d3d_output_->hasTexture()) {
+            d3d_output_->clear(1.0f, 0.55f, 0.0f, 1.0f); // orange first frame
+        }
+        dbg.width = width_;
+        dbg.height = height_;
+        dbg.has_video_in = true;
+        dbg.download_ok = true;
+        dbg.stage = "input_black";
+        logStatusMaybe(dbg);
+        return RenderResult::Succeeded;
+    }
+
+    std::swap(d3d_rgba_delayed_, d3d_rgba_in_);
+
+    if ((render_ticks_ % 30u) == 1u) {
+        D3d11SharedTexture::logFrameStats(d3d_rgba_in_, width_, height_, "frame");
+    }
+
     if (!remover_->asyncEnabled()) {
         applyMatteSettings();
         remover_->setAsyncEnabled(true);
@@ -422,10 +446,11 @@ RenderResult Input::render() noexcept try {
     (void)remover_->processCpuRgbaFrame(d3d_rgba_in_.data(), true, &error, &dbg, true,
                                         &d3d_rgba_out_);
     if (dbg.nonzero_rgb == 0 && (render_ticks_ % 30u) == 1u) {
-        if (D3d11SharedTexture::looksLikeSentinel(d3d_rgba_in_)) {
-            removerLog("SENTINEL STILL PRESENT - PIXERA is not writing Video In");
+        if (dbg.mid_a >= 250) {
+            removerLog("opaque_black: PIXERA wrote A=1 RGB=0 — check Video In source is playing "
+                       "(test ExtSampleD3D with the same link)");
         } else {
-            removerLog("input_black: PIXERA wrote zeros (check Video In media is playing)");
+            removerLog("input_black: all RGB zero (raw clear or empty feed)");
         }
     }
     if (d3d_output_ && d3d_output_->hasTexture() && !d3d_rgba_out_.empty()) {

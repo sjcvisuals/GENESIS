@@ -49,6 +49,9 @@ public:
     // Raw mid-pixel diagnostics (FP16 bits or RGBA8 bytes) after a successful download path.
     static void logMidRaw(const std::vector<std::uint8_t>& rgba, Format format, std::uint32_t width,
                           std::uint32_t height, const char* tag);
+    // max_rgb + corner samples — mid can be letterbox black while feed has pixels.
+    static void logFrameStats(const std::vector<std::uint8_t>& rgba, std::uint32_t width,
+                              std::uint32_t height, const char* tag);
 
 private:
     void destroyTexture();

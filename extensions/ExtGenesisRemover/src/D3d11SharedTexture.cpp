@@ -9,6 +9,7 @@
 #include <dxgi.h>
 #include <dxgi1_2.h>
 
+#include <algorithm>
 #include <cstring>
 #include <format>
 #include <stdexcept>
@@ -139,22 +140,16 @@ void D3d11SharedTexture::allocate(std::uint32_t width, std::uint32_t height, For
     desc.Format = dxgi;
     desc.SampleDesc = {1, 0};
     desc.Usage = D3D11_USAGE_DEFAULT;
-    // Always SRV. Also try RTV on Video In so PIXERA can OM-blit into the share
-    // (ExtSampleD3D uses SRV-only; Remover saw zeros — PIXERA may need RTV).
-    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+    // Match ExtSampleD3D exactly: Video In = SRV only; output = SRV|RTV.
+    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    if (is_target) {
+        desc.BindFlags |= D3D11_BIND_RENDER_TARGET;
+    }
     // ExtSampleD3D: SHARED | SHARED_NTHANDLE (keyed mutex → black).
     desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
 
     if (FAILED(device_->CreateTexture2D(&desc, nullptr, &texture_)) || !texture_) {
-        // Fallback: ExtSampleD3D bind flags (SRV only for Video In, SRV|RTV for output).
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-        if (is_target) {
-            desc.BindFlags |= D3D11_BIND_RENDER_TARGET;
-        }
-        if (FAILED(device_->CreateTexture2D(&desc, nullptr, &texture_)) || !texture_) {
-            throw std::runtime_error("D3d11SharedTexture: CreateTexture2D failed");
-        }
-        removerLog("D3d11SharedTexture: fell back to ExtSampleD3D bind flags");
+        throw std::runtime_error("D3d11SharedTexture: CreateTexture2D failed");
     }
 
     IDXGIResource1* dxgi_res = nullptr;
@@ -263,6 +258,38 @@ void D3d11SharedTexture::logMidRaw(const std::vector<std::uint8_t>& rgba, Format
     removerLog(std::format("{} mid_rgba=({},{},{},{}) nz_bytes={} fmt={} {}x{}", tag ? tag : "?",
                            rgba[mid], rgba[mid + 1], rgba[mid + 2], rgba[mid + 3], nz,
                            get_format_name(format), width, height));
+}
+
+void D3d11SharedTexture::logFrameStats(const std::vector<std::uint8_t>& rgba, std::uint32_t width,
+                                       std::uint32_t height, const char* tag) {
+    if (rgba.size() < 4 || width == 0 || height == 0) {
+        return;
+    }
+    auto at = [&](std::uint32_t x, std::uint32_t y) -> const std::uint8_t* {
+        const std::size_t i = (static_cast<std::size_t>(y) * width + x) * 4u;
+        return rgba.data() + i;
+    };
+    unsigned max_rgb = 0;
+    std::size_t nz = 0;
+    for (std::size_t i = 0; i + 3 < rgba.size(); i += 4) {
+        const unsigned m = std::max({rgba[i], rgba[i + 1], rgba[i + 2]});
+        if (m > max_rgb) {
+            max_rgb = m;
+        }
+        if (rgba[i] | rgba[i + 1] | rgba[i + 2]) {
+            ++nz;
+        }
+    }
+    const auto* tl = at(0, 0);
+    const auto* tr = at(width - 1, 0);
+    const auto* bl = at(0, height - 1);
+    const auto* br = at(width - 1, height - 1);
+    const auto* mid = at(width / 2u, height / 2u);
+    removerLog(std::format(
+        "{} stats max_rgb={} nz={} mid=({},{},{},{}) tl=({},{},{}) tr=({},{},{}) "
+        "bl=({},{},{}) br=({},{},{})",
+        tag ? tag : "?", max_rgb, nz, mid[0], mid[1], mid[2], mid[3], tl[0], tl[1], tl[2], tr[0],
+        tr[1], tr[2], bl[0], bl[1], bl[2], br[0], br[1], br[2]));
 }
 
 bool D3d11SharedTexture::mapStagingToRgba8(std::vector<std::uint8_t>& out_rgba, long* out_hr) {

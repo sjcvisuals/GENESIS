@@ -56,12 +56,14 @@ private:
     std::unique_ptr<D3d11SharedTexture> d3d_video_in_;
     std::unique_ptr<D3d11Passthrough> passthrough_;
     std::vector<std::uint8_t> d3d_rgba_in_;
+    std::vector<std::uint8_t> d3d_rgba_delayed_;
     std::vector<std::uint8_t> d3d_rgba_out_;
     std::uint32_t width_ = 1920;
     std::uint32_t height_ = 1080;
     std::uint64_t render_ticks_ = 0;
     std::string last_stage_;
     bool video_in_ready_ = false;
+    bool have_delayed_frame_ = false;
 };
 
 } // namespace rxext::genesis_remover

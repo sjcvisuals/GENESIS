@@ -76,14 +76,16 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v26-cpu-rtv-20260818
+  remover-timeline-v27-delay-stats-20260818
 
-v26 = restore v24 CPU path + Video In RTV (no GPU blit / no pre-publish GPU write):
-  v25 hung black again right after VIDEO_IN (GPU blit / UpdateSubresource+Flush).
-  Expect continuous STATUS like v24. Video In now SRV|RTV so PIXERA can OM-blit.
-  FP16 raw mid bits logged when converted pixels are all zero.
+v27 = one-frame delayed readback + full-frame stats (max_rgb / corners):
+  v26 proved PIXERA writes opaque black (mid A→255, RGB=0, FP16 raw zeros).
+  Delay Map processing by 1 frame in case fence signals before color.
+  Log frame stats=max_rgb/nz/corners — if max_rgb>0 feed exists (letterbox mid).
+  Video In back to ExtSampleD3D SRV-only.
+  If still opaque_black: A/B test ExtSampleD3D with the SAME Video In link.
 
-v25 = GPU blit; hung after VIDEO_IN publish.
+v26 = continuous STATUS; orange; PIXERA wrote (0,0,0,1).
 
 Stage colours (until Video In has pixels):
   cyan   = waiting for Video In link (normal)
