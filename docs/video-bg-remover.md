@@ -91,17 +91,15 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for `STATUS stage=` lines and stamp `remover-timeline-v32-fence-blit-*`.
+Look for `STATUS stage=` lines and stamp `remover-timeline-v33-blit-map-out-*`.
 
 | Colour / stage | Meaning |
 |----------------|---------|
 | cyan / `waiting_video_in` | Video In slot empty — drag Live Input in |
-| blue / `download_fail` | fence wait or Map failed |
-| orange / `input_black` | Map zeros (see if GPU blit still shows camera) |
-| `passthrough` / `matte` | working |
+| blue / `download_fail` | fence wait or output Map failed |
+| `passthrough` / `matte` | live upright feed then cutout |
 
-v32: Device D3D_FENCE + D3D11_IMAGE + GPU blit before Map. Preview and Output
-engines need the Remover Adapter LUID set to **that** engine's GPU.
+v33: never Map Video In (that froze the feed); GPU blit (V-flipped) then Map output for matte.
 
 Also check Remover params **Debug Stage** / **Debug Status**.
 Checklist: `.\scripts\pixera-remover-debug.ps1`

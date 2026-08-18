@@ -16,9 +16,8 @@
 
 namespace rxext::genesis_remover {
 
-// Full ExtSampleD3D I/O: Device D3D_FENCE timeline + D3D11_IMAGE Video In/Out.
-// Video In stays empty until PIXERA links a feed (update_input_texture).
-// GPU blit first (prove write); CPU Map → RemoverPipeline matte when nz>0.
+// GPU blit Video In → output (V-flipped). Never Map Video In (zeros + freezes feed).
+// Map output RT after blit for CPU matte.
 class Input : public rxext::InputStream {
 public:
     Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, ValueSet settings);
@@ -57,14 +56,12 @@ private:
     std::unique_ptr<D3d11SharedTexture> d3d_video_in_;
     std::unique_ptr<D3d11Passthrough> passthrough_;
     std::vector<std::uint8_t> d3d_rgba_in_;
-    std::vector<std::uint8_t> d3d_rgba_delayed_;
     std::vector<std::uint8_t> d3d_rgba_out_;
     std::uint32_t width_ = 1920;
     std::uint32_t height_ = 1080;
     std::uint64_t render_ticks_ = 0;
     std::string last_stage_;
     bool video_in_ready_ = false;
-    bool have_delayed_frame_ = false;
     bool matte_live_ = false;
 };
 

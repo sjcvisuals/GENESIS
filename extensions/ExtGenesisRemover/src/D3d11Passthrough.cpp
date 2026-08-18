@@ -96,12 +96,13 @@ D3d11Passthrough::D3d11Passthrough(ID3D11Device* device) {
         return;
     }
 
-    // Fullscreen triangle strip in clip space (ExtSampleD3D uses ~2/3; we fill the viewport).
+    // Fullscreen strip. V flipped vs D3D default — PIXERA shared Video In is top-left origin
+    // like GL; without this the feed appears upside-down in preview.
     const std::array<Vertex, 4> verts = {{
-        {-1.f, -1.f, 0.f, 1.f, 0.f, 1.f},
-        {-1.f, 1.f, 0.f, 1.f, 0.f, 0.f},
-        {1.f, -1.f, 0.f, 1.f, 1.f, 1.f},
-        {1.f, 1.f, 0.f, 1.f, 1.f, 0.f},
+        {-1.f, -1.f, 0.f, 1.f, 0.f, 0.f},
+        {-1.f, 1.f, 0.f, 1.f, 0.f, 1.f},
+        {1.f, -1.f, 0.f, 1.f, 1.f, 0.f},
+        {1.f, 1.f, 0.f, 1.f, 1.f, 1.f},
     }};
     D3D11_BUFFER_DESC bd{};
     bd.ByteWidth = static_cast<UINT>(sizeof(verts));

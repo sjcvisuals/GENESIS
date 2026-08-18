@@ -190,8 +190,6 @@ void Input::publishVideoInTexture() {
             "shared VIDEO_IN {}x{} format={} handle=D3D11_IMAGE is_target=0 srv={} (link feed now)",
             shared.width, shared.height, get_format_name(shared.format),
             d3d_video_in_->srv() ? 1 : 0));
-        have_delayed_frame_ = false;
-        d3d_rgba_delayed_.clear();
         matte_live_ = false;
     };
 
@@ -235,7 +233,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     if (debug_stage_) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
-    const std::string ui = std::format("v32 {} nz={} mid=({},{},{}) vin={}",
+    const std::string ui = std::format("v33 {} nz={} mid=({},{},{}) vin={}",
                                        dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r,
                                        dbg.mid_g, dbg.mid_b, dbg.has_video_in ? 1 : 0);
     if (debug_status_) {
@@ -288,7 +286,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     remover_->resize(width_, height_);
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v32 fence+blit - Video In slot empty until you link"));
+        debug_status_->set_value(std::string("v33 blit→Map output - link Live Input"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -403,60 +401,48 @@ RenderResult Input::render() noexcept try {
         return RenderResult::Succeeded;
     }
 
-    // Hypothesis A proof: ExtSampleD3D GPU blit Video In → output BEFORE CPU Map.
-    // If the preview shows the camera here, PIXERA is writing and Map-only was the bug.
-    // If still black/orange, PIXERA is not filling the shared D3D11_IMAGE.
-    bool blitted = false;
-    if (passthrough_ && passthrough_->ready() && d3d_video_in_->srv() && d3d_output_ &&
-        d3d_output_->rtv()) {
-        passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_output_->rtv(), width_,
-                           height_);
-        blitted = true;
-        if (render_ticks_ <= 8u || (render_ticks_ % 60u) == 1u) {
-            removerLog(std::format("gpu_blit Video In → output {}x{} fmt={}", width_, height_,
-                                   get_format_name(d3d_video_in_->format())));
-        }
-    }
-
-    long map_hr = 0;
-    if (!d3d_video_in_->downloadRgba8(d3d_rgba_in_, &map_hr)) {
+    // Hypothesis B (v32 proved): GPU blit sees the feed; Mapping Video In returns zeros and
+    // CopyResource on Video In freezes PIXERA's updates on the first frame.
+    // Never Map Video In. Blit → Flush → Map our RGBA8 output RT for CPU matte.
+    if (!passthrough_ || !passthrough_->ready() || !d3d_video_in_->srv() || !d3d_output_ ||
+        !d3d_output_->rtv()) {
         dbg.width = width_;
         dbg.height = height_;
         dbg.has_video_in = true;
         dbg.download_ok = false;
         dbg.stage = "download_fail";
-        if (render_ticks_ <= 5u || (render_ticks_ % 30u) == 1u) {
-            removerLog(std::format("download Map/copy failed hr=0x{:08x} fmt={} blitted={}",
-                                   static_cast<unsigned long>(map_hr),
-                                   get_format_name(d3d_video_in_->format()), blitted ? 1 : 0));
-        }
-        // Keep GPU blit result if any; else blue.
-        if (!blitted && d3d_output_ && d3d_output_->hasTexture()) {
+        if (d3d_output_ && d3d_output_->hasTexture()) {
             d3d_output_->clear(0.12f, 0.35f, 0.86f, 1.0f);
         }
         logStatusMaybe(dbg);
         return RenderResult::Succeeded;
     }
 
-    if (!have_delayed_frame_) {
-        d3d_rgba_delayed_ = d3d_rgba_in_;
-        have_delayed_frame_ = true;
+    passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_output_->rtv(), width_, height_);
+    d3d_->context()->Flush();
+    if (render_ticks_ <= 8u || (render_ticks_ % 60u) == 1u) {
+        removerLog(std::format("gpu_blit Video In → output {}x{} fmt={} (no Video In Map)", width_,
+                               height_, get_format_name(d3d_video_in_->format())));
+    }
+
+    long map_hr = 0;
+    if (!d3d_output_->downloadTargetRgba8(d3d_rgba_in_, &map_hr)) {
         dbg.width = width_;
         dbg.height = height_;
         dbg.has_video_in = true;
-        dbg.download_ok = true;
-        dbg.stage = blitted ? "passthrough" : "input_black";
-        if (!blitted && d3d_output_ && d3d_output_->hasTexture()) {
-            d3d_output_->clear(1.0f, 0.55f, 0.0f, 1.0f); // orange first map frame
+        dbg.download_ok = false;
+        dbg.stage = "download_fail";
+        if (render_ticks_ <= 5u || (render_ticks_ % 30u) == 1u) {
+            removerLog(std::format("output Map after blit failed hr=0x{:08x}",
+                                   static_cast<unsigned long>(map_hr)));
         }
+        // Blit result still on GPU for preview.
         logStatusMaybe(dbg);
         return RenderResult::Succeeded;
     }
 
-    std::swap(d3d_rgba_delayed_, d3d_rgba_in_);
-
     if ((render_ticks_ % 30u) == 1u) {
-        D3d11SharedTexture::logFrameStats(d3d_rgba_in_, width_, height_, "frame");
+        D3d11SharedTexture::logFrameStats(d3d_rgba_in_, width_, height_, "out_after_blit");
     }
 
     if (!remover_->asyncEnabled()) {
@@ -466,24 +452,21 @@ RenderResult Input::render() noexcept try {
 
     (void)remover_->processCpuRgbaFrame(d3d_rgba_in_.data(), true, &error, &dbg, true,
                                         &d3d_rgba_out_);
-    if (dbg.nonzero_rgb == 0 && (render_ticks_ % 30u) == 1u) {
-        removerLog(std::format(
-            "map_nz=0 blitted={} — if preview shows camera, Map path is wrong; if black, "
-            "PIXERA is not writing D3D11_IMAGE (check ExtSampleD3D + same LUID engine)",
-            blitted ? 1 : 0));
-    }
 
-    // Prefer matte/passthrough CPU upload when we have non-zero pixels; else leave GPU blit.
-    if (dbg.nonzero_rgb > 0 && d3d_output_ && d3d_output_->hasTexture() && !d3d_rgba_out_.empty()) {
+    // Live GPU blit already shows the feed (upright after V-flip). Only overwrite output
+    // when we have a covered matte — avoid uploading orange/black diagnostics over the blit.
+    if (dbg.stage && std::string_view(dbg.stage) == "matte" && dbg.nonzero_rgb > 0 &&
+        d3d_output_ && !d3d_rgba_out_.empty()) {
         if (!d3d_output_->uploadRgba8(d3d_rgba_out_.data(), width_, height_)) {
             removerLog("D3D output uploadRgba8 failed");
-        }
-        if (dbg.stage && std::string_view(dbg.stage) == "matte") {
+        } else {
             matte_live_ = true;
         }
-    } else if (!blitted && d3d_output_ && d3d_output_->hasTexture() && !d3d_rgba_out_.empty()) {
-        // Diagnostic colour from processCpuRgbaFrame (orange/cyan).
-        (void)d3d_output_->uploadRgba8(d3d_rgba_out_.data(), width_, height_);
+    } else if (dbg.nonzero_rgb == 0 && (render_ticks_ % 30u) == 1u) {
+        removerLog("output_after_blit nz=0 (blit may still be visible on GPU)");
+    } else if (dbg.nonzero_rgb > 0 && (render_ticks_ % 60u) == 1u) {
+        removerLog(std::format("output_after_blit nz={} stage={} (GPU blit passthrough until matte)",
+                               dbg.nonzero_rgb, dbg.stage ? dbg.stage : "?"));
     }
 
     if (!error.empty() && (render_ticks_ % 60u) == 1u) {

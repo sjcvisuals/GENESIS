@@ -11,7 +11,7 @@ if (-not (Test-Path $log)) {
 }
 
 Write-Host ""
-Write-Host "==== stamp (must be v32-fence-blit) ====" -ForegroundColor Cyan
+Write-Host "==== stamp (must be v33-blit-map-out) ====" -ForegroundColor Cyan
 Select-String -Path $log -Pattern "remover-timeline-" | ForEach-Object { $_.Line } |
     ForEach-Object { if ($_ -match '\[(remover-timeline-[^\]]+)\]') { $Matches[1] } } |
     Group-Object | Sort-Object Count -Descending |
@@ -20,14 +20,13 @@ Select-String -Path $log -Pattern "remover-timeline-" | ForEach-Object { $_.Line
 Write-Host ""
 Write-Host "==== latest STATUS lines (stage machine) ====" -ForegroundColor Cyan
 Write-Host "  cyan/waiting_video_in = empty Video In slot (link Live Input)"
-Write-Host "  blue/download_fail    = fence wait or Map failed"
-Write-Host "  orange/input_black    = Map zeros (check if preview still shows blit)"
-Write-Host "  passthrough / matte   = working"
+Write-Host "  blue/download_fail    = fence wait or output Map failed"
+Write-Host "  passthrough / matte   = working (live upright feed then cutout)"
 Select-String -Path $log -Pattern "STATUS stage=" | Select-Object -Last 15 | ForEach-Object { $_.Line }
 
 Write-Host ""
 Write-Host "==== key events ====" -ForegroundColor Cyan
-Select-String -Path $log -Pattern "Device::before_render|SharedD3d11 ready|shared OUTPUT|video_in allocate|shared VIDEO_IN|gpu_blit|map_nz|STATUS stage=|matte_live|waiting Video In link|fence wait" |
+Select-String -Path $log -Pattern "Device::before_render|shared VIDEO_IN|gpu_blit|out_after_blit|output Map|STATUS stage=|matte_live|waiting Video In link" |
     Select-Object -Last 35 | ForEach-Object { $_.Line }
 
 Write-Host ""
@@ -35,6 +34,5 @@ Write-Host "==== last 40 lines ====" -ForegroundColor Cyan
 Get-Content $log -Tail 40
 
 Write-Host ""
-Write-Host "Video In slot empty until you drag Live Input in = expected."
-Write-Host "Set Adapter LUID to the PREVIEW engine GPU when testing preview; OUTPUT engine LUID for output."
-Write-Host "Also check Debug Stage on the Remover resource."
+Write-Host "Expect live upright camera (not frozen/upside-down), then cutout."
+Write-Host "Adapter LUID = PREVIEW engine GPU when testing preview."
