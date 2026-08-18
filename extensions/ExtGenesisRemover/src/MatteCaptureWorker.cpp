@@ -1,7 +1,6 @@
 #include "WinPrefix.h"
 #include "MatteCaptureWorker.h"
 
-#include "D3d11Passthrough.h"
 #include "D3d11SharedTexture.h"
 #include "RemoverLog.h"
 
@@ -45,26 +44,12 @@ ComPointer<IDXGIAdapter1> findAdapter(IDXGIFactory1& factory, LUID want) {
     return {};
 }
 
-DXGI_FORMAT toDxgi(Format format) {
-    switch (format) {
-    case Format::R8G8B8A8_UNORM:
-        return DXGI_FORMAT_R8G8B8A8_UNORM;
-    case Format::B8G8R8A8_UNORM:
-        return DXGI_FORMAT_B8G8R8A8_UNORM;
-    case Format::R16G16B16A16_SFLOAT:
-        return DXGI_FORMAT_R16G16B16A16_FLOAT;
-    case Format::R32G32B32A32_SFLOAT:
-        return DXGI_FORMAT_R32G32B32A32_FLOAT;
-    default:
-        return DXGI_FORMAT_R8G8B8A8_UNORM;
-    }
-}
-
 } // namespace
 
 MatteCaptureWorker::MatteCaptureWorker(std::uint64_t adapter_luid) : adapter_luid_(adapter_luid) {
     thread_ = std::thread([this] { threadMain(); });
-    removerLog(std::format("MatteCaptureWorker started adapter={:016x}", adapter_luid_));
+    removerLog(std::format("MatteCaptureWorker started adapter={:016x} (capture-share mode)",
+                           adapter_luid_));
 }
 
 MatteCaptureWorker::~MatteCaptureWorker() {
@@ -77,17 +62,15 @@ MatteCaptureWorker::~MatteCaptureWorker() {
     releaseDevice();
 }
 
-void MatteCaptureWorker::setVideoIn(void* nt_share_handle, std::uint32_t width, std::uint32_t height,
-                                    Format format) {
+void MatteCaptureWorker::setCaptureShare(void* nt_share_handle, std::uint32_t width,
+                                         std::uint32_t height) {
     std::lock_guard<std::mutex> lock(in_mu_);
-    if (video_in_handle_ == nt_share_handle && in_w_ == width && in_h_ == height &&
-        in_fmt_ == format) {
+    if (capture_handle_ == nt_share_handle && in_w_ == width && in_h_ == height) {
         return;
     }
-    video_in_handle_ = nt_share_handle;
+    capture_handle_ = nt_share_handle;
     in_w_ = width;
     in_h_ = height;
-    in_fmt_ = format;
     ++in_gen_;
 }
 
@@ -96,6 +79,9 @@ void MatteCaptureWorker::setQuality(int quality_0_to_2) {
 }
 
 void MatteCaptureWorker::kick() {
+    if (busy_.load()) {
+        return;
+    }
     kick_.store(true);
 }
 
@@ -116,24 +102,21 @@ bool MatteCaptureWorker::tryTakeMatte(std::vector<std::uint8_t>& out_rgba, std::
 }
 
 void MatteCaptureWorker::releaseOpened() {
-    if (opened_srv_) {
-        opened_srv_->Release();
-        opened_srv_ = nullptr;
+    if (staging_) {
+        staging_->Release();
+        staging_ = nullptr;
     }
-    if (opened_vin_) {
-        opened_vin_->Release();
-        opened_vin_ = nullptr;
+    if (opened_capture_) {
+        opened_capture_->Release();
+        opened_capture_ = nullptr;
     }
     opened_handle_ = nullptr;
     opened_w_ = 0;
     opened_h_ = 0;
-    opened_fmt_ = Format::None;
     opened_gen_ = 0;
 }
 
 void MatteCaptureWorker::releaseDevice() {
-    capture_.reset();
-    blit_.reset();
     pipeline_.reset();
     if (context_) {
         context_->Release();
@@ -167,31 +150,27 @@ bool MatteCaptureWorker::ensureWorkerDevice() {
         releaseDevice();
         return false;
     }
-    blit_ = std::make_unique<D3d11Passthrough>(device_);
-    capture_ = std::make_unique<D3d11SharedTexture>(device_, context_);
     pipeline_ = std::make_unique<::genesis::RemoverPipeline>(adapter_luid_);
-    removerLog("MatteCaptureWorker D3D device ready (separate from PIXERA render device)");
-    return blit_->ready();
+    removerLog("MatteCaptureWorker D3D device ready (opens capture share only, never Video In)");
+    return true;
 }
 
-bool MatteCaptureWorker::openVideoInLocked() {
+bool MatteCaptureWorker::openCaptureLocked() {
     void* handle = nullptr;
     std::uint32_t w = 0;
     std::uint32_t h = 0;
-    Format fmt = Format::None;
     std::uint64_t gen = 0;
     {
         std::lock_guard<std::mutex> lock(in_mu_);
-        handle = video_in_handle_;
+        handle = capture_handle_;
         w = in_w_;
         h = in_h_;
-        fmt = in_fmt_;
         gen = in_gen_;
     }
     if (!handle || w == 0 || h == 0) {
         return false;
     }
-    if (opened_handle_ == handle && opened_gen_ == gen && opened_srv_) {
+    if (opened_handle_ == handle && opened_gen_ == gen && opened_capture_ && staging_) {
         return true;
     }
     releaseOpened();
@@ -202,49 +181,53 @@ bool MatteCaptureWorker::openVideoInLocked() {
         return false;
     }
     ID3D11Texture2D* tex = nullptr;
-    const HRESULT open_hr =
-        device1->OpenSharedResource1(handle, IID_PPV_ARGS(&tex));
+    const HRESULT open_hr = device1->OpenSharedResource1(handle, IID_PPV_ARGS(&tex));
     device1->Release();
     if (FAILED(open_hr) || !tex) {
-        removerLog(std::format("MatteCaptureWorker OpenSharedResource1 failed hr=0x{:08x}",
+        removerLog(std::format("MatteCaptureWorker OpenSharedResource1(capture) hr=0x{:08x}",
                                static_cast<unsigned long>(open_hr)));
         return false;
     }
 
-    D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc{};
-    srv_desc.Format = toDxgi(fmt);
-    srv_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    srv_desc.Texture2D.MipLevels = 1;
-    ID3D11ShaderResourceView* srv = nullptr;
-    if (FAILED(device_->CreateShaderResourceView(tex, &srv_desc, &srv)) || !srv) {
+    D3D11_TEXTURE2D_DESC desc{};
+    tex->GetDesc(&desc);
+    D3D11_TEXTURE2D_DESC staging_desc = desc;
+    staging_desc.Usage = D3D11_USAGE_STAGING;
+    staging_desc.BindFlags = 0;
+    staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    staging_desc.MiscFlags = 0;
+    ID3D11Texture2D* staging = nullptr;
+    if (FAILED(device_->CreateTexture2D(&staging_desc, nullptr, &staging)) || !staging) {
         tex->Release();
-        removerLog("MatteCaptureWorker CreateShaderResourceView failed");
+        removerLog("MatteCaptureWorker staging CreateTexture2D failed");
         return false;
     }
 
-    opened_vin_ = tex;
-    opened_srv_ = srv;
+    opened_capture_ = tex;
+    staging_ = staging;
     opened_handle_ = handle;
     opened_w_ = w;
     opened_h_ = h;
-    opened_fmt_ = fmt;
     opened_gen_ = gen;
-    capture_->allocate(w, h, Format::R8G8B8A8_UNORM, /*is_target=*/true, /*publish_share=*/false);
     if (pipeline_) {
         pipeline_->resize(w, h);
     }
-    removerLog(std::format("MatteCaptureWorker opened VIDEO_IN {}x{} fmt={}", w, h,
-                           static_cast<int>(fmt)));
+    removerLog(std::format("MatteCaptureWorker opened CAPTURE share {}x{} (not Video In)", w, h));
     return true;
 }
 
 bool MatteCaptureWorker::captureAndMatteOnce() {
-    if (!ensureWorkerDevice() || !openVideoInLocked() || !opened_srv_ || !capture_ || !blit_) {
+    busy_.store(true);
+    struct BusyClear {
+        std::atomic<bool>& b;
+        ~BusyClear() { b.store(false); }
+    } busy_clear{busy_};
+
+    if (!ensureWorkerDevice() || !openCaptureLocked() || !opened_capture_ || !staging_) {
         return false;
     }
 
-    blit_->draw(context_, opened_srv_, capture_->rtv(), opened_w_, opened_h_);
-    // Stall *this* device only until blit finishes, then Map. Never touches PIXERA device.
+    context_->CopyResource(staging_, opened_capture_);
     {
         D3D11_QUERY_DESC qd{};
         qd.Query = D3D11_QUERY_EVENT;
@@ -255,19 +238,30 @@ bool MatteCaptureWorker::captureAndMatteOnce() {
                 Sleep(0);
             }
             q->Release();
-        } else {
-            context_->Flush();
         }
     }
-    long map_hr = 0;
-    if (!capture_->downloadTargetRgba8(scratch_in_, &map_hr)) {
-        if ((captures_ % 60u) == 0u) {
-            removerLog(std::format("MatteCaptureWorker Map failed hr=0x{:08x}",
-                                   static_cast<unsigned long>(map_hr)));
-        }
+
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    const HRESULT map_hr = context_->Map(staging_, 0, D3D11_MAP_READ, 0, &mapped);
+    if (FAILED(map_hr) || !mapped.pData) {
+        removerLog(std::format("MatteCaptureWorker Map capture failed hr=0x{:08x}",
+                               static_cast<unsigned long>(map_hr)));
         return false;
     }
+
+    const std::size_t bytes = static_cast<std::size_t>(opened_w_) * opened_h_ * 4u;
+    scratch_in_.resize(bytes);
+    auto* src = static_cast<const std::uint8_t*>(mapped.pData);
+    for (std::uint32_t y = 0; y < opened_h_; ++y) {
+        std::memcpy(scratch_in_.data() + static_cast<std::size_t>(y) * opened_w_ * 4u,
+                    src + static_cast<std::size_t>(y) * mapped.RowPitch, opened_w_ * 4u);
+    }
+    context_->Unmap(staging_, 0);
     ++captures_;
+
+    if (captures_ <= 5u || (captures_ % 30u) == 1u) {
+        D3d11SharedTexture::logFrameStats(scratch_in_, opened_w_, opened_h_, "worker_capture");
+    }
 
     bool any = false;
     for (std::uint8_t b : scratch_in_) {
@@ -276,11 +270,8 @@ bool MatteCaptureWorker::captureAndMatteOnce() {
             break;
         }
     }
-    if ((captures_ % 30u) == 1u) {
-        D3d11SharedTexture::logFrameStats(scratch_in_, opened_w_, opened_h_, "worker_capture");
-    }
     if (!any) {
-        if ((captures_ % 60u) == 1u) {
+        if (captures_ <= 5u || (captures_ % 60u) == 1u) {
             removerLog("worker_capture nz=0");
         }
         return false;
@@ -300,15 +291,25 @@ bool MatteCaptureWorker::captureAndMatteOnce() {
         pipeline_->setAsyncEnabled(true);
     }
 
+    if (captures_ <= 3u) {
+        removerLog("worker RVM process begin");
+    }
     ::genesis::RemoverFrameDebug dbg{};
     std::string error;
     (void)pipeline_->processCpuRgbaFrame(scratch_in_.data(), true, &error, &dbg, false,
                                          &scratch_out_);
+    if (captures_ <= 3u) {
+        removerLog(std::format("worker RVM process end stage={} nz={} err={}",
+                               dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, error));
+    }
+
     if (!(dbg.stage && std::string_view(dbg.stage) == "matte" && dbg.nonzero_rgb > 0 &&
           !scratch_out_.empty())) {
-        if ((captures_ % 60u) == 1u) {
-            removerLog(std::format("worker matte not ready stage={} nz={} err={}",
-                                   dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, error));
+        // Do NOT publish passthrough to primary — that replaced the live Video In blit with a
+        // single stale upload and looked frozen. Keep capturing until RVM returns matte.
+        if (captures_ <= 5u || (captures_ % 30u) == 1u) {
+            removerLog(std::format("worker matte pending stage={} nz={} (live blit continues)",
+                                   dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb));
         }
         return false;
     }
@@ -321,10 +322,8 @@ bool MatteCaptureWorker::captureAndMatteOnce() {
         out_dbg_ = dbg;
         out_ready_ = true;
     }
-    if ((nonzero_captures_ % 30u) == 1u) {
-        removerLog(std::format("worker matte_ok nz={} captures={}/{}", dbg.nonzero_rgb,
-                               nonzero_captures_, captures_));
-    }
+    removerLog(std::format("worker matte_ok nz={} captures={}/{}", dbg.nonzero_rgb,
+                           nonzero_captures_, captures_));
     return true;
 }
 
@@ -342,6 +341,7 @@ void MatteCaptureWorker::threadMain() {
             (void)captureAndMatteOnce();
         } catch (const std::exception& ex) {
             removerLog(std::format("MatteCaptureWorker exception: {}", ex.what()));
+            busy_.store(false);
         }
     }
     releaseOpened();

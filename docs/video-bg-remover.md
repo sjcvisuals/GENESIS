@@ -91,7 +91,7 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for `STATUS stage=` lines and stamp `remover-timeline-v38-bg-matte-*`.
+Look for `STATUS stage=` lines and stamp `remover-timeline-v39-capture-share-*`.
 
 | Colour / stage | Meaning |
 |----------------|---------|
@@ -99,8 +99,10 @@ Look for `STATUS stage=` lines and stamp `remover-timeline-v38-bg-matte-*`.
 | `passthrough` | live blit (waiting on first background matte) |
 | `matte` | person cutout |
 
-v38: live blit on the PIXERA device; RVM on a background D3D device/thread.
-Expect `worker_capture nz>0` and `matte_ok from bg worker` while the camera stays live.
+v39: live blit on the PIXERA device; primary shader-blits Video In into a capture share we
+own; RVM Maps that share on a background D3D device (never opens Video In). Live present
+continues until `worker matte_ok`. Expect `opened CAPTURE share`, `worker_capture nz>0`,
+and `matte_ok` while the camera stays live (lime heartbeat stripe on passthrough).
 
 Also check Remover params **Debug Stage** / **Debug Status**.
 Checklist: `.\scripts\pixera-remover-debug.ps1`

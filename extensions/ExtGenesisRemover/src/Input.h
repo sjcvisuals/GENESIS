@@ -17,8 +17,9 @@
 
 namespace rxext::genesis_remover {
 
-// Live blit on the PIXERA device (v36 proven). Matte on a background D3D device/thread
-// so render never Map/CopyResource/RVM (that froze Video In in v35/v37).
+// Live blit on the PIXERA device (v36 proven). Primary blits Video In -> our capture
+// share; background worker Maps that share + RVM (never opens PIXERA Video In — v38 freeze).
+// Present stays on live Video In until a real matte frame arrives (v39).
 class Input : public rxext::InputStream {
 public:
     Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, ValueSet settings);
@@ -57,6 +58,9 @@ private:
     std::unique_ptr<::genesis::RemoverPipeline> remover_;
     std::unique_ptr<D3d11SharedTexture> d3d_output_;
     std::unique_ptr<D3d11SharedTexture> d3d_video_in_;
+    // Shared RGBA8 capture buffers we blit Video In into (worker Maps these, never Video In).
+    std::unique_ptr<D3d11SharedTexture> d3d_capture_share_[2];
+    int capture_idx_ = 0;
     std::unique_ptr<D3d11SharedTexture> d3d_matte_tex_;
     std::unique_ptr<D3d11Passthrough> passthrough_;
     std::unique_ptr<MatteCaptureWorker> matte_worker_;

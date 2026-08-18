@@ -11,7 +11,7 @@ if (-not (Test-Path $log)) {
 }
 
 Write-Host ""
-Write-Host "==== stamp (must be v38-bg-matte) ====" -ForegroundColor Cyan
+Write-Host "==== stamp (must be v39-capture-share) ====" -ForegroundColor Cyan
 Select-String -Path $log -Pattern "remover-timeline-" | ForEach-Object { $_.Line } |
     ForEach-Object { if ($_ -match '\[(remover-timeline-[^\]]+)\]') { $Matches[1] } } |
     Group-Object | Sort-Object Count -Descending |
@@ -26,14 +26,14 @@ Select-String -Path $log -Pattern "STATUS stage=" | Select-Object -Last 15 | For
 
 Write-Host ""
 Write-Host "==== key events ====" -ForegroundColor Cyan
-Select-String -Path $log -Pattern "MatteCaptureWorker|worker_capture|worker matte|gpu_present|matte_ok|shared VIDEO_IN|STATUS stage=|OpenSharedResource" |
-    Select-Object -Last 40 | ForEach-Object { $_.Line }
+Select-String -Path $log -Pattern "MatteCaptureWorker|worker_capture|worker matte|kick capture|gpu_present|matte_ok|shared VIDEO_IN|CAPTURE share|STATUS stage=|OpenSharedResource|applied worker" |
+    Select-Object -Last 50 | ForEach-Object { $_.Line }
 
 Write-Host ""
 Write-Host "==== last 40 lines ====" -ForegroundColor Cyan
 Get-Content $log -Tail 40
 
 Write-Host ""
-Write-Host "Expect LIVE camera (not frozen) then person cutout."
-Write-Host "Look for worker_capture nz>0 and matte_ok from bg worker."
+Write-Host "Expect LIVE camera (lime heartbeat) then person cutout."
+Write-Host "Look for opened CAPTURE share, worker_capture nz>0, worker matte_ok."
 Write-Host "Adapter LUID = PREVIEW engine GPU when testing preview."

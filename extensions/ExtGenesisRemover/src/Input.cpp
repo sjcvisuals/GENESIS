@@ -116,6 +116,11 @@ void Input::ensureD3dTextures() {
     if (!d3d_video_in_) {
         d3d_video_in_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
     }
+    for (auto& cap : d3d_capture_share_) {
+        if (!cap) {
+            cap = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
+        }
+    }
     if (!d3d_matte_tex_) {
         d3d_matte_tex_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
     }
@@ -141,11 +146,15 @@ void Input::clearVideoInLink(const char* reason) {
     video_in_ready_ = false;
     matte_live_ = false;
     if (matte_worker_) {
-        matte_worker_->setVideoIn(nullptr, 0, 0, Format::None);
+        matte_worker_->setCaptureShare(nullptr, 0, 0);
     }
     if (d3d_video_in_) {
         d3d_video_in_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
     }
+    for (auto& cap : d3d_capture_share_) {
+        cap = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
+    }
+    capture_idx_ = 0;
     if (d3d_matte_tex_) {
         d3d_matte_tex_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
     }
@@ -202,6 +211,11 @@ void Input::publishVideoInTexture() {
         ensureD3dTextures();
         ensureWorker();
         d3d_video_in_->allocate(width_, height_, fmt, /*is_target=*/false);
+        for (auto& cap : d3d_capture_share_) {
+            cap->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
+                          /*publish_share=*/true);
+        }
+        capture_idx_ = 0;
         d3d_matte_tex_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
                                  /*publish_share=*/false);
         remover_->resize(width_, height_);
@@ -216,11 +230,11 @@ void Input::publishVideoInTexture() {
         video_in_ready_ = true;
         matte_live_ = false;
         applyMatteSettings();
-        matte_worker_->setVideoIn(d3d_video_in_->shareHandle(), width_, height_, fmt);
         removerLog(std::format(
             "shared VIDEO_IN {}x{} format={} handle=D3D11_IMAGE is_target=0 srv={} (link feed now)",
             shared.width, shared.height, get_format_name(shared.format),
             d3d_video_in_->srv() ? 1 : 0));
+        removerLog("capture shares ready (worker Maps these, never Video In)");
     };
 
     update_input_texture(*video_in_, allocate);
@@ -267,7 +281,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     if (debug_stage_) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
-    const std::string ui = std::format("v38 {} nz={} mid=({},{},{}) vin={}",
+    const std::string ui = std::format("v39 {} nz={} mid=({},{},{}) vin={}",
                                        dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r,
                                        dbg.mid_g, dbg.mid_b, dbg.has_video_in ? 1 : 0);
     if (debug_status_) {
@@ -318,7 +332,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     remover_->resize(width_, height_);
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v38 live + bg-thread matte"));
+        debug_status_->set_value(std::string("v39 live + capture-share matte"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -425,30 +439,33 @@ RenderResult Input::render() noexcept try {
 
     ensureWorker();
     applyMatteSettings();
-    if (d3d_video_in_->shareHandle()) {
-        matte_worker_->setVideoIn(d3d_video_in_->shareHandle(), width_, height_,
-                                  d3d_video_in_->format());
-    }
 
-    // Pull finished matte from background worker (never Map on this device).
+    // Apply ONLY real cutout frames. Worker "passthrough" uploads must NOT set matte_live_
+    // — that abandoned the live Video In blit and looked like a ~1s freeze (v38 symptom).
     std::uint32_t mw = 0;
     std::uint32_t mh = 0;
     ::genesis::RemoverFrameDebug worker_dbg{};
     if (matte_worker_->tryTakeMatte(worker_matte_rgba_, mw, mh, &worker_dbg) && mw == width_ &&
         mh == height_ && !worker_matte_rgba_.empty()) {
-        d3d_matte_tex_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
-                                 /*publish_share=*/false);
-        if (d3d_matte_tex_->uploadRgba8UpdateSubresource(worker_matte_rgba_.data(), width_,
-                                                         height_)) {
-            matte_live_ = true;
-            dbg = worker_dbg;
-            if ((render_ticks_ % 60u) == 1u) {
-                removerLog("matte_ok from bg worker (UpdateSubresource, no primary Map)");
+        const bool is_matte =
+            worker_dbg.stage && std::string_view(worker_dbg.stage) == "matte" &&
+            worker_dbg.nonzero_rgb > 0;
+        if (is_matte) {
+            d3d_matte_tex_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
+                                     /*publish_share=*/false);
+            if (d3d_matte_tex_->uploadRgba8UpdateSubresource(worker_matte_rgba_.data(), width_,
+                                                             height_)) {
+                matte_live_ = true;
+                dbg = worker_dbg;
+                removerLog(std::format("applied worker matte nz={}", dbg.nonzero_rgb));
             }
+        } else if ((render_ticks_ % 60u) == 1u) {
+            removerLog(std::format("ignore worker non-matte stage={}",
+                                   worker_dbg.stage ? worker_dbg.stage : "?"));
         }
     }
 
-    // Present: v36-style GPU blit only on the PIXERA device.
+    // Present: live Video In until a real matte exists (v36 path must stay live).
     if (matte_live_ && d3d_matte_tex_ && d3d_matte_tex_->srv()) {
         passthrough_->draw(d3d_->context(), d3d_matte_tex_->srv(), d3d_output_->rtv(), width_,
                            height_);
@@ -457,30 +474,43 @@ RenderResult Input::render() noexcept try {
         dbg.has_video_in = true;
         dbg.download_ok = true;
         dbg.matte_copied = true;
-        if (!dbg.stage || std::string_view(dbg.stage) == "none") {
-            dbg.stage = "matte";
-        }
+        dbg.stage = "matte";
     } else {
         d3d_output_->clear(0.0f, 0.0f, 0.0f, 1.0f);
         passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_output_->rtv(), width_,
                            height_);
+        passthrough_->drawHeartbeat(d3d_->context(), d3d_output_->rtv(), width_, height_,
+                                    render_ticks_);
         dbg.width = width_;
         dbg.height = height_;
         dbg.has_video_in = true;
-        if (!dbg.stage || std::string_view(dbg.stage) == "none") {
-            dbg.stage = "passthrough";
+        dbg.stage = "passthrough";
+    }
+
+    // Blit Video In -> our capture share (shader sample, never CopyResource/Map Video In).
+    // Worker Maps that share only. Flush so the other device sees completed GPU writes.
+    if (matte_worker_ && !matte_worker_->busy() && render_ticks_ >= 30u &&
+        (render_ticks_ % 8u) == 0u && d3d_capture_share_[0] && d3d_capture_share_[0]->rtv()) {
+        auto& cap = d3d_capture_share_[capture_idx_];
+        if (cap->width() != width_ || cap->height() != height_) {
+            cap->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
+                          /*publish_share=*/true);
+        }
+        passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), cap->rtv(), width_, height_);
+        d3d_->context()->Flush();
+        matte_worker_->setCaptureShare(cap->shareHandle(), width_, height_);
+        matte_worker_->kick();
+        capture_idx_ ^= 1;
+        if (render_ticks_ <= 48u || (render_ticks_ % 120u) == 1u) {
+            removerLog(std::format("kick capture-share blit idx={} tick={}", capture_idx_ ^ 1,
+                                   render_ticks_));
         }
     }
 
-    // Kick background capture every other frame - does not block this callback.
-    if ((render_ticks_ % 2u) == 0u) {
-        matte_worker_->kick();
-    }
-
     if (render_ticks_ <= 8u || (render_ticks_ % 60u) == 1u) {
-        removerLog(std::format("gpu_present {} {}x{} matte_live={} (no primary Map/Copy)",
-                               matte_live_ ? "matte" : "live", width_, height_,
-                               matte_live_ ? 1 : 0));
+        removerLog(std::format("gpu_present {} {}x{} matte_live={} worker_busy={}",
+                               matte_live_ ? "worker" : "live", width_, height_,
+                               matte_live_ ? 1 : 0, matte_worker_ && matte_worker_->busy() ? 1 : 0));
     }
 
     logStatusMaybe(dbg);
