@@ -59,7 +59,7 @@ If the resource imports but timeline drag fails
      powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-pixera-remover.ps1
 
 2. Confirm the install printed BUILD_STAMP with:
-     remover-timeline-v21-sentinel-20260818
+     remover-timeline-v20-d3d-io-20260817
 
 3. In PIXERA, re-browse to:
      <PIXERA>\data\rxExt\ExtGenesisRemover\ExtGenesisRemover.dll
@@ -76,11 +76,11 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v21-sentinel-20260818
+  remover-timeline-v20-d3d-io-20260817
 
-v20 = ExtSampleD3D full D3D11 I/O:
-  Device D3D_FENCE timeline + Video In and sampler both D3D11_IMAGE.
-  Matte is CPU/ORT; PIXERA never sees Vulkan share handles.
+v21 = diagnostics + Video In RTV bind + CPU fence wait:
+  STATUS includes fence=done/counter sync=N sent=0|1
+  Magenta sentinel on Video In allocate (sent=1 means PIXERA never wrote).
 
 Stage colours (until Video In has pixels):
   cyan   = waiting for Video In link (normal)
