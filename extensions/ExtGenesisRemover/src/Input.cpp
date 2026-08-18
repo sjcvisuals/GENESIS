@@ -16,11 +16,25 @@ namespace rxext::genesis_remover {
 
 namespace {
 
-// PIXERA host-texture samples (ExtSampleCPU) use BGRA. We keep RGBA internally for RVM.
-constexpr Format kPixeraHostFormat = Format::B8G8R8A8_UNORM;
+// Sampler + Video In host textures must be 8-bit. PIXERA timeline often requests
+// R16G16B16A16_SFLOAT; accepting that hangs download_texture forever (v29 yellow).
+// Upload as RGBA8 so cyan stays cyan (BGRA upload looked yellow — stamp v10/v29).
+constexpr Format kPixeraHostFormat = Format::R8G8B8A8_UNORM;
 
-bool isBgra(Format format) {
-    return format == Format::B8G8R8A8_UNORM;
+bool isFloatHostFormat(Format format) {
+    return format == Format::R16G16B16A16_SFLOAT || format == Format::R32G32B32A32_SFLOAT;
+}
+
+Format forceHostFormat(Format requested) {
+    if (requested == Format::None || isFloatHostFormat(requested) ||
+        requested == Format::B8G8R8A8_UNORM) {
+        return kPixeraHostFormat;
+    }
+    if (requested == Format::R8G8B8A8_UNORM) {
+        return kPixeraHostFormat;
+    }
+    // Unknown 8-bit-ish: still force RGBA8 so download size stays w*h*4.
+    return kPixeraHostFormat;
 }
 
 void swapRbInPlace(std::uint8_t* px, std::size_t pixels) {
@@ -29,23 +43,9 @@ void swapRbInPlace(std::uint8_t* px, std::size_t pixels) {
     }
 }
 
-void hostToRgbaInPlace(std::uint8_t* px, std::size_t pixels, Format host_format) {
-    if (isBgra(host_format)) {
-        swapRbInPlace(px, pixels);
-    }
-}
-
-void rgbaToHost(const std::uint8_t* rgba, std::uint8_t* host, std::size_t pixels, Format host_format) {
-    if (!isBgra(host_format)) {
-        std::memcpy(host, rgba, pixels * 4u);
-        return;
-    }
-    for (std::size_t i = 0; i < pixels; ++i) {
-        host[i * 4u + 0] = rgba[i * 4u + 2]; // B
-        host[i * 4u + 1] = rgba[i * 4u + 1]; // G
-        host[i * 4u + 2] = rgba[i * 4u + 0]; // R
-        host[i * 4u + 3] = rgba[i * 4u + 3]; // A
-    }
+// Live Video In bytes often arrive B,G,R,A even when the texture is labeled RGBA.
+void videoInBytesToRgbaInPlace(std::uint8_t* px, std::size_t pixels) {
+    swapRbInPlace(px, pixels);
 }
 
 std::size_t nonzeroRgbCount(const std::uint8_t* rgba, std::size_t bytes) {
@@ -194,20 +194,17 @@ void Input::ensureSampler(std::uint32_t width, std::uint32_t height) {
     TextureDesc desc{};
     desc.width = width_;
     desc.height = height_;
-    // Match ExtSampleCPU: PIXERA host textures are BGRA.
+    // RGBA8: BGRA placeholder uploads displayed as yellow in PIXERA (v10/v29).
     desc.format = kPixeraHostFormat;
     desc.is_target = true;
     sampler_->set_texture(host().create_texture(desc));
 
     // Cyan = DLL alive, waiting for Video In download (unmistakable diagnostic).
     const std::size_t bytes = static_cast<std::size_t>(width_) * height_ * 4u;
-    const std::size_t pixels = static_cast<std::size_t>(width_) * height_;
     scratch_out_.resize(bytes);
     fillSolidRgba(scratch_out_.data(), bytes, 0, 220, 255);
-    host_upload_.resize(bytes);
-    rgbaToHost(scratch_out_.data(), host_upload_.data(), pixels, kPixeraHostFormat);
     BufferDesc buffer{};
-    buffer.data = host_upload_.data();
+    buffer.data = scratch_out_.data();
     buffer.pitch = static_cast<std::size_t>(width_) * 4u;
     buffer.size = bytes;
     host().upload_texture(sampler_->texture(), buffer, true, []() noexcept {});
@@ -227,11 +224,17 @@ void Input::ensureVideoInHostTexture() {
         if (desc.width == 0 || desc.height == 0) {
             return;
         }
-        if (desc.format == Format::None) {
-            desc.format = kPixeraHostFormat;
-        }
+        const Format requested = desc.format;
+        desc.format = forceHostFormat(desc.format);
         desc.is_target = false;
         desc.share_handle = {};
+
+        if (requested != desc.format && !logged_format_override_) {
+            logged_format_override_ = true;
+            removerLog(std::format(
+                "video_in FORCE format {} → {} (download_texture needs 8-bit RGBA)",
+                get_format_name(requested), get_format_name(desc.format)));
+        }
 
         const auto gen = video_in_generation_.fetch_add(1) + 1;
         download_pending_.store(false);
@@ -257,15 +260,34 @@ void Input::ensureVideoInHostTexture() {
                                desc.height, get_format_name(desc.format), gen, reason));
     };
 
+    // PIXERA's update_input_texture compares requested format (often FP16) to the
+    // current texture. If we create RGBA8, it would call us every update() forever
+    // (realloc trap → download never settles). Size-only: keep RGBA8 once allocated.
     update_input_texture(*video_in_, [&](const TextureDesc& desc) {
+        if (video_in_allocated_) {
+            try {
+                const auto cur = video_in_->texture().desc();
+                if (cur.width == desc.width && cur.height == desc.height &&
+                    cur.format == kPixeraHostFormat) {
+                    if (desc.format != kPixeraHostFormat && !logged_size_only_skip_) {
+                        logged_size_only_skip_ = true;
+                        removerLog(std::format(
+                            "video_in keep RGBA8 {}x{} (ignore PIXERA format={})", desc.width,
+                            desc.height, get_format_name(desc.format)));
+                    }
+                    return;
+                }
+            } catch (...) {
+            }
+        }
         allocate(desc, "update_input_texture");
     });
 
     const int prop_w = video_in_->get_property<int>(SettingNames::resolution_x, 0);
     const int prop_h = video_in_->get_property<int>(SettingNames::resolution_y, 0);
     const std::string format_str(video_in_->get_property(SettingNames::format));
-    // Default BGRA like ExtSampleCPU — RGBA default caused multi-colour feeds.
-    const Format prop_fmt = get_format_by_name(format_str, kPixeraHostFormat);
+    const Format prop_fmt =
+        forceHostFormat(get_format_by_name(format_str, Format::None));
 
     if (!baseline_captured_ && prop_w > 0 && prop_h > 0) {
         baseline_w_ = prop_w;
@@ -349,8 +371,16 @@ void Input::requestVideoDownload() {
     download_pending_since_tick_.store(render_ticks_ == 0 ? 1 : render_ticks_);
 
     const auto gen = video_in_generation_.load(std::memory_order_acquire);
+    const Format host_fmt =
+        desc.format != Format::None ? desc.format : video_in_host_format_;
 
-    const Format host_fmt = desc.format != Format::None ? desc.format : video_in_host_format_;
+    {
+        const auto n = downloads_ok_.load() + downloads_empty_.load() + downloads_abandoned_.load();
+        if (n < 8) {
+            removerLog(std::format("download_texture requested {}x{} format={} gen={}", desc.width,
+                                   desc.height, get_format_name(host_fmt), gen));
+        }
+    }
 
     host().download_texture(
         video_in_->texture(),
@@ -368,8 +398,9 @@ void Input::requestVideoDownload() {
                 if (!buffer.data || buffer.size < expected || w == 0 || h == 0) {
                     const auto n = downloads_empty_.fetch_add(1) + 1;
                     if (n <= 5 || (n % 120) == 0) {
-                        removerLog(std::format("download empty/short size={} expected={} n={}",
-                                               buffer.size, expected, n));
+                        removerLog(std::format(
+                            "download empty/short size={} expected={} fmt={} n={}", buffer.size,
+                            expected, get_format_name(host_fmt), n));
                     }
                 } else {
                     std::vector<std::uint8_t> packed(expected);
@@ -382,7 +413,8 @@ void Input::requestVideoDownload() {
                                     static_cast<std::size_t>(w) * 4u);
                     }
                     const std::size_t pixels = static_cast<std::size_t>(w) * h;
-                    hostToRgbaInPlace(packed.data(), pixels, host_fmt);
+                    // PIXERA Video In bytes are usually BGRA layout even on RGBA8 textures.
+                    videoInBytesToRgbaInPlace(packed.data(), pixels);
                     const std::size_t lit = nonzeroRgbCount(packed.data(), expected);
                     const std::size_t mid = (pixels / 2u) * 4u;
                     const unsigned pr = packed[mid + 0];
@@ -448,11 +480,8 @@ void Input::uploadOutputRgba(const std::uint8_t* rgba, std::uint32_t width, std:
     }
     ensureSampler(width, height);
     const std::size_t bytes = static_cast<std::size_t>(width) * height * 4u;
-    const std::size_t pixels = static_cast<std::size_t>(width) * height;
-    host_upload_.resize(bytes);
-    rgbaToHost(rgba, host_upload_.data(), pixels, kPixeraHostFormat);
     BufferDesc buffer{};
-    buffer.data = host_upload_.data();
+    buffer.data = rgba;
     buffer.pitch = static_cast<std::size_t>(width) * 4u;
     buffer.size = bytes;
     host().upload_texture(sampler_->texture(), buffer, true, []() noexcept {});
@@ -562,6 +591,9 @@ bool Input::update() noexcept try {
 RenderResult Input::render() noexcept try {
     touchHostClock();
     ++render_ticks_;
+    // Keep download retries alive even if update() stalls after Video In link.
+    ensureVideoInHostTexture();
+    requestVideoDownload();
     logMatteStatusMaybe();
 
     std::vector<std::uint8_t> frame;
@@ -579,6 +611,14 @@ RenderResult Input::render() noexcept try {
     if (frame.empty() || w == 0 || h == 0) {
         // Keep cyan placeholder visible so we know the DLL is rendering.
         logPathOnce(last_render_path_, "waiting_download_cyan");
+        if ((render_ticks_ % 60u) == 0u) {
+            removerLog(std::format(
+                "STATUS stage=waiting_download vin={} dl={} nz=0 {}x{} pending={} armed={} "
+                "abandoned={}",
+                video_in_allocated_ ? 1 : 0, downloads_ok_.load() > 0 ? 1 : 0, width_, height_,
+                download_pending_.load() ? 1 : 0, video_in_download_allowed_ ? 1 : 0,
+                downloads_abandoned_.load()));
+        }
         return RenderResult::Succeeded;
     }
 

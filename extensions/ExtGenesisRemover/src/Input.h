@@ -15,8 +15,10 @@
 
 namespace rxext::genesis_remover {
 
-// Host-texture path (ExtSampleShader Video In + ExtSampleCPU sampler upload).
+// Host-texture path (ExtSampleShader Video In + host download/upload).
 // D3D11/Vulkan shared Video In stayed black with live PIXERA inputs.
+// Always allocate 8-bit RGBA host textures — PIXERA often requests FP16, but
+// download_texture never completes on R16G16B16A16_SFLOAT (v29 yellow hang).
 class Input : public rxext::InputStream {
 public:
     explicit Input(ValueSet settings);
@@ -71,16 +73,17 @@ private:
     bool video_in_download_allowed_ = false;
     std::uint32_t download_cooldown_frames_ = 0;
     std::atomic<std::uint64_t> video_in_generation_{0};
-    // PIXERA host textures are BGRA (ExtSampleCPU). Track per Video In allocate.
-    Format video_in_host_format_ = Format::B8G8R8A8_UNORM;
+    // Host Video In is always forced to RGBA8 (see Input.cpp). Track for logs.
+    Format video_in_host_format_ = Format::R8G8B8A8_UNORM;
     bool baseline_captured_ = false;
     int baseline_w_ = 0;
     int baseline_h_ = 0;
     std::string baseline_format_;
     bool same_res_allocate_tried_ = false;
+    bool logged_format_override_ = false;
+    bool logged_size_only_skip_ = false;
 
     std::vector<std::uint8_t> scratch_out_;  // RGBA working buffer
-    std::vector<std::uint8_t> host_upload_; // BGRA (or RGBA) bytes for PIXERA
     std::vector<std::uint8_t> last_alpha_;
     bool has_last_alpha_ = false;
     std::string last_matte_status_;

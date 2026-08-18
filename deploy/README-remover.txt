@@ -76,27 +76,29 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v29-host-20260818
+  remover-timeline-v30-rgba8-20260818
 
-v29 = restore HOST-texture Video In (ExtSampleCPU/Shader path):
-  v18–v28 D3D11 shared Video In: download/fence worked but PIXERA never blitted
-  the feed (full-frame max_rgb=0 / opaque black). Prior commits already noted
-  shared D3D11 stayed black; host create/download/upload got live pixels.
-  Restore host path with BGRA swizzle + download abandon after ~90 ticks
-  (avoids the old hung-blue scrub stall).
-  Cyan = waiting download; magenta = linked empty; live = passthrough then matte.
-  Log STATUS stage=passthrough|input_black with nz=/mid=.
+v30 = force RGBA8 host Video In (fix PIXERA FP16 hang):
+  v29 accepted R16G16B16A16_SFLOAT from update_input_texture → download_texture
+  never completed (yellow = cyan placeholder with BGRA upload R/B-swap).
+  Always create RGBA8 host textures; size-only realloc so PIXERA's FP16 prop
+  does not thrash allocate every frame. Sampler uploads stay RGBA (cyan=cyan).
+  Video In download still R/B-swaps bytes (PIXERA often delivers BGRA layout).
+  Log: FORCE format, keep RGBA8, download_texture requested, STATUS waiting_download.
 
-v28 = Video In is_target; still full-frame zeros.
+v29 = restore HOST-texture Video In; shared D3D stayed black but host FP16 hung.
 
 Stage colours (until Video In has pixels):
-  cyan   = waiting for Video In link (normal)
-  blue   = D3D staging download failed
-  orange = linked but PIXERA wrote zeros (check Adapter LUID / media playing)
+  cyan   = waiting for download (normal; must NOT be yellow)
+  magenta= download ok but pixels zero
   live   = passthrough then matte
 
 Critical: set device Adapter LUID to the PIXERA engine GPU (non-zero).
 Dump: .\scripts\dump-remover-log.ps1
+Expect stamp v30-rgba8 and lines like:
+  video_in FORCE format R16G16B16A16_SFLOAT → R8G8B8A8_UNORM
+  download_texture requested ... format=R8G8B8A8_UNORM
+  STATUS stage=passthrough nz=...   (or waiting_download / ABANDONED)
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log

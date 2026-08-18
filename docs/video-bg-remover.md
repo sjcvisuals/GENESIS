@@ -91,14 +91,16 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for `STATUS stage=` lines and stamp `remover-timeline-v21-sentinel-*`.
+Look for `STATUS stage=` lines and stamp `remover-timeline-v30-rgba8-*`.
 
 | Colour / stage | Meaning |
 |----------------|---------|
-| cyan / `waiting_video_in` | shared output OK, Video In not published |
-| blue / `download_fail` | Vulkan shared read failed |
-| orange / `input_black` | Video In bound, PIXERA wrote zeros |
+| cyan / `waiting_download` | host Video In allocated; download not done yet (must be cyan, not yellow) |
+| `download ABANDONED` | `download_texture` hung; will retry |
+| orange / `input_black` | download ok but pixels are zero |
 | `passthrough` / `matte` | working |
+
+v30 forces RGBA8 host textures even when PIXERA requests FP16 (FP16 hung download forever).
 
 Also check Remover params **Debug Stage** / **Debug Status**.
 Checklist: `.\scripts\pixera-remover-debug.ps1`
