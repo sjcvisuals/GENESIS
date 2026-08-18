@@ -202,4 +202,29 @@ void SharedD3d11::signal(std::uint64_t value) {
     }
 }
 
+std::uint64_t SharedD3d11::completedValue() const {
+    return fence_ ? fence_->GetCompletedValue() : 0;
+}
+
+bool SharedD3d11::waitCpu(std::uint64_t value, std::uint32_t timeout_ms) {
+    if (!fence_) {
+        return false;
+    }
+    if (fence_->GetCompletedValue() >= value) {
+        return true;
+    }
+    HANDLE event = CreateEventExW(nullptr, nullptr, 0, EVENT_ALL_ACCESS);
+    if (!event) {
+        return false;
+    }
+    const HRESULT hr = fence_->SetEventOnCompletion(value, event);
+    if (FAILED(hr)) {
+        CloseHandle(event);
+        return false;
+    }
+    const DWORD wait = WaitForSingleObject(event, timeout_ms);
+    CloseHandle(event);
+    return wait == WAIT_OBJECT_0;
+}
+
 } // namespace rxext::genesis_remover

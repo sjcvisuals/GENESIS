@@ -12,6 +12,7 @@
 #include <cstring>
 #include <format>
 #include <stdexcept>
+#include <vector>
 
 namespace rxext::genesis_remover {
 namespace {
@@ -135,14 +136,22 @@ void D3d11SharedTexture::allocate(std::uint32_t width, std::uint32_t height, For
     desc.SampleDesc = {1, 0};
     desc.Usage = D3D11_USAGE_DEFAULT;
     desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-    if (is_target) {
-        desc.BindFlags |= D3D11_BIND_RENDER_TARGET;
-    }
+    // PIXERA may blit via RTV into Video In; ExtSampleD3D only uses SRV but that left us
+    // permanently black. Allow both binds for input and output.
+    desc.BindFlags |= D3D11_BIND_RENDER_TARGET;
     // ExtSampleD3D: SHARED | SHARED_NTHANDLE (keyed mutex → black).
     desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
 
     if (FAILED(device_->CreateTexture2D(&desc, nullptr, &texture_)) || !texture_) {
-        throw std::runtime_error("D3d11SharedTexture: CreateTexture2D failed");
+        // Fallback: SRV-only (strict ExtSampleD3D) if RTV+share rejects the format.
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        if (is_target) {
+            desc.BindFlags |= D3D11_BIND_RENDER_TARGET;
+        }
+        if (FAILED(device_->CreateTexture2D(&desc, nullptr, &texture_)) || !texture_) {
+            throw std::runtime_error("D3d11SharedTexture: CreateTexture2D failed");
+        }
+        removerLog("D3d11SharedTexture: fell back to ExtSampleD3D bind flags");
     }
 
     IDXGIResource1* dxgi_res = nullptr;
@@ -158,10 +167,15 @@ void D3d11SharedTexture::allocate(std::uint32_t width, std::uint32_t height, For
         throw std::runtime_error("D3d11SharedTexture: CreateSharedHandle failed");
     }
 
-    if (is_target) {
-        if (FAILED(device_->CreateRenderTargetView(texture_, nullptr, &rtv_)) || !rtv_) {
-            destroyTexture();
-            throw std::runtime_error("D3d11SharedTexture: CreateRenderTargetView failed");
+    // RTV whenever BIND_RENDER_TARGET is set (input sentinel clear + PIXERA blit + output).
+    {
+        D3D11_TEXTURE2D_DESC created{};
+        texture_->GetDesc(&created);
+        if (created.BindFlags & D3D11_BIND_RENDER_TARGET) {
+            if (FAILED(device_->CreateRenderTargetView(texture_, nullptr, &rtv_)) || !rtv_) {
+                destroyTexture();
+                throw std::runtime_error("D3d11SharedTexture: CreateRenderTargetView failed");
+            }
         }
     }
 
@@ -190,6 +204,48 @@ void D3d11SharedTexture::clear(float r, float g, float b, float a) {
     }
     const float color[4] = {r, g, b, a};
     context_->ClearRenderTargetView(rtv_, color);
+}
+
+bool D3d11SharedTexture::fillSentinelMagenta() {
+    if (!texture_ || !context_ || width_ == 0 || height_ == 0) {
+        return false;
+    }
+    if (rtv_ && format_ == Format::R8G8B8A8_UNORM) {
+        clear(1.0f, 0.0f, 1.0f, 1.0f);
+        context_->Flush();
+        return true;
+    }
+    if (rtv_ && format_ == Format::R16G16B16A16_SFLOAT) {
+        clear(1.0f, 0.0f, 1.0f, 1.0f);
+        context_->Flush();
+        return true;
+    }
+    // UpdateSubresource fallback for SRV-only textures.
+    if (format_ == Format::R8G8B8A8_UNORM) {
+        std::vector<std::uint8_t> px(static_cast<std::size_t>(width_) * height_ * 4u);
+        for (std::size_t i = 0; i + 3 < px.size(); i += 4) {
+            px[i + 0] = 255;
+            px[i + 1] = 0;
+            px[i + 2] = 255;
+            px[i + 3] = 255;
+        }
+        context_->UpdateSubresource(texture_, 0, nullptr, px.data(), width_ * 4u, 0);
+        context_->Flush();
+        return true;
+    }
+    return false;
+}
+
+bool D3d11SharedTexture::looksLikeSentinel(const std::vector<std::uint8_t>& rgba) {
+    if (rgba.size() < 4) {
+        return false;
+    }
+    // Mid-pixel roughly magenta (allow small conversion error for FP16).
+    const std::size_t mid = (rgba.size() / 8u) * 4u;
+    const unsigned r = rgba[mid + 0];
+    const unsigned g = rgba[mid + 1];
+    const unsigned b = rgba[mid + 2];
+    return r >= 200 && g <= 40 && b >= 200;
 }
 
 bool D3d11SharedTexture::downloadRgba8(std::vector<std::uint8_t>& out_rgba) {

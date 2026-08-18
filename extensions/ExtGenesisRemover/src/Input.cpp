@@ -8,6 +8,8 @@
 #include "platform/Paths.hpp"
 #include "rxext_util.h"
 
+#include <Windows.h>
+
 #include <algorithm>
 #include <filesystem>
 #include <format>
@@ -137,13 +139,14 @@ void Input::publishTargetTexture() {
     ensureD3dTextures();
     d3d_output_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true);
 
-    TextureDesc desc{};
+        TextureDesc desc{};
     desc.width = width_;
     desc.height = height_;
     desc.format = Format::R8G8B8A8_UNORM;
     desc.is_target = true;
     desc.share_handle = {HandleType::D3D11_IMAGE,
-                         reinterpret_cast<Handle>(d3d_output_->shareHandle())};
+                         reinterpret_cast<Handle>(d3d_output_->shareHandle()),
+                         static_cast<std::uint64_t>(GetCurrentProcessId())};
     sampler_->set_texture(host().create_texture(desc));
     removerLog(std::format("shared OUTPUT {}x{} handle=D3D11_IMAGE", desc.width, desc.height));
 }
@@ -165,6 +168,9 @@ void Input::publishVideoInTexture() {
 
         ensureD3dTextures();
         d3d_video_in_->allocate(width_, height_, fmt, /*is_target=*/false);
+        if (d3d_video_in_->fillSentinelMagenta()) {
+            removerLog("video_in sentinel magenta written (if STATUS stays mid~magenta, PIXERA is not writing)");
+        }
         remover_->resize(width_, height_);
         publishTargetTexture();
 
@@ -172,7 +178,8 @@ void Input::publishVideoInTexture() {
         shared.format = fmt;
         shared.is_target = false;
         shared.share_handle = {HandleType::D3D11_IMAGE,
-                               reinterpret_cast<Handle>(d3d_video_in_->shareHandle())};
+                               reinterpret_cast<Handle>(d3d_video_in_->shareHandle()),
+                               static_cast<std::uint64_t>(GetCurrentProcessId())};
         video_in_->set_texture(host().create_texture(shared));
         video_in_ready_ = true;
         applyMatteSettings();
@@ -221,7 +228,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     if (debug_stage_) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
-    const std::string ui = std::format("v20 {} nz={} mid=({},{},{}) vin={}",
+    const std::string ui = std::format("v21 {} nz={} mid=({},{},{}) vin={}",
                                        dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r,
                                        dbg.mid_g, dbg.mid_b, dbg.has_video_in ? 1 : 0);
     if (debug_status_) {
@@ -229,11 +236,17 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     }
     if (last_stage_ != (dbg.stage ? dbg.stage : "") || (render_ticks_ % 30u) == 1u) {
         last_stage_ = dbg.stage ? dbg.stage : "";
+        const std::uint64_t fence_c = d3d_ ? d3d_->fenceCounter() : 0;
+        const std::uint64_t fence_done = d3d_ ? d3d_->completedValue() : 0;
+        const std::uint64_t sync_n = d3d_ ? d3d_->syncCallbacks() : 0;
+        const int sent =
+            (!d3d_rgba_in_.empty() && D3d11SharedTexture::looksLikeSentinel(d3d_rgba_in_)) ? 1 : 0;
         removerLog(std::format(
-            "STATUS stage={} vin={} dl={} nz={} mid=({},{},{},{}) {}x{} matte={} luid={:016x}",
+            "STATUS stage={} vin={} dl={} nz={} mid=({},{},{},{}) {}x{} matte={} luid={:016x} "
+            "fence={}/{} sync={} sent={}",
             dbg.stage ? dbg.stage : "?", dbg.has_video_in ? 1 : 0, dbg.download_ok ? 1 : 0,
             dbg.nonzero_rgb, dbg.mid_r, dbg.mid_g, dbg.mid_b, dbg.mid_a, dbg.width, dbg.height,
-            dbg.matte_copied ? 1 : 0, adapter_luid_));
+            dbg.matte_copied ? 1 : 0, adapter_luid_, fence_done, fence_c, sync_n, sent));
     }
 }
 
@@ -268,7 +281,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     remover_->resize(width_, height_);
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v20 full D3D11 I/O - link Video In"));
+        debug_status_->set_value(std::string("v21 D3D11+sentinel - link Video In"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -358,6 +371,11 @@ RenderResult Input::render() noexcept try {
     if (!remover_->asyncEnabled()) {
         applyMatteSettings();
         remover_->setAsyncEnabled(true);
+    }
+
+    // Ensure PIXERA fence signal is visible before staging readback.
+    if (d3d_ && d3d_->fenceCounter() > 0) {
+        (void)d3d_->waitCpu(d3d_->fenceCounter(), 50);
     }
 
     if (!d3d_video_in_->downloadRgba8(d3d_rgba_in_)) {

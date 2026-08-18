@@ -27,9 +27,14 @@ public:
     ID3D11DeviceContext4* context4() const { return context4_; }
     void* fenceShareHandle() const { return fence_share_; }
     std::uint64_t& fenceCounter() { return fence_counter_; }
+    std::uint64_t completedValue() const;
+    std::uint64_t syncCallbacks() const { return sync_callbacks_; }
+    void noteSyncCallback() { ++sync_callbacks_; }
 
     void wait(std::uint64_t value);
     void signal(std::uint64_t value);
+    // CPU-side wait so staging Map sees PIXERA writes (GPU Wait alone is not enough).
+    bool waitCpu(std::uint64_t value, std::uint32_t timeout_ms = 100);
 
 private:
     ID3D11Device* device_ = nullptr;
@@ -39,6 +44,7 @@ private:
     ID3D11Fence* fence_ = nullptr;
     void* fence_share_ = nullptr;
     std::uint64_t fence_counter_ = 0;
+    std::uint64_t sync_callbacks_ = 0;
 };
 
 } // namespace rxext::genesis_remover

@@ -6,6 +6,7 @@
 #include "common/string.h"
 #include "rxext_util.h"
 
+#include <Windows.h>
 #include <d3d11.h>
 
 #include <format>
@@ -75,21 +76,39 @@ InputStream* Device::create_input_stream(ValueSet settings) noexcept try {
 }
 
 SyncDesc Device::before_render() noexcept {
+    if (d3d_) {
+        d3d_->noteSyncCallback();
+        if ((d3d_->syncCallbacks() % 60u) == 1u) {
+            removerLog(std::format("Device::before_render fence counter={} completed={} calls={}",
+                                   d3d_->fenceCounter(), d3d_->completedValue(),
+                                   d3d_->syncCallbacks()));
+        }
+    }
     return get_sync_desc();
 }
 
 void Device::render() noexcept {
     // ExtSampleD3D: wait until PIXERA signals the next fence value (Video In ready).
     if (d3d_) {
-        d3d_->wait(++d3d_->fenceCounter());
+        d3d_->noteSyncCallback();
+        const std::uint64_t wait_for = ++d3d_->fenceCounter();
+        d3d_->wait(wait_for);
         if (d3d_->context()) {
             d3d_->context()->Flush();
+        }
+        // Also CPU-wait so subsequent staging Maps see PIXERA's writes.
+        const bool ok = d3d_->waitCpu(wait_for, 50);
+        if ((d3d_->syncCallbacks() % 60u) == 1u) {
+            removerLog(std::format("Device::render wait_for={} completed={} cpu_ok={} calls={}",
+                                   wait_for, d3d_->completedValue(), ok ? 1 : 0,
+                                   d3d_->syncCallbacks()));
         }
     }
 }
 
 SyncDesc Device::after_render() noexcept {
     if (d3d_) {
+        d3d_->noteSyncCallback();
         d3d_->signal(++d3d_->fenceCounter());
         if (d3d_->context()) {
             d3d_->context()->Flush();
@@ -107,6 +126,7 @@ SyncDesc Device::get_sync_desc() noexcept {
         ShareHandle{
             HandleType::D3D_FENCE,
             reinterpret_cast<Handle>(d3d_->fenceShareHandle()),
+            static_cast<std::uint64_t>(GetCurrentProcessId()),
         },
         d3d_->fenceCounter(),
     };

@@ -36,6 +36,9 @@ public:
     bool downloadRgba8(std::vector<std::uint8_t>& out_rgba);
     bool uploadRgba8(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height);
     void clear(float r, float g, float b, float a);
+    // Magenta sentinel so we can tell "PIXERA never wrote" vs "PIXERA wrote black".
+    bool fillSentinelMagenta();
+    static bool looksLikeSentinel(const std::vector<std::uint8_t>& rgba);
 
 private:
     void destroyTexture();
