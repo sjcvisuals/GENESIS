@@ -76,13 +76,17 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v33-blit-map-out-20260818
+  remover-timeline-v34-private-map-20260818
 
-v33 = Hypothesis B: never Map Video In; blit → Map output; flip Y:
-  v32 showed camera via GPU blit but frozen on first frame + upside down;
-  Map of Video In always nz=0 while blit showed pixels. CopyResource/Map on
-  Video In fights PIXERA updates. Fix: blit only (V-flipped UVs), Map our
-  RGBA8 output for matte; leave blit on screen until covered matte.
+v34 = never Map/CopyResource shared textures PIXERA samples:
+  v33 upright but frozen — Map of shared output raced (nz=0 most frames) and
+  stuck the compositor on one face. Fix: GPU blit Video In → shared every
+  frame (ExtSampleD3D); blit → private RGBA8 RT; waitGpuIdle; Map private only.
+  Matte uploads to private then blit → shared. Clear shared on nz=0 / unlink.
+  Logs frozen_suspect if mid pixels unchanged for 90 frames.
+
+v33 = Hypothesis B: never Map Video In; blit → Map output; flip Y (upright,
+  still froze).
 
 v32 = Device fence + GPU blit proof (camera visible = PIXERA writes).
 
@@ -92,14 +96,15 @@ Workflow: empty Video In until link → drag Live Input → live upright feed �
 
 Stage colours:
   cyan   = waiting for Video In link (empty slot)
-  blue   = fence wait / output Map failed
+  blue   = private Map / pipeline fail
   live   = GPU blit passthrough then matte
 
 Dump: .\scripts\dump-remover-log.ps1
-Expect stamp v33-blit-map-out and:
-  gpu_blit ... (no Video In Map)
-  out_after_blit nz>0
+Expect stamp v34-private-map and:
+  gpu_blit×2 ...
+  private_after_blit nz>0 (and mid changing each dump)
   STATUS stage=passthrough|matte
+  no frozen_suspect
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log

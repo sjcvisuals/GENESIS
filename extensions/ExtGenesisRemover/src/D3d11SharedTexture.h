@@ -25,9 +25,10 @@ public:
     D3d11SharedTexture(const D3d11SharedTexture&) = delete;
     D3d11SharedTexture& operator=(const D3d11SharedTexture&) = delete;
 
-    // is_target=true → BIND_RENDER_TARGET. Video In may also be a target so PIXERA
-    // can composite the feed (opaque-black clear alone means host never blitted).
-    void allocate(std::uint32_t width, std::uint32_t height, Format format, bool is_target);
+    // is_target=true → BIND_RENDER_TARGET. publish_share=false → private GPU RT (no NT handle);
+    // used to Map for matte without CopyResource on the shared output PIXERA is sampling.
+    void allocate(std::uint32_t width, std::uint32_t height, Format format, bool is_target,
+                  bool publish_share = true);
     bool hasTexture() const { return texture_ != nullptr; }
     std::uint32_t width() const { return width_; }
     std::uint32_t height() const { return height_; }
@@ -69,6 +70,7 @@ private:
     std::uint32_t height_ = 0;
     Format format_ = Format::None;
     bool is_target_ = false;
+    bool publish_share_ = true;
 };
 
 } // namespace rxext::genesis_remover

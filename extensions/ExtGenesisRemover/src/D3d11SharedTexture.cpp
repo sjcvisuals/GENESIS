@@ -116,15 +116,16 @@ void D3d11SharedTexture::destroyTexture() {
     height_ = 0;
     format_ = Format::None;
     is_target_ = false;
+    publish_share_ = true;
 }
 
 void D3d11SharedTexture::allocate(std::uint32_t width, std::uint32_t height, Format format,
-                                  bool is_target) {
+                                  bool is_target, bool publish_share) {
     if (width == 0 || height == 0) {
         throw std::runtime_error("D3d11SharedTexture: invalid extent");
     }
     if (texture_ && width_ == width && height_ == height && format_ == format &&
-        is_target_ == is_target) {
+        is_target_ == is_target && publish_share_ == publish_share) {
         return;
     }
     destroyTexture();
@@ -145,24 +146,28 @@ void D3d11SharedTexture::allocate(std::uint32_t width, std::uint32_t height, For
     if (is_target) {
         desc.BindFlags |= D3D11_BIND_RENDER_TARGET;
     }
-    // ExtSampleD3D: SHARED | SHARED_NTHANDLE (keyed mutex → black).
-    desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
+    // ExtSampleD3D: SHARED | SHARED_NTHANDLE (keyed mutex → black). Private matte RT: none.
+    if (publish_share) {
+        desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
+    }
 
     if (FAILED(device_->CreateTexture2D(&desc, nullptr, &texture_)) || !texture_) {
         throw std::runtime_error("D3d11SharedTexture: CreateTexture2D failed");
     }
 
-    IDXGIResource1* dxgi_res = nullptr;
-    if (FAILED(texture_->QueryInterface(IID_PPV_ARGS(&dxgi_res))) || !dxgi_res) {
-        destroyTexture();
-        throw std::runtime_error("D3d11SharedTexture: IDXGIResource1 QI failed");
-    }
-    const HRESULT share_hr = dxgi_res->CreateSharedHandle(
-        &sharedSecurityAttributes(), GENERIC_ALL, nullptr, &share_handle_);
-    dxgi_res->Release();
-    if (FAILED(share_hr) || !share_handle_) {
-        destroyTexture();
-        throw std::runtime_error("D3d11SharedTexture: CreateSharedHandle failed");
+    if (publish_share) {
+        IDXGIResource1* dxgi_res = nullptr;
+        if (FAILED(texture_->QueryInterface(IID_PPV_ARGS(&dxgi_res))) || !dxgi_res) {
+            destroyTexture();
+            throw std::runtime_error("D3d11SharedTexture: IDXGIResource1 QI failed");
+        }
+        const HRESULT share_hr = dxgi_res->CreateSharedHandle(
+            &sharedSecurityAttributes(), GENERIC_ALL, nullptr, &share_handle_);
+        dxgi_res->Release();
+        if (FAILED(share_hr) || !share_handle_) {
+            destroyTexture();
+            throw std::runtime_error("D3d11SharedTexture: CreateSharedHandle failed");
+        }
     }
 
     // RTV whenever BIND_RENDER_TARGET is set (output sampler).
@@ -203,9 +208,10 @@ void D3d11SharedTexture::allocate(std::uint32_t width, std::uint32_t height, For
     height_ = height;
     format_ = resolved;
     is_target_ = is_target;
-    removerLog(std::format("D3d11SharedTexture allocate {}x{} format={} dxgi={} target={}", width_,
-                           height_, get_format_name(format_), static_cast<int>(dxgi),
-                           is_target_ ? 1 : 0));
+    publish_share_ = publish_share;
+    removerLog(std::format("D3d11SharedTexture allocate {}x{} format={} dxgi={} target={} share={}",
+                           width_, height_, get_format_name(format_), static_cast<int>(dxgi),
+                           is_target_ ? 1 : 0, publish_share_ ? 1 : 0));
 }
 
 void D3d11SharedTexture::clear(float r, float g, float b, float a) {

@@ -35,6 +35,9 @@ public:
     void signal(std::uint64_t value);
     // CPU-side wait so staging Map sees PIXERA writes (GPU Wait alone is not enough).
     bool waitCpu(std::uint64_t value, std::uint32_t timeout_ms = 100);
+    // Wait until GPU has finished commands submitted so far (after blit, before Map).
+    // Uses a private D3D11_QUERY_EVENT — does not touch the PIXERA timeline fence.
+    bool waitGpuIdle(std::uint32_t timeout_ms = 50);
 
 private:
     ID3D11Device* device_ = nullptr;
@@ -45,6 +48,7 @@ private:
     void* fence_share_ = nullptr;
     std::uint64_t fence_counter_ = 0;
     std::uint64_t sync_callbacks_ = 0;
+    struct ID3D11Query* gpu_event_query_ = nullptr;
 };
 
 } // namespace rxext::genesis_remover

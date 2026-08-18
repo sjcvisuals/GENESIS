@@ -114,10 +114,41 @@ void Input::ensureD3dTextures() {
     if (!d3d_video_in_) {
         d3d_video_in_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
     }
-    // Passthrough: ExtSampleD3D GPU blit Video In → output (proves PIXERA write
-    // without relying on CPU Map, which can read zeros even when SRV has data).
+    if (!d3d_matte_src_) {
+        d3d_matte_src_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
+    }
     if (!passthrough_) {
         passthrough_ = std::make_unique<D3d11Passthrough>(d3d_->device());
+    }
+}
+
+void Input::clearVideoInLink(const char* reason) {
+    if (!video_in_ready_ && (!d3d_video_in_ || !d3d_video_in_->hasTexture())) {
+        return;
+    }
+    removerLog(std::format("video_in cleared ({})", reason ? reason : "?"));
+    video_in_ready_ = false;
+    matte_live_ = false;
+    same_mid_frames_ = 0;
+    last_mid_rgba_ = {};
+    if (d3d_video_in_) {
+        // Drop the old share so PIXERA cannot keep sampling a stale first frame.
+        d3d_video_in_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
+    }
+    if (d3d_matte_src_) {
+        d3d_matte_src_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
+    }
+    if (video_in_) {
+        try {
+            video_in_->set_texture({});
+        } catch (...) {
+        }
+    }
+    if (d3d_output_ && d3d_output_->hasTexture()) {
+        d3d_output_->clear(0.0f, 0.86f, 1.0f, 1.0f); // cyan
+        if (d3d_ && d3d_->context()) {
+            d3d_->context()->Flush();
+        }
     }
 }
 
@@ -173,9 +204,11 @@ void Input::publishVideoInTexture() {
                                get_format_name(fmt)));
 
         ensureD3dTextures();
-        // ExtSampleD3D Video In: SRV only (is_target=false). v28 tried is_target=true
-        // and still got full-frame zeros — match the sample that PIXERA knows how to fill.
+        // ExtSampleD3D Video In: SRV only (is_target=false).
         d3d_video_in_->allocate(width_, height_, fmt, /*is_target=*/false);
+        // Private matte RT: never shared — Map this, not the output PIXERA displays.
+        d3d_matte_src_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
+                                 /*publish_share=*/false);
         remover_->resize(width_, height_);
         publishTargetTexture();
 
@@ -196,12 +229,19 @@ void Input::publishVideoInTexture() {
 
     update_input_texture(*video_in_, allocate);
 
+    const int prop_w = video_in_->get_property<int>(SettingNames::resolution_x, 0);
+    const int prop_h = video_in_->get_property<int>(SettingNames::resolution_y, 0);
+
+    // Unlink: props cleared after we had a Video In — drop stale first-frame texture.
+    if (video_in_ready_ && prop_w <= 0 && prop_h <= 0) {
+        clearVideoInLink("props cleared");
+        return;
+    }
+
     if (!video_in_ready_) {
         TextureDesc desc{};
-        desc.width = static_cast<std::size_t>(
-            video_in_->get_property<int>(SettingNames::resolution_x, 0));
-        desc.height = static_cast<std::size_t>(
-            video_in_->get_property<int>(SettingNames::resolution_y, 0));
+        desc.width = static_cast<std::size_t>(prop_w);
+        desc.height = static_cast<std::size_t>(prop_h);
         desc.format = get_format_by_name(video_in_->get_property(SettingNames::format),
                                          Format::R8G8B8A8_UNORM);
         if (desc.width == 0 || desc.height == 0) {
@@ -223,9 +263,7 @@ void Input::publishVideoInTexture() {
         } else if ((render_ticks_ % 60u) == 1u) {
             removerLog(std::format(
                 "waiting Video In link (props {}x{} format='{}') - cyan is correct until then",
-                video_in_->get_property<int>(SettingNames::resolution_x, 0),
-                video_in_->get_property<int>(SettingNames::resolution_y, 0),
-                std::string(video_in_->get_property(SettingNames::format))));
+                prop_w, prop_h, std::string(video_in_->get_property(SettingNames::format))));
         }
     }
 }
@@ -234,7 +272,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     if (debug_stage_) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
-    const std::string ui = std::format("v33 {} nz={} mid=({},{},{}) vin={}",
+    const std::string ui = std::format("v34 {} nz={} mid=({},{},{}) vin={}",
                                        dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r,
                                        dbg.mid_g, dbg.mid_b, dbg.has_video_in ? 1 : 0);
     if (debug_status_) {
@@ -287,7 +325,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     remover_->resize(width_, height_);
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v33 blit→Map output - link Live Input"));
+        debug_status_->set_value(std::string("v34 private Map - link Live Input"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -366,10 +404,12 @@ RenderResult Input::render() noexcept try {
 
     if (!video_in_ready_ || !d3d_video_in_ || !d3d_video_in_->hasTexture()) {
         (void)remover_->processCpuRgbaFrame(nullptr, false, &error, &dbg, true, &d3d_rgba_out_);
-        if (d3d_output_ && d3d_output_->hasTexture() && !d3d_rgba_out_.empty()) {
-            (void)d3d_output_->uploadRgba8(d3d_rgba_out_.data(), width_, height_);
-        } else if (d3d_output_ && d3d_output_->hasTexture()) {
+        // Clear only — never uploadRgba8/CopyResource onto shared output (v33 freeze).
+        if (d3d_output_ && d3d_output_->hasTexture()) {
             d3d_output_->clear(0.0f, 0.86f, 1.0f, 1.0f); // cyan
+            if (d3d_ && d3d_->context()) {
+                d3d_->context()->Flush();
+            }
         }
         logStatusMaybe(dbg);
         return RenderResult::Succeeded;
@@ -382,31 +422,15 @@ RenderResult Input::render() noexcept try {
                                d3d_ ? d3d_->fenceCounter() : 0));
     }
 
-    // Device::render already GPU-Waited fenceCounter. Only touch GPU after that value completes.
-    const std::uint64_t wait_for = d3d_ ? d3d_->fenceCounter() : 0;
-    if (d3d_ && wait_for > 0 && !d3d_->waitCpu(wait_for, 100)) {
-        dbg.width = width_;
-        dbg.height = height_;
-        dbg.has_video_in = true;
-        dbg.download_ok = false;
-        dbg.stage = "download_fail";
-        if (render_ticks_ <= 5u || (render_ticks_ % 30u) == 1u) {
-            removerLog(std::format(
-                "fence wait timeout wait_for={} completed={} - skip blit/Map (avoid hang)",
-                wait_for, d3d_->completedValue()));
-        }
-        if (d3d_output_ && d3d_output_->hasTexture()) {
-            d3d_output_->clear(0.12f, 0.35f, 0.86f, 1.0f); // blue
-        }
-        logStatusMaybe(dbg);
-        return RenderResult::Succeeded;
-    }
+    // Device::render already queued GPU Wait on fenceCounter (ExtSampleD3D). Do NOT
+    // waitCpu here — a timeout that skips blit leaves the previous face on screen.
+    // Live blit always runs; CPU Map uses waitGpuIdle on our private RT only.
 
-    // Hypothesis B (v32 proved): GPU blit sees the feed; Mapping Video In returns zeros and
-    // CopyResource on Video In freezes PIXERA's updates on the first frame.
-    // Never Map Video In. Blit → Flush → Map our RGBA8 output RT for CPU matte.
+    // Live path: blit Video In → shared output (what PIXERA shows).
+    // Matte path: blit Video In → private RGBA8 RT, wait GPU, Map private only.
+    // Never Map/CopyResource Video In or shared output (v32/v33: zeros + frozen frame).
     if (!passthrough_ || !passthrough_->ready() || !d3d_video_in_->srv() || !d3d_output_ ||
-        !d3d_output_->rtv()) {
+        !d3d_output_->rtv() || !d3d_matte_src_ || !d3d_matte_src_->rtv()) {
         dbg.width = width_;
         dbg.height = height_;
         dbg.has_video_in = true;
@@ -419,31 +443,73 @@ RenderResult Input::render() noexcept try {
         return RenderResult::Succeeded;
     }
 
+    // Ensure private matte RT matches current size (allocate is no-op if unchanged).
+    d3d_matte_src_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
+                             /*publish_share=*/false);
+
+    // Always refresh shared output from Video In (same as ExtSampleD3D Quad) — this is
+    // the live preview path and must not depend on Map/CopyResource.
     passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_output_->rtv(), width_, height_);
-    d3d_->context()->Flush();
+    passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_matte_src_->rtv(), width_,
+                       height_);
+    if (!d3d_->waitGpuIdle(80)) {
+        if (render_ticks_ <= 5u || (render_ticks_ % 60u) == 1u) {
+            removerLog("waitGpuIdle after blit timed out — keep live blit, skip Map");
+        }
+        dbg.width = width_;
+        dbg.height = height_;
+        dbg.has_video_in = true;
+        dbg.download_ok = false;
+        dbg.stage = "passthrough"; // shared output blit still submitted
+        logStatusMaybe(dbg);
+        return RenderResult::Succeeded;
+    }
     if (render_ticks_ <= 8u || (render_ticks_ % 60u) == 1u) {
-        removerLog(std::format("gpu_blit Video In → output {}x{} fmt={} (no Video In Map)", width_,
-                               height_, get_format_name(d3d_video_in_->format())));
+        removerLog(std::format("gpu_blit×2 Video In → output+private {}x{} fmt={}", width_, height_,
+                               get_format_name(d3d_video_in_->format())));
     }
 
     long map_hr = 0;
-    if (!d3d_output_->downloadTargetRgba8(d3d_rgba_in_, &map_hr)) {
+    if (!d3d_matte_src_->downloadTargetRgba8(d3d_rgba_in_, &map_hr)) {
         dbg.width = width_;
         dbg.height = height_;
         dbg.has_video_in = true;
         dbg.download_ok = false;
         dbg.stage = "download_fail";
         if (render_ticks_ <= 5u || (render_ticks_ % 30u) == 1u) {
-            removerLog(std::format("output Map after blit failed hr=0x{:08x}",
+            removerLog(std::format("private matte Map failed hr=0x{:08x}",
                                    static_cast<unsigned long>(map_hr)));
         }
-        // Blit result still on GPU for preview.
         logStatusMaybe(dbg);
         return RenderResult::Succeeded;
     }
 
     if ((render_ticks_ % 30u) == 1u) {
-        D3d11SharedTexture::logFrameStats(d3d_rgba_in_, width_, height_, "out_after_blit");
+        D3d11SharedTexture::logFrameStats(d3d_rgba_in_, width_, height_, "private_after_blit");
+    }
+
+    // Detect frozen Video In (PIXERA wrote once then stopped): same mid for many frames.
+    if (d3d_rgba_in_.size() >= 4 && width_ > 0 && height_ > 0) {
+        const std::size_t mid_i =
+            (static_cast<std::size_t>(height_ / 2u) * width_ + (width_ / 2u)) * 4u;
+        if (mid_i + 3 < d3d_rgba_in_.size()) {
+            const std::array<std::uint8_t, 4> mid = {
+                d3d_rgba_in_[mid_i], d3d_rgba_in_[mid_i + 1], d3d_rgba_in_[mid_i + 2],
+                d3d_rgba_in_[mid_i + 3]};
+            const bool any = (mid[0] | mid[1] | mid[2]) != 0;
+            if (any && mid == last_mid_rgba_) {
+                ++same_mid_frames_;
+            } else {
+                same_mid_frames_ = 0;
+                last_mid_rgba_ = mid;
+            }
+            if (any && same_mid_frames_ == 90u) {
+                removerLog(std::format(
+                    "frozen_suspect same mid=({},{},{},{}) for 90 frames — Video In may not be "
+                    "updating",
+                    mid[0], mid[1], mid[2], mid[3]));
+            }
+        }
     }
 
     if (!remover_->asyncEnabled()) {
@@ -454,19 +520,32 @@ RenderResult Input::render() noexcept try {
     (void)remover_->processCpuRgbaFrame(d3d_rgba_in_.data(), true, &error, &dbg, true,
                                         &d3d_rgba_out_);
 
-    // Live GPU blit already shows the feed (upright after V-flip). Only overwrite output
-    // when we have a covered matte — avoid uploading orange/black diagnostics over the blit.
+    // Never CopyResource onto shared output (v33 freeze). Upload matte into private RT,
+    // then GPU-blit private → shared (ExtSampleD3D-safe).
     if (dbg.stage && std::string_view(dbg.stage) == "matte" && dbg.nonzero_rgb > 0 &&
-        d3d_output_ && !d3d_rgba_out_.empty()) {
-        if (!d3d_output_->uploadRgba8(d3d_rgba_out_.data(), width_, height_)) {
-            removerLog("D3D output uploadRgba8 failed");
+        d3d_matte_src_ && d3d_matte_src_->srv() && d3d_output_ && d3d_output_->rtv() &&
+        !d3d_rgba_out_.empty()) {
+        if (!d3d_matte_src_->uploadRgba8(d3d_rgba_out_.data(), width_, height_)) {
+            removerLog("private matte uploadRgba8 failed");
         } else {
+            passthrough_->draw(d3d_->context(), d3d_matte_src_->srv(), d3d_output_->rtv(), width_,
+                               height_);
             matte_live_ = true;
+            if ((render_ticks_ % 60u) == 1u) {
+                removerLog("matte_ok blit private → shared output");
+            }
         }
-    } else if (dbg.nonzero_rgb == 0 && (render_ticks_ % 30u) == 1u) {
-        removerLog("output_after_blit nz=0 (blit may still be visible on GPU)");
+    } else if (dbg.nonzero_rgb == 0) {
+        // Video In empty this frame — force shared clear so preview cannot stick on last face.
+        if (d3d_output_ && d3d_output_->hasTexture()) {
+            d3d_output_->clear(0.0f, 0.0f, 0.0f, 1.0f);
+        }
+        matte_live_ = false;
+        if ((render_ticks_ % 30u) == 1u) {
+            removerLog("private_after_blit nz=0 — cleared shared output (no stale face)");
+        }
     } else if (dbg.nonzero_rgb > 0 && (render_ticks_ % 60u) == 1u) {
-        removerLog(std::format("output_after_blit nz={} stage={} (GPU blit passthrough until matte)",
+        removerLog(std::format("private_after_blit nz={} stage={} (live blit on shared output)",
                                dbg.nonzero_rgb, dbg.stage ? dbg.stage : "?"));
     }
 

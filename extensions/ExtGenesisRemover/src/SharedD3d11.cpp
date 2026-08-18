@@ -164,6 +164,10 @@ SharedD3d11::SharedD3d11(std::uint64_t adapter_luid) {
 }
 
 SharedD3d11::~SharedD3d11() {
+    if (gpu_event_query_) {
+        gpu_event_query_->Release();
+        gpu_event_query_ = nullptr;
+    }
     if (fence_share_) {
         CloseHandle(fence_share_);
         fence_share_ = nullptr;
@@ -225,6 +229,34 @@ bool SharedD3d11::waitCpu(std::uint64_t value, std::uint32_t timeout_ms) {
     const DWORD wait = WaitForSingleObject(event, timeout_ms);
     CloseHandle(event);
     return wait == WAIT_OBJECT_0;
+}
+
+bool SharedD3d11::waitGpuIdle(std::uint32_t timeout_ms) {
+    if (!device_ || !context_) {
+        return false;
+    }
+    if (!gpu_event_query_) {
+        D3D11_QUERY_DESC qd{};
+        qd.Query = D3D11_QUERY_EVENT;
+        if (FAILED(device_->CreateQuery(&qd, &gpu_event_query_)) || !gpu_event_query_) {
+            return false;
+        }
+    }
+    context_->End(gpu_event_query_);
+    const DWORD start = GetTickCount();
+    for (;;) {
+        const HRESULT hr = context_->GetData(gpu_event_query_, nullptr, 0, 0);
+        if (hr == S_OK) {
+            return true;
+        }
+        if (FAILED(hr)) {
+            return false;
+        }
+        if (GetTickCount() - start >= timeout_ms) {
+            return false;
+        }
+        Sleep(0);
+    }
 }
 
 } // namespace rxext::genesis_remover
