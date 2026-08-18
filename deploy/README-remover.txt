@@ -76,21 +76,19 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v36-blit-heartbeat-20260818
+  remover-timeline-v37-async-matte-20260818
 
-v36 = DIAGNOSTIC blit-only + lime heartbeat stripe (no Map/matte):
-  v35 Map always nz=0 while preview showed a frozen face. Disable all CPU
-  readback. ExtSampleD3D clear+blit only, plus a moving lime bar.
-  Stripe moves + face frozen => Video In stuck after one PIXERA write.
-  Stripe also frozen => PIXERA not presenting our shared output updates.
-  Stripe moves + face live => re-enable matte next.
+v37 = live blit + async matte (v36 proved feed is live):
+  Every frame: present live or last matte (GPU blit only).
+  Every other frame: blit Video In -> private capture, CopyResource+End(query).
+  Later frames: non-blocking GetData(DONOTFLUSH); Map only when ready; RVM;
+  upload cutout to private matte RT; blit matte -> shared.
+  Never waitGpuIdle / Flush / Map on the PIXERA fence critical path.
 
-v35 = live blit + throttled matte Map (still froze; Map always nz=0).
-
-Preview vs Output: set Adapter LUID to that engine's GPU.
+v36 = blit-only + lime heartbeat (diagnosed live Video In).
 
 Dump: .\scripts\dump-remover-log.ps1
-Expect stamp v36-blit-heartbeat and gpu_blit live+heartbeat.
+Expect stamp v37-async-matte, async_capture nz>0, matte_ok, stage=matte.
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log

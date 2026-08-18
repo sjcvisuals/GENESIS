@@ -114,8 +114,11 @@ void Input::ensureD3dTextures() {
     if (!d3d_video_in_) {
         d3d_video_in_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
     }
-    if (!d3d_matte_src_) {
-        d3d_matte_src_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
+    if (!d3d_capture_) {
+        d3d_capture_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
+    }
+    if (!d3d_matte_tex_) {
+        d3d_matte_tex_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
     }
     if (!passthrough_) {
         passthrough_ = std::make_unique<D3d11Passthrough>(d3d_->device());
@@ -132,11 +135,13 @@ void Input::clearVideoInLink(const char* reason) {
     same_mid_frames_ = 0;
     last_mid_rgba_ = {};
     if (d3d_video_in_) {
-        // Drop the old share so PIXERA cannot keep sampling a stale first frame.
         d3d_video_in_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
     }
-    if (d3d_matte_src_) {
-        d3d_matte_src_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
+    if (d3d_capture_) {
+        d3d_capture_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
+    }
+    if (d3d_matte_tex_) {
+        d3d_matte_tex_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
     }
     if (video_in_) {
         try {
@@ -206,8 +211,9 @@ void Input::publishVideoInTexture() {
         ensureD3dTextures();
         // ExtSampleD3D Video In: SRV only (is_target=false).
         d3d_video_in_->allocate(width_, height_, fmt, /*is_target=*/false);
-        // Private matte RT: never shared — Map this, not the output PIXERA displays.
-        d3d_matte_src_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
+        d3d_capture_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
+                               /*publish_share=*/false);
+        d3d_matte_tex_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
                                  /*publish_share=*/false);
         remover_->resize(width_, height_);
         publishTargetTexture();
@@ -272,7 +278,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     if (debug_stage_) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
-    const std::string ui = std::format("v36 {} nz={} mid=({},{},{}) vin={}",
+    const std::string ui = std::format("v37 {} nz={} mid=({},{},{}) vin={}",
                                        dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r,
                                        dbg.mid_g, dbg.mid_b, dbg.has_video_in ? 1 : 0);
     if (debug_status_) {
@@ -325,7 +331,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     remover_->resize(width_, height_);
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v36 blit+heartbeat - watch lime stripe"));
+        debug_status_->set_value(std::string("v37 live+async matte - link Live Input"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -387,6 +393,119 @@ SyncDesc Input::before_render() noexcept {
     return {};
 }
 
+void Input::tryFinishAsyncMatte(::genesis::RemoverFrameDebug& dbg, std::string& error) {
+    if (!d3d_capture_ || !d3d_capture_->asyncDownloadPending()) {
+        return;
+    }
+    long map_hr = 0;
+    const int poll = d3d_capture_->pollAsyncDownload(d3d_rgba_in_, &map_hr);
+    if (poll == 0) {
+        return; // still on GPU - do not wait
+    }
+    if (poll < 0) {
+        if ((render_ticks_ % 60u) == 1u) {
+            removerLog(std::format("async capture poll failed hr=0x{:08x}",
+                                   static_cast<unsigned long>(map_hr)));
+        }
+        return;
+    }
+
+    if ((render_ticks_ % 30u) == 1u) {
+        D3d11SharedTexture::logFrameStats(d3d_rgba_in_, width_, height_, "async_capture");
+    }
+
+    bool any_px = false;
+    for (std::uint8_t b : d3d_rgba_in_) {
+        if (b) {
+            any_px = true;
+            break;
+        }
+    }
+    if (!any_px) {
+        dbg.width = width_;
+        dbg.height = height_;
+        dbg.has_video_in = true;
+        dbg.download_ok = true;
+        dbg.nonzero_rgb = 0;
+        dbg.stage = "input_black";
+        if ((render_ticks_ % 60u) == 1u) {
+            removerLog("async_capture nz=0 (keep live blit)");
+        }
+        return;
+    }
+
+    if (d3d_rgba_in_.size() >= 4 && width_ > 0 && height_ > 0) {
+        const std::size_t mid_i =
+            (static_cast<std::size_t>(height_ / 2u) * width_ + (width_ / 2u)) * 4u;
+        if (mid_i + 3 < d3d_rgba_in_.size()) {
+            const std::array<std::uint8_t, 4> mid = {
+                d3d_rgba_in_[mid_i], d3d_rgba_in_[mid_i + 1], d3d_rgba_in_[mid_i + 2],
+                d3d_rgba_in_[mid_i + 3]};
+            const bool any = (mid[0] | mid[1] | mid[2]) != 0;
+            if (any && mid == last_mid_rgba_) {
+                ++same_mid_frames_;
+            } else {
+                same_mid_frames_ = 0;
+                last_mid_rgba_ = mid;
+            }
+            if (any && same_mid_frames_ == 45u) {
+                removerLog(std::format(
+                    "frozen_suspect same mid=({},{},{},{}) for 45 captures", mid[0], mid[1], mid[2],
+                    mid[3]));
+            }
+        }
+    }
+
+    if (!remover_->asyncEnabled()) {
+        applyMatteSettings();
+        remover_->setAsyncEnabled(true);
+    }
+
+    (void)remover_->processCpuRgbaFrame(d3d_rgba_in_.data(), true, &error, &dbg, false,
+                                        &d3d_rgba_out_);
+
+    if (dbg.stage && std::string_view(dbg.stage) == "matte" && dbg.nonzero_rgb > 0 &&
+        d3d_matte_tex_ && !d3d_rgba_out_.empty()) {
+        d3d_matte_tex_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
+                                 /*publish_share=*/false);
+        if (d3d_matte_tex_->uploadRgba8(d3d_rgba_out_.data(), width_, height_)) {
+            matte_live_ = true;
+            if ((render_ticks_ % 60u) == 1u) {
+                removerLog("matte_ok async uploaded to private matte RT");
+            }
+        } else if ((render_ticks_ % 60u) == 1u) {
+            removerLog("matte uploadRgba8 to private failed");
+        }
+    } else if (dbg.nonzero_rgb > 0 && (render_ticks_ % 60u) == 1u) {
+        removerLog(std::format("async_capture nz={} stage={}", dbg.nonzero_rgb,
+                               dbg.stage ? dbg.stage : "?"));
+    }
+}
+
+void Input::maybeStartAsyncCapture() {
+    if (!d3d_capture_ || !passthrough_ || !d3d_video_in_ || !d3d_video_in_->srv()) {
+        return;
+    }
+    if (d3d_capture_->asyncDownloadPending()) {
+        return;
+    }
+    // Capture every other frame - leaves GPU time for live blit + fence signal.
+    if ((render_ticks_ % 2u) != 0u) {
+        return;
+    }
+    d3d_capture_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
+                           /*publish_share=*/false);
+    if (!d3d_capture_->rtv()) {
+        return;
+    }
+    passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_capture_->rtv(), width_, height_);
+    if (!d3d_capture_->beginAsyncDownload()) {
+        if ((render_ticks_ % 120u) == 1u) {
+            removerLog("beginAsyncDownload failed");
+        }
+    }
+}
+
 RenderResult Input::render() noexcept try {
     ++render_ticks_;
     if (time_) {
@@ -417,11 +536,6 @@ RenderResult Input::render() noexcept try {
                                d3d_ ? d3d_->fenceCounter() : 0));
     }
 
-    // v36 DIAGNOSTIC: blit-only like ExtSampleD3D. No Map, no waitGpuIdle, no matte.
-    // v35 still Mapped every 4th tick (always nz=0) while preview showed a frozen face -
-    // either Video In is stuck after one write, or PIXERA is caching an old output frame.
-    // Lime heartbeat stripe: if it MOVES, our shared output is live (face frozen => Video In).
-    // If stripe is also frozen, PIXERA is not presenting our updates.
     if (!passthrough_ || !passthrough_->ready() || !d3d_video_in_->srv() || !d3d_output_ ||
         !d3d_output_->rtv()) {
         dbg.width = width_;
@@ -430,31 +544,53 @@ RenderResult Input::render() noexcept try {
         dbg.download_ok = false;
         dbg.stage = "download_fail";
         if (d3d_output_ && d3d_output_->hasTexture()) {
-            d3d_output_->clear(0.12f, 0.35f, 0.86f, 1.0f); // blue
+            d3d_output_->clear(0.12f, 0.35f, 0.86f, 1.0f);
         }
         logStatusMaybe(dbg);
         return RenderResult::Succeeded;
     }
 
-    // ExtSampleD3D clears then draws the input quad.
-    d3d_output_->clear(0.0f, 0.0f, 0.0f, 1.0f);
-    passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_output_->rtv(), width_, height_);
-    passthrough_->drawHeartbeat(d3d_->context(), d3d_output_->rtv(), width_, height_,
-                                render_ticks_);
+    // 1) Finish any completed async capture (never blocks).
+    tryFinishAsyncMatte(dbg, error);
 
-    dbg.width = width_;
-    dbg.height = height_;
-    dbg.has_video_in = true;
-    dbg.download_ok = false;
-    dbg.stage = "passthrough";
-    dbg.nonzero_rgb = 0;
+    // 2) Present: prefer last matte cutout; else live Video In (v36-proven path).
+    if (matte_live_ && d3d_matte_tex_ && d3d_matte_tex_->srv()) {
+        passthrough_->draw(d3d_->context(), d3d_matte_tex_->srv(), d3d_output_->rtv(), width_,
+                           height_);
+        if (!dbg.stage || std::string_view(dbg.stage) == "none" ||
+            std::string_view(dbg.stage) == "passthrough") {
+            dbg.stage = "matte";
+            dbg.has_video_in = true;
+            dbg.download_ok = true;
+            dbg.matte_copied = true;
+            dbg.width = width_;
+            dbg.height = height_;
+        }
+    } else {
+        d3d_output_->clear(0.0f, 0.0f, 0.0f, 1.0f);
+        passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_output_->rtv(), width_,
+                           height_);
+        dbg.width = width_;
+        dbg.height = height_;
+        dbg.has_video_in = true;
+        if (!dbg.stage || std::string_view(dbg.stage) == "none") {
+            dbg.stage = "passthrough";
+        }
+    }
+
+    // 3) Kick next capture (CopyResource+End query only - no Map/wait).
+    maybeStartAsyncCapture();
 
     if (render_ticks_ <= 8u || (render_ticks_ % 60u) == 1u) {
         removerLog(std::format(
-            "gpu_blit live+heartbeat Video In -> output {}x{} fmt={} tick={} (no Map/matte)",
-            width_, height_, get_format_name(d3d_video_in_->format()), render_ticks_));
+            "gpu_present {} {}x{} capture_pending={} matte_live={}",
+            matte_live_ ? "matte" : "live", width_, height_,
+            (d3d_capture_ && d3d_capture_->asyncDownloadPending()) ? 1 : 0, matte_live_ ? 1 : 0));
     }
 
+    if (!error.empty() && (render_ticks_ % 60u) == 1u) {
+        removerLog(std::format("processCpuRgbaFrame: {}", error));
+    }
     logStatusMaybe(dbg);
     return RenderResult::Succeeded;
 } catch (const std::exception& ex) {

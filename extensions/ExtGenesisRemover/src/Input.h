@@ -17,8 +17,9 @@
 
 namespace rxext::genesis_remover {
 
-// v36 diagnostic: GPU blit Video In -> shared output + moving lime heartbeat.
-// No Map/matte (v35 Map always nz=0 while preview showed a frozen face).
+// Live: GPU blit Video In -> shared every frame (proven live in v36).
+// Matte: async blit -> private capture -> non-blocking poll/Map; upload cutout to
+// private matte RT; blit matte -> shared. Never stall fence with waitGpuIdle/Flush/Map.
 class Input : public rxext::InputStream {
 public:
     Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, ValueSet settings);
@@ -40,6 +41,9 @@ private:
     void publishTargetTexture();
     void publishVideoInTexture();
     void logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg);
+    void clearVideoInLink(const char* reason);
+    void tryFinishAsyncMatte(::genesis::RemoverFrameDebug& dbg, std::string& error);
+    void maybeStartAsyncCapture();
 
     std::shared_ptr<SharedD3d11> d3d_;
     std::uint64_t adapter_luid_ = 0;
@@ -55,9 +59,10 @@ private:
     std::unique_ptr<::genesis::RemoverPipeline> remover_;
     std::unique_ptr<D3d11SharedTexture> d3d_output_;
     std::unique_ptr<D3d11SharedTexture> d3d_video_in_;
-    // Private (non-shared) RGBA8 RT: blit here for CPU Map so we never CopyResource the
-    // shared output PIXERA is displaying (that froze the feed on a single frame).
-    std::unique_ptr<D3d11SharedTexture> d3d_matte_src_;
+    // Private capture RT: Video In blit target for async CPU readback.
+    std::unique_ptr<D3d11SharedTexture> d3d_capture_;
+    // Private matte RT: last cutout for display (blit to shared output).
+    std::unique_ptr<D3d11SharedTexture> d3d_matte_tex_;
     std::unique_ptr<D3d11Passthrough> passthrough_;
     std::vector<std::uint8_t> d3d_rgba_in_;
     std::vector<std::uint8_t> d3d_rgba_out_;
@@ -69,8 +74,6 @@ private:
     bool matte_live_ = false;
     std::uint32_t same_mid_frames_ = 0;
     std::array<std::uint8_t, 4> last_mid_rgba_{};
-
-    void clearVideoInLink(const char* reason);
 };
 
 } // namespace rxext::genesis_remover

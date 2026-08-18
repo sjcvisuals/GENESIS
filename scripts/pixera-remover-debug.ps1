@@ -4,21 +4,22 @@
 $ErrorActionPreference = "Continue"
 Write-Host @"
 
-GENESIS Remover v36 - blit + heartbeat
-======================================
-Blit-only (no Map/matte). Lime stripe diagnoses freeze:
+GENESIS Remover v37 - live + async matte
+========================================
+Live GPU blit every frame (v36 proven). Matte via async private capture
+(non-blocking poll/Map) so the fence handshake never stalls.
 
-  stripe MOVES + face frozen  => Video In stuck
-  stripe ALSO frozen          => PIXERA not presenting output
-  stripe MOVES + face live    => OK for matte next
+Expect:
+  live passthrough first, then person cutout
+  STATUS stage=matte, async_capture nz>0, matte_ok
 
 1) Quit PIXERA completely
 2) git pull
 3) BUILD-REMOVER.bat
-4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v36-blit-heartbeat-*)
+4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v37-async-matte-*)
 5) Re-import ExtGenesisRemover.dll
 6) Adapter LUID = preview GPU; drag Live Input
-7) Watch lime stripe; dump log
+7) Dump log
 
 "@
 

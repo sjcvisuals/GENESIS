@@ -12,6 +12,7 @@ struct ID3D11DeviceContext;
 struct ID3D11Texture2D;
 struct ID3D11RenderTargetView;
 struct ID3D11ShaderResourceView;
+struct ID3D11Query;
 
 namespace rxext::genesis_remover {
 
@@ -40,8 +41,13 @@ public:
 
     // Video In (is_target=false) readback.
     bool downloadRgba8(std::vector<std::uint8_t>& out_rgba, long* out_hr = nullptr);
-    // After GPU blit into output (is_target=true), read RGBA8 for matte.
+    // After GPU blit into a private RT (is_target=true), read RGBA8 for matte.
     bool downloadTargetRgba8(std::vector<std::uint8_t>& out_rgba, long* out_hr = nullptr);
+    // Non-blocking readback: CopyResource+End(query) now; poll later without stalling render.
+    bool beginAsyncDownload();
+    // 0=pending, 1=ready (out filled), -1=idle/failed.
+    int pollAsyncDownload(std::vector<std::uint8_t>& out_rgba, long* out_hr = nullptr);
+    bool asyncDownloadPending() const { return async_pending_; }
     bool uploadRgba8(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height);
     void clear(float r, float g, float b, float a);
     // Magenta sentinel so we can tell "PIXERA never wrote" vs "PIXERA wrote black".
@@ -65,12 +71,14 @@ private:
     ID3D11Texture2D* staging_ = nullptr;
     ID3D11RenderTargetView* rtv_ = nullptr;
     ID3D11ShaderResourceView* srv_ = nullptr;
+    ID3D11Query* async_query_ = nullptr;
     void* share_handle_ = nullptr;
     std::uint32_t width_ = 0;
     std::uint32_t height_ = 0;
     Format format_ = Format::None;
     bool is_target_ = false;
     bool publish_share_ = true;
+    bool async_pending_ = false;
 };
 
 } // namespace rxext::genesis_remover

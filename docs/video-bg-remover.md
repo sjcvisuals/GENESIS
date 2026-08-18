@@ -91,16 +91,17 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for `STATUS stage=` lines and stamp `remover-timeline-v36-blit-heartbeat-*`.
+Look for `STATUS stage=` lines and stamp `remover-timeline-v37-async-matte-*`.
 
 | Colour / stage | Meaning |
 |----------------|---------|
 | cyan / `waiting_video_in` | Video In slot empty — drag Live Input in |
 | blue / `download_fail` | live path missing RTV/SRV |
-| `passthrough` | blit + lime heartbeat (v36 has no matte) |
+| `passthrough` | live blit (waiting on first matte) |
+| `matte` | person cutout |
 
-v36 diagnostic: blit-only with a moving lime stripe. Stripe moves + face frozen means
-Video In is stuck; stripe also frozen means PIXERA is not presenting our output.
+v37: live blit every frame; async private capture for RVM (no fence stall).
+Expect `async_capture nz>0` then `matte_ok`.
 
 Also check Remover params **Debug Stage** / **Debug Status**.
 Checklist: `.\scripts\pixera-remover-debug.ps1`

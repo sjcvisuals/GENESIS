@@ -92,6 +92,11 @@ D3d11SharedTexture::~D3d11SharedTexture() {
 }
 
 void D3d11SharedTexture::destroyTexture() {
+    async_pending_ = false;
+    if (async_query_) {
+        async_query_->Release();
+        async_query_ = nullptr;
+    }
     if (share_handle_) {
         CloseHandle(share_handle_);
         share_handle_ = nullptr;
@@ -416,6 +421,44 @@ bool D3d11SharedTexture::downloadTargetRgba8(std::vector<std::uint8_t>& out_rgba
     }
     context_->CopyResource(staging_, texture_);
     return mapStagingToRgba8(out_rgba, out_hr);
+}
+
+bool D3d11SharedTexture::beginAsyncDownload() {
+    if (!texture_ || !staging_ || !context_ || !device_ || width_ == 0 || height_ == 0 ||
+        !is_target_ || format_ != Format::R8G8B8A8_UNORM || async_pending_) {
+        return false;
+    }
+    if (!async_query_) {
+        D3D11_QUERY_DESC qd{};
+        qd.Query = D3D11_QUERY_EVENT;
+        if (FAILED(device_->CreateQuery(&qd, &async_query_)) || !async_query_) {
+            return false;
+        }
+    }
+    context_->CopyResource(staging_, texture_);
+    context_->End(async_query_);
+    async_pending_ = true;
+    return true;
+}
+
+int D3d11SharedTexture::pollAsyncDownload(std::vector<std::uint8_t>& out_rgba, long* out_hr) {
+    if (!async_pending_ || !async_query_ || !context_) {
+        return -1;
+    }
+    // DONOTFLUSH: never stall the PIXERA fence handshake from GetData.
+    const HRESULT data_hr =
+        context_->GetData(async_query_, nullptr, 0, D3D11_ASYNC_GETDATA_DONOTFLUSH);
+    if (data_hr == S_FALSE) {
+        return 0;
+    }
+    async_pending_ = false;
+    if (FAILED(data_hr)) {
+        if (out_hr) {
+            *out_hr = static_cast<long>(data_hr);
+        }
+        return -1;
+    }
+    return mapStagingToRgba8(out_rgba, out_hr) ? 1 : -1;
 }
 
 bool D3d11SharedTexture::uploadRgba8(const std::uint8_t* rgba, std::uint32_t width,
