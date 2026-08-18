@@ -49,6 +49,9 @@ public:
     int pollAsyncDownload(std::vector<std::uint8_t>& out_rgba, long* out_hr = nullptr);
     bool asyncDownloadPending() const { return async_pending_; }
     bool uploadRgba8(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height);
+    // Prefer for matte from worker thread results - no staging Map on the PIXERA device.
+    bool uploadRgba8UpdateSubresource(const std::uint8_t* rgba, std::uint32_t width,
+                                      std::uint32_t height);
     void clear(float r, float g, float b, float a);
     // Magenta sentinel so we can tell "PIXERA never wrote" vs "PIXERA wrote black".
     // FP16 uses a 1x1 mid-pixel UpdateSubresource (full-frame upload can stall PIXERA).

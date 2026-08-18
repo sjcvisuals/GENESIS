@@ -482,4 +482,14 @@ bool D3d11SharedTexture::uploadRgba8(const std::uint8_t* rgba, std::uint32_t wid
     return true;
 }
 
+bool D3d11SharedTexture::uploadRgba8UpdateSubresource(const std::uint8_t* rgba, std::uint32_t width,
+                                                      std::uint32_t height) {
+    if (!rgba || !texture_ || !context_ || !is_target_ || width != width_ || height != height_ ||
+        format_ != Format::R8G8B8A8_UNORM) {
+        return false;
+    }
+    context_->UpdateSubresource(texture_, 0, nullptr, rgba, width_ * 4u, 0);
+    return true;
+}
+
 } // namespace rxext::genesis_remover

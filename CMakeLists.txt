@@ -478,6 +478,7 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         ${EXT_REMOVER_DIR}/src/D3d11SharedTexture.cpp
         ${EXT_REMOVER_DIR}/src/D3d11Passthrough.cpp
         ${EXT_REMOVER_DIR}/src/SharedD3d11.cpp
+        ${EXT_REMOVER_DIR}/src/MatteCaptureWorker.cpp
         ${EXT_REMOVER_DIR}/src/ModulePaths.cpp
         ${EXT_REMOVER_DIR}/src/RemoverLog.cpp
         ${RX_SDK_DIR}/libs/common/string.cpp

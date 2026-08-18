@@ -47,6 +47,7 @@ int stageToEnum(const char* stage) {
     }
     return 0;
 }
+
 } // namespace
 
 Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, ValueSet settings)
@@ -92,6 +93,7 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
 }
 
 Input::~Input() {
+    matte_worker_.reset();
     removerLog("Input dtor");
 }
 
@@ -99,9 +101,9 @@ void Input::ensureRemover() {
     if (remover_) {
         return;
     }
-    // Vulkan context still used internally for matte scratch; PIXERA only sees D3D11_IMAGE.
     remover_ = std::make_unique<::genesis::RemoverPipeline>(adapter_luid_);
-    removerLog(std::format("RemoverPipeline ready adapter={:016x}", adapter_luid_));
+    removerLog(std::format("RemoverPipeline ready adapter={:016x} (diagnostics only)",
+                           adapter_luid_));
 }
 
 void Input::ensureD3dTextures() {
@@ -114,14 +116,20 @@ void Input::ensureD3dTextures() {
     if (!d3d_video_in_) {
         d3d_video_in_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
     }
-    if (!d3d_capture_) {
-        d3d_capture_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
-    }
     if (!d3d_matte_tex_) {
         d3d_matte_tex_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
     }
     if (!passthrough_) {
         passthrough_ = std::make_unique<D3d11Passthrough>(d3d_->device());
+    }
+}
+
+void Input::ensureWorker() {
+    if (!matte_worker_) {
+        matte_worker_ = std::make_unique<MatteCaptureWorker>(adapter_luid_);
+    }
+    if (quality_) {
+        matte_worker_->setQuality(quality_->value());
     }
 }
 
@@ -132,13 +140,11 @@ void Input::clearVideoInLink(const char* reason) {
     removerLog(std::format("video_in cleared ({})", reason ? reason : "?"));
     video_in_ready_ = false;
     matte_live_ = false;
-    same_mid_frames_ = 0;
-    last_mid_rgba_ = {};
+    if (matte_worker_) {
+        matte_worker_->setVideoIn(nullptr, 0, 0, Format::None);
+    }
     if (d3d_video_in_) {
         d3d_video_in_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
-    }
-    if (d3d_capture_) {
-        d3d_capture_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
     }
     if (d3d_matte_tex_) {
         d3d_matte_tex_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
@@ -150,28 +156,14 @@ void Input::clearVideoInLink(const char* reason) {
         }
     }
     if (d3d_output_ && d3d_output_->hasTexture()) {
-        d3d_output_->clear(0.0f, 0.86f, 1.0f, 1.0f); // cyan
-        if (d3d_ && d3d_->context()) {
-            d3d_->context()->Flush();
-        }
+        d3d_output_->clear(0.0f, 0.86f, 1.0f, 1.0f);
     }
 }
 
 void Input::applyMatteSettings() {
-    if (!remover_) {
-        return;
+    if (matte_worker_ && quality_) {
+        matte_worker_->setQuality(quality_->value());
     }
-    ::genesis::BgRemoverSettings matte = remover_->remover().settings();
-    const int q = quality_ ? std::clamp(quality_->value(), 0, 2) : 1;
-    const auto next_q = static_cast<::genesis::BgRemoverQuality>(q);
-    if (matte.backend == ::genesis::BgRemoverBackend::Auto && matte.quality == next_q) {
-        return;
-    }
-    matte.backend = ::genesis::BgRemoverBackend::Auto;
-    matte.quality = next_q;
-    matte.rvm_downsample = 0.0f;
-    matte.temporal_alpha = 0.20f;
-    remover_->setSettings(matte);
 }
 
 void Input::publishTargetTexture() {
@@ -186,7 +178,6 @@ void Input::publishTargetTexture() {
     desc.height = height_;
     desc.format = Format::R8G8B8A8_UNORM;
     desc.is_target = true;
-    // Match ExtSampleD3D: type + handle only (process_id = 0).
     desc.share_handle = {HandleType::D3D11_IMAGE,
                          reinterpret_cast<Handle>(d3d_output_->shareHandle())};
     sampler_->set_texture(host().create_texture(desc));
@@ -209,10 +200,8 @@ void Input::publishVideoInTexture() {
                                get_format_name(fmt)));
 
         ensureD3dTextures();
-        // ExtSampleD3D Video In: SRV only (is_target=false).
+        ensureWorker();
         d3d_video_in_->allocate(width_, height_, fmt, /*is_target=*/false);
-        d3d_capture_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
-                               /*publish_share=*/false);
         d3d_matte_tex_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
                                  /*publish_share=*/false);
         remover_->resize(width_, height_);
@@ -225,12 +214,13 @@ void Input::publishVideoInTexture() {
                                reinterpret_cast<Handle>(d3d_video_in_->shareHandle())};
         video_in_->set_texture(host().create_texture(shared));
         video_in_ready_ = true;
+        matte_live_ = false;
         applyMatteSettings();
+        matte_worker_->setVideoIn(d3d_video_in_->shareHandle(), width_, height_, fmt);
         removerLog(std::format(
             "shared VIDEO_IN {}x{} format={} handle=D3D11_IMAGE is_target=0 srv={} (link feed now)",
             shared.width, shared.height, get_format_name(shared.format),
             d3d_video_in_->srv() ? 1 : 0));
-        matte_live_ = false;
     };
 
     update_input_texture(*video_in_, allocate);
@@ -238,7 +228,6 @@ void Input::publishVideoInTexture() {
     const int prop_w = video_in_->get_property<int>(SettingNames::resolution_x, 0);
     const int prop_h = video_in_->get_property<int>(SettingNames::resolution_y, 0);
 
-    // Unlink: props cleared after we had a Video In — drop stale first-frame texture.
     if (video_in_ready_ && prop_w <= 0 && prop_h <= 0) {
         clearVideoInLink("props cleared");
         return;
@@ -278,7 +267,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     if (debug_stage_) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
-    const std::string ui = std::format("v37 {} nz={} mid=({},{},{}) vin={}",
+    const std::string ui = std::format("v38 {} nz={} mid=({},{},{}) vin={}",
                                        dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r,
                                        dbg.mid_g, dbg.mid_b, dbg.has_video_in ? 1 : 0);
     if (debug_status_) {
@@ -289,14 +278,12 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
         const std::uint64_t fence_c = d3d_ ? d3d_->fenceCounter() : 0;
         const std::uint64_t fence_done = d3d_ ? d3d_->completedValue() : 0;
         const std::uint64_t sync_n = d3d_ ? d3d_->syncCallbacks() : 0;
-        const int sent =
-            (!d3d_rgba_in_.empty() && D3d11SharedTexture::looksLikeSentinel(d3d_rgba_in_)) ? 1 : 0;
         removerLog(std::format(
             "STATUS stage={} vin={} dl={} nz={} mid=({},{},{},{}) {}x{} matte={} luid={:016x} "
-            "fence={}/{} sync={} sent={}",
+            "fence={}/{} sync={}",
             dbg.stage ? dbg.stage : "?", dbg.has_video_in ? 1 : 0, dbg.download_ok ? 1 : 0,
             dbg.nonzero_rgb, dbg.mid_r, dbg.mid_g, dbg.mid_b, dbg.mid_a, dbg.width, dbg.height,
-            dbg.matte_copied ? 1 : 0, adapter_luid_, fence_done, fence_c, sync_n, sent));
+            dbg.matte_copied ? 1 : 0, adapter_luid_, fence_done, fence_c, sync_n));
     }
 }
 
@@ -331,7 +318,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     remover_->resize(width_, height_);
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v37 live+async matte - link Live Input"));
+        debug_status_->set_value(std::string("v38 live + bg-thread matte"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -368,7 +355,6 @@ ValueSet Input::get_state() noexcept {
 
 string Input::get_property(string_view name) noexcept {
     if (name == PropertyNames::applies_alpha) {
-        // false until matte — transparent black looks like "nothing" in preview.
         return string(matte_live_ ? "true" : "false");
     }
     return {};
@@ -393,119 +379,6 @@ SyncDesc Input::before_render() noexcept {
     return {};
 }
 
-void Input::tryFinishAsyncMatte(::genesis::RemoverFrameDebug& dbg, std::string& error) {
-    if (!d3d_capture_ || !d3d_capture_->asyncDownloadPending()) {
-        return;
-    }
-    long map_hr = 0;
-    const int poll = d3d_capture_->pollAsyncDownload(d3d_rgba_in_, &map_hr);
-    if (poll == 0) {
-        return; // still on GPU - do not wait
-    }
-    if (poll < 0) {
-        if ((render_ticks_ % 60u) == 1u) {
-            removerLog(std::format("async capture poll failed hr=0x{:08x}",
-                                   static_cast<unsigned long>(map_hr)));
-        }
-        return;
-    }
-
-    if ((render_ticks_ % 30u) == 1u) {
-        D3d11SharedTexture::logFrameStats(d3d_rgba_in_, width_, height_, "async_capture");
-    }
-
-    bool any_px = false;
-    for (std::uint8_t b : d3d_rgba_in_) {
-        if (b) {
-            any_px = true;
-            break;
-        }
-    }
-    if (!any_px) {
-        dbg.width = width_;
-        dbg.height = height_;
-        dbg.has_video_in = true;
-        dbg.download_ok = true;
-        dbg.nonzero_rgb = 0;
-        dbg.stage = "input_black";
-        if ((render_ticks_ % 60u) == 1u) {
-            removerLog("async_capture nz=0 (keep live blit)");
-        }
-        return;
-    }
-
-    if (d3d_rgba_in_.size() >= 4 && width_ > 0 && height_ > 0) {
-        const std::size_t mid_i =
-            (static_cast<std::size_t>(height_ / 2u) * width_ + (width_ / 2u)) * 4u;
-        if (mid_i + 3 < d3d_rgba_in_.size()) {
-            const std::array<std::uint8_t, 4> mid = {
-                d3d_rgba_in_[mid_i], d3d_rgba_in_[mid_i + 1], d3d_rgba_in_[mid_i + 2],
-                d3d_rgba_in_[mid_i + 3]};
-            const bool any = (mid[0] | mid[1] | mid[2]) != 0;
-            if (any && mid == last_mid_rgba_) {
-                ++same_mid_frames_;
-            } else {
-                same_mid_frames_ = 0;
-                last_mid_rgba_ = mid;
-            }
-            if (any && same_mid_frames_ == 45u) {
-                removerLog(std::format(
-                    "frozen_suspect same mid=({},{},{},{}) for 45 captures", mid[0], mid[1], mid[2],
-                    mid[3]));
-            }
-        }
-    }
-
-    if (!remover_->asyncEnabled()) {
-        applyMatteSettings();
-        remover_->setAsyncEnabled(true);
-    }
-
-    (void)remover_->processCpuRgbaFrame(d3d_rgba_in_.data(), true, &error, &dbg, false,
-                                        &d3d_rgba_out_);
-
-    if (dbg.stage && std::string_view(dbg.stage) == "matte" && dbg.nonzero_rgb > 0 &&
-        d3d_matte_tex_ && !d3d_rgba_out_.empty()) {
-        d3d_matte_tex_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
-                                 /*publish_share=*/false);
-        if (d3d_matte_tex_->uploadRgba8(d3d_rgba_out_.data(), width_, height_)) {
-            matte_live_ = true;
-            if ((render_ticks_ % 60u) == 1u) {
-                removerLog("matte_ok async uploaded to private matte RT");
-            }
-        } else if ((render_ticks_ % 60u) == 1u) {
-            removerLog("matte uploadRgba8 to private failed");
-        }
-    } else if (dbg.nonzero_rgb > 0 && (render_ticks_ % 60u) == 1u) {
-        removerLog(std::format("async_capture nz={} stage={}", dbg.nonzero_rgb,
-                               dbg.stage ? dbg.stage : "?"));
-    }
-}
-
-void Input::maybeStartAsyncCapture() {
-    if (!d3d_capture_ || !passthrough_ || !d3d_video_in_ || !d3d_video_in_->srv()) {
-        return;
-    }
-    if (d3d_capture_->asyncDownloadPending()) {
-        return;
-    }
-    // Capture every other frame - leaves GPU time for live blit + fence signal.
-    if ((render_ticks_ % 2u) != 0u) {
-        return;
-    }
-    d3d_capture_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
-                           /*publish_share=*/false);
-    if (!d3d_capture_->rtv()) {
-        return;
-    }
-    passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_capture_->rtv(), width_, height_);
-    if (!d3d_capture_->beginAsyncDownload()) {
-        if ((render_ticks_ % 120u) == 1u) {
-            removerLog("beginAsyncDownload failed");
-        }
-    }
-}
-
 RenderResult Input::render() noexcept try {
     ++render_ticks_;
     if (time_) {
@@ -522,9 +395,9 @@ RenderResult Input::render() noexcept try {
     std::string error;
 
     if (!video_in_ready_ || !d3d_video_in_ || !d3d_video_in_->hasTexture()) {
-        (void)remover_->processCpuRgbaFrame(nullptr, false, &error, &dbg, true, &d3d_rgba_out_);
+        (void)remover_->processCpuRgbaFrame(nullptr, false, &error, &dbg, true, nullptr);
         if (d3d_output_ && d3d_output_->hasTexture()) {
-            d3d_output_->clear(0.0f, 0.86f, 1.0f, 1.0f); // cyan
+            d3d_output_->clear(0.0f, 0.86f, 1.0f, 1.0f);
         }
         logStatusMaybe(dbg);
         return RenderResult::Succeeded;
@@ -550,21 +423,42 @@ RenderResult Input::render() noexcept try {
         return RenderResult::Succeeded;
     }
 
-    // 1) Finish any completed async capture (never blocks).
-    tryFinishAsyncMatte(dbg, error);
+    ensureWorker();
+    applyMatteSettings();
+    if (d3d_video_in_->shareHandle()) {
+        matte_worker_->setVideoIn(d3d_video_in_->shareHandle(), width_, height_,
+                                  d3d_video_in_->format());
+    }
 
-    // 2) Present: prefer last matte cutout; else live Video In (v36-proven path).
+    // Pull finished matte from background worker (never Map on this device).
+    std::uint32_t mw = 0;
+    std::uint32_t mh = 0;
+    ::genesis::RemoverFrameDebug worker_dbg{};
+    if (matte_worker_->tryTakeMatte(worker_matte_rgba_, mw, mh, &worker_dbg) && mw == width_ &&
+        mh == height_ && !worker_matte_rgba_.empty()) {
+        d3d_matte_tex_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
+                                 /*publish_share=*/false);
+        if (d3d_matte_tex_->uploadRgba8UpdateSubresource(worker_matte_rgba_.data(), width_,
+                                                         height_)) {
+            matte_live_ = true;
+            dbg = worker_dbg;
+            if ((render_ticks_ % 60u) == 1u) {
+                removerLog("matte_ok from bg worker (UpdateSubresource, no primary Map)");
+            }
+        }
+    }
+
+    // Present: v36-style GPU blit only on the PIXERA device.
     if (matte_live_ && d3d_matte_tex_ && d3d_matte_tex_->srv()) {
         passthrough_->draw(d3d_->context(), d3d_matte_tex_->srv(), d3d_output_->rtv(), width_,
                            height_);
-        if (!dbg.stage || std::string_view(dbg.stage) == "none" ||
-            std::string_view(dbg.stage) == "passthrough") {
+        dbg.width = width_;
+        dbg.height = height_;
+        dbg.has_video_in = true;
+        dbg.download_ok = true;
+        dbg.matte_copied = true;
+        if (!dbg.stage || std::string_view(dbg.stage) == "none") {
             dbg.stage = "matte";
-            dbg.has_video_in = true;
-            dbg.download_ok = true;
-            dbg.matte_copied = true;
-            dbg.width = width_;
-            dbg.height = height_;
         }
     } else {
         d3d_output_->clear(0.0f, 0.0f, 0.0f, 1.0f);
@@ -578,19 +472,17 @@ RenderResult Input::render() noexcept try {
         }
     }
 
-    // 3) Kick next capture (CopyResource+End query only - no Map/wait).
-    maybeStartAsyncCapture();
+    // Kick background capture every other frame - does not block this callback.
+    if ((render_ticks_ % 2u) == 0u) {
+        matte_worker_->kick();
+    }
 
     if (render_ticks_ <= 8u || (render_ticks_ % 60u) == 1u) {
-        removerLog(std::format(
-            "gpu_present {} {}x{} capture_pending={} matte_live={}",
-            matte_live_ ? "matte" : "live", width_, height_,
-            (d3d_capture_ && d3d_capture_->asyncDownloadPending()) ? 1 : 0, matte_live_ ? 1 : 0));
+        removerLog(std::format("gpu_present {} {}x{} matte_live={} (no primary Map/Copy)",
+                               matte_live_ ? "matte" : "live", width_, height_,
+                               matte_live_ ? 1 : 0));
     }
 
-    if (!error.empty() && (render_ticks_ % 60u) == 1u) {
-        removerLog(std::format("processCpuRgbaFrame: {}", error));
-    }
     logStatusMaybe(dbg);
     return RenderResult::Succeeded;
 } catch (const std::exception& ex) {
