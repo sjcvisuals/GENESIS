@@ -116,10 +116,8 @@ void Input::ensureD3dTextures() {
     if (!d3d_video_in_) {
         d3d_video_in_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
     }
-    for (auto& cap : d3d_capture_share_) {
-        if (!cap) {
-            cap = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
-        }
+    if (!d3d_capture_share_) {
+        d3d_capture_share_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
     }
     if (!d3d_matte_tex_) {
         d3d_matte_tex_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
@@ -151,10 +149,8 @@ void Input::clearVideoInLink(const char* reason) {
     if (d3d_video_in_) {
         d3d_video_in_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
     }
-    for (auto& cap : d3d_capture_share_) {
-        cap = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
-    }
-    capture_idx_ = 0;
+    d3d_capture_share_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
+    last_capture_kick_tick_ = 0;
     if (d3d_matte_tex_) {
         d3d_matte_tex_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
     }
@@ -211,11 +207,8 @@ void Input::publishVideoInTexture() {
         ensureD3dTextures();
         ensureWorker();
         d3d_video_in_->allocate(width_, height_, fmt, /*is_target=*/false);
-        for (auto& cap : d3d_capture_share_) {
-            cap->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
-                          /*publish_share=*/true);
-        }
-        capture_idx_ = 0;
+        d3d_capture_share_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
+                                     /*publish_share=*/true);
         d3d_matte_tex_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
                                  /*publish_share=*/false);
         remover_->resize(width_, height_);
@@ -229,12 +222,14 @@ void Input::publishVideoInTexture() {
         video_in_->set_texture(host().create_texture(shared));
         video_in_ready_ = true;
         matte_live_ = false;
+        last_capture_kick_tick_ = 0;
         applyMatteSettings();
+        matte_worker_->setCaptureShare(d3d_capture_share_->shareHandle(), width_, height_);
         removerLog(std::format(
             "shared VIDEO_IN {}x{} format={} handle=D3D11_IMAGE is_target=0 srv={} (link feed now)",
             shared.width, shared.height, get_format_name(shared.format),
             d3d_video_in_->srv() ? 1 : 0));
-        removerLog("capture shares ready (worker Maps these, never Video In)");
+        removerLog("capture share ready (single buffer; worker Maps this, never Video In)");
     };
 
     update_input_texture(*video_in_, allocate);
@@ -281,7 +276,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     if (debug_stage_) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
-    const std::string ui = std::format("v40 {} nz={} mid=({},{},{}) vin={}",
+    const std::string ui = std::format("v41 {} nz={} mid=({},{},{}) vin={}",
                                        dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r,
                                        dbg.mid_g, dbg.mid_b, dbg.has_video_in ? 1 : 0);
     if (debug_status_) {
@@ -332,7 +327,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     remover_->resize(width_, height_);
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v40 live + CPU RVM on capture-share"));
+        debug_status_->set_value(std::string("v41 live + slow single-share CPU RVM"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -487,22 +482,25 @@ RenderResult Input::render() noexcept try {
         dbg.stage = "passthrough";
     }
 
-    // Blit Video In -> our capture share (shader sample, never CopyResource/Map Video In).
-    // Worker Maps that share only. Flush so the other device sees completed GPU writes.
-    if (matte_worker_ && !matte_worker_->busy() && render_ticks_ >= 30u &&
-        (render_ticks_ % 8u) == 0u && d3d_capture_share_[0] && d3d_capture_share_[0]->rtv()) {
-        auto& cap = d3d_capture_share_[capture_idx_];
-        if (cap->width() != width_ || cap->height() != height_) {
-            cap->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
-                          /*publish_share=*/true);
+    // Blit Video In -> one capture share, then kick worker. No Flush (froze PIXERA in v40).
+    // busy is set inside kick() so we never blit/Map the same share concurrently.
+    // Slow rate: first kick after ~2s live, then at most every ~2s while idle.
+    constexpr std::uint64_t kFirstKickTick = 120;
+    constexpr std::uint64_t kKickInterval = 120;
+    if (matte_worker_ && !matte_worker_->busy() && render_ticks_ >= kFirstKickTick &&
+        (last_capture_kick_tick_ == 0 ||
+         render_ticks_ - last_capture_kick_tick_ >= kKickInterval) &&
+        d3d_capture_share_ && d3d_capture_share_->rtv() && d3d_capture_share_->shareHandle()) {
+        if (d3d_capture_share_->width() != width_ || d3d_capture_share_->height() != height_) {
+            d3d_capture_share_->allocate(width_, height_, Format::R8G8B8A8_UNORM,
+                                        /*is_target=*/true, /*publish_share=*/true);
+            matte_worker_->setCaptureShare(d3d_capture_share_->shareHandle(), width_, height_);
         }
-        passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), cap->rtv(), width_, height_);
-        d3d_->context()->Flush();
-        matte_worker_->setCaptureShare(cap->shareHandle(), width_, height_);
-        matte_worker_->kick();
-        capture_idx_ ^= 1;
-        if (render_ticks_ <= 48u || (render_ticks_ % 120u) == 1u) {
-            removerLog(std::format("kick capture-share blit idx={} tick={}", capture_idx_ ^ 1,
+        passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_capture_share_->rtv(),
+                           width_, height_);
+        if (matte_worker_->kick()) {
+            last_capture_kick_tick_ = render_ticks_;
+            removerLog(std::format("kick capture-share tick={} (no Flush, single share)",
                                    render_ticks_));
         }
     }

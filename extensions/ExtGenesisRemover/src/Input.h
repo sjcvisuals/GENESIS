@@ -17,10 +17,9 @@
 
 namespace rxext::genesis_remover {
 
-// Live blit on the PIXERA device (v36 proven). Primary blits Video In -> our capture
-// share; background worker Maps that share + runs RVM on **CPU only** (no Vulkan /
-// DirectML — those froze the preview GPU at first infer in v39). Present stays on live
-// Video In until a real matte frame arrives.
+// Live blit on the PIXERA device (v36 proven). Primary blits Video In -> one capture
+// share we own; worker Maps it + CPU RVM. No Flush / no ping-pong OpenSharedResource
+// storm (v40 froze PIXERA ~5s). Present stays live until matte_ok.
 class Input : public rxext::InputStream {
 public:
     Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, ValueSet settings);
@@ -59,9 +58,8 @@ private:
     std::unique_ptr<::genesis::RemoverPipeline> remover_;
     std::unique_ptr<D3d11SharedTexture> d3d_output_;
     std::unique_ptr<D3d11SharedTexture> d3d_video_in_;
-    // Shared RGBA8 capture buffers we blit Video In into (worker Maps these, never Video In).
-    std::unique_ptr<D3d11SharedTexture> d3d_capture_share_[2];
-    int capture_idx_ = 0;
+    // One shared RGBA8 capture buffer (worker Maps this, never Video In).
+    std::unique_ptr<D3d11SharedTexture> d3d_capture_share_;
     std::unique_ptr<D3d11SharedTexture> d3d_matte_tex_;
     std::unique_ptr<D3d11Passthrough> passthrough_;
     std::unique_ptr<MatteCaptureWorker> matte_worker_;
@@ -69,6 +67,7 @@ private:
     std::uint32_t width_ = 1920;
     std::uint32_t height_ = 1080;
     std::uint64_t render_ticks_ = 0;
+    std::uint64_t last_capture_kick_tick_ = 0;
     std::string last_stage_;
     bool video_in_ready_ = false;
     bool matte_live_ = false;

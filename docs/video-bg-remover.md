@@ -91,7 +91,7 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for `STATUS stage=` lines and stamp `remover-timeline-v40-cpu-rvm-*`.
+Look for `STATUS stage=` lines and stamp `remover-timeline-v41-gentle-capture-*`.
 
 | Colour / stage | Meaning |
 |----------------|---------|
@@ -99,10 +99,11 @@ Look for `STATUS stage=` lines and stamp `remover-timeline-v40-cpu-rvm-*`.
 | `passthrough` | live blit (waiting on first background matte) |
 | `matte` | person cutout |
 
-v40: live blit on the PIXERA device; capture-share Map on a background D3D device;
-RVM runs on **ORT CPU** (no DirectML / no extra Vulkan on the worker — DML froze the
-preview GPU in v39 at `worker RVM process begin`). Expect `BgRemover ready ep=CPU`,
-`worker RVM process end`, `worker matte_ok`, sustained live (lime heartbeat), then cutout.
+v41: live blit stays live; **one** capture share; kick at most ~every 2s; **no Flush**;
+worker opens the share once and sleeps before Map. v40 stormed `OpenSharedResource` +
+`Flush` every ~8 frames and froze PIXERA for ~5s; captures were black (`nz=0`).
+Expect a single `opened CAPTURE share`, `worker_capture nz>0`, `ep=CPU`, `matte_ok`,
+and a **continuously moving** lime heartbeat.
 
 Also check Remover params **Debug Stage** / **Debug Status**.
 Checklist: `.\scripts\pixera-remover-debug.ps1`

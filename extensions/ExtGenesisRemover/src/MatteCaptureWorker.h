@@ -17,9 +17,9 @@ struct ID3D11Texture2D;
 
 namespace rxext::genesis_remover {
 
-// Background matte: opens a capture share *we* write (never opens PIXERA Video In).
-// Uses BgRemover on CPU only — no RemoverPipeline/Vulkan/DirectML (those froze the
-// PIXERA GPU at first RVM load in v39).
+// Background matte: Maps a single capture share we own (never Video In).
+// CPU RVM only. kick() sets busy synchronously so primary never touches the share
+// while we Copy/Map (v40 stormed OpenSharedResource + Flush and froze PIXERA).
 class MatteCaptureWorker {
 public:
     explicit MatteCaptureWorker(std::uint64_t adapter_luid);
@@ -28,10 +28,10 @@ public:
     MatteCaptureWorker(const MatteCaptureWorker&) = delete;
     MatteCaptureWorker& operator=(const MatteCaptureWorker&) = delete;
 
-    // NT handle of our RGBA8 capture share (primary blits Video In into it).
     void setCaptureShare(void* nt_share_handle, std::uint32_t width, std::uint32_t height);
     void setQuality(int quality_0_to_2);
-    void kick();
+    // Returns false if already busy. On true, busy stays set until capture+RVM finishes.
+    bool kick();
     bool busy() const { return busy_.load(); }
     bool tryTakeMatte(std::vector<std::uint8_t>& out_rgba, std::uint32_t& out_w, std::uint32_t& out_h,
                       ::genesis::RemoverFrameDebug* dbg);

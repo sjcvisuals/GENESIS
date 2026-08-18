@@ -76,21 +76,22 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v40-cpu-rvm-20260818
+  remover-timeline-v41-gentle-capture-20260818
 
-v40 = capture-share Map + RVM on ORT CPU (no DML/Vulkan in worker):
-  v39 froze at `worker RVM process begin` — DirectML + RemoverPipeline/Vulkan on the
-  same preview GPU locked PIXERA's blit (lime heartbeat froze too).
-  Fix: worker uses BgRemover with prefer_cpu_ep; never constructs RemoverPipeline.
+v41 = gentle single-share capture (no Flush / no OpenSharedResource storm):
+  v40 kicked every 8 frames with ping-pong shares + Flush → PIXERA froze ~5s,
+  worker reopened share continuously, worker_capture nz=0, never reached RVM.
+  Fix: one capture share, kick ~every 2s, busy set in kick(), worker opens once,
+  50ms sleep instead of primary Flush.
 
-v39 = capture share (not Video In) but DML still froze GPU.
-v38 = worker opened Video In on second device → live ~1s then freeze.
-v37 = async Map on primary device (froze again).
+v40 = CPU RVM but capture storm still froze PIXERA.
+v39 = DML/Vulkan on preview GPU froze at RVM begin.
+v38 = worker opened Video In → freeze.
 v36 = blit-only diagnostic (live feed proven).
 
 Dump: .\scripts\dump-remover-log.ps1
-Expect stamp v40-cpu-rvm, ep=CPU, worker RVM process end, matte_ok,
-live feed (moving lime) then cutout.
+Expect stamp v41-gentle-capture, one opened CAPTURE share, nz>0, ep=CPU,
+matte_ok, continuously moving lime heartbeat.
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log
