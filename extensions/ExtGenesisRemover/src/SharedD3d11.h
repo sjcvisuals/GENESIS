@@ -9,6 +9,7 @@ struct ID3D11DeviceContext;
 struct ID3D11Device5;
 struct ID3D11DeviceContext4;
 struct ID3D11Fence;
+struct ID3D11Query;
 
 namespace rxext::genesis_remover {
 
@@ -48,7 +49,7 @@ private:
     void* fence_share_ = nullptr;
     std::uint64_t fence_counter_ = 0;
     std::uint64_t sync_callbacks_ = 0;
-    struct ID3D11Query* gpu_event_query_ = nullptr;
+    ID3D11Query* gpu_event_query_ = nullptr;
 };
 
 } // namespace rxext::genesis_remover
