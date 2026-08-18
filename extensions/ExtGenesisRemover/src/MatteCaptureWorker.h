@@ -2,11 +2,11 @@
 
 #include "WinPrefix.h"
 #include "rxext.h"
+#include "matting/BgRemover.hpp"
 #include "runtime/RemoverPipeline.hpp"
 
 #include <atomic>
 #include <cstdint>
-#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -18,7 +18,8 @@ struct ID3D11Texture2D;
 namespace rxext::genesis_remover {
 
 // Background matte: opens a capture share *we* write (never opens PIXERA Video In).
-// Primary blits Video In -> capture share (GPU only); worker Maps that share + RVM.
+// Uses BgRemover on CPU only — no RemoverPipeline/Vulkan/DirectML (those froze the
+// PIXERA GPU at first RVM load in v39).
 class MatteCaptureWorker {
 public:
     explicit MatteCaptureWorker(std::uint64_t adapter_luid);
@@ -38,6 +39,7 @@ public:
 private:
     void threadMain();
     bool ensureWorkerDevice();
+    bool ensureRemover();
     bool openCaptureLocked();
     bool captureAndMatteOnce();
     void releaseOpened();
@@ -72,7 +74,9 @@ private:
     std::uint32_t opened_h_ = 0;
     std::uint64_t opened_gen_ = 0;
 
-    std::unique_ptr<::genesis::RemoverPipeline> pipeline_;
+    ::genesis::BgRemover remover_;
+    bool remover_ready_ = false;
+    int remover_quality_ = -1;
     std::vector<std::uint8_t> scratch_in_;
     std::vector<std::uint8_t> scratch_out_;
     std::uint64_t captures_ = 0;

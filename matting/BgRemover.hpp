@@ -35,6 +35,8 @@ struct BgRemoverSettings {
     // Explicit >0 forces that ratio (e.g. 0.25 ≈ 1080p→~270).
     float rvm_downsample = 0.0f;
     std::filesystem::path model_path; // empty → assets/matting/rvm_mobilenetv3_fp16.onnx
+    // Skip DirectML — use ORT CPU EP. Required for PIXERA Remover worker (DML freezes GPU).
+    bool prefer_cpu_ep = false;
 };
 
 // CPU RGBA8 in → premultiplied RGBA8 out (transparent background).

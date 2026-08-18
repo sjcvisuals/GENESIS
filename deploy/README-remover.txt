@@ -76,21 +76,21 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v39-capture-share-20260818
+  remover-timeline-v40-cpu-rvm-20260818
 
-v39 = live blit stays live until real matte:
-  Primary shader-blits Video In into ping-pong capture shares we own.
-  Worker Opens/Maps those shares only (never Video In — that froze in v38).
-  Present keeps live Video In (+ lime heartbeat) until worker matte_ok;
-  never switches to a stale worker passthrough upload.
+v40 = capture-share Map + RVM on ORT CPU (no DML/Vulkan in worker):
+  v39 froze at `worker RVM process begin` — DirectML + RemoverPipeline/Vulkan on the
+  same preview GPU locked PIXERA's blit (lime heartbeat froze too).
+  Fix: worker uses BgRemover with prefer_cpu_ep; never constructs RemoverPipeline.
 
+v39 = capture share (not Video In) but DML still froze GPU.
 v38 = worker opened Video In on second device → live ~1s then freeze.
 v37 = async Map on primary device (froze again).
 v36 = blit-only diagnostic (live feed proven).
 
 Dump: .\scripts\dump-remover-log.ps1
-Expect stamp v39-capture-share, opened CAPTURE share, worker_capture nz>0,
-matte_ok, live feed then cutout.
+Expect stamp v40-cpu-rvm, ep=CPU, worker RVM process end, matte_ok,
+live feed (moving lime) then cutout.
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log

@@ -24,7 +24,10 @@ public:
     RvmOnnxSession(const RvmOnnxSession&) = delete;
     RvmOnnxSession& operator=(const RvmOnnxSession&) = delete;
 
-    bool load(const std::filesystem::path& model_path, std::string* out_error = nullptr);
+    // prefer_cpu=true skips DirectML (required inside PIXERA: DML on the preview GPU
+    // freezes Video In / shared output blit while the model loads / runs).
+    bool load(const std::filesystem::path& model_path, std::string* out_error = nullptr,
+              bool prefer_cpu = false);
     bool ready() const { return ready_; }
     void reset();
     // "DML" / "CPU" / empty before load.

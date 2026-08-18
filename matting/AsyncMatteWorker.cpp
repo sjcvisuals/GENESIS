@@ -49,6 +49,7 @@ void AsyncMatteWorker::setSettings(const BgRemoverSettings& settings) {
             settings_.key_softness == settings.key_softness &&
             settings_.temporal_alpha == settings.temporal_alpha &&
             settings_.rvm_downsample == settings.rvm_downsample &&
+            settings_.prefer_cpu_ep == settings.prefer_cpu_ep &&
             settings_.model_path == settings.model_path) {
             return;
         }

@@ -156,7 +156,8 @@ void RvmOnnxSession::reset() {
     last_infer_h_ = 0;
 }
 
-bool RvmOnnxSession::load(const std::filesystem::path& model_path, std::string* out_error) {
+bool RvmOnnxSession::load(const std::filesystem::path& model_path, std::string* out_error,
+                          bool prefer_cpu) {
     delete impl_;
     impl_ = nullptr;
     ready_ = false;
@@ -191,7 +192,7 @@ bool RvmOnnxSession::load(const std::filesystem::path& model_path, std::string* 
         std::string dml_err;
 
 #if defined(_WIN32) && defined(GENESIS_HAS_ORT_DIRECTML)
-        {
+        if (!prefer_cpu) {
             Ort::SessionOptions dml_opts;
             dml_opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
             dml_opts.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
@@ -212,6 +213,8 @@ bool RvmOnnxSession::load(const std::filesystem::path& model_path, std::string* 
                 dml_err = ex.what();
             }
         }
+#else
+        (void)prefer_cpu;
 #endif
 
         const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
@@ -224,13 +227,15 @@ bool RvmOnnxSession::load(const std::filesystem::path& model_path, std::string* 
             delete impl_;
             impl_ = nullptr;
             if (out_error) {
-                *out_error = "ORT load failed (CPU and DML)";
+                *out_error = prefer_cpu ? "ORT load failed (CPU)" : "ORT load failed (CPU and DML)";
             }
             return false;
         }
         ready_ = true;
         if (out_error) {
-            if (!dml_err.empty()) {
+            if (prefer_cpu) {
+                *out_error = "rvm-onnx CPU loaded (prefer_cpu): " + model_path.string();
+            } else if (!dml_err.empty()) {
                 *out_error = "rvm-onnx CPU loaded (DML failed: " + dml_err + "): " + model_path.string();
             } else {
                 *out_error = "rvm-onnx CPU loaded: " + model_path.string();

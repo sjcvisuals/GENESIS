@@ -18,8 +18,9 @@
 namespace rxext::genesis_remover {
 
 // Live blit on the PIXERA device (v36 proven). Primary blits Video In -> our capture
-// share; background worker Maps that share + RVM (never opens PIXERA Video In — v38 freeze).
-// Present stays on live Video In until a real matte frame arrives (v39).
+// share; background worker Maps that share + runs RVM on **CPU only** (no Vulkan /
+// DirectML — those froze the preview GPU at first infer in v39). Present stays on live
+// Video In until a real matte frame arrives.
 class Input : public rxext::InputStream {
 public:
     Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, ValueSet settings);

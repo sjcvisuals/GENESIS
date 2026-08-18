@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cstring>
 #include <format>
+#include <string>
 #include <string_view>
 
 #pragma comment(lib, "d3d11.lib")
@@ -44,11 +45,21 @@ ComPointer<IDXGIAdapter1> findAdapter(IDXGIFactory1& factory, LUID want) {
     return {};
 }
 
+std::size_t countNonzeroRgb(const std::uint8_t* rgba, std::size_t bytes) {
+    std::size_t n = 0;
+    for (std::size_t i = 0; i + 3 < bytes; i += 4) {
+        if (rgba[i] | rgba[i + 1] | rgba[i + 2]) {
+            ++n;
+        }
+    }
+    return n;
+}
+
 } // namespace
 
 MatteCaptureWorker::MatteCaptureWorker(std::uint64_t adapter_luid) : adapter_luid_(adapter_luid) {
     thread_ = std::thread([this] { threadMain(); });
-    removerLog(std::format("MatteCaptureWorker started adapter={:016x} (capture-share mode)",
+    removerLog(std::format("MatteCaptureWorker started adapter={:016x} (CPU RVM, no Vulkan/DML)",
                            adapter_luid_));
 }
 
@@ -117,7 +128,8 @@ void MatteCaptureWorker::releaseOpened() {
 }
 
 void MatteCaptureWorker::releaseDevice() {
-    pipeline_.reset();
+    remover_ready_ = false;
+    remover_quality_ = -1;
     if (context_) {
         context_->Release();
         context_ = nullptr;
@@ -150,8 +162,33 @@ bool MatteCaptureWorker::ensureWorkerDevice() {
         releaseDevice();
         return false;
     }
-    pipeline_ = std::make_unique<::genesis::RemoverPipeline>(adapter_luid_);
-    removerLog("MatteCaptureWorker D3D device ready (opens capture share only, never Video In)");
+    removerLog("MatteCaptureWorker D3D device ready (capture share only; RVM on CPU)");
+    return true;
+}
+
+bool MatteCaptureWorker::ensureRemover() {
+    const int q = quality_.load();
+    if (remover_ready_ && remover_quality_ == q) {
+        return true;
+    }
+    ::genesis::BgRemoverSettings settings;
+    settings.backend = ::genesis::BgRemoverBackend::Auto;
+    settings.quality = static_cast<::genesis::BgRemoverQuality>(q);
+    settings.rvm_downsample = 0.0f;
+    settings.temporal_alpha = 0.20f;
+    // Critical: DirectML on the PIXERA preview GPU freezes live blit (v39).
+    settings.prefer_cpu_ep = true;
+    remover_.setSettings(settings);
+    std::string status;
+    if (!remover_.initialize(&status)) {
+        removerLog(std::format("MatteCaptureWorker BgRemover init failed: {}", status));
+        remover_ready_ = false;
+        return false;
+    }
+    remover_ready_ = true;
+    remover_quality_ = q;
+    removerLog(std::format("MatteCaptureWorker BgRemover ready ep={} status={}",
+                           remover_.executionProvider(), status));
     return true;
 }
 
@@ -209,9 +246,6 @@ bool MatteCaptureWorker::openCaptureLocked() {
     opened_w_ = w;
     opened_h_ = h;
     opened_gen_ = gen;
-    if (pipeline_) {
-        pipeline_->resize(w, h);
-    }
     removerLog(std::format("MatteCaptureWorker opened CAPTURE share {}x{} (not Video In)", w, h));
     return true;
 }
@@ -263,14 +297,8 @@ bool MatteCaptureWorker::captureAndMatteOnce() {
         D3d11SharedTexture::logFrameStats(scratch_in_, opened_w_, opened_h_, "worker_capture");
     }
 
-    bool any = false;
-    for (std::uint8_t b : scratch_in_) {
-        if (b) {
-            any = true;
-            break;
-        }
-    }
-    if (!any) {
+    const std::size_t nz = countNonzeroRgb(scratch_in_.data(), scratch_in_.size());
+    if (nz == 0) {
         if (captures_ <= 5u || (captures_ % 60u) == 1u) {
             removerLog("worker_capture nz=0");
         }
@@ -278,40 +306,40 @@ bool MatteCaptureWorker::captureAndMatteOnce() {
     }
     ++nonzero_captures_;
 
-    if (!pipeline_) {
+    // Load ORT only after a successful capture so live blit is proven first.
+    if (!ensureRemover()) {
         return false;
-    }
-    ::genesis::BgRemoverSettings settings = pipeline_->remover().settings();
-    settings.backend = ::genesis::BgRemoverBackend::Auto;
-    settings.quality = static_cast<::genesis::BgRemoverQuality>(quality_.load());
-    settings.rvm_downsample = 0.0f;
-    settings.temporal_alpha = 0.20f;
-    pipeline_->setSettings(settings);
-    if (!pipeline_->asyncEnabled()) {
-        pipeline_->setAsyncEnabled(true);
     }
 
     if (captures_ <= 3u) {
-        removerLog("worker RVM process begin");
+        removerLog(std::format("worker RVM process begin ep={}", remover_.executionProvider()));
     }
+    scratch_out_.resize(bytes);
+    const bool ok = remover_.process(scratch_in_.data(), scratch_out_.data(), opened_w_, opened_h_);
+    if (captures_ <= 3u) {
+        removerLog(std::format("worker RVM process end ok={} ep={} nz_in={}", ok ? 1 : 0,
+                               remover_.executionProvider(), nz));
+    }
+    if (!ok) {
+        removerLog(std::format("worker RVM process failed status={}", remover_.status()));
+        return false;
+    }
+
+    const std::size_t out_nz = countNonzeroRgb(scratch_out_.data(), scratch_out_.size());
     ::genesis::RemoverFrameDebug dbg{};
-    std::string error;
-    (void)pipeline_->processCpuRgbaFrame(scratch_in_.data(), true, &error, &dbg, false,
-                                         &scratch_out_);
-    if (captures_ <= 3u) {
-        removerLog(std::format("worker RVM process end stage={} nz={} err={}",
-                               dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, error));
-    }
-
-    if (!(dbg.stage && std::string_view(dbg.stage) == "matte" && dbg.nonzero_rgb > 0 &&
-          !scratch_out_.empty())) {
-        // Do NOT publish passthrough to primary — that replaced the live Video In blit with a
-        // single stale upload and looked frozen. Keep capturing until RVM returns matte.
-        if (captures_ <= 5u || (captures_ % 30u) == 1u) {
-            removerLog(std::format("worker matte pending stage={} nz={} (live blit continues)",
-                                   dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb));
-        }
-        return false;
+    dbg.width = opened_w_;
+    dbg.height = opened_h_;
+    dbg.has_video_in = true;
+    dbg.download_ok = true;
+    dbg.nonzero_rgb = out_nz;
+    dbg.matte_copied = true;
+    dbg.stage = "matte";
+    if (out_nz > 0 && bytes >= 4) {
+        const std::size_t mid = (static_cast<std::size_t>(opened_w_) * opened_h_ / 2u) * 4u;
+        dbg.mid_r = scratch_out_[mid + 0];
+        dbg.mid_g = scratch_out_[mid + 1];
+        dbg.mid_b = scratch_out_[mid + 2];
+        dbg.mid_a = scratch_out_[mid + 3];
     }
 
     {
@@ -322,8 +350,8 @@ bool MatteCaptureWorker::captureAndMatteOnce() {
         out_dbg_ = dbg;
         out_ready_ = true;
     }
-    removerLog(std::format("worker matte_ok nz={} captures={}/{}", dbg.nonzero_rgb,
-                           nonzero_captures_, captures_));
+    removerLog(std::format("worker matte_ok nz={} ep={} captures={}/{}", out_nz,
+                           remover_.executionProvider(), nonzero_captures_, captures_));
     return true;
 }
 
