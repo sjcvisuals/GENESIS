@@ -4,7 +4,6 @@
 #include "ModulePaths.h"
 #include "RemoverLog.h"
 #include "common/string.h"
-#include "matting/BgRemover.hpp"
 #include "platform/Paths.hpp"
 #include "rxext_util.h"
 
@@ -73,7 +72,7 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
     quality_->set_property(PropertyNames::group_name, "Matte");
     quality_->set_property<std::vector<std::string>>(PropertyNames::enum_names,
                                                       {"Fast", "Balanced", "Quality"});
-    quality_->set_value(1);
+    quality_->set_value(0); // Fast — CPU RVM in PIXERA
 
     debug_stage_ = add_parameter<ParameterInt>("debug_stage");
     debug_stage_->set_property(PropertyNames::name, "Debug Stage");
@@ -95,15 +94,6 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
 Input::~Input() {
     matte_worker_.reset();
     removerLog("Input dtor");
-}
-
-void Input::ensureRemover() {
-    if (remover_) {
-        return;
-    }
-    remover_ = std::make_unique<::genesis::RemoverPipeline>(adapter_luid_);
-    removerLog(std::format("RemoverPipeline ready adapter={:016x} (diagnostics only)",
-                           adapter_luid_));
 }
 
 void Input::ensureD3dTextures() {
@@ -190,7 +180,7 @@ void Input::publishTargetTexture() {
 }
 
 void Input::publishVideoInTexture() {
-    if (!video_in_ || !remover_) {
+    if (!video_in_) {
         return;
     }
 
@@ -211,7 +201,6 @@ void Input::publishVideoInTexture() {
                                      /*publish_share=*/true);
         d3d_matte_tex_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
                                  /*publish_share=*/false);
-        remover_->resize(width_, height_);
         publishTargetTexture();
 
         TextureDesc shared = desc;
@@ -276,7 +265,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     if (debug_stage_) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
-    const std::string ui = std::format("v41 {} nz={} mid=({},{},{}) vin={}",
+    const std::string ui = std::format("v42 {} nz={} mid=({},{},{}) vin={}",
                                        dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r,
                                        dbg.mid_g, dbg.mid_b, dbg.has_video_in ? 1 : 0);
     if (debug_status_) {
@@ -323,11 +312,12 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     removerLog(std::format("update_settings {}x{} adapter={:016x}", width_, height_,
                            adapter_luid_));
 
-    ensureRemover();
-    remover_->resize(width_, height_);
+    // Start worker early so CPU RVM preloads while cyan (before Video In / live blit).
+    ensureWorker();
+    applyMatteSettings();
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v41 live + slow single-share CPU RVM"));
+        debug_status_->set_value(std::string("v42 D3D11-only + preloaded CPU RVM"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -376,7 +366,6 @@ bool Input::update() noexcept try {
     if (frame_counter_) {
         (void)frame_counter_->value();
     }
-    ensureRemover();
     publishVideoInTexture();
     return true;
 } catch (const std::exception& ex) {
@@ -397,14 +386,14 @@ RenderResult Input::render() noexcept try {
         (void)frame_counter_->value();
     }
 
-    ensureRemover();
     ensureD3dTextures();
 
     ::genesis::RemoverFrameDebug dbg{};
-    std::string error;
 
     if (!video_in_ready_ || !d3d_video_in_ || !d3d_video_in_->hasTexture()) {
-        (void)remover_->processCpuRgbaFrame(nullptr, false, &error, &dbg, true, nullptr);
+        dbg.width = width_;
+        dbg.height = height_;
+        dbg.stage = "waiting_video_in";
         if (d3d_output_ && d3d_output_->hasTexture()) {
             d3d_output_->clear(0.0f, 0.86f, 1.0f, 1.0f);
         }
@@ -482,12 +471,12 @@ RenderResult Input::render() noexcept try {
         dbg.stage = "passthrough";
     }
 
-    // Blit Video In -> one capture share, then kick worker. No Flush (froze PIXERA in v40).
-    // busy is set inside kick() so we never blit/Map the same share concurrently.
-    // Slow rate: first kick after ~2s live, then at most every ~2s while idle.
-    constexpr std::uint64_t kFirstKickTick = 120;
-    constexpr std::uint64_t kKickInterval = 120;
-    if (matte_worker_ && !matte_worker_->busy() && render_ticks_ >= kFirstKickTick &&
+    // Blit Video In -> capture share only when CPU RVM is preloaded and worker is idle.
+    // No Flush. No RemoverPipeline/Vulkan on this device.
+    constexpr std::uint64_t kFirstKickTick = 90;
+    constexpr std::uint64_t kKickInterval = 180;
+    if (matte_worker_ && matte_worker_->engineReady() && !matte_worker_->busy() &&
+        render_ticks_ >= kFirstKickTick &&
         (last_capture_kick_tick_ == 0 ||
          render_ticks_ - last_capture_kick_tick_ >= kKickInterval) &&
         d3d_capture_share_ && d3d_capture_share_->rtv() && d3d_capture_share_->shareHandle()) {
@@ -500,15 +489,18 @@ RenderResult Input::render() noexcept try {
                            width_, height_);
         if (matte_worker_->kick()) {
             last_capture_kick_tick_ = render_ticks_;
-            removerLog(std::format("kick capture-share tick={} (no Flush, single share)",
+            removerLog(std::format("kick capture-share tick={} (engine ready, share released before RVM)",
                                    render_ticks_));
         }
+    } else if (matte_worker_ && !matte_worker_->engineReady() && (render_ticks_ % 60u) == 1u) {
+        removerLog("waiting CPU RVM preload before first capture kick");
     }
 
     if (render_ticks_ <= 8u || (render_ticks_ % 60u) == 1u) {
-        removerLog(std::format("gpu_present {} {}x{} matte_live={} worker_busy={}",
+        removerLog(std::format("gpu_present {} {}x{} matte_live={} worker_busy={} engine_ready={}",
                                matte_live_ ? "worker" : "live", width_, height_,
-                               matte_live_ ? 1 : 0, matte_worker_ && matte_worker_->busy() ? 1 : 0));
+                               matte_live_ ? 1 : 0, matte_worker_ && matte_worker_->busy() ? 1 : 0,
+                               matte_worker_ && matte_worker_->engineReady() ? 1 : 0));
     }
 
     logStatusMaybe(dbg);

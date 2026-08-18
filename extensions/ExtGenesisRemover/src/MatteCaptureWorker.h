@@ -1,9 +1,8 @@
 #pragma once
 
 #include "WinPrefix.h"
-#include "rxext.h"
+#include "RemoverFrameDebug.h"
 #include "matting/BgRemover.hpp"
-#include "runtime/RemoverPipeline.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -17,9 +16,8 @@ struct ID3D11Texture2D;
 
 namespace rxext::genesis_remover {
 
-// Background matte: Maps a single capture share we own (never Video In).
-// CPU RVM only. kick() sets busy synchronously so primary never touches the share
-// while we Copy/Map (v40 stormed OpenSharedResource + Flush and froze PIXERA).
+// Background matte: preload CPU RVM first, then Map our capture share (never Video In).
+// Releases the shared texture before ORT infer so PIXERA's GPU is not contended.
 class MatteCaptureWorker {
 public:
     explicit MatteCaptureWorker(std::uint64_t adapter_luid);
@@ -30,7 +28,7 @@ public:
 
     void setCaptureShare(void* nt_share_handle, std::uint32_t width, std::uint32_t height);
     void setQuality(int quality_0_to_2);
-    // Returns false if already busy. On true, busy stays set until capture+RVM finishes.
+    bool engineReady() const { return engine_ready_.load(); }
     bool kick();
     bool busy() const { return busy_.load(); }
     bool tryTakeMatte(std::vector<std::uint8_t>& out_rgba, std::uint32_t& out_w, std::uint32_t& out_h,
@@ -50,7 +48,8 @@ private:
     std::atomic<bool> stop_{false};
     std::atomic<bool> kick_{false};
     std::atomic<bool> busy_{false};
-    std::atomic<int> quality_{1};
+    std::atomic<bool> engine_ready_{false};
+    std::atomic<int> quality_{0}; // Fast by default for PIXERA CPU path
 
     std::mutex in_mu_;
     void* capture_handle_ = nullptr;

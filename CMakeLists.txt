@@ -493,7 +493,7 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
     )
     # Hypothesis A: ExtSampleD3D Device D3D_FENCE + D3D11_IMAGE Video In/Out.
     # GPU blit proves PIXERA write; CPU Map feeds RemoverPipeline matte.
-    target_link_libraries(ExtGenesisRemover PRIVATE genesis_remover_core d3d11 dxgi d3dcompiler)
+    target_link_libraries(ExtGenesisRemover PRIVATE genesis_matting d3d11 dxgi d3dcompiler)
     if(MSVC AND GENESIS_HAS_ONNXRUNTIME)
         target_link_options(ExtGenesisRemover PRIVATE "/DELAYLOAD:onnxruntime.dll")
         target_link_libraries(ExtGenesisRemover PRIVATE delayimp)

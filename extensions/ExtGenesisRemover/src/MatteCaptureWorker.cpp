@@ -58,7 +58,7 @@ std::size_t countNonzeroRgb(const std::uint8_t* rgba, std::size_t bytes) {
 
 MatteCaptureWorker::MatteCaptureWorker(std::uint64_t adapter_luid) : adapter_luid_(adapter_luid) {
     thread_ = std::thread([this] { threadMain(); });
-    removerLog(std::format("MatteCaptureWorker started adapter={:016x} (v41 single-share, CPU RVM)",
+    removerLog(std::format("MatteCaptureWorker started adapter={:016x} (v42 preload CPU RVM)",
                            adapter_luid_));
 }
 
@@ -92,6 +92,9 @@ void MatteCaptureWorker::setQuality(int quality_0_to_2) {
 }
 
 bool MatteCaptureWorker::kick() {
+    if (!engine_ready_.load()) {
+        return false;
+    }
     bool expected = false;
     if (!busy_.compare_exchange_strong(expected, true)) {
         return false;
@@ -132,8 +135,6 @@ void MatteCaptureWorker::releaseOpened() {
 }
 
 void MatteCaptureWorker::releaseDevice() {
-    remover_ready_ = false;
-    remover_quality_ = -1;
     if (context_) {
         context_->Release();
         context_ = nullptr;
@@ -166,7 +167,7 @@ bool MatteCaptureWorker::ensureWorkerDevice() {
         releaseDevice();
         return false;
     }
-    removerLog("MatteCaptureWorker D3D device ready (single capture share; RVM on CPU)");
+    removerLog("MatteCaptureWorker D3D device ready (after CPU RVM preload)");
     return true;
 }
 
@@ -183,6 +184,7 @@ bool MatteCaptureWorker::ensureRemover() {
     settings.prefer_cpu_ep = true;
     remover_.setSettings(settings);
     std::string status;
+    removerLog("MatteCaptureWorker BgRemover initialize begin (CPU EP, no D3D share held)");
     if (!remover_.initialize(&status)) {
         removerLog(std::format("MatteCaptureWorker BgRemover init failed: {}", status));
         remover_ready_ = false;
@@ -249,26 +251,25 @@ bool MatteCaptureWorker::openCaptureLocked() {
     opened_w_ = w;
     opened_h_ = h;
     opened_gen_ = gen;
-    removerLog(std::format("MatteCaptureWorker opened CAPTURE share {}x{} gen={} (once until handle changes)",
-                           w, h, gen));
+    removerLog(std::format("MatteCaptureWorker opened CAPTURE share {}x{} gen={}", w, h, gen));
     return true;
 }
 
 bool MatteCaptureWorker::captureAndMatteOnce() {
-    // busy_ already true from kick().
     struct BusyClear {
         std::atomic<bool>& b;
         ~BusyClear() { b.store(false); }
     } busy_clear{busy_};
 
-    if (!ensureWorkerDevice()) {
+    if (!engine_ready_.load() || !remover_ready_) {
+        removerLog("capture skipped: engine not ready");
         return false;
     }
-    if (!openCaptureLocked() || !opened_capture_ || !staging_) {
+    if (!ensureWorkerDevice() || !openCaptureLocked() || !opened_capture_ || !staging_) {
         return false;
     }
 
-    // No primary Flush (that froze PIXERA). Wait so the blit GPU work can retire.
+    // Let primary blit retire without Flush on the PIXERA device.
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     if (stop_.load()) {
         return false;
@@ -300,18 +301,23 @@ bool MatteCaptureWorker::captureAndMatteOnce() {
         return false;
     }
 
-    const std::size_t bytes = static_cast<std::size_t>(opened_w_) * opened_h_ * 4u;
+    const std::uint32_t cap_w = opened_w_;
+    const std::uint32_t cap_h = opened_h_;
+    const std::size_t bytes = static_cast<std::size_t>(cap_w) * cap_h * 4u;
     scratch_in_.resize(bytes);
     auto* src = static_cast<const std::uint8_t*>(mapped.pData);
-    for (std::uint32_t y = 0; y < opened_h_; ++y) {
-        std::memcpy(scratch_in_.data() + static_cast<std::size_t>(y) * opened_w_ * 4u,
-                    src + static_cast<std::size_t>(y) * mapped.RowPitch, opened_w_ * 4u);
+    for (std::uint32_t y = 0; y < cap_h; ++y) {
+        std::memcpy(scratch_in_.data() + static_cast<std::size_t>(y) * cap_w * 4u,
+                    src + static_cast<std::size_t>(y) * mapped.RowPitch, cap_w * 4u);
     }
     context_->Unmap(staging_, 0);
     ++captures_;
 
-    D3d11SharedTexture::logFrameStats(scratch_in_, opened_w_, opened_h_, "worker_capture");
+    // Drop the shared GPU resource BEFORE ORT infer (v41 froze during ensureRemover
+    // while the capture share was still open on this device).
+    releaseOpened();
 
+    D3d11SharedTexture::logFrameStats(scratch_in_, cap_w, cap_h, "worker_capture");
     const std::size_t nz = countNonzeroRgb(scratch_in_.data(), scratch_in_.size());
     if (nz == 0) {
         removerLog("worker_capture nz=0 (will retry later; live blit continues)");
@@ -319,13 +325,10 @@ bool MatteCaptureWorker::captureAndMatteOnce() {
     }
     ++nonzero_captures_;
 
-    if (!ensureRemover()) {
-        return false;
-    }
-
-    removerLog(std::format("worker RVM process begin ep={}", remover_.executionProvider()));
+    removerLog(std::format("worker RVM process begin ep={} (share released)",
+                           remover_.executionProvider()));
     scratch_out_.resize(bytes);
-    const bool ok = remover_.process(scratch_in_.data(), scratch_out_.data(), opened_w_, opened_h_);
+    const bool ok = remover_.process(scratch_in_.data(), scratch_out_.data(), cap_w, cap_h);
     removerLog(std::format("worker RVM process end ok={} ep={} nz_in={}", ok ? 1 : 0,
                            remover_.executionProvider(), nz));
     if (!ok) {
@@ -335,15 +338,15 @@ bool MatteCaptureWorker::captureAndMatteOnce() {
 
     const std::size_t out_nz = countNonzeroRgb(scratch_out_.data(), scratch_out_.size());
     ::genesis::RemoverFrameDebug dbg{};
-    dbg.width = opened_w_;
-    dbg.height = opened_h_;
+    dbg.width = cap_w;
+    dbg.height = cap_h;
     dbg.has_video_in = true;
     dbg.download_ok = true;
     dbg.nonzero_rgb = out_nz;
     dbg.matte_copied = true;
     dbg.stage = "matte";
     if (out_nz > 0 && bytes >= 4) {
-        const std::size_t mid = (static_cast<std::size_t>(opened_w_) * opened_h_ / 2u) * 4u;
+        const std::size_t mid = (static_cast<std::size_t>(cap_w) * cap_h / 2u) * 4u;
         dbg.mid_r = scratch_out_[mid + 0];
         dbg.mid_g = scratch_out_[mid + 1];
         dbg.mid_b = scratch_out_[mid + 2];
@@ -353,8 +356,8 @@ bool MatteCaptureWorker::captureAndMatteOnce() {
     {
         std::lock_guard<std::mutex> lock(out_mu_);
         matte_rgba_ = scratch_out_;
-        out_w_ = opened_w_;
-        out_h_ = opened_h_;
+        out_w_ = cap_w;
+        out_h_ = cap_h;
         out_dbg_ = dbg;
         out_ready_ = true;
     }
@@ -364,7 +367,18 @@ bool MatteCaptureWorker::captureAndMatteOnce() {
 }
 
 void MatteCaptureWorker::threadMain() {
-    removerLog("MatteCaptureWorker thread running");
+    removerLog("MatteCaptureWorker thread running — preloading CPU RVM before any D3D capture");
+    try {
+        if (!ensureRemover()) {
+            removerLog("MatteCaptureWorker preload FAILED — kicks disabled");
+        } else {
+            engine_ready_.store(true);
+            removerLog("MatteCaptureWorker preload OK — kicks enabled");
+        }
+    } catch (const std::exception& ex) {
+        removerLog(std::format("MatteCaptureWorker preload exception: {}", ex.what()));
+    }
+
     while (!stop_.load()) {
         if (!kick_.exchange(false)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));

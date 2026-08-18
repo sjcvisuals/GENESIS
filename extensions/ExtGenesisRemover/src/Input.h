@@ -6,20 +6,18 @@
 #include "D3d11Passthrough.h"
 #include "D3d11SharedTexture.h"
 #include "MatteCaptureWorker.h"
+#include "RemoverFrameDebug.h"
 #include "SharedD3d11.h"
-#include "runtime/RemoverPipeline.hpp"
 
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace rxext::genesis_remover {
 
-// Live blit on the PIXERA device (v36 proven). Primary blits Video In -> one capture
-// share we own; worker Maps it + CPU RVM. No Flush / no ping-pong OpenSharedResource
-// storm (v40 froze PIXERA ~5s). Present stays live until matte_ok.
+// D3D11-only PIXERA path: live Video In blit + background CPU RVM on our capture share.
+// No RemoverPipeline / Vulkan (that contended with PIXERA on the preview GPU).
 class Input : public rxext::InputStream {
 public:
     Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, ValueSet settings);
@@ -35,7 +33,6 @@ public:
     SyncDesc after_render() noexcept override;
 
 private:
-    void ensureRemover();
     void ensureD3dTextures();
     void ensureWorker();
     void applyMatteSettings();
@@ -55,10 +52,8 @@ private:
     ParameterInt* debug_stage_ = nullptr;
     ParameterString* debug_status_ = nullptr;
 
-    std::unique_ptr<::genesis::RemoverPipeline> remover_;
     std::unique_ptr<D3d11SharedTexture> d3d_output_;
     std::unique_ptr<D3d11SharedTexture> d3d_video_in_;
-    // One shared RGBA8 capture buffer (worker Maps this, never Video In).
     std::unique_ptr<D3d11SharedTexture> d3d_capture_share_;
     std::unique_ptr<D3d11SharedTexture> d3d_matte_tex_;
     std::unique_ptr<D3d11Passthrough> passthrough_;

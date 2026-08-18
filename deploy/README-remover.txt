@@ -76,22 +76,21 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v41-gentle-capture-20260818
+  remover-timeline-v42-preload-cpu-20260818
 
-v41 = gentle single-share capture (no Flush / no OpenSharedResource storm):
-  v40 kicked every 8 frames with ping-pong shares + Flush → PIXERA froze ~5s,
-  worker reopened share continuously, worker_capture nz=0, never reached RVM.
-  Fix: one capture share, kick ~every 2s, busy set in kick(), worker opens once,
-  50ms sleep instead of primary Flush.
+v42 = preload CPU RVM + release share before infer (no Vulkan in PIXERA DLL path):
+  v41 got nz>0 then froze during BgRemover/ORT init while the capture share was still
+  open; Input also constructed RemoverPipeline/Vulkan on the preview GPU.
+  Fix: link genesis_matting only (no remover_core/Vulkan); preload ORT on worker
+  start before kicks; release OpenSharedResource before process().
 
-v40 = CPU RVM but capture storm still froze PIXERA.
-v39 = DML/Vulkan on preview GPU froze at RVM begin.
-v38 = worker opened Video In → freeze.
+v41 = gentle capture but ORT init while share held still stalled PIXERA.
+v40 = OpenSharedResource storm + Flush.
 v36 = blit-only diagnostic (live feed proven).
 
 Dump: .\scripts\dump-remover-log.ps1
-Expect stamp v41-gentle-capture, one opened CAPTURE share, nz>0, ep=CPU,
-matte_ok, continuously moving lime heartbeat.
+Expect stamp v42-preload-cpu, preload OK before kick, ep=CPU, matte_ok,
+continuously moving lime.
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log
