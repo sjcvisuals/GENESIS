@@ -17,8 +17,8 @@
 
 namespace rxext::genesis_remover {
 
-// Live: GPU blit Video In -> shared output every frame (ExtSampleD3D; no Map/Flush stall).
-// Matte: throttled blit -> private RGBA8 -> waitGpuIdle -> Map private; blit matte -> shared.
+// v36 diagnostic: GPU blit Video In -> shared output + moving lime heartbeat.
+// No Map/matte (v35 Map always nz=0 while preview showed a frozen face).
 class Input : public rxext::InputStream {
 public:
     Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, ValueSet settings);
