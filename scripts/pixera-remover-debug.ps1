@@ -4,19 +4,20 @@
 $ErrorActionPreference = "Continue"
 Write-Host @"
 
-GENESIS Remover v37 - live + async matte
-========================================
-Live GPU blit every frame (v36 proven). Matte via async private capture
-(non-blocking poll/Map) so the fence handshake never stalls.
+GENESIS Remover v38 - live + background matte
+=============================================
+PIXERA render thread: GPU blit only (v36 live path).
+Background D3D device/thread: OpenSharedResource, blit, Map, RVM.
+No Map/CopyResource/RVM on the PIXERA fence device.
 
 Expect:
-  live passthrough first, then person cutout
-  STATUS stage=matte, async_capture nz>0, matte_ok
+  live moving camera, then person cutout
+  worker_capture nz>0, matte_ok from bg worker
 
 1) Quit PIXERA completely
 2) git pull
 3) BUILD-REMOVER.bat
-4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v37-async-matte-*)
+4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v38-bg-matte-*)
 5) Re-import ExtGenesisRemover.dll
 6) Adapter LUID = preview GPU; drag Live Input
 7) Dump log

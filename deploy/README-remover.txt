@@ -76,19 +76,19 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v37-async-matte-20260818
+  remover-timeline-v38-bg-matte-20260818
 
-v37 = live blit + async matte (v36 proved feed is live):
-  Every frame: present live or last matte (GPU blit only).
-  Every other frame: blit Video In -> private capture, CopyResource+End(query).
-  Later frames: non-blocking GetData(DONOTFLUSH); Map only when ready; RVM;
-  upload cutout to private matte RT; blit matte -> shared.
-  Never waitGpuIdle / Flush / Map on the PIXERA fence critical path.
+v38 = live blit on PIXERA device + matte on background D3D device/thread:
+  v37 Map/RVM on the render device froze Video In again (async_capture nz=0).
+  Fix: render callback only GPU-blits (v36 path). Worker opens the Video In
+  NT share on a second device, blits to private RGBA8, Maps, runs RVM, returns
+  pixels; primary UpdateSubresource into private matte RT and blits to output.
 
-v36 = blit-only + lime heartbeat (diagnosed live Video In).
+v37 = async Map on primary device (froze again).
+v36 = blit-only diagnostic (live feed proven).
 
 Dump: .\scripts\dump-remover-log.ps1
-Expect stamp v37-async-matte, async_capture nz>0, matte_ok, stage=matte.
+Expect stamp v38-bg-matte, worker_capture nz>0, matte_ok, live feed + cutout.
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log

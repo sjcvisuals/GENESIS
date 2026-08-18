@@ -91,17 +91,16 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for `STATUS stage=` lines and stamp `remover-timeline-v37-async-matte-*`.
+Look for `STATUS stage=` lines and stamp `remover-timeline-v38-bg-matte-*`.
 
 | Colour / stage | Meaning |
 |----------------|---------|
 | cyan / `waiting_video_in` | Video In slot empty — drag Live Input in |
-| blue / `download_fail` | live path missing RTV/SRV |
-| `passthrough` | live blit (waiting on first matte) |
+| `passthrough` | live blit (waiting on first background matte) |
 | `matte` | person cutout |
 
-v37: live blit every frame; async private capture for RVM (no fence stall).
-Expect `async_capture nz>0` then `matte_ok`.
+v38: live blit on the PIXERA device; RVM on a background D3D device/thread.
+Expect `worker_capture nz>0` and `matte_ok from bg worker` while the camera stays live.
 
 Also check Remover params **Debug Stage** / **Debug Status**.
 Checklist: `.\scripts\pixera-remover-debug.ps1`
