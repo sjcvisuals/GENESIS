@@ -76,11 +76,15 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v20-d3d-io-20260817
+  remover-timeline-v22-nofencewait-20260818
 
-v21 = diagnostics + Video In RTV bind + CPU fence wait:
-  STATUS includes fence=done/counter sync=N sent=0|1
-  Magenta sentinel on Video In allocate (sent=1 means PIXERA never wrote).
+v22 = fix solid black hang after Video In allocate:
+  Removed Device::render GPU/CPU Wait (deadlocked CopyResource+Map).
+  Video In stays SRV-only (ExtSampleD3D); FP16 magenta sentinel via UpdateSubresource.
+  Keep SyncDesc + after_render Signal so PIXERA can wait on OUTPUT.
+  Expect STATUS lines to continue after VIDEO_IN is published.
+
+v21 = diagnostics (sentinel + fence=/sync=/sent=); Wait caused black hang.
 
 Stage colours (until Video In has pixels):
   cyan   = waiting for Video In link (normal)

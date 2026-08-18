@@ -88,21 +88,14 @@ SyncDesc Device::before_render() noexcept {
 }
 
 void Device::render() noexcept {
-    // ExtSampleD3D: wait until PIXERA signals the next fence value (Video In ready).
+    // Do NOT GPU/CPU Wait on the Device fence here.
+    // ExtSampleD3D waits then draws entirely on the GPU; our Input path does
+    // CopyResource+Map on the CPU. Waiting for ++fenceCounter (signaled only in
+    // after_render, or by PIXERA for GPU consumers) deadlocks: Map waits for the
+    // GPU Wait, host never reaches after_render Signal → solid black, no STATUS.
+    // Keep SyncDesc publish + after_render Signal so PIXERA can wait on OUTPUT.
     if (d3d_) {
         d3d_->noteSyncCallback();
-        const std::uint64_t wait_for = ++d3d_->fenceCounter();
-        d3d_->wait(wait_for);
-        if (d3d_->context()) {
-            d3d_->context()->Flush();
-        }
-        // Also CPU-wait so subsequent staging Maps see PIXERA's writes.
-        const bool ok = d3d_->waitCpu(wait_for, 50);
-        if ((d3d_->syncCallbacks() % 60u) == 1u) {
-            removerLog(std::format("Device::render wait_for={} completed={} cpu_ok={} calls={}",
-                                   wait_for, d3d_->completedValue(), ok ? 1 : 0,
-                                   d3d_->syncCallbacks()));
-        }
     }
 }
 

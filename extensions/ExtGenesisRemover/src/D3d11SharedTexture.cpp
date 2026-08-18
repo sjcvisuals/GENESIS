@@ -135,10 +135,11 @@ void D3d11SharedTexture::allocate(std::uint32_t width, std::uint32_t height, For
     desc.Format = dxgi;
     desc.SampleDesc = {1, 0};
     desc.Usage = D3D11_USAGE_DEFAULT;
+    // Match ExtSampleD3D TextureDesc: Video In = SRV only; sampler/output = SRV|RTV.
     desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-    // PIXERA may blit via RTV into Video In; ExtSampleD3D only uses SRV but that left us
-    // permanently black. Allow both binds for input and output.
-    desc.BindFlags |= D3D11_BIND_RENDER_TARGET;
+    if (is_target) {
+        desc.BindFlags |= D3D11_BIND_RENDER_TARGET;
+    }
     // ExtSampleD3D: SHARED | SHARED_NTHANDLE (keyed mutex → black).
     desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
 
@@ -220,7 +221,7 @@ bool D3d11SharedTexture::fillSentinelMagenta() {
         context_->Flush();
         return true;
     }
-    // UpdateSubresource fallback for SRV-only textures.
+    // UpdateSubresource fallback for SRV-only textures (Video In has no RTV).
     if (format_ == Format::R8G8B8A8_UNORM) {
         std::vector<std::uint8_t> px(static_cast<std::size_t>(width_) * height_ * 4u);
         for (std::size_t i = 0; i + 3 < px.size(); i += 4) {
@@ -230,6 +231,19 @@ bool D3d11SharedTexture::fillSentinelMagenta() {
             px[i + 3] = 255;
         }
         context_->UpdateSubresource(texture_, 0, nullptr, px.data(), width_ * 4u, 0);
+        context_->Flush();
+        return true;
+    }
+    if (format_ == Format::R16G16B16A16_SFLOAT) {
+        // IEEE float16: 1.0 = 0x3C00, 0.0 = 0x0000 → magenta (1,0,1,1).
+        std::vector<std::uint16_t> px(static_cast<std::size_t>(width_) * height_ * 4u);
+        for (std::size_t i = 0; i + 3 < px.size(); i += 4) {
+            px[i + 0] = 0x3C00;
+            px[i + 1] = 0x0000;
+            px[i + 2] = 0x3C00;
+            px[i + 3] = 0x3C00;
+        }
+        context_->UpdateSubresource(texture_, 0, nullptr, px.data(), width_ * 8u, 0);
         context_->Flush();
         return true;
     }
