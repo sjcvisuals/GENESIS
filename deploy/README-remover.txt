@@ -76,29 +76,31 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v30-rgba8-20260818
+  remover-timeline-v31-shared-fp16-20260818
 
-v30 = force RGBA8 host Video In (fix PIXERA FP16 hang):
-  v29 accepted R16G16B16A16_SFLOAT from update_input_texture → download_texture
-  never completed (yellow = cyan placeholder with BGRA upload R/B-swap).
-  Always create RGBA8 host textures; size-only realloc so PIXERA's FP16 prop
-  does not thrash allocate every frame. Sampler uploads stay RGBA (cyan=cyan).
-  Video In download still R/B-swaps bytes (PIXERA often delivers BGRA layout).
-  Log: FORCE format, keep RGBA8, download_texture requested, STATUS waiting_download.
+v31 = shared-Vulkan RemoverPipeline + match PIXERA FP16 (ExtGenesis path):
+  v29/v30 proved host download_texture on Video In never completes (freezes
+  the extension until PIXERA restarts). SDK only uses download_texture for
+  output RTs (MemoryOutputStream), not inputs.
+  Restore ExtGenesis-style OPAQUE_WIN32 shared Video In. Critical fix vs v14:
+  ensureVideoIn(VkFormat) must match PIXERA (often R16G16B16A16_SFLOAT);
+  default RGBA8 while advertising FP16 caused black readback.
+  Cyan/blue/orange diagnostics via processFrame show_diagnostics.
 
-v29 = restore HOST-texture Video In; shared D3D stayed black but host FP16 hung.
+v30 = forced RGBA8 host; download still hung (format was not the only issue).
 
-Stage colours (until Video In has pixels):
-  cyan   = waiting for download (normal; must NOT be yellow)
-  magenta= download ok but pixels zero
+Stage colours:
+  cyan   = waiting Video In
+  blue   = shared read failed
+  orange = linked but zeros
   live   = passthrough then matte
 
 Critical: set device Adapter LUID to the PIXERA engine GPU (non-zero).
 Dump: .\scripts\dump-remover-log.ps1
-Expect stamp v30-rgba8 and lines like:
-  video_in FORCE format R16G16B16A16_SFLOAT → R8G8B8A8_UNORM
-  download_texture requested ... format=R8G8B8A8_UNORM
-  STATUS stage=passthrough nz=...   (or waiting_download / ABANDONED)
+Expect stamp v31-shared-fp16 and:
+  video_in allocate ... format=R16G16B16A16_SFLOAT
+  shared VIDEO_IN published ... format=R16G16B16A16_SFLOAT
+  STATUS stage=passthrough|matte nz=...
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log

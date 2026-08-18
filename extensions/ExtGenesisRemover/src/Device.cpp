@@ -11,14 +11,14 @@
 namespace rxext::genesis_remover {
 
 Device::Device(ValueSet settings) : settings_(std::move(settings)) {
-    removerLog("Device ctor (host-texture)");
+    removerLog("Device ctor (shared-vulkan)");
 }
 
 bool Device::initialize() noexcept try {
     const string luid_hex = settings_.get(SettingNames::adapter_luid, string("0000000000000000"));
     adapter_luid_ = common::from_hex_string<std::uint64_t>(luid_hex);
     removerLog(std::format("Device::initialize adapter_luid={:016x}", adapter_luid_));
-    host().log_info(std::format("GENESIS Remover host-texture device ready (adapter_luid={:016x})",
+    host().log_info(std::format("GENESIS Remover shared-vulkan device ready (adapter_luid={:016x})",
                                 adapter_luid_));
     return true;
 } catch (const std::exception& ex) {
@@ -52,7 +52,7 @@ vector<ValueSet> Device::enumerate_stream_settings() noexcept {
 
 InputStream* Device::create_input_stream(ValueSet settings) noexcept try {
     removerLog("Device::create_input_stream");
-    return new Input(std::move(settings));
+    return new Input(adapter_luid_, std::move(settings));
 } catch (const std::exception& ex) {
     removerLog(std::format("create_input_stream exception: {}", ex.what()));
     host().log_error(ex.what());

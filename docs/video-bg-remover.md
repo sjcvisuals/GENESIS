@@ -91,16 +91,17 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for `STATUS stage=` lines and stamp `remover-timeline-v30-rgba8-*`.
+Look for `STATUS stage=` lines and stamp `remover-timeline-v31-shared-fp16-*`.
 
 | Colour / stage | Meaning |
 |----------------|---------|
-| cyan / `waiting_download` | host Video In allocated; download not done yet (must be cyan, not yellow) |
-| `download ABANDONED` | `download_texture` hung; will retry |
-| orange / `input_black` | download ok but pixels are zero |
+| cyan / `waiting_video_in` | shared output OK, Video In not published |
+| blue / `download_fail` | shared Vulkan read failed |
+| orange / `input_black` | Video In bound, PIXERA wrote zeros |
 | `passthrough` / `matte` | working |
 
-v30 forces RGBA8 host textures even when PIXERA requests FP16 (FP16 hung download forever).
+v31: host `download_texture` on Video In hangs (do not use). Shared-Vulkan path
+matches PIXERA FP16 via `ensureVideoIn(VkFormat)` like ExtGenesis Background Remover.
 
 Also check Remover params **Debug Stage** / **Debug Status**.
 Checklist: `.\scripts\pixera-remover-debug.ps1`

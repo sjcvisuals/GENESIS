@@ -19,7 +19,7 @@ Expect:
 1) Quit PIXERA completely
 2) git pull
 3) BUILD-REMOVER.bat
-4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v30-rgba8-*)
+4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v31-shared-fp16-*)
 5) Re-import ExtGenesisRemover.dll
 6) Link Video In with media PLAYING, wait a few seconds (cooldown ~20 frames)
 7) Dump log — look for 'video_in HOST', 'download armed', 'STATUS stage=passthrough'

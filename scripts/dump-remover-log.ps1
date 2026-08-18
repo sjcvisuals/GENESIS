@@ -11,7 +11,7 @@ if (-not (Test-Path $log)) {
 }
 
 Write-Host ""
-Write-Host "==== stamp (must be v30-rgba8) ====" -ForegroundColor Cyan
+Write-Host "==== stamp (must be v31-shared-fp16) ====" -ForegroundColor Cyan
 Select-String -Path $log -Pattern "remover-timeline-" | ForEach-Object { $_.Line } |
     ForEach-Object { if ($_ -match '\[(remover-timeline-[^\]]+)\]') { $Matches[1] } } |
     Group-Object | Sort-Object Count -Descending |
@@ -19,15 +19,15 @@ Select-String -Path $log -Pattern "remover-timeline-" | ForEach-Object { $_.Line
 
 Write-Host ""
 Write-Host "==== latest STATUS lines (stage machine) ====" -ForegroundColor Cyan
-Write-Host "  cyan/waiting_download = host Video In allocated, download not done yet"
-Write-Host "  blue/download_fail    = download empty/abandoned"
-Write-Host "  orange/input_black    = download ok but pixels are zero"
+Write-Host "  cyan/waiting_video_in = shared out OK, Video In not published yet"
+Write-Host "  blue/download_fail    = shared Vulkan read failed"
+Write-Host "  orange/input_black    = shared Video In bound but pixels are zero"
 Write-Host "  passthrough / matte   = working (feed then cutout)"
 Select-String -Path $log -Pattern "STATUS stage=" | Select-Object -Last 15 | ForEach-Object { $_.Line }
 
 Write-Host ""
 Write-Host "==== key events ====" -ForegroundColor Cyan
-Select-String -Path $log -Pattern "FORCE format|keep RGBA8|video_in HOST|download armed|download_texture requested|download empty|download ABANDONED|STATUS stage=|matte_live|sampler host|opaque_passthrough|waiting_download" |
+Select-String -Path $log -Pattern "RemoverPipeline|shared OUTPUT|video_in allocate|shared VIDEO_IN|STATUS stage=|matte_live|GPU FAIL|processFrame|placeholder" |
     Select-Object -Last 30 | ForEach-Object { $_.Line }
 
 Write-Host ""

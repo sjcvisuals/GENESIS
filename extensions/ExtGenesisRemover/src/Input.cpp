@@ -3,130 +3,46 @@
 
 #include "ModulePaths.h"
 #include "RemoverLog.h"
+#include "common/string.h"
+#include "matting/BgRemover.hpp"
 #include "platform/Paths.hpp"
+#include "renderer/vulkan/ExternalRenderTarget.hpp"
+
+#include <volk.h>
 
 #include <algorithm>
-#include <cstring>
 #include <format>
 #include <string>
-#include <utility>
+#include <string_view>
 #include <vector>
 
 namespace rxext::genesis_remover {
 
 namespace {
+#if defined(_WIN32)
+constexpr auto kHandleType = HandleType::OPAQUE_WIN32;
+#else
+constexpr auto kHandleType = HandleType::OPAQUE_FD;
+#endif
 
-// Sampler + Video In host textures must be 8-bit. PIXERA timeline often requests
-// R16G16B16A16_SFLOAT; accepting that hangs download_texture forever (v29 yellow).
-// Upload as RGBA8 so cyan stays cyan (BGRA upload looked yellow — stamp v10/v29).
-constexpr Format kPixeraHostFormat = Format::R8G8B8A8_UNORM;
-
-bool isFloatHostFormat(Format format) {
-    return format == Format::R16G16B16A16_SFLOAT || format == Format::R32G32B32A32_SFLOAT;
+int stageToEnum(const char* stage) {
+    if (!stage) return 0;
+    if (std::string_view(stage) == "waiting_video_in") return 1;
+    if (std::string_view(stage) == "download_fail") return 2;
+    if (std::string_view(stage) == "input_black") return 3;
+    if (std::string_view(stage) == "passthrough") return 4;
+    if (std::string_view(stage) == "matte") return 5;
+    if (std::string_view(stage) == "error") return 6;
+    return 0;
 }
-
-Format forceHostFormat(Format requested) {
-    if (requested == Format::None || isFloatHostFormat(requested) ||
-        requested == Format::B8G8R8A8_UNORM) {
-        return kPixeraHostFormat;
-    }
-    if (requested == Format::R8G8B8A8_UNORM) {
-        return kPixeraHostFormat;
-    }
-    // Unknown 8-bit-ish: still force RGBA8 so download size stays w*h*4.
-    return kPixeraHostFormat;
-}
-
-void swapRbInPlace(std::uint8_t* px, std::size_t pixels) {
-    for (std::size_t i = 0; i < pixels; ++i) {
-        std::swap(px[i * 4u + 0], px[i * 4u + 2]);
-    }
-}
-
-// Live Video In bytes often arrive B,G,R,A even when the texture is labeled RGBA.
-void videoInBytesToRgbaInPlace(std::uint8_t* px, std::size_t pixels) {
-    swapRbInPlace(px, pixels);
-}
-
-std::size_t nonzeroRgbCount(const std::uint8_t* rgba, std::size_t bytes) {
-    std::size_t n = 0;
-    for (std::size_t i = 0; i + 3 < bytes; i += 4) {
-        if (rgba[i] | rgba[i + 1] | rgba[i + 2]) {
-            ++n;
-        }
-    }
-    return n;
-}
-
-bool matteHasCoverage(const std::uint8_t* rgba, std::uint32_t w, std::uint32_t h) {
-    if (!rgba || w == 0 || h == 0) {
-        return false;
-    }
-    const std::size_t pixels = static_cast<std::size_t>(w) * h;
-    const std::size_t step = std::max<std::size_t>(1, pixels / 8192u);
-    std::size_t hits = 0;
-    unsigned max_a = 0;
-    for (std::size_t i = 0; i < pixels; i += step) {
-        const unsigned a = rgba[i * 4u + 3u];
-        max_a = std::max(max_a, a);
-        if (a > 8) {
-            ++hits;
-        }
-    }
-    // Soft gate: RVM often has sparse person coverage; don't block matte_live forever.
-    return max_a > 24 && hits >= 3;
-}
-
-void extractAlpha(const std::uint8_t* rgba, std::uint8_t* alpha8, std::size_t pixels) {
-    for (std::size_t i = 0; i < pixels; ++i) {
-        alpha8[i] = rgba[i * 4u + 3u];
-    }
-}
-
-void compositeWithAlpha(const std::uint8_t* in_rgba, const std::uint8_t* alpha8,
-                        std::uint8_t* out_rgba, std::size_t pixels) {
-    for (std::size_t i = 0; i < pixels; ++i) {
-        const std::uint8_t a = alpha8[i];
-        out_rgba[i * 4u + 0] = static_cast<std::uint8_t>((in_rgba[i * 4u + 0] * a) / 255u);
-        out_rgba[i * 4u + 1] = static_cast<std::uint8_t>((in_rgba[i * 4u + 1] * a) / 255u);
-        out_rgba[i * 4u + 2] = static_cast<std::uint8_t>((in_rgba[i * 4u + 2] * a) / 255u);
-        out_rgba[i * 4u + 3] = a;
-    }
-}
-
-void fillOpaquePassthrough(const std::uint8_t* in_rgba, std::uint8_t* out_rgba, std::size_t bytes) {
-    std::memcpy(out_rgba, in_rgba, bytes);
-    for (std::size_t i = 3; i < bytes; i += 4) {
-        out_rgba[i] = 255;
-    }
-}
-
-void fillSolidRgba(std::uint8_t* out_rgba, std::size_t bytes, std::uint8_t r, std::uint8_t g,
-                   std::uint8_t b) {
-    for (std::size_t i = 0; i + 3 < bytes; i += 4) {
-        out_rgba[i + 0] = r;
-        out_rgba[i + 1] = g;
-        out_rgba[i + 2] = b;
-        out_rgba[i + 3] = 255;
-    }
-}
-
-void logPathOnce(std::string& last, const char* path) {
-    if (last == path) {
-        return;
-    }
-    last = path;
-    removerLog(std::format("render path={}", path));
-}
-
 } // namespace
 
-Input::Input(ValueSet settings) : settings_(std::move(settings)) {
-    removerLog("Input ctor (host-texture)");
+Input::Input(std::uint64_t adapter_luid, ValueSet settings)
+    : adapter_luid_(adapter_luid), settings_(std::move(settings)) {
+    removerLog(std::format("Input ctor shared-vulkan adapter_luid={:016x}", adapter_luid_));
 }
 
 Input::~Input() {
-    async_.stop();
     removerLog("Input dtor");
 }
 
@@ -143,8 +59,7 @@ void Input::registerParameters() {
     time_ = add_parameter<ParameterValue>("time");
     time_->set_property(PropertyNames::purpose, PurposeNames::TimelineTime);
 
-    // Needed so update() keeps running after a Video In link while the playhead
-    // is parked (otherwise we stay on cyan forever).
+    // Keep update() alive when playhead is parked (needed after Video In link).
     frame_counter_ = add_parameter<ParameterValue>("frame_counter");
     frame_counter_->set_property(PropertyNames::purpose, PurposeNames::FrameCounter);
 
@@ -159,367 +74,99 @@ void Input::registerParameters() {
                                                       {"Fast", "Balanced", "Quality"});
     quality_->set_value(1);
 
+    debug_stage_ = add_parameter<ParameterInt>("debug_stage");
+    debug_stage_->set_property(PropertyNames::name, "Debug Stage");
+    debug_stage_->set_property(PropertyNames::group_name, "Debug");
+    debug_stage_->set_property<std::vector<std::string>>(
+        PropertyNames::enum_names,
+        {"none", "waiting_video_in (cyan)", "download_fail (blue)", "input_black (orange)",
+         "passthrough", "matte", "error"});
+    debug_stage_->set_value(0);
+
+    debug_status_ = add_parameter<ParameterString>("debug_status");
+    debug_status_->set_property(PropertyNames::name, "Debug Status");
+    debug_status_->set_property(PropertyNames::group_name, "Debug");
+    debug_status_->set_value(std::string("booting"));
+
     params_registered_ = true;
-    removerLog("parameters registered (host-texture path)");
+    removerLog("parameters registered (shared-vulkan + debug)");
 }
 
-void Input::touchHostClock() {
-    if (time_) {
-        (void)time_->value();
-    }
-    if (frame_counter_) {
-        (void)frame_counter_->value();
+void Input::setDebugStatus(const std::string& text) {
+    if (debug_status_ && text != last_status_) {
+        last_status_ = text;
+        debug_status_->set_value(text);
     }
 }
 
-void Input::ensureSampler(std::uint32_t width, std::uint32_t height) {
-    if (!sampler_ || width == 0 || height == 0) {
+void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
+    if (debug_stage_) {
+        debug_stage_->set_value(stageToEnum(dbg.stage));
+    }
+    const std::string line = std::format(
+        "STATUS stage={} vin={} dl={} nz={} mid=({},{},{},{}) {}x{} matte={} proc={} shared_out={} "
+        "luid={:016x}",
+        dbg.stage ? dbg.stage : "?", dbg.has_video_in ? 1 : 0, dbg.download_ok ? 1 : 0,
+        dbg.nonzero_rgb, dbg.mid_r, dbg.mid_g, dbg.mid_b, dbg.mid_a, dbg.width, dbg.height,
+        dbg.matte_copied ? 1 : 0, processing_enabled_ ? 1 : 0, shared_output_published_ ? 1 : 0,
+        adapter_luid_);
+    setDebugStatus(line);
+    if (last_stage_ != (dbg.stage ? dbg.stage : "") || (render_ticks_ % 60u) == 1u) {
+        last_stage_ = dbg.stage ? dbg.stage : "";
+        removerLog(line);
+    }
+}
+
+void Input::publishPlaceholderSampler() {
+    if (!sampler_) {
         return;
     }
-    width_ = width;
-    height_ = height;
-
-    bool need_new = true;
-    try {
-        const auto cur = sampler_->texture().desc();
-        need_new =
-            (cur.width != width_ || cur.height != height_ || cur.format != kPixeraHostFormat);
-    } catch (...) {
-        need_new = true;
-    }
-    if (!need_new) {
-        return;
-    }
-
     TextureDesc desc{};
-    desc.width = width_;
-    desc.height = height_;
-    // RGBA8: BGRA placeholder uploads displayed as yellow in PIXERA (v10/v29).
-    desc.format = kPixeraHostFormat;
+    desc.width = static_cast<std::size_t>(std::max<std::uint32_t>(width_, 2));
+    desc.height = static_cast<std::size_t>(std::max<std::uint32_t>(height_, 2));
+    desc.format = Format::R8G8B8A8_UNORM;
     desc.is_target = true;
     sampler_->set_texture(host().create_texture(desc));
 
-    // Cyan = DLL alive, waiting for Video In download (unmistakable diagnostic).
-    const std::size_t bytes = static_cast<std::size_t>(width_) * height_ * 4u;
-    scratch_out_.resize(bytes);
-    fillSolidRgba(scratch_out_.data(), bytes, 0, 220, 255);
+    // Host cyan until shared Vulkan output is published.
+    const std::size_t bytes = desc.width * desc.height * 4u;
+    std::vector<std::uint8_t> cyan(bytes);
+    for (std::size_t i = 0; i + 3 < bytes; i += 4) {
+        cyan[i + 0] = 0;
+        cyan[i + 1] = 220;
+        cyan[i + 2] = 255;
+        cyan[i + 3] = 255;
+    }
     BufferDesc buffer{};
-    buffer.data = scratch_out_.data();
-    buffer.pitch = static_cast<std::size_t>(width_) * 4u;
+    buffer.data = cyan.data();
+    buffer.pitch = desc.width * 4u;
     buffer.size = bytes;
     host().upload_texture(sampler_->texture(), buffer, true, []() noexcept {});
-    matte_live_ = false;
-    has_last_alpha_ = false;
-    last_alpha_.clear();
-    removerLog(std::format("sampler host texture {}x{} format={} (cyan placeholder)", width_,
-                           height_, get_format_name(kPixeraHostFormat)));
-}
-
-void Input::ensureVideoInHostTexture() {
-    if (!video_in_) {
-        return;
-    }
-
-    auto allocate = [&](TextureDesc desc, const char* reason) {
-        if (desc.width == 0 || desc.height == 0) {
-            return;
-        }
-        const Format requested = desc.format;
-        desc.format = forceHostFormat(desc.format);
-        desc.is_target = false;
-        desc.share_handle = {};
-
-        if (requested != desc.format && !logged_format_override_) {
-            logged_format_override_ = true;
-            removerLog(std::format(
-                "video_in FORCE format {} → {} (download_texture needs 8-bit RGBA)",
-                get_format_name(requested), get_format_name(desc.format)));
-        }
-
-        const auto gen = video_in_generation_.fetch_add(1) + 1;
-        download_pending_.store(false);
-        download_pending_since_tick_.store(0);
-
-        video_in_host_format_ = desc.format;
-        video_in_->set_texture(host().create_texture(desc));
-        video_in_allocated_ = true;
-        // Never download in the same step as create — that crashed PIXERA.
-        video_in_download_allowed_ = false;
-        download_cooldown_frames_ = 20;
-        ensureSampler(static_cast<std::uint32_t>(desc.width),
-                      static_cast<std::uint32_t>(desc.height));
-        {
-            std::lock_guard<std::mutex> lock(frame_mutex_);
-            has_in_ = false;
-            latest_in_.clear();
-        }
-        has_last_alpha_ = false;
-        last_alpha_.clear();
-        last_render_path_.clear();
-        removerLog(std::format("video_in HOST texture {}x{} format={} gen={} ({})", desc.width,
-                               desc.height, get_format_name(desc.format), gen, reason));
-    };
-
-    // PIXERA's update_input_texture compares requested format (often FP16) to the
-    // current texture. If we create RGBA8, it would call us every update() forever
-    // (realloc trap → download never settles). Size-only: keep RGBA8 once allocated.
-    update_input_texture(*video_in_, [&](const TextureDesc& desc) {
-        if (video_in_allocated_) {
-            try {
-                const auto cur = video_in_->texture().desc();
-                if (cur.width == desc.width && cur.height == desc.height &&
-                    cur.format == kPixeraHostFormat) {
-                    if (desc.format != kPixeraHostFormat && !logged_size_only_skip_) {
-                        logged_size_only_skip_ = true;
-                        removerLog(std::format(
-                            "video_in keep RGBA8 {}x{} (ignore PIXERA format={})", desc.width,
-                            desc.height, get_format_name(desc.format)));
-                    }
-                    return;
-                }
-            } catch (...) {
-            }
-        }
-        allocate(desc, "update_input_texture");
-    });
-
-    const int prop_w = video_in_->get_property<int>(SettingNames::resolution_x, 0);
-    const int prop_h = video_in_->get_property<int>(SettingNames::resolution_y, 0);
-    const std::string format_str(video_in_->get_property(SettingNames::format));
-    const Format prop_fmt =
-        forceHostFormat(get_format_by_name(format_str, Format::None));
-
-    if (!baseline_captured_ && prop_w > 0 && prop_h > 0) {
-        baseline_w_ = prop_w;
-        baseline_h_ = prop_h;
-        baseline_format_ = format_str;
-        baseline_captured_ = true;
-        removerLog(std::format("video_in baseline props {}x{} format='{}'", prop_w, prop_h,
-                               format_str));
-    }
-
-    // PIXERA live inputs often omit format, so the SDK helper never fires.
-    // Allocate when format is explicit or when props change from the pre-link baseline.
-    if (!video_in_allocated_ && prop_w > 0 && prop_h > 0 && baseline_captured_) {
-        const bool format_explicit = !format_str.empty();
-        const bool dims_changed = (prop_w != baseline_w_ || prop_h != baseline_h_);
-        const bool format_changed = (format_str != baseline_format_);
-        if (format_explicit || dims_changed || format_changed) {
-            TextureDesc desc{};
-            desc.width = static_cast<std::size_t>(prop_w);
-            desc.height = static_cast<std::size_t>(prop_h);
-            desc.format = prop_fmt;
-            allocate(desc, format_explicit ? "props+format" : "props-changed");
-        } else if (!same_res_allocate_tried_ && render_ticks_ > 45) {
-            // Same-resolution live link: props may never change. After ~0.75s of ticks,
-            // create the host texture so PIXERA can write; download arms after cooldown.
-            same_res_allocate_tried_ = true;
-            TextureDesc desc{};
-            desc.width = static_cast<std::size_t>(prop_w);
-            desc.height = static_cast<std::size_t>(prop_h);
-            desc.format = prop_fmt;
-            allocate(desc, "same-res-timeout");
-        }
-    }
-
-    if (video_in_allocated_ && !video_in_download_allowed_) {
-        if (download_cooldown_frames_ > 0) {
-            --download_cooldown_frames_;
-        } else {
-            video_in_download_allowed_ = true;
-            removerLog("video_in download armed");
-        }
-    }
-
-    if (!video_in_allocated_ && (render_ticks_ % 60u) == 1u) {
-        removerLog(std::format("waiting link: props {}x{} format='{}' baseline={}", prop_w, prop_h,
-                               format_str, baseline_captured_ ? 1 : 0));
-    }
-}
-
-void Input::requestVideoDownload() {
-    if (!video_in_ || !video_in_download_allowed_) {
-        return;
-    }
-    TextureDesc desc{};
-    try {
-        desc = video_in_->texture().desc();
-    } catch (...) {
-        return;
-    }
-    if (desc.width == 0 || desc.height == 0 || !video_in_->texture()) {
-        return;
-    }
-    // Abandon hung download_texture (PIXERA sometimes never completes — was stuck blue).
-    if (download_pending_.load()) {
-        const auto since = download_pending_since_tick_.load();
-        if (since > 0 && render_ticks_ > since + 90u) {
-            download_pending_.store(false);
-            download_pending_since_tick_.store(0);
-            const auto n = downloads_abandoned_.fetch_add(1) + 1;
-            if (n <= 8 || (n % 60) == 0) {
-                removerLog(std::format("download ABANDONED after {} ticks (n={})",
-                                       render_ticks_ - since, n));
-            }
-        } else {
-            return;
-        }
-    }
-    if (download_pending_.exchange(true)) {
-        return;
-    }
-    download_pending_since_tick_.store(render_ticks_ == 0 ? 1 : render_ticks_);
-
-    const auto gen = video_in_generation_.load(std::memory_order_acquire);
-    const Format host_fmt =
-        desc.format != Format::None ? desc.format : video_in_host_format_;
-
-    {
-        const auto n = downloads_ok_.load() + downloads_empty_.load() + downloads_abandoned_.load();
-        if (n < 8) {
-            removerLog(std::format("download_texture requested {}x{} format={} gen={}", desc.width,
-                                   desc.height, get_format_name(host_fmt), gen));
-        }
-    }
-
-    host().download_texture(
-        video_in_->texture(),
-        [this, gen, host_fmt, w = static_cast<std::uint32_t>(desc.width),
-         h = static_cast<std::uint32_t>(desc.height)](BufferDesc buffer,
-                                                      OnComplete on_complete) mutable noexcept {
-            try {
-                if (gen != video_in_generation_.load(std::memory_order_acquire)) {
-                    download_pending_.store(false);
-                    download_pending_since_tick_.store(0);
-                    on_complete();
-                    return;
-                }
-                const std::size_t expected = static_cast<std::size_t>(w) * h * 4u;
-                if (!buffer.data || buffer.size < expected || w == 0 || h == 0) {
-                    const auto n = downloads_empty_.fetch_add(1) + 1;
-                    if (n <= 5 || (n % 120) == 0) {
-                        removerLog(std::format(
-                            "download empty/short size={} expected={} fmt={} n={}", buffer.size,
-                            expected, get_format_name(host_fmt), n));
-                    }
-                } else {
-                    std::vector<std::uint8_t> packed(expected);
-                    const auto* src = static_cast<const std::uint8_t*>(buffer.data);
-                    const std::size_t src_pitch =
-                        buffer.pitch > 0 ? buffer.pitch : static_cast<std::size_t>(w) * 4u;
-                    for (std::uint32_t y = 0; y < h; ++y) {
-                        std::memcpy(packed.data() + static_cast<std::size_t>(y) * w * 4u,
-                                    src + static_cast<std::size_t>(y) * src_pitch,
-                                    static_cast<std::size_t>(w) * 4u);
-                    }
-                    const std::size_t pixels = static_cast<std::size_t>(w) * h;
-                    // PIXERA Video In bytes are usually BGRA layout even on RGBA8 textures.
-                    videoInBytesToRgbaInPlace(packed.data(), pixels);
-                    const std::size_t lit = nonzeroRgbCount(packed.data(), expected);
-                    const std::size_t mid = (pixels / 2u) * 4u;
-                    const unsigned pr = packed[mid + 0];
-                    const unsigned pg = packed[mid + 1];
-                    const unsigned pb = packed[mid + 2];
-                    {
-                        std::lock_guard<std::mutex> lock(frame_mutex_);
-                        latest_in_ = std::move(packed);
-                        in_w_ = w;
-                        in_h_ = h;
-                        has_in_ = true;
-                    }
-                    const auto n = downloads_ok_.fetch_add(1) + 1;
-                    if (n <= 8 || (n % 60) == 0) {
-                        removerLog(std::format(
-                            "STATUS stage={} vin=1 dl=1 nz={} mid=({},{},{}) {}x{} host={} n={}",
-                            lit > 0 ? "passthrough" : "input_black", lit, pr, pg, pb, w, h,
-                            get_format_name(host_fmt), n));
-                    }
-                }
-            } catch (...) {
-                removerLog("download callback exception");
-            }
-            download_pending_.store(false);
-            download_pending_since_tick_.store(0);
-            on_complete();
-        });
-}
-
-void Input::applyMatteSettings() {
-    const int q = quality_ ? std::clamp(quality_->value(), 0, 2) : 1;
-    const auto next_q = static_cast<::genesis::BgRemoverQuality>(q);
-    if (matte_settings_applied_ && matte_settings_.backend == ::genesis::BgRemoverBackend::Auto &&
-        matte_settings_.quality == next_q) {
-        return;
-    }
-    matte_settings_.backend = ::genesis::BgRemoverBackend::Auto;
-    matte_settings_.quality = next_q;
-    matte_settings_.rvm_downsample = 0.0f; // honor Fast/Balanced/Quality presets
-    matte_settings_.temporal_alpha = 0.20f;
-    // Resolve model only when the worker is (about to be) running — avoid SDL/asset
-    // work during cyan scrub-in before Video In is linked.
-    if (async_started_ && matte_settings_.model_path.empty()) {
-        try {
-            matte_settings_.model_path =
-                ::genesis::resolveAssetPath("assets/matting/rvm_mobilenetv3_fp16.onnx");
-            removerLog(std::format("RVM model: {}", matte_settings_.model_path.string()));
-        } catch (const std::exception& ex) {
-            removerLog(std::format("RVM model resolve failed: {}", ex.what()));
-        }
-    }
-    matte_settings_applied_ = true;
-    if (async_started_) {
-        async_.setSettings(matte_settings_);
-        removerLog(std::format("matte settings applied quality={} ep={}", q,
-                               async_.executionProvider()));
-    }
-}
-
-void Input::uploadOutputRgba(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height) {
-    if (!sampler_ || !rgba || width == 0 || height == 0) {
-        return;
-    }
-    ensureSampler(width, height);
-    const std::size_t bytes = static_cast<std::size_t>(width) * height * 4u;
-    BufferDesc buffer{};
-    buffer.data = rgba;
-    buffer.pitch = static_cast<std::size_t>(width) * 4u;
-    buffer.size = bytes;
-    host().upload_texture(sampler_->texture(), buffer, true, []() noexcept {});
-}
-
-void Input::logMatteStatusMaybe() {
-    if (!async_started_) {
-        return;
-    }
-    const auto completed = async_.completed();
-    const std::string status = async_.status();
-    if (status == last_matte_status_ && completed == last_logged_completed_ &&
-        (render_ticks_ % 120u) != 0u) {
-        return;
-    }
-    last_matte_status_ = status;
-    last_logged_completed_ = completed;
-    removerLog(std::format(
-        "matte status='{}' backend={} ep={} rvm={} infer={}x{} ms={:.1f} submitted={} completed={} "
-        "skipped={} busy={} matte_live={} dl_ok={} dl_empty={}",
-        status, ::genesis::bgRemoverBackendLabel(async_.activeBackend()),
-        async_.executionProvider(), async_.isRvmReady() ? 1 : 0, async_.lastInferWidth(),
-        async_.lastInferHeight(), async_.lastInferMs(), async_.submitted(), completed,
-        async_.skipped(), async_.busy() ? 1 : 0, matte_live_ ? 1 : 0, downloads_ok_.load(),
-        downloads_empty_.load()));
+    placeholder_published_ = true;
+    shared_output_published_ = false;
+    removerLog(std::format("placeholder sampler {}x{} (host cyan)", desc.width, desc.height));
+    setDebugStatus("placeholder host cyan — GPU not up yet");
 }
 
 bool Input::initialize() noexcept try {
     const std::string handle = settings_.get(SettingNames::handle, "main");
-    removerLog(std::format("initialize begin handle='{}' ({})", handle, kRemoverBuildStamp));
+    removerLog(std::format("initialize begin handle='{}' adapter_luid={:016x} ({})", handle,
+                           adapter_luid_, kRemoverBuildStamp));
     host().log_info(std::format("initializing GENESIS Remover stream '{}' ({})", handle,
                                 kRemoverBuildStamp));
 
     registerParameters();
+
     width_ = settings_.get<std::uint32_t>(SettingNames::resolution_x, 1920);
     height_ = settings_.get<std::uint32_t>(SettingNames::resolution_y, 1080);
-    ensureSampler(width_, height_);
-    removerLog("initialize OK (host-texture path)");
+    if (const string stream_luid = settings_.get(SettingNames::adapter_luid, string{});
+        !stream_luid.empty()) {
+        adapter_luid_ = common::from_hex_string<std::uint64_t>(stream_luid);
+    }
+
+    // Accept timeline with host cyan first — Vulkan/ONNX deferred to update().
+    publishPlaceholderSampler();
+    removerLog("initialize OK (cpu-first placeholder, shared-vulkan deferred)");
     return true;
 } catch (const std::exception& ex) {
     removerLog(std::format("initialize exception: {}", ex.what()));
@@ -534,22 +181,259 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     settings_ = std::move(settings);
     width_ = settings_.get<std::uint32_t>(SettingNames::resolution_x, 1920);
     height_ = settings_.get<std::uint32_t>(SettingNames::resolution_y, 1080);
-    removerLog(std::format("update_settings {}x{}", width_, height_));
-    if (!params_registered_) {
-        registerParameters();
+    if (const string stream_luid = settings_.get(SettingNames::adapter_luid, string{});
+        !stream_luid.empty()) {
+        adapter_luid_ = common::from_hex_string<std::uint64_t>(stream_luid);
     }
-    ensureSampler(width_, height_);
+    removerLog(std::format("update_settings {}x{} adapter={:016x}", width_, height_,
+                           adapter_luid_));
+
+    if (pipeline_ && pipeline_adapter_luid_ != adapter_luid_) {
+        pipeline_.reset();
+        processing_enabled_ = false;
+        shared_output_published_ = false;
+        video_in_published_ = false;
+        gpu_failed_ = false;
+        matte_live_ = false;
+    }
+
+    if (!shared_output_published_) {
+        if (!params_registered_) {
+            registerParameters();
+        }
+        publishPlaceholderSampler();
+    } else if (pipeline_) {
+        try {
+            pipeline_->resize(width_, height_);
+            publishSharedOutput();
+        } catch (const std::exception& ex) {
+            removerLog(std::format("resize/publish after settings failed: {}", ex.what()));
+            publishPlaceholderSampler();
+        }
+    }
     return true;
 } catch (const std::exception& ex) {
     removerLog(std::format("update_settings exception: {}", ex.what()));
+    try {
+        publishPlaceholderSampler();
+    } catch (...) {
+    }
     return true;
+}
+
+bool Input::tryEnsureGpuPipeline() {
+    if (pipeline_) {
+        return true;
+    }
+    if (gpu_failed_) {
+        return false;
+    }
+    try {
+        removerLog(std::format("creating RemoverPipeline adapter={:016x}", adapter_luid_));
+        pipeline_ = std::make_unique<::genesis::RemoverPipeline>(adapter_luid_);
+        pipeline_adapter_luid_ = adapter_luid_;
+        pipeline_->resize(width_, height_);
+        publishSharedOutput();
+        removerLog(std::format("RemoverPipeline GPU output published {}x{} handle={}", width_,
+                               height_,
+                               pipeline_->output().colorExport().win32_handle ? "ok" : "NULL"));
+        host().log_info(std::format("GENESIS Remover GPU ready {}x{}", width_, height_));
+        setDebugStatus("shared output published — waiting Video In");
+        return true;
+    } catch (const std::exception& ex) {
+        if (adapter_luid_ != 0) {
+            removerLog(std::format("pipeline adapter fail ({}); retry LUID 0", ex.what()));
+            try {
+                pipeline_ = std::make_unique<::genesis::RemoverPipeline>(0);
+                pipeline_adapter_luid_ = 0;
+                adapter_luid_ = 0;
+                pipeline_->resize(width_, height_);
+                publishSharedOutput();
+                removerLog("RemoverPipeline GPU output published (default GPU)");
+                return true;
+            } catch (const std::exception& ex2) {
+                removerLog(std::format("GPU pipeline failed: {}", ex2.what()));
+                host().log_error(std::format("GENESIS Remover GPU unavailable: {}", ex2.what()));
+                pipeline_.reset();
+                gpu_failed_ = true;
+                publishPlaceholderSampler();
+                setDebugStatus(std::format("GPU FAIL: {}", ex2.what()));
+                return false;
+            }
+        }
+        removerLog(std::format("GPU pipeline failed: {}", ex.what()));
+        host().log_error(std::format("GENESIS Remover GPU unavailable: {}", ex.what()));
+        pipeline_.reset();
+        gpu_failed_ = true;
+        publishPlaceholderSampler();
+        setDebugStatus(std::format("GPU FAIL: {}", ex.what()));
+        return false;
+    }
+}
+
+void Input::applyMatteSettings() {
+    if (!pipeline_) {
+        return;
+    }
+    ::genesis::BgRemoverSettings matte = pipeline_->remover().settings();
+    const int q = quality_ ? std::clamp(quality_->value(), 0, 2) : 1;
+    const auto next_q = static_cast<::genesis::BgRemoverQuality>(q);
+    matte.backend = ::genesis::BgRemoverBackend::Auto;
+    matte.quality = next_q;
+    matte.rvm_downsample = 0.0f;
+    matte.temporal_alpha = 0.20f;
+    pipeline_->setSettings(matte);
+}
+
+void Input::enableProcessing() {
+    if (!pipeline_ || processing_enabled_) {
+        return;
+    }
+    applyMatteSettings();
+    pipeline_->setAsyncEnabled(true);
+    processing_enabled_ = true;
+    removerLog(std::format("processing enabled status={} ep={}", pipeline_->remover().status(),
+                           pipeline_->asyncWorker().executionProvider()));
+    host().log_info(std::format("GENESIS Remover processing enabled ({})",
+                                pipeline_->remover().status()));
+}
+
+void Input::publishSharedOutput() {
+    if (!pipeline_ || !sampler_ || !pipeline_->hasOutput()) {
+        return;
+    }
+    const auto& exp = pipeline_->output().colorExport();
+    if (!exp.win32_handle) {
+        throw std::runtime_error("GENESIS Remover output share handle is null");
+    }
+    TextureDesc desc{};
+    desc.width = pipeline_->output().extent().width;
+    desc.height = pipeline_->output().extent().height;
+    desc.format = Format::R8G8B8A8_UNORM;
+    desc.is_target = true;
+    desc.share_handle = {
+        kHandleType,
+        reinterpret_cast<Handle>(exp.win32_handle),
+        0,
+        exp.memory_size,
+        0,
+        exp.dedicated,
+    };
+    sampler_->set_texture(host().create_texture(desc));
+    shared_output_published_ = true;
+    placeholder_published_ = false;
+    removerLog(std::format("shared OUTPUT published {}x{} mem={} dedicated={}", desc.width,
+                           desc.height, exp.memory_size, exp.dedicated ? 1 : 0));
+}
+
+void Input::publishVideoIn() {
+    if (!video_in_ || !pipeline_) {
+        return;
+    }
+
+    auto allocate = [&](const TextureDesc& desc, const char* reason) {
+        if (desc.width == 0 || desc.height == 0) {
+            return;
+        }
+        width_ = static_cast<std::uint32_t>(desc.width);
+        height_ = static_cast<std::uint32_t>(desc.height);
+        const Format pixera_fmt =
+            desc.format == Format::None ? Format::R8G8B8A8_UNORM : desc.format;
+        const VkFormat vk_fmt = [&]() -> VkFormat {
+            switch (pixera_fmt) {
+            case Format::B8G8R8A8_UNORM:
+                return VK_FORMAT_B8G8R8A8_UNORM;
+            case Format::R16G16B16A16_SFLOAT:
+                return VK_FORMAT_R16G16B16A16_SFLOAT;
+            case Format::R32G32B32A32_SFLOAT:
+                return VK_FORMAT_R32G32B32A32_SFLOAT;
+            default:
+                return VK_FORMAT_R8G8B8A8_UNORM;
+            }
+        }();
+        removerLog(std::format("video_in allocate {}x{} format={} vk={} ({})", width_, height_,
+                               get_format_name(pixera_fmt), static_cast<int>(vk_fmt), reason));
+        pipeline_->resize(width_, height_);
+        // Must match PIXERA's requested format (often FP16). v14 called ensureVideoIn()
+        // with default RGBA8 while advertising FP16 → shared readback stayed black.
+        pipeline_->ensureVideoIn(vk_fmt);
+        const auto& exp = pipeline_->videoIn().exportInfo();
+        if (!exp.win32_handle) {
+            removerLog("video_in share handle NULL");
+            setDebugStatus("video_in share handle NULL");
+            return;
+        }
+        TextureDesc shared = desc;
+        shared.format = pixera_fmt;
+        shared.is_target = false;
+        shared.share_handle = {
+            kHandleType,
+            reinterpret_cast<Handle>(exp.win32_handle),
+            0,
+            exp.memory_size,
+            0,
+            exp.dedicated,
+        };
+        video_in_->set_texture(host().create_texture(shared));
+        video_in_published_ = true;
+        publishSharedOutput();
+        enableProcessing();
+        removerLog(std::format("shared VIDEO_IN published {}x{} format={} mem={}", shared.width,
+                               shared.height, get_format_name(shared.format), exp.memory_size));
+        setDebugStatus(std::format("shared video_in {}x{} {} — waiting PIXERA write", width_,
+                                   height_, get_format_name(shared.format)));
+    };
+
+    update_input_texture(*video_in_, [&](const TextureDesc& desc) {
+        allocate(desc, "update_input_texture");
+    });
+
+    if (!pipeline_->hasVideoIn()) {
+        TextureDesc desc{};
+        desc.width = static_cast<std::size_t>(
+            video_in_->get_property<int>(SettingNames::resolution_x, 0));
+        desc.height = static_cast<std::size_t>(
+            video_in_->get_property<int>(SettingNames::resolution_y, 0));
+        const std::string format_str(video_in_->get_property(SettingNames::format));
+        desc.format = get_format_by_name(format_str, Format::R8G8B8A8_UNORM);
+        if (desc.width == 0 || desc.height == 0) {
+            try {
+                const auto cur = video_in_->texture().desc();
+                if (cur.width > 0 && cur.height > 0) {
+                    desc.width = cur.width;
+                    desc.height = cur.height;
+                    if (cur.format != Format::None) {
+                        desc.format = cur.format;
+                    }
+                }
+            } catch (...) {
+            }
+        }
+        if (desc.width == 0 || desc.height == 0) {
+            // Same-res link: props may never change — use stream size after a few ticks.
+            if (render_ticks_ > 45 && width_ > 0 && height_ > 0) {
+                desc.width = width_;
+                desc.height = height_;
+                // Prefer PIXERA's format property even when dims came from stream defaults.
+                desc.format = get_format_by_name(format_str, Format::R16G16B16A16_SFLOAT);
+                allocate(desc, "same-res-stream-fallback");
+            } else if ((render_ticks_ % 60u) == 1u) {
+                removerLog(std::format("waiting Video In props {}x{} format='{}' ticks={}",
+                                       video_in_->get_property<int>(SettingNames::resolution_x, 0),
+                                       video_in_->get_property<int>(SettingNames::resolution_y, 0),
+                                       format_str, render_ticks_));
+            }
+        } else {
+            allocate(desc, format_str.empty() ? "props-fallback" : "props+format");
+        }
+    }
 }
 
 ValueSet Input::get_state() noexcept {
     ValueSet state;
     int res_x = static_cast<int>(width_);
     int res_y = static_cast<int>(height_);
-    Format format = kPixeraHostFormat;
+    Format format = Format::R8G8B8A8_UNORM;
     if (sampler_) {
         try {
             const auto desc = sampler_->texture().desc();
@@ -571,118 +455,78 @@ ValueSet Input::get_state() noexcept {
 
 string Input::get_property(string_view name) noexcept {
     if (name == PropertyNames::applies_alpha) {
-        // false until covered matte is live — live webcam A=0 + applies_alpha=true = black.
+        // Avoid black timeline until we have a covered matte.
         return string(matte_live_ ? "true" : "false");
     }
     return {};
 }
 
 bool Input::update() noexcept try {
-    touchHostClock();
-    ensureVideoInHostTexture();
-    // Do not call applyMatteSettings / start ORT here — scrub-in must stay light.
-    requestVideoDownload();
+    if (time_) {
+        (void)time_->value();
+    }
+    if (frame_counter_) {
+        (void)frame_counter_->value();
+    }
+    if (!tryEnsureGpuPipeline()) {
+        return true;
+    }
+    publishVideoIn();
     return true;
 } catch (const std::exception& ex) {
     removerLog(std::format("update exception: {}", ex.what()));
     return true;
 }
 
+SyncDesc Input::before_render() noexcept {
+    return {};
+}
+
 RenderResult Input::render() noexcept try {
-    touchHostClock();
     ++render_ticks_;
-    // Keep download retries alive even if update() stalls after Video In link.
-    ensureVideoInHostTexture();
-    requestVideoDownload();
-    logMatteStatusMaybe();
-
-    std::vector<std::uint8_t> frame;
-    std::uint32_t w = 0;
-    std::uint32_t h = 0;
-    {
-        std::lock_guard<std::mutex> lock(frame_mutex_);
-        if (has_in_ && !latest_in_.empty()) {
-            frame = latest_in_;
-            w = in_w_;
-            h = in_h_;
-        }
+    if (time_) {
+        (void)time_->value();
+    }
+    if (frame_counter_) {
+        (void)frame_counter_->value();
     }
 
-    if (frame.empty() || w == 0 || h == 0) {
-        // Keep cyan placeholder visible so we know the DLL is rendering.
-        logPathOnce(last_render_path_, "waiting_download_cyan");
-        if ((render_ticks_ % 60u) == 0u) {
-            removerLog(std::format(
-                "STATUS stage=waiting_download vin={} dl={} nz=0 {}x{} pending={} armed={} "
-                "abandoned={}",
-                video_in_allocated_ ? 1 : 0, downloads_ok_.load() > 0 ? 1 : 0, width_, height_,
-                download_pending_.load() ? 1 : 0, video_in_download_allowed_ ? 1 : 0,
-                downloads_abandoned_.load()));
-        }
+    // PIXERA may skip update — pump GPU + Video In here too.
+    if (!tryEnsureGpuPipeline()) {
         return RenderResult::Succeeded;
     }
+    publishVideoIn();
 
-    const std::size_t bytes = static_cast<std::size_t>(w) * h * 4u;
-    if (frame.size() < bytes) {
-        return RenderResult::Succeeded;
+    if (pipeline_->hasVideoIn() && !processing_enabled_) {
+        enableProcessing();
     }
 
-    if (!async_started_) {
-        async_.start();
-        async_started_ = true;
-        matte_settings_applied_ = false; // force push now that worker exists
-        applyMatteSettings();
-        async_.reset(w, h);
-        removerLog(std::format("async matte worker started (after first video frame) ep={}",
-                               async_.executionProvider()));
-    } else {
-        // Live Quality UI changes (setSettings is a no-op when unchanged).
-        applyMatteSettings();
-    }
+    ::genesis::RemoverFrameDebug dbg{};
+    std::string error;
+    const bool ok = pipeline_->processFrame(&error, &dbg, /*show_diagnostics=*/true);
+    logStatusMaybe(dbg);
 
-    async_.trySubmit(frame.data(), w, h);
-    scratch_out_.resize(bytes);
-    const std::size_t pixels = static_cast<std::size_t>(w) * h;
-
-    // Prefer a fresh covered matte; otherwise reuse last alpha on the current camera
-    // RGB so PIXERA stays smooth when RVM is slower than the host download rate.
-    if (async_.copyLatest(scratch_out_.data(), w, h) &&
-        matteHasCoverage(scratch_out_.data(), w, h)) {
-        last_alpha_.resize(pixels);
-        extractAlpha(scratch_out_.data(), last_alpha_.data(), pixels);
-        has_last_alpha_ = true;
+    if (dbg.stage && std::string_view(dbg.stage) == "matte") {
         if (!matte_live_) {
             matte_live_ = true;
-            removerLog(std::format("matte_live=1 ep={} infer={}x{} ({:.1f}ms)",
-                                   async_.executionProvider(), async_.lastInferWidth(),
-                                   async_.lastInferHeight(), async_.lastInferMs()));
+            removerLog(std::format("matte_live=1 ep={} status={}",
+                                   pipeline_->asyncWorker().executionProvider(),
+                                   pipeline_->remover().status()));
         }
     }
 
-    if (has_last_alpha_ && last_alpha_.size() == pixels) {
-        compositeWithAlpha(frame.data(), last_alpha_.data(), scratch_out_.data(), pixels);
-        uploadOutputRgba(scratch_out_.data(), w, h);
-        logPathOnce(last_render_path_, "matte");
-        return RenderResult::Succeeded;
+    if (!ok && !error.empty() && (render_ticks_ % 60u) == 1u) {
+        removerLog(std::format("processFrame: {}", error));
     }
-
-    const std::size_t lit = nonzeroRgbCount(frame.data(), bytes);
-    if (lit == 0) {
-        // Linked but empty — magenta diagnostic.
-        fillSolidRgba(scratch_out_.data(), bytes, 255, 0, 255);
-        uploadOutputRgba(scratch_out_.data(), w, h);
-        logPathOnce(last_render_path_, "input_black_magenta");
-        return RenderResult::Succeeded;
-    }
-
-    // Correct-color live feed until RVM coverage is ready (was multi-colour under RGBA host).
-    fillOpaquePassthrough(frame.data(), scratch_out_.data(), bytes);
-    uploadOutputRgba(scratch_out_.data(), w, h);
-    logPathOnce(last_render_path_, "opaque_passthrough");
     return RenderResult::Succeeded;
 } catch (const std::exception& ex) {
     removerLog(std::format("render exception: {}", ex.what()));
+    setDebugStatus(std::format("render exception: {}", ex.what()));
     return RenderResult::Succeeded;
+}
+
+SyncDesc Input::after_render() noexcept {
+    return {};
 }
 
 } // namespace rxext::genesis_remover
