@@ -238,7 +238,7 @@ function Sync-OutFolder {
         }
 
         $stamp = @"
-build=remover-timeline-v35-live-blit-20260818
+build=remover-timeline-v36-blit-heartbeat-20260818
 dll=$remOut\ExtGenesisRemover.dll
 time=$(Get-Date -Format o)
 size=$remSize

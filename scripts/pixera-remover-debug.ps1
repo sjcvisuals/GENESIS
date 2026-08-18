@@ -4,23 +4,21 @@
 $ErrorActionPreference = "Continue"
 Write-Host @"
 
-GENESIS Remover v35 - live blit
-================================
-Live GPU blit every frame (ExtSampleD3D). Matte Map is throttled on a private RT.
-Never Map/CopyResource the shared textures PIXERA samples.
+GENESIS Remover v36 - blit + heartbeat
+======================================
+Blit-only (no Map/matte). Lime stripe diagnoses freeze:
 
-Expect:
-  cyan     = waiting for Video In link
-  live     = passthrough then matte
-  STATUS   = stage=passthrough|matte  (changing mid=)
+  stripe MOVES + face frozen  => Video In stuck
+  stripe ALSO frozen          => PIXERA not presenting output
+  stripe MOVES + face live    => OK for matte next
 
 1) Quit PIXERA completely
 2) git pull
 3) BUILD-REMOVER.bat
-4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v35-live-blit-*)
+4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v36-blit-heartbeat-*)
 5) Re-import ExtGenesisRemover.dll
-6) Adapter LUID = preview GPU; empty Video In OK; drag Live Input
-7) Dump log - look for 'gpu_blit live', 'private_after_blit', no 'frozen_suspect'
+6) Adapter LUID = preview GPU; drag Live Input
+7) Watch lime stripe; dump log
 
 "@
 

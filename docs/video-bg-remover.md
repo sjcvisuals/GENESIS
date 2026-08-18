@@ -91,16 +91,16 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for `STATUS stage=` lines and stamp `remover-timeline-v35-live-blit-*`.
+Look for `STATUS stage=` lines and stamp `remover-timeline-v36-blit-heartbeat-*`.
 
 | Colour / stage | Meaning |
 |----------------|---------|
 | cyan / `waiting_video_in` | Video In slot empty — drag Live Input in |
 | blue / `download_fail` | live path missing RTV/SRV |
-| `passthrough` / `matte` | live upright feed then cutout |
+| `passthrough` | blit + lime heartbeat (v36 has no matte) |
 
-v35: live GPU blit every frame (no per-frame Map/idle stall); matte Map throttled.
-Watch for `frozen_suspect` if mid stays constant (PIXERA not rewriting Video In).
+v36 diagnostic: blit-only with a moving lime stripe. Stripe moves + face frozen means
+Video In is stuck; stripe also frozen means PIXERA is not presenting our output.
 
 Also check Remover params **Debug Stage** / **Debug Status**.
 Checklist: `.\scripts\pixera-remover-debug.ps1`

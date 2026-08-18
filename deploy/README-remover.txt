@@ -76,34 +76,21 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v35-live-blit-20260818
+  remover-timeline-v36-blit-heartbeat-20260818
 
-v35 = live blit every frame like ExtSampleD3D; matte Map throttled:
-  v34 still froze - waitGpuIdle+Map+matte every frame stalled the fence
-  signal so PIXERA stopped rewriting Video In. Also nz=0 clear wiped live
-  frames (black/blue flashes). Fix: blit live with no idle/Map; matte every
-  4th tick only; never clear shared after a live blit; no Flush after fence
-  signal. dump-remover-log.ps1 ASCII-only (em-dash broke PowerShell).
+v36 = DIAGNOSTIC blit-only + lime heartbeat stripe (no Map/matte):
+  v35 Map always nz=0 while preview showed a frozen face. Disable all CPU
+  readback. ExtSampleD3D clear+blit only, plus a moving lime bar.
+  Stripe moves + face frozen => Video In stuck after one PIXERA write.
+  Stripe also frozen => PIXERA not presenting our shared output updates.
+  Stripe moves + face live => re-enable matte next.
 
-v34 = private Map after waitGpuIdle (still froze from per-frame stall).
-
-v33 = blit then Map shared output (upright, froze compositor).
+v35 = live blit + throttled matte Map (still froze; Map always nz=0).
 
 Preview vs Output: set Adapter LUID to that engine's GPU.
 
-Workflow: empty Video In until link -> drag Live Input -> live upright feed -> cutout.
-
-Stage colours:
-  cyan   = waiting for Video In link (empty slot)
-  blue   = live path missing RTV/SRV
-  live   = GPU blit passthrough then matte
-
 Dump: .\scripts\dump-remover-log.ps1
-Expect stamp v35-live-blit and:
-  gpu_blit live ...
-  private_after_blit nz>0 with changing mid=
-  STATUS stage=passthrough|matte
-  no frozen_suspect
+Expect stamp v36-blit-heartbeat and gpu_blit live+heartbeat.
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log

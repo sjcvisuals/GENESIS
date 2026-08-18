@@ -165,7 +165,7 @@ try {
     Write-Host "In PIXERA:" -ForegroundColor Green
     Write-Host "  Re-import:"
     Write-Host "    $(Join-Path $dest 'ExtGenesisRemover.dll')"
-    Write-Host "  Stamp must be: remover-timeline-v35-live-blit-20260818"
+    Write-Host "  Stamp must be: remover-timeline-v36-blit-heartbeat-20260818"
     Write-Host ("Install log: {0}" -f $LogPath)
     exit 0
 }

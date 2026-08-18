@@ -28,11 +28,15 @@ public:
     bool ready() const { return ready_; }
     void draw(ID3D11DeviceContext* context, ID3D11ShaderResourceView* srv,
               ID3D11RenderTargetView* rtv, std::uint32_t width, std::uint32_t height);
+    // Moving lime stripe so we can tell if shared output is updating (vs stale compositor).
+    void drawHeartbeat(ID3D11DeviceContext* context, ID3D11RenderTargetView* rtv,
+                       std::uint32_t width, std::uint32_t height, std::uint64_t tick);
 
 private:
     bool ready_ = false;
     ID3D11VertexShader* vs_ = nullptr;
     ID3D11PixelShader* ps_ = nullptr;
+    ID3D11PixelShader* solid_ps_ = nullptr;
     ID3D11InputLayout* layout_ = nullptr;
     ID3D11Buffer* vb_ = nullptr;
     ID3D11SamplerState* sampler_ = nullptr;

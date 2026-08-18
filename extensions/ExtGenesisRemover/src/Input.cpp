@@ -272,7 +272,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     if (debug_stage_) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
-    const std::string ui = std::format("v35 {} nz={} mid=({},{},{}) vin={}",
+    const std::string ui = std::format("v36 {} nz={} mid=({},{},{}) vin={}",
                                        dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r,
                                        dbg.mid_g, dbg.mid_b, dbg.has_video_in ? 1 : 0);
     if (debug_status_) {
@@ -325,7 +325,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     remover_->resize(width_, height_);
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v35 live blit - link Live Input"));
+        debug_status_->set_value(std::string("v36 blit+heartbeat - watch lime stripe"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -404,7 +404,6 @@ RenderResult Input::render() noexcept try {
 
     if (!video_in_ready_ || !d3d_video_in_ || !d3d_video_in_->hasTexture()) {
         (void)remover_->processCpuRgbaFrame(nullptr, false, &error, &dbg, true, &d3d_rgba_out_);
-        // Clear only - never uploadRgba8/CopyResource onto shared output (v33 freeze).
         if (d3d_output_ && d3d_output_->hasTexture()) {
             d3d_output_->clear(0.0f, 0.86f, 1.0f, 1.0f); // cyan
         }
@@ -412,17 +411,17 @@ RenderResult Input::render() noexcept try {
         return RenderResult::Succeeded;
     }
 
-    // Heartbeat: first frames after VIDEO_IN must appear or PIXERA hung on share open.
     if (render_ticks_ <= 5u || (render_ticks_ % 30u) == 1u) {
         removerLog(std::format("render vin-ready enter ticks={} fence={}/{}", render_ticks_,
                                d3d_ ? d3d_->completedValue() : 0,
                                d3d_ ? d3d_->fenceCounter() : 0));
     }
 
-    // Live path must match ExtSampleD3D: blit Video In -> shared output and return promptly.
-    // v34 waited on GPU idle + Map + matte every frame; that stalled the fence signal and
-    // PIXERA stopped rewriting Video In (frozen first frame). Never Map/CopyResource the
-    // shares PIXERA samples.
+    // v36 DIAGNOSTIC: blit-only like ExtSampleD3D. No Map, no waitGpuIdle, no matte.
+    // v35 still Mapped every 4th tick (always nz=0) while preview showed a frozen face -
+    // either Video In is stuck after one write, or PIXERA is caching an old output frame.
+    // Lime heartbeat stripe: if it MOVES, our shared output is live (face frozen => Video In).
+    // If stripe is also frozen, PIXERA is not presenting our updates.
     if (!passthrough_ || !passthrough_->ready() || !d3d_video_in_->srv() || !d3d_output_ ||
         !d3d_output_->rtv()) {
         dbg.width = width_;
@@ -437,118 +436,25 @@ RenderResult Input::render() noexcept try {
         return RenderResult::Succeeded;
     }
 
+    // ExtSampleD3D clears then draws the input quad.
+    d3d_output_->clear(0.0f, 0.0f, 0.0f, 1.0f);
     passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_output_->rtv(), width_, height_);
-    if (render_ticks_ <= 8u || (render_ticks_ % 60u) == 1u) {
-        removerLog(std::format("gpu_blit live Video In -> output {}x{} fmt={}", width_, height_,
-                               get_format_name(d3d_video_in_->format())));
-    }
+    passthrough_->drawHeartbeat(d3d_->context(), d3d_output_->rtv(), width_, height_,
+                                render_ticks_);
 
     dbg.width = width_;
     dbg.height = height_;
     dbg.has_video_in = true;
     dbg.download_ok = false;
     dbg.stage = "passthrough";
+    dbg.nonzero_rgb = 0;
 
-    // Matte readback is throttled so live blit + fence signal stay on the PIXERA clock.
-    constexpr std::uint64_t kMatteEveryN = 4;
-    const bool do_matte_tick = (render_ticks_ % kMatteEveryN) == 1u;
-    if (!do_matte_tick || !d3d_matte_src_) {
-        logStatusMaybe(dbg);
-        return RenderResult::Succeeded;
+    if (render_ticks_ <= 8u || (render_ticks_ % 60u) == 1u) {
+        removerLog(std::format(
+            "gpu_blit live+heartbeat Video In -> output {}x{} fmt={} tick={} (no Map/matte)",
+            width_, height_, get_format_name(d3d_video_in_->format()), render_ticks_));
     }
 
-    d3d_matte_src_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
-                             /*publish_share=*/false);
-    if (!d3d_matte_src_->rtv()) {
-        logStatusMaybe(dbg);
-        return RenderResult::Succeeded;
-    }
-
-    passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_matte_src_->rtv(), width_,
-                       height_);
-    // Short idle wait only on matte ticks - never block the live path above.
-    if (!d3d_->waitGpuIdle(8)) {
-        if ((render_ticks_ % 60u) == 1u) {
-            removerLog("waitGpuIdle matte tick timed out - keep live blit");
-        }
-        logStatusMaybe(dbg);
-        return RenderResult::Succeeded;
-    }
-
-    long map_hr = 0;
-    if (!d3d_matte_src_->downloadTargetRgba8(d3d_rgba_in_, &map_hr)) {
-        if ((render_ticks_ % 30u) == 1u) {
-            removerLog(std::format("private matte Map failed hr=0x{:08x}",
-                                   static_cast<unsigned long>(map_hr)));
-        }
-        logStatusMaybe(dbg);
-        return RenderResult::Succeeded;
-    }
-
-    if ((render_ticks_ % 30u) == 1u) {
-        D3d11SharedTexture::logFrameStats(d3d_rgba_in_, width_, height_, "private_after_blit");
-    }
-
-    // Detect frozen Video In (PIXERA wrote once then stopped): same mid for many matte ticks.
-    if (d3d_rgba_in_.size() >= 4 && width_ > 0 && height_ > 0) {
-        const std::size_t mid_i =
-            (static_cast<std::size_t>(height_ / 2u) * width_ + (width_ / 2u)) * 4u;
-        if (mid_i + 3 < d3d_rgba_in_.size()) {
-            const std::array<std::uint8_t, 4> mid = {
-                d3d_rgba_in_[mid_i], d3d_rgba_in_[mid_i + 1], d3d_rgba_in_[mid_i + 2],
-                d3d_rgba_in_[mid_i + 3]};
-            const bool any = (mid[0] | mid[1] | mid[2]) != 0;
-            if (any && mid == last_mid_rgba_) {
-                ++same_mid_frames_;
-            } else {
-                same_mid_frames_ = 0;
-                last_mid_rgba_ = mid;
-            }
-            if (any && same_mid_frames_ == 30u) {
-                removerLog(std::format(
-                    "frozen_suspect same mid=({},{},{},{}) for 30 matte ticks - Video In may not "
-                    "be updating",
-                    mid[0], mid[1], mid[2], mid[3]));
-            }
-        }
-    }
-
-    if (!remover_->asyncEnabled()) {
-        applyMatteSettings();
-        remover_->setAsyncEnabled(true);
-    }
-
-    (void)remover_->processCpuRgbaFrame(d3d_rgba_in_.data(), true, &error, &dbg, true,
-                                        &d3d_rgba_out_);
-
-    // Never CopyResource onto shared output. Upload matte into private, blit -> shared.
-    if (dbg.stage && std::string_view(dbg.stage) == "matte" && dbg.nonzero_rgb > 0 &&
-        d3d_matte_src_->srv() && !d3d_rgba_out_.empty()) {
-        if (!d3d_matte_src_->uploadRgba8(d3d_rgba_out_.data(), width_, height_)) {
-            removerLog("private matte uploadRgba8 failed");
-        } else {
-            passthrough_->draw(d3d_->context(), d3d_matte_src_->srv(), d3d_output_->rtv(), width_,
-                               height_);
-            matte_live_ = true;
-            if ((render_ticks_ % 60u) == 1u) {
-                removerLog("matte_ok blit private -> shared output");
-            }
-        }
-    } else if (dbg.nonzero_rgb == 0) {
-        // Do NOT clear shared here - live blit already ran this frame. Clearing wiped a
-        // good live frame whenever Map lagged (black/blue flashes in v34).
-        matte_live_ = false;
-        if ((render_ticks_ % 30u) == 1u) {
-            removerLog("private_after_blit nz=0 (live blit kept; matte skipped)");
-        }
-    } else if (dbg.nonzero_rgb > 0 && (render_ticks_ % 60u) == 1u) {
-        removerLog(std::format("private_after_blit nz={} stage={} (live blit on shared output)",
-                               dbg.nonzero_rgb, dbg.stage ? dbg.stage : "?"));
-    }
-
-    if (!error.empty() && (render_ticks_ % 60u) == 1u) {
-        removerLog(std::format("processCpuRgbaFrame: {}", error));
-    }
     logStatusMaybe(dbg);
     return RenderResult::Succeeded;
 } catch (const std::exception& ex) {
