@@ -76,15 +76,15 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v22-nofencewait-20260818
+  remover-timeline-v23-mapgate-20260818
 
-v22 = fix solid black hang after Video In allocate:
-  Removed Device::render GPU/CPU Wait (deadlocked CopyResource+Map).
-  Video In stays SRV-only (ExtSampleD3D); FP16 magenta sentinel via UpdateSubresource.
-  Keep SyncDesc + after_render Signal so PIXERA can wait on OUTPUT.
-  Expect STATUS lines to continue after VIDEO_IN is published.
+v23 = restore ExtSampleD3D Device Wait + gated Map (no hang):
+  Map only after waitCpu(fence) succeeds; Map uses DO_NOT_WAIT.
+  ShareHandle matches ExtSampleD3D (no process_id).
+  Skip FP16 full-frame sentinel; defer async matte until download works.
+  Expect STATUS after VIDEO_IN (blue=timeout/busy OK; silence=PIXERA stuck).
 
-v21 = diagnostics (sentinel + fence=/sync=/sent=); Wait caused black hang.
+v22 = removed Wait entirely; STATUS still stopped after VIDEO_IN (Map race).
 
 Stage colours (until Video In has pixels):
   cyan   = waiting for Video In link (normal)

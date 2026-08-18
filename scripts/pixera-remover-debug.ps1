@@ -1,29 +1,27 @@
-# Quick checklist after installing Remover v22 (no Device::render fence Wait).
+# Quick checklist after installing Remover v23 (gated Map after fence Wait).
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\pixera-remover-debug.ps1
 
 $ErrorActionPreference = "Continue"
 Write-Host @"
 
-GENESIS Remover v22 - nofencewait (black hang fix)
-==================================================
-v21 log showed fence sync working, then silence after VIDEO_IN allocate.
-Cause: Device::render GPU Wait + Input CopyResource/Map deadlock → solid black.
+GENESIS Remover v23 - mapgate (no Map hang)
+===========================================
+v22 still went silent after VIDEO_IN. Likely Map while fence Wait pending
+or Map racing PIXERA writes.
 
-v22 removes that Wait. STATUS must keep printing after VIDEO_IN.
-
-STATUS extras:
-  fence=COMPLETED/COUNTER  - after_render Signal progress (Wait removed)
-  sync=N                   - Device before/render/after call count
-  sent=1                   - magenta sentinel still in Video In (PIXERA not writing)
-  sent=0 + nz=0            - PIXERA overwrote with black (source/link issue)
+v23:
+  - Restore ExtSampleD3D Device::render Wait
+  - Map ONLY after waitCpu succeeds (else blue + STATUS, never hang)
+  - Map uses DO_NOT_WAIT
+  - ShareHandle = type+handle only (like ExtSampleD3D)
 
 1) Quit PIXERA completely
 2) git pull
 3) BUILD-REMOVER.bat
-4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v22-nofencewait-*)
+4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v23-mapgate-*)
 5) Re-import ExtGenesisRemover.dll
 6) Set Adapter LUID, link Video In (media playing)
-7) Dump log - STATUS must continue after shared VIDEO_IN
+7) Dump log - must see STATUS or 'render vin-ready enter' after VIDEO_IN
 
 "@
 

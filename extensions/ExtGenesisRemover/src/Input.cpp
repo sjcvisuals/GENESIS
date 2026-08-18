@@ -139,14 +139,14 @@ void Input::publishTargetTexture() {
     ensureD3dTextures();
     d3d_output_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true);
 
-        TextureDesc desc{};
+    TextureDesc desc{};
     desc.width = width_;
     desc.height = height_;
     desc.format = Format::R8G8B8A8_UNORM;
     desc.is_target = true;
+    // Match ExtSampleD3D: type + handle only (process_id = 0).
     desc.share_handle = {HandleType::D3D11_IMAGE,
-                         reinterpret_cast<Handle>(d3d_output_->shareHandle()),
-                         static_cast<std::uint64_t>(GetCurrentProcessId())};
+                         reinterpret_cast<Handle>(d3d_output_->shareHandle())};
     sampler_->set_texture(host().create_texture(desc));
     removerLog(std::format("shared OUTPUT {}x{} handle=D3D11_IMAGE", desc.width, desc.height));
 }
@@ -168,7 +168,9 @@ void Input::publishVideoInTexture() {
 
         ensureD3dTextures();
         d3d_video_in_->allocate(width_, height_, fmt, /*is_target=*/false);
-        if (d3d_video_in_->fillSentinelMagenta()) {
+        // Do not UpdateSubresource a full FP16 frame (can stall PIXERA open).
+        // RGBA8 sentinel only; FP16 relies on STATUS nz/mid after gated Map.
+        if (fmt == Format::R8G8B8A8_UNORM && d3d_video_in_->fillSentinelMagenta()) {
             removerLog("video_in sentinel magenta written (if STATUS stays mid~magenta, PIXERA is not writing)");
         }
         remover_->resize(width_, height_);
@@ -177,13 +179,13 @@ void Input::publishVideoInTexture() {
         TextureDesc shared = desc;
         shared.format = fmt;
         shared.is_target = false;
+        // Match ExtSampleD3D: type + handle only.
         shared.share_handle = {HandleType::D3D11_IMAGE,
-                               reinterpret_cast<Handle>(d3d_video_in_->shareHandle()),
-                               static_cast<std::uint64_t>(GetCurrentProcessId())};
+                               reinterpret_cast<Handle>(d3d_video_in_->shareHandle())};
         video_in_->set_texture(host().create_texture(shared));
         video_in_ready_ = true;
         applyMatteSettings();
-        remover_->setAsyncEnabled(true);
+        // Keep matte sync until first gated download succeeds (async start can mask hangs).
         removerLog(std::format("shared VIDEO_IN {}x{} format={} handle=D3D11_IMAGE", shared.width,
                                shared.height, get_format_name(shared.format)));
     };
@@ -228,7 +230,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     if (debug_stage_) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
-    const std::string ui = std::format("v21 {} nz={} mid=({},{},{}) vin={}",
+    const std::string ui = std::format("v23 {} nz={} mid=({},{},{}) vin={}",
                                        dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r,
                                        dbg.mid_g, dbg.mid_b, dbg.has_video_in ? 1 : 0);
     if (debug_status_) {
@@ -281,7 +283,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     remover_->resize(width_, height_);
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v21 D3D11+sentinel - link Video In"));
+        debug_status_->set_value(std::string("v23 gated-map - link Video In"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -368,14 +370,36 @@ RenderResult Input::render() noexcept try {
         return RenderResult::Succeeded;
     }
 
-    if (!remover_->asyncEnabled()) {
-        applyMatteSettings();
-        remover_->setAsyncEnabled(true);
+    if ((render_ticks_ % 30u) == 1u) {
+        removerLog(std::format("render vin-ready enter ticks={} fence={}/{}", render_ticks_,
+                               d3d_ ? d3d_->completedValue() : 0,
+                               d3d_ ? d3d_->fenceCounter() : 0));
     }
 
-    // Ensure PIXERA fence signal is visible before staging readback.
-    if (d3d_ && d3d_->fenceCounter() > 0) {
-        (void)d3d_->waitCpu(d3d_->fenceCounter(), 50);
+    // Device::render already GPU-Waited fenceCounter. Only Map after that value completes.
+    // Mapping while GPU Wait is still pending = solid black hang (no further STATUS).
+    const std::uint64_t wait_for = d3d_ ? d3d_->fenceCounter() : 0;
+    if (d3d_ && wait_for > 0 && !d3d_->waitCpu(wait_for, 100)) {
+        dbg.width = width_;
+        dbg.height = height_;
+        dbg.has_video_in = true;
+        dbg.download_ok = false;
+        dbg.stage = "download_fail";
+        if ((render_ticks_ % 30u) == 1u) {
+            removerLog(std::format(
+                "fence wait timeout wait_for={} completed={} - skip Map (avoid hang)",
+                wait_for, d3d_->completedValue()));
+        }
+        if (d3d_output_ && d3d_output_->hasTexture()) {
+            d3d_output_->clear(0.12f, 0.35f, 0.86f, 1.0f); // blue
+        }
+        logStatusMaybe(dbg);
+        return RenderResult::Succeeded;
+    }
+
+    if ((render_ticks_ % 30u) == 1u) {
+        removerLog(std::format("download begin vin=1 wait_for={} completed={}", wait_for,
+                               d3d_ ? d3d_->completedValue() : 0));
     }
 
     if (!d3d_video_in_->downloadRgba8(d3d_rgba_in_)) {
@@ -389,6 +413,11 @@ RenderResult Input::render() noexcept try {
         }
         logStatusMaybe(dbg);
         return RenderResult::Succeeded;
+    }
+
+    if (!remover_->asyncEnabled()) {
+        applyMatteSettings();
+        remover_->setAsyncEnabled(true);
     }
 
     (void)remover_->processCpuRgbaFrame(d3d_rgba_in_.data(), true, &error, &dbg, true,

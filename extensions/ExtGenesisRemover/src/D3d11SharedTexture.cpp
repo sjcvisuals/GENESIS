@@ -269,7 +269,10 @@ bool D3d11SharedTexture::downloadRgba8(std::vector<std::uint8_t>& out_rgba) {
     context_->CopyResource(staging_, texture_);
 
     D3D11_MAPPED_SUBRESOURCE mapped{};
-    if (FAILED(context_->Map(staging_, 0, D3D11_MAP_READ, 0, &mapped)) || !mapped.pData) {
+    // Never block the PIXERA render thread: pending GPU work → fail this frame.
+    const HRESULT map_hr =
+        context_->Map(staging_, 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped);
+    if (FAILED(map_hr) || !mapped.pData) {
         return false;
     }
 
