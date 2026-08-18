@@ -262,16 +262,26 @@ bool D3d11SharedTexture::looksLikeSentinel(const std::vector<std::uint8_t>& rgba
     return r >= 200 && g <= 40 && b >= 200;
 }
 
-bool D3d11SharedTexture::downloadRgba8(std::vector<std::uint8_t>& out_rgba) {
+bool D3d11SharedTexture::downloadRgba8(std::vector<std::uint8_t>& out_rgba, long* out_hr) {
+    if (out_hr) {
+        *out_hr = S_OK;
+    }
     if (!texture_ || !staging_ || !context_ || width_ == 0 || height_ == 0 || is_target_) {
+        if (out_hr) {
+            *out_hr = E_INVALIDARG;
+        }
         return false;
     }
+    // Caller must only invoke after Device fence Wait has completed (PIXERA Video In ready).
+    // Blocking Map here waits only for our CopyResource — safe once the PIXERA fence is done.
+    // DO_NOT_WAIT right after Copy always fails (WAS_STILL_DRAWING) → permanent download_fail.
     context_->CopyResource(staging_, texture_);
 
     D3D11_MAPPED_SUBRESOURCE mapped{};
-    // Never block the PIXERA render thread: pending GPU work → fail this frame.
-    const HRESULT map_hr =
-        context_->Map(staging_, 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped);
+    const HRESULT map_hr = context_->Map(staging_, 0, D3D11_MAP_READ, 0, &mapped);
+    if (out_hr) {
+        *out_hr = static_cast<long>(map_hr);
+    }
     if (FAILED(map_hr) || !mapped.pData) {
         return false;
     }
@@ -323,6 +333,9 @@ bool D3d11SharedTexture::downloadRgba8(std::vector<std::uint8_t>& out_rgba) {
         }
     } else {
         context_->Unmap(staging_, 0);
+        if (out_hr) {
+            *out_hr = E_NOTIMPL;
+        }
         return false;
     }
 

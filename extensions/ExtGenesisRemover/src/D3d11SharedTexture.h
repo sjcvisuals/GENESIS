@@ -33,7 +33,7 @@ public:
     bool isTarget() const { return is_target_; }
     void* shareHandle() const { return share_handle_; }
 
-    bool downloadRgba8(std::vector<std::uint8_t>& out_rgba);
+    bool downloadRgba8(std::vector<std::uint8_t>& out_rgba, long* out_hr = nullptr);
     bool uploadRgba8(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height);
     void clear(float r, float g, float b, float a);
     // Magenta sentinel so we can tell "PIXERA never wrote" vs "PIXERA wrote black".

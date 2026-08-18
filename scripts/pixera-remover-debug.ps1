@@ -1,27 +1,23 @@
-# Quick checklist after installing Remover v23 (gated Map after fence Wait).
+# Quick checklist after installing Remover v24 (blocking Map after fence).
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\pixera-remover-debug.ps1
 
 $ErrorActionPreference = "Continue"
 Write-Host @"
 
-GENESIS Remover v23 - mapgate (no Map hang)
-===========================================
-v22 still went silent after VIDEO_IN. Likely Map while fence Wait pending
-or Map racing PIXERA writes.
+GENESIS Remover v24 - blockingmap
+=================================
+v23 kept STATUS alive (good!) but download_fail forever:
+  fence OK → CopyResource → DO_NOT_WAIT Map → always WAS_STILL_DRAWING.
 
-v23:
-  - Restore ExtSampleD3D Device::render Wait
-  - Map ONLY after waitCpu succeeds (else blue + STATUS, never hang)
-  - Map uses DO_NOT_WAIT
-  - ShareHandle = type+handle only (like ExtSampleD3D)
+v24: blocking Map after fence Wait completes (waits only for our Copy).
 
 1) Quit PIXERA completely
 2) git pull
 3) BUILD-REMOVER.bat
-4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v23-mapgate-*)
+4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v24-blockingmap-*)
 5) Re-import ExtGenesisRemover.dll
 6) Set Adapter LUID, link Video In (media playing)
-7) Dump log - must see STATUS or 'render vin-ready enter' after VIDEO_IN
+7) Dump log - want nz>0 / passthrough|matte|input_black (not endless download_fail)
 
 "@
 

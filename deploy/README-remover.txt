@@ -76,15 +76,14 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v23-mapgate-20260818
+  remover-timeline-v24-blockingmap-20260818
 
-v23 = restore ExtSampleD3D Device Wait + gated Map (no hang):
-  Map only after waitCpu(fence) succeeds; Map uses DO_NOT_WAIT.
-  ShareHandle matches ExtSampleD3D (no process_id).
-  Skip FP16 full-frame sentinel; defer async matte until download works.
-  Expect STATUS after VIDEO_IN (blue=timeout/busy OK; silence=PIXERA stuck).
+v24 = blocking Map after fence (fix permanent download_fail):
+  v23 fence sync worked but DO_NOT_WAIT Map right after CopyResource always
+  failed (WAS_STILL_DRAWING). Blocking Map is safe once PIXERA fence completed.
+  Expect passthrough/matte or orange (zeros) — not endless blue download_fail.
 
-v22 = removed Wait entirely; STATUS still stopped after VIDEO_IN (Map race).
+v23 = gated Map + DO_NOT_WAIT; STATUS alive but download always failed.
 
 Stage colours (until Video In has pixels):
   cyan   = waiting for Video In link (normal)

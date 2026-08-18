@@ -230,7 +230,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     if (debug_stage_) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
-    const std::string ui = std::format("v23 {} nz={} mid=({},{},{}) vin={}",
+    const std::string ui = std::format("v24 {} nz={} mid=({},{},{}) vin={}",
                                        dbg.stage ? dbg.stage : "?", dbg.nonzero_rgb, dbg.mid_r,
                                        dbg.mid_g, dbg.mid_b, dbg.has_video_in ? 1 : 0);
     if (debug_status_) {
@@ -283,7 +283,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     remover_->resize(width_, height_);
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v23 gated-map - link Video In"));
+        debug_status_->set_value(std::string("v24 blocking-map - link Video In"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -402,12 +402,18 @@ RenderResult Input::render() noexcept try {
                                d3d_ ? d3d_->completedValue() : 0));
     }
 
-    if (!d3d_video_in_->downloadRgba8(d3d_rgba_in_)) {
+    long map_hr = 0;
+    if (!d3d_video_in_->downloadRgba8(d3d_rgba_in_, &map_hr)) {
         dbg.width = width_;
         dbg.height = height_;
         dbg.has_video_in = true;
         dbg.download_ok = false;
         dbg.stage = "download_fail";
+        if ((render_ticks_ % 30u) == 1u) {
+            removerLog(std::format("download Map/copy failed hr=0x{:08x} fmt={}",
+                                   static_cast<unsigned long>(map_hr),
+                                   get_format_name(d3d_video_in_->format())));
+        }
         if (d3d_output_ && d3d_output_->hasTexture()) {
             d3d_output_->clear(0.12f, 0.35f, 0.86f, 1.0f); // blue
         }
