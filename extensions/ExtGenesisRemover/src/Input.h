@@ -5,6 +5,7 @@
 
 #include "D3d11SharedTexture.h"
 #include "SharedD3d11.h"
+#include "D3d11Passthrough.h"
 #include "runtime/RemoverPipeline.hpp"
 
 #include <cstdint>
@@ -53,6 +54,7 @@ private:
     std::unique_ptr<::genesis::RemoverPipeline> remover_;
     std::unique_ptr<D3d11SharedTexture> d3d_output_;
     std::unique_ptr<D3d11SharedTexture> d3d_video_in_;
+    std::unique_ptr<D3d11Passthrough> passthrough_;
     std::vector<std::uint8_t> d3d_rgba_in_;
     std::vector<std::uint8_t> d3d_rgba_out_;
     std::uint32_t width_ = 1920;

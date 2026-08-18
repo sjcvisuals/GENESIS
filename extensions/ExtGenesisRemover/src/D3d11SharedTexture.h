@@ -11,6 +11,7 @@ struct ID3D11Device;
 struct ID3D11DeviceContext;
 struct ID3D11Texture2D;
 struct ID3D11RenderTargetView;
+struct ID3D11ShaderResourceView;
 
 namespace rxext::genesis_remover {
 
@@ -32,22 +33,33 @@ public:
     Format format() const { return format_; }
     bool isTarget() const { return is_target_; }
     void* shareHandle() const { return share_handle_; }
+    ID3D11ShaderResourceView* srv() const { return srv_; }
+    ID3D11RenderTargetView* rtv() const { return rtv_; }
 
+    // Video In (is_target=false) readback.
     bool downloadRgba8(std::vector<std::uint8_t>& out_rgba, long* out_hr = nullptr);
+    // After GPU blit into output (is_target=true), read RGBA8 for matte.
+    bool downloadTargetRgba8(std::vector<std::uint8_t>& out_rgba, long* out_hr = nullptr);
     bool uploadRgba8(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height);
     void clear(float r, float g, float b, float a);
     // Magenta sentinel so we can tell "PIXERA never wrote" vs "PIXERA wrote black".
+    // FP16 uses a 1x1 mid-pixel UpdateSubresource (full-frame upload can stall PIXERA).
     bool fillSentinelMagenta();
     static bool looksLikeSentinel(const std::vector<std::uint8_t>& rgba);
+    // Raw mid-pixel diagnostics (FP16 bits or RGBA8 bytes) after a successful download path.
+    static void logMidRaw(const std::vector<std::uint8_t>& rgba, Format format, std::uint32_t width,
+                          std::uint32_t height, const char* tag);
 
 private:
     void destroyTexture();
+    bool mapStagingToRgba8(std::vector<std::uint8_t>& out_rgba, long* out_hr);
 
     ID3D11Device* device_ = nullptr;
     ID3D11DeviceContext* context_ = nullptr;
     ID3D11Texture2D* texture_ = nullptr;
     ID3D11Texture2D* staging_ = nullptr;
     ID3D11RenderTargetView* rtv_ = nullptr;
+    ID3D11ShaderResourceView* srv_ = nullptr;
     void* share_handle_ = nullptr;
     std::uint32_t width_ = 0;
     std::uint32_t height_ = 0;

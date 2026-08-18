@@ -95,6 +95,10 @@ void D3d11SharedTexture::destroyTexture() {
         CloseHandle(share_handle_);
         share_handle_ = nullptr;
     }
+    if (srv_) {
+        srv_->Release();
+        srv_ = nullptr;
+    }
     if (rtv_) {
         rtv_->Release();
         rtv_ = nullptr;
@@ -168,7 +172,7 @@ void D3d11SharedTexture::allocate(std::uint32_t width, std::uint32_t height, For
         throw std::runtime_error("D3d11SharedTexture: CreateSharedHandle failed");
     }
 
-    // RTV whenever BIND_RENDER_TARGET is set (input sentinel clear + PIXERA blit + output).
+    // RTV whenever BIND_RENDER_TARGET is set (output sampler).
     {
         D3D11_TEXTURE2D_DESC created{};
         texture_->GetDesc(&created);
@@ -178,12 +182,24 @@ void D3d11SharedTexture::allocate(std::uint32_t width, std::uint32_t height, For
                 throw std::runtime_error("D3d11SharedTexture: CreateRenderTargetView failed");
             }
         }
+        // SRV for Video In sampling (ExtSampleD3D Quad) and optional output debug.
+        if (created.BindFlags & D3D11_BIND_SHADER_RESOURCE) {
+            D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc{};
+            srv_desc.Format = created.Format;
+            srv_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+            srv_desc.Texture2D.MipLevels = 1;
+            if (FAILED(device_->CreateShaderResourceView(texture_, &srv_desc, &srv_)) || !srv_) {
+                destroyTexture();
+                throw std::runtime_error("D3d11SharedTexture: CreateShaderResourceView failed");
+            }
+        }
     }
 
     D3D11_TEXTURE2D_DESC staging_desc = desc;
     staging_desc.Usage = D3D11_USAGE_STAGING;
     staging_desc.BindFlags = 0;
-    staging_desc.CPUAccessFlags = is_target ? D3D11_CPU_ACCESS_WRITE : D3D11_CPU_ACCESS_READ;
+    // READ|WRITE so output can upload and also downloadTarget after GPU blit.
+    staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE;
     staging_desc.MiscFlags = 0;
     if (FAILED(device_->CreateTexture2D(&staging_desc, nullptr, &staging_)) || !staging_) {
         destroyTexture();
@@ -211,39 +227,30 @@ bool D3d11SharedTexture::fillSentinelMagenta() {
     if (!texture_ || !context_ || width_ == 0 || height_ == 0) {
         return false;
     }
-    if (rtv_ && format_ == Format::R8G8B8A8_UNORM) {
+    if (rtv_ && (format_ == Format::R8G8B8A8_UNORM || format_ == Format::R16G16B16A16_SFLOAT)) {
         clear(1.0f, 0.0f, 1.0f, 1.0f);
         context_->Flush();
         return true;
     }
-    if (rtv_ && format_ == Format::R16G16B16A16_SFLOAT) {
-        clear(1.0f, 0.0f, 1.0f, 1.0f);
-        context_->Flush();
-        return true;
-    }
-    // UpdateSubresource fallback for SRV-only textures (Video In has no RTV).
+    // 1x1 mid-pixel UpdateSubresource (full-frame FP16 upload can stall PIXERA open).
+    const UINT mx = width_ / 2u;
+    const UINT my = height_ / 2u;
+    D3D11_BOX box{};
+    box.left = mx;
+    box.top = my;
+    box.front = 0;
+    box.right = mx + 1;
+    box.bottom = my + 1;
+    box.back = 1;
     if (format_ == Format::R8G8B8A8_UNORM) {
-        std::vector<std::uint8_t> px(static_cast<std::size_t>(width_) * height_ * 4u);
-        for (std::size_t i = 0; i + 3 < px.size(); i += 4) {
-            px[i + 0] = 255;
-            px[i + 1] = 0;
-            px[i + 2] = 255;
-            px[i + 3] = 255;
-        }
-        context_->UpdateSubresource(texture_, 0, nullptr, px.data(), width_ * 4u, 0);
+        const std::uint8_t px[4] = {255, 0, 255, 255};
+        context_->UpdateSubresource(texture_, 0, &box, px, 4u, 0);
         context_->Flush();
         return true;
     }
     if (format_ == Format::R16G16B16A16_SFLOAT) {
-        // IEEE float16: 1.0 = 0x3C00, 0.0 = 0x0000 → magenta (1,0,1,1).
-        std::vector<std::uint16_t> px(static_cast<std::size_t>(width_) * height_ * 4u);
-        for (std::size_t i = 0; i + 3 < px.size(); i += 4) {
-            px[i + 0] = 0x3C00;
-            px[i + 1] = 0x0000;
-            px[i + 2] = 0x3C00;
-            px[i + 3] = 0x3C00;
-        }
-        context_->UpdateSubresource(texture_, 0, nullptr, px.data(), width_ * 8u, 0);
+        const std::uint16_t px[4] = {0x3C00, 0x0000, 0x3C00, 0x3C00}; // (1,0,1,1)
+        context_->UpdateSubresource(texture_, 0, &box, px, 8u, 0);
         context_->Flush();
         return true;
     }
@@ -254,7 +261,6 @@ bool D3d11SharedTexture::looksLikeSentinel(const std::vector<std::uint8_t>& rgba
     if (rgba.size() < 4) {
         return false;
     }
-    // Mid-pixel roughly magenta (allow small conversion error for FP16).
     const std::size_t mid = (rgba.size() / 8u) * 4u;
     const unsigned r = rgba[mid + 0];
     const unsigned g = rgba[mid + 1];
@@ -262,21 +268,28 @@ bool D3d11SharedTexture::looksLikeSentinel(const std::vector<std::uint8_t>& rgba
     return r >= 200 && g <= 40 && b >= 200;
 }
 
-bool D3d11SharedTexture::downloadRgba8(std::vector<std::uint8_t>& out_rgba, long* out_hr) {
-    if (out_hr) {
-        *out_hr = S_OK;
+void D3d11SharedTexture::logMidRaw(const std::vector<std::uint8_t>& rgba, Format format,
+                                   std::uint32_t width, std::uint32_t height, const char* tag) {
+    if (rgba.size() < 4 || width == 0 || height == 0) {
+        removerLog(std::format("{} mid_raw: empty", tag ? tag : "?"));
+        return;
     }
-    if (!texture_ || !staging_ || !context_ || width_ == 0 || height_ == 0 || is_target_) {
-        if (out_hr) {
-            *out_hr = E_INVALIDARG;
+    const std::size_t mid = (static_cast<std::size_t>(height / 2u) * width + (width / 2u)) * 4u;
+    if (mid + 3 >= rgba.size()) {
+        return;
+    }
+    std::size_t nz = 0;
+    for (unsigned char b : rgba) {
+        if (b != 0) {
+            ++nz;
         }
-        return false;
     }
-    // Caller must only invoke after Device fence Wait has completed (PIXERA Video In ready).
-    // Blocking Map here waits only for our CopyResource — safe once the PIXERA fence is done.
-    // DO_NOT_WAIT right after Copy always fails (WAS_STILL_DRAWING) → permanent download_fail.
-    context_->CopyResource(staging_, texture_);
+    removerLog(std::format("{} mid_rgba=({},{},{},{}) nz_bytes={} fmt={} {}x{}", tag ? tag : "?",
+                           rgba[mid], rgba[mid + 1], rgba[mid + 2], rgba[mid + 3], nz,
+                           get_format_name(format), width, height));
+}
 
+bool D3d11SharedTexture::mapStagingToRgba8(std::vector<std::uint8_t>& out_rgba, long* out_hr) {
     D3D11_MAPPED_SUBRESOURCE mapped{};
     const HRESULT map_hr = context_->Map(staging_, 0, D3D11_MAP_READ, 0, &mapped);
     if (out_hr) {
@@ -341,6 +354,35 @@ bool D3d11SharedTexture::downloadRgba8(std::vector<std::uint8_t>& out_rgba, long
 
     context_->Unmap(staging_, 0);
     return true;
+}
+
+bool D3d11SharedTexture::downloadRgba8(std::vector<std::uint8_t>& out_rgba, long* out_hr) {
+    if (out_hr) {
+        *out_hr = S_OK;
+    }
+    if (!texture_ || !staging_ || !context_ || width_ == 0 || height_ == 0 || is_target_) {
+        if (out_hr) {
+            *out_hr = E_INVALIDARG;
+        }
+        return false;
+    }
+    context_->CopyResource(staging_, texture_);
+    return mapStagingToRgba8(out_rgba, out_hr);
+}
+
+bool D3d11SharedTexture::downloadTargetRgba8(std::vector<std::uint8_t>& out_rgba, long* out_hr) {
+    if (out_hr) {
+        *out_hr = S_OK;
+    }
+    if (!texture_ || !staging_ || !context_ || width_ == 0 || height_ == 0 || !is_target_ ||
+        format_ != Format::R8G8B8A8_UNORM) {
+        if (out_hr) {
+            *out_hr = E_INVALIDARG;
+        }
+        return false;
+    }
+    context_->CopyResource(staging_, texture_);
+    return mapStagingToRgba8(out_rgba, out_hr);
 }
 
 bool D3d11SharedTexture::uploadRgba8(const std::uint8_t* rgba, std::uint32_t width,
