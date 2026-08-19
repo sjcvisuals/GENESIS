@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 // Shared between ExtGenesisRemover.dll and GenesisRemoverMatteHost.exe.
