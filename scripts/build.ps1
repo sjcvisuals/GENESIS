@@ -344,14 +344,14 @@ if ($CameraDebugOnly) {
     # Release preferred: matches Remover CRT + ships next to onnxruntime.dll in out\.
     $pixeraTargets = @("genesis_remover_camera_debug")
 } elseif ($RemoverOnly) {
-    $pixeraTargets = @("ExtGenesisRemover", "genesis_remover_camera_debug")
+    $pixeraTargets = @("ExtGenesisRemover", "GenesisRemoverMatteHost", "genesis_remover_camera_debug")
 } elseif ($PixeraOnly) {
-    $pixeraTargets = @("ExtGenesis", "ExtGenesisRemover", "genesis_remover_camera_debug")
+    $pixeraTargets = @("ExtGenesis", "ExtGenesisRemover", "GenesisRemoverMatteHost", "genesis_remover_camera_debug")
 } elseif ($EditorOnly) {
     $editorTargets = @("genesis_gltf_viewer")
 } else {
     $editorTargets = @("genesis_gltf_viewer")
-    $pixeraTargets = @("ExtGenesis", "ExtGenesisRemover", "genesis_remover_camera_debug")
+    $pixeraTargets = @("ExtGenesis", "ExtGenesisRemover", "GenesisRemoverMatteHost", "genesis_remover_camera_debug")
 }
 
 Write-Host ""
