@@ -126,8 +126,12 @@ bool MatteHostClient::launchHost() {
     std::wstring cmd = L"\"" + exe.wstring() + L"\"";
     STARTUPINFOW si{};
     si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
     PROCESS_INFORMATION pi{};
-    if (!CreateProcessW(exe.wstring().c_str(), cmd.data(), nullptr, nullptr, FALSE, 0, nullptr,
+    // CREATE_NO_WINDOW: no blank console flash for the matte host.
+    constexpr DWORD kFlags = CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT;
+    if (!CreateProcessW(exe.wstring().c_str(), cmd.data(), nullptr, nullptr, FALSE, kFlags, nullptr,
                         dir.wstring().c_str(), &si, &pi)) {
         removerLog(std::format("MatteHost CreateProcess failed err={}", GetLastError()));
         return false;
@@ -224,7 +228,10 @@ bool MatteHostClient::kickCapture(D3d11SharedTexture& capture, std::uint32_t wid
     h->result_ok = 0;
     ++h->kick_seq;
     SetEvent(static_cast<HANDLE>(kick_event_));
-    removerLog(std::format("MatteHostClient kick seq={} {}x{}", h->kick_seq, width, height));
+    // Throttle: per-kick log + flush tanks matte FPS on disk.
+    if ((h->kick_seq % 30u) == 1u) {
+        removerLog(std::format("MatteHostClient kick seq={} {}x{}", h->kick_seq, width, height));
+    }
     return true;
 }
 
@@ -256,8 +263,10 @@ bool MatteHostClient::tryTakeMatte(std::vector<std::uint8_t>& out_rgba, std::uin
         dbg->nonzero_rgb = h->result_nz;
         dbg->stage = "matte";
     }
-    removerLog(std::format("MatteHostClient took matte seq={} nz={} stage={}", h->done_seq,
-                           h->result_nz, h->stage));
+    if ((h->done_seq % 30u) == 1u) {
+        removerLog(std::format("MatteHostClient took matte seq={} nz={} stage={}", h->done_seq,
+                               h->result_nz, h->stage));
+    }
     return true;
 }
 

@@ -86,9 +86,9 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
     debug_status_ = add_parameter<ParameterString>("debug_status");
     debug_status_->set_property(PropertyNames::name, "Debug Status");
     debug_status_->set_property(PropertyNames::group_name, "Debug");
-    debug_status_->set_value(std::string("v44 live + out-of-process matte host"));
+    debug_status_->set_value(std::string("v45 live + fast oop matte host"));
 
-    removerLog(std::format("Input ctor v44 oop-matte adapter_luid={:016x}", adapter_luid_));
+    removerLog(std::format("Input ctor v45 oop-fast adapter_luid={:016x}", adapter_luid_));
 }
 
 Input::~Input() {
@@ -257,7 +257,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     }
     const bool host_ready = matte_host_ && matte_host_->hostReady();
     const std::string ui =
-        std::format("v44 {} vin={} host={} matte={}", dbg.stage ? dbg.stage : "?",
+        std::format("v45 {} vin={} host={} matte={}", dbg.stage ? dbg.stage : "?",
                     dbg.has_video_in ? 1 : 0, host_ready ? 1 : 0, matte_live_ ? 1 : 0);
     if (debug_status_) {
         debug_status_->set_value(ui);
@@ -307,7 +307,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     ensureMatteHost();
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v44 live + GenesisRemoverMatteHost.exe"));
+        debug_status_->set_value(std::string("v45 live + fast GenesisRemoverMatteHost"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -453,9 +453,9 @@ RenderResult Input::render() noexcept try {
         dbg.stage = "passthrough";
     }
 
-    // Kick out-of-process host: blit Video In -> our capture share (no Flush / no ORT here).
-    constexpr std::uint64_t kFirstKickTick = 90;
-    constexpr std::uint64_t kKickInterval = 120;
+    // Kick host as soon as idle (was ~2s interval — looked like low FPS).
+    constexpr std::uint64_t kFirstKickTick = 30;
+    constexpr std::uint64_t kKickInterval = 2;
     if (matte_host_ && matte_host_->hostReady() && !matte_host_->busy() &&
         render_ticks_ >= kFirstKickTick &&
         (last_capture_kick_tick_ == 0 ||

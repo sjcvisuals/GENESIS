@@ -518,6 +518,10 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
     set_target_properties(GenesisRemoverMatteHost PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/rxExt/ExtGenesisRemover"
     )
+    if(MSVC)
+        # No console window (blank cmd flash). Entry stays main().
+        target_link_options(GenesisRemoverMatteHost PRIVATE "/SUBSYSTEM:WINDOWS" "/ENTRY:mainCRTStartup")
+    endif()
     if(MSVC AND GENESIS_HAS_ONNXRUNTIME)
         target_link_options(GenesisRemoverMatteHost PRIVATE "/DELAYLOAD:onnxruntime.dll")
         target_link_libraries(GenesisRemoverMatteHost PRIVATE delayimp)

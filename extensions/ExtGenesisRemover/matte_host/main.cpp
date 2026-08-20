@@ -219,6 +219,9 @@ struct CaptureState {
 } // namespace
 
 int main() {
+    // Belt-and-suspenders with DLL CREATE_NO_WINDOW: never leave a blank console up.
+    FreeConsole();
+
     wchar_t temp[MAX_PATH]{};
     GetTempPathW(MAX_PATH, temp);
     const std::filesystem::path log_path =
@@ -231,7 +234,7 @@ int main() {
     const std::filesystem::path roots[] = {module_dir, module_dir / "assets"};
     genesis::setAssetSearchRoots(roots);
 
-    logLine("start " + module_dir.string());
+    logLine("start v45-oop-fast " + module_dir.string());
 
     HANDLE mapping = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, L"Local\\GenesisRemoverMatteIpc_v44");
     if (!mapping) {
@@ -276,11 +279,12 @@ int main() {
     genesis::BgRemoverSettings settings;
     settings.backend = genesis::BgRemoverBackend::Auto;
     settings.quality = genesis::BgRemoverQuality::Fast;
-    settings.prefer_cpu_ep = true;
+    // Out-of-process: DML is OK here (in-PIXERA ORT was the freeze). Falls back to CPU.
+    settings.prefer_cpu_ep = false;
     settings.temporal_alpha = 0.20f;
     remover.setSettings(settings);
     std::string status;
-    logLine("BgRemover initialize begin (CPU EP, separate process)");
+    logLine("BgRemover initialize begin (DML preferred, separate process)");
     if (!remover.initialize(&status)) {
         logLine("BgRemover init failed: " + status);
         std::snprintf(hdr->status, sizeof(hdr->status), "%s", status.c_str());
@@ -294,10 +298,11 @@ int main() {
     std::vector<std::uint8_t> scratch_in;
     std::vector<std::uint8_t> scratch_out;
     std::uint64_t last_kick = 0;
+    std::uint64_t frames = 0;
 
     for (;;) {
         HANDLE waits[] = {stop, kick};
-        const DWORD wr = WaitForMultipleObjects(2, waits, FALSE, 200);
+        const DWORD wr = WaitForMultipleObjects(2, waits, FALSE, 50);
         if (wr == WAIT_OBJECT_0) {
             logLine("stop event");
             break;
@@ -310,8 +315,11 @@ int main() {
         const std::uint32_t w = hdr->width;
         const std::uint32_t h = hdr->height;
         const HANDLE cap_handle = reinterpret_cast<HANDLE>(static_cast<uintptr_t>(hdr->capture_handle));
-        logLine("kick seq=" + std::to_string(last_kick) + " " + std::to_string(w) + "x" +
-                std::to_string(h));
+        ++frames;
+        if (frames <= 3u || (frames % 30u) == 1u) {
+            logLine("kick seq=" + std::to_string(last_kick) + " " + std::to_string(w) + "x" +
+                    std::to_string(h));
+        }
 
         if (w == 0 || h == 0 || w > genesis::matte_ipc::kMaxWidth ||
             h > genesis::matte_ipc::kMaxHeight || !cap_handle) {
@@ -324,24 +332,29 @@ int main() {
             continue;
         }
 
-        Sleep(50);
+        // Short settle — DLL does not Flush; 8ms is enough for a blit to retire.
+        Sleep(8);
 
         if (!capture.mapToRgba(scratch_in)) {
             continue;
         }
-        capture.releaseOpened();
+        // Keep the shared capture open across kicks (reopen was killing FPS).
 
         const std::size_t nz = countNz(scratch_in.data(), scratch_in.size());
-        logLine("capture nz=" + std::to_string(nz));
         if (nz == 0) {
+            if (frames <= 5u || (frames % 60u) == 1u) {
+                logLine("capture nz=0");
+            }
             continue;
         }
 
         scratch_out.resize(scratch_in.size());
-        logLine("RVM process begin ep=" + remover.executionProvider());
+        const auto t0 = std::chrono::steady_clock::now();
         const bool ok = remover.process(scratch_in.data(), scratch_out.data(), w, h);
-        logLine(std::string("RVM process end ok=") + (ok ? "1" : "0"));
+        const auto t1 = std::chrono::steady_clock::now();
+        const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
         if (!ok) {
+            logLine("RVM process failed");
             continue;
         }
 
@@ -351,7 +364,10 @@ int main() {
         hdr->result_ok = 1;
         std::snprintf(hdr->stage, sizeof(hdr->stage), "matte");
         hdr->done_seq = last_kick;
-        logLine("matte_ok nz=" + std::to_string(out_nz) + " seq=" + std::to_string(last_kick));
+        if (frames <= 3u || (frames % 30u) == 1u) {
+            logLine("matte_ok nz=" + std::to_string(out_nz) + " infer_ms=" + std::to_string(ms) +
+                    " ep=" + remover.executionProvider());
+        }
     }
 
     capture.releaseAll();

@@ -76,7 +76,10 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v44-oop-matte-20260818
+  remover-timeline-v45-oop-fast-20260820
+
+v45 = v44 OOP matte + faster host kicks (DML preferred, no console window,
+  capture share kept open, kick ASAP when host idle).
 
 v44 = live blit in PIXERA + out-of-process RVM host:
   v43 confirmed live works without ORT. Cutout needs ORT, but ORT-in-process
@@ -89,8 +92,8 @@ v42–v38 = in-process ORT / capture variants (froze).
 v36 = blit-only diagnostic (live proven).
 
 Dump: .\scripts\dump-remover-log.ps1
-Expect stamp v44-oop-matte, host_ready=1, applied host matte, moving lime until cutout.
-Host log: %TEMP%\GenesisRemoverMatteHost.log
+Expect stamp v45-oop-fast, host_ready=1, applied host matte, moving lime until cutout.
+Host log: %TEMP%\GenesisRemoverMatteHost.log (ep=DML or CPU, infer_ms)
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log
