@@ -76,9 +76,25 @@ function Invoke-LoggedNative {
 function Resolve-BuiltExe([string]$Name, [string]$Config) {
     foreach ($c in @(
         (Join-Path $BuildDir "$Config\$Name"),
-        (Join-Path $BuildDir $Name)
+        (Join-Path $BuildDir $Name),
+        # ExtGenesisRemover / MatteHost share RUNTIME_OUTPUT_DIRECTORY rxExt\ExtGenesisRemover
+        (Join-Path $BuildDir "rxExt\ExtGenesisRemover\$Config\$Name"),
+        (Join-Path $BuildDir "rxExt\ExtGenesisRemover\$Name"),
+        (Join-Path $BuildDir "rxExt\ExtGenesis\$Config\$Name"),
+        (Join-Path $BuildDir "rxExt\ExtGenesis\$Name")
     )) {
         if (Test-Path $c) { return (Resolve-Path $c).Path }
+    }
+    # Last resort: recursive search under build\ (MSVC layout can vary).
+    if (Test-Path $BuildDir) {
+        $hit = Get-ChildItem -Path $BuildDir -Recurse -Filter $Name -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match [regex]::Escape($Config) -or $Config -eq "" } |
+            Select-Object -First 1
+        if (-not $hit) {
+            $hit = Get-ChildItem -Path $BuildDir -Recurse -Filter $Name -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+        }
+        if ($hit) { return $hit.FullName }
     }
     return $null
 }
@@ -216,9 +232,15 @@ function Sync-OutFolder {
         New-Item -ItemType Directory -Force -Path $remOut | Out-Null
         Copy-Item -Path $removerDll -Destination (Join-Path $remOut "ExtGenesisRemover.dll") -Force
         $matteHost = Resolve-BuiltExe "GenesisRemoverMatteHost.exe" $PixeraConfig
-        if ($matteHost) {
-            Copy-Item -Path $matteHost -Destination (Join-Path $remOut "GenesisRemoverMatteHost.exe") -Force
+        if (-not $matteHost) {
+            throw @"
+GenesisRemoverMatteHost.exe not found under build\ after compile.
+Expected near: build\rxExt\ExtGenesisRemover\$PixeraConfig\GenesisRemoverMatteHost.exe
+Re-run cmake configure (delete build\CMakeCache.txt if the target is missing), then BUILD-REMOVER.bat.
+"@
         }
+        Write-Host "Matte host built: $matteHost"
+        Copy-Item -Path $matteHost -Destination (Join-Path $remOut "GenesisRemoverMatteHost.exe") -Force
         Sync-Directory (Join-Path $assetsSrc "matting") (Join-Path $remOut "assets\matting")
         Copy-Item -Path (Join-Path $RepoRoot "deploy\GenesisRemover.manifest.json") `
             -Destination (Join-Path $remOut "GenesisRemover.manifest.json") -Force
