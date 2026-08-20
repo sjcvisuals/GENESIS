@@ -178,6 +178,13 @@ bool MatteHostClient::busy() const {
     return h->kick_seq != h->done_seq;
 }
 
+std::string MatteHostClient::hostEp() const {
+    if (!view_) {
+        return {};
+    }
+    return std::string(asHeader(view_)->status);
+}
+
 void MatteHostClient::clearBusyIfStale(std::uint32_t stale_ms) {
     if (!view_ || !busy() || last_kick_tick_ms_ == 0) {
         return;

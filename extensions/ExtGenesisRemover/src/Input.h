@@ -16,7 +16,7 @@
 
 namespace rxext::genesis_remover {
 
-// v47: upright matte (capture unflipped) + half-res capture for FPS.
+// v48: OOP RVM on DirectML GPU bound to PIXERA Adapter LUID.
 // ORT must not load in the PIXERA process (v39–v42 froze the preview).
 class Input : public rxext::InputStream {
 public:

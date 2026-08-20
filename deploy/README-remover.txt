@@ -76,22 +76,19 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v47-oop-orient-20260820
+  remover-timeline-v48-oop-gpu-20260820
+
+v48 = bind DirectML to PIXERA Adapter LUID (not always GPU 0); surface ep=DML:N
+  in logs; Fast capture 640-wide; shorter settle after first good frame.
 
 v47 = upright matte (capture unflipped) + <=960 capture for FPS; adaptive
   settle 50ms then 12ms; dump script ASCII single-quotes only.
 
 v46 = fix v45 busy-stuck: host always acks done_seq on failure; Sleep(50)
-  settle restored (Sleep(8) mapped empty capture); nz=0 remap retry.
-
-v45 = v44 OOP matte + faster host kicks (DML preferred, no console window,
-  capture share kept open, kick ASAP when host idle). Broke cutout when
-  settle was too short (nz=0 left kick unacked).
-
-v44 = live blit in PIXERA + out-of-process RVM host.
+  settle restored.
 
 Dump: .\scripts\dump-remover-log.ps1
-Expect stamp v47-oop-orient, upright cutout, host ~fps= and size=960x...
+Expect stamp v48-oop-gpu, STATUS ep=DML:N, host matte_ok ~fps=
 Host log: %TEMP%\GenesisRemoverMatteHost.log
 
 Open diagnostics:

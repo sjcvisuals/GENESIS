@@ -30,7 +30,7 @@ if (Test-Path -LiteralPath $hostLog) {
 }
 
 Write-Host ''
-Write-Host 'Expect stamp remover-timeline-v47-oop-orient-...'
-Write-Host 'DLL: applied host matte, stage=matte, not stuck busy=1'
-Write-Host 'Host: ep=DML (or CPU), matte_ok, infer_ms, cycle_ms'
+Write-Host 'Expect stamp remover-timeline-v48-oop-gpu-...'
+Write-Host 'DLL STATUS should show ep=DML:N (GPU). ep=CPU means DirectML.dll/ORT DML build missing.'
+Write-Host 'Host: BgRemover ready ep=DML:N, matte_ok infer_ms, ~fps='
 Write-Host 'Adapter LUID = PREVIEW engine GPU when testing preview.'

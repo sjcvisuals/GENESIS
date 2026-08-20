@@ -47,6 +47,35 @@ LUID toLuid(std::uint64_t value) {
     return luid;
 }
 
+// DML device_id matches IDXGIFactory::EnumAdapters order (not EnumAdapters1).
+int findDmlDeviceId(std::uint64_t want_luid) {
+    IDXGIFactory* factory = nullptr;
+    if (FAILED(CreateDXGIFactory(__uuidof(IDXGIFactory), reinterpret_cast<void**>(&factory))) ||
+        !factory) {
+        logLine("CreateDXGIFactory failed for DML device enum");
+        return -1;
+    }
+    int matched = -1;
+    IDXGIAdapter* adapter = nullptr;
+    for (UINT i = 0; factory->EnumAdapters(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i) {
+        DXGI_ADAPTER_DESC desc{};
+        adapter->GetDesc(&desc);
+        const std::uint64_t luid =
+            (static_cast<std::uint64_t>(static_cast<std::uint32_t>(desc.AdapterLuid.HighPart)) << 32) |
+            desc.AdapterLuid.LowPart;
+        char name[128]{};
+        WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, name, sizeof(name), nullptr, nullptr);
+        logLine("DXGI adapter[" + std::to_string(i) + "] luid=" + std::to_string(luid) + " " + name);
+        if (want_luid != 0 && luid == want_luid) {
+            matched = static_cast<int>(i);
+        }
+        adapter->Release();
+        adapter = nullptr;
+    }
+    factory->Release();
+    return matched;
+}
+
 IDXGIAdapter1* findAdapter(IDXGIFactory1& factory, LUID want) {
     IDXGIAdapter1* adapter = nullptr;
     for (UINT i = 0; factory.EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i) {
@@ -234,7 +263,7 @@ int main() {
     const std::filesystem::path roots[] = {module_dir, module_dir / "assets"};
     genesis::setAssetSearchRoots(roots);
 
-    logLine("start v47-oop-orient " + module_dir.string());
+    logLine("start v48-oop-gpu " + module_dir.string());
 
     HANDLE mapping = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, L"Local\\GenesisRemoverMatteIpc_v44");
     if (!mapping) {
@@ -275,25 +304,38 @@ int main() {
     }
     hdr->host_pid = GetCurrentProcessId();
 
+    // Wait briefly for DLL to publish Adapter LUID (set before CreateProcess, usually ready).
+    for (int i = 0; i < 50 && hdr->adapter_luid == 0; ++i) {
+        Sleep(10);
+    }
+    const int dml_id = findDmlDeviceId(hdr->adapter_luid);
+    logLine("PIXERA adapter_luid=" + std::to_string(hdr->adapter_luid) +
+            " -> preferred DML device_id=" + std::to_string(dml_id));
+
     genesis::BgRemover remover;
     genesis::BgRemoverSettings settings;
     settings.backend = genesis::BgRemoverBackend::Auto;
     settings.quality = genesis::BgRemoverQuality::Fast;
-    // Out-of-process: DML is OK here (in-PIXERA ORT was the freeze). Falls back to CPU.
+    // Out-of-process: DirectML GPU is the intended path (in-PIXERA ORT froze preview).
     settings.prefer_cpu_ep = false;
-    settings.temporal_alpha = 0.15f;
-    // Stronger downsample on top of Fast for realtime PIXERA preview.
-    settings.rvm_downsample = 0.18f;
+    settings.dml_device_id = dml_id;
+    settings.adapter_luid = hdr->adapter_luid;
+    settings.temporal_alpha = 0.12f;
+    settings.rvm_downsample = 0.16f;
     remover.setSettings(settings);
     std::string status;
-    logLine("BgRemover initialize begin (DML preferred, separate process)");
+    logLine("BgRemover initialize begin (DirectML GPU preferred)");
     if (!remover.initialize(&status)) {
         logLine("BgRemover init failed: " + status);
         std::snprintf(hdr->status, sizeof(hdr->status), "%s", status.c_str());
         return 2;
     }
-    logLine("BgRemover ready ep=" + remover.executionProvider() + " " + status);
-    std::snprintf(hdr->status, sizeof(hdr->status), "%s", status.c_str());
+    const std::string ep = remover.executionProvider();
+    logLine("BgRemover ready ep=" + ep + " " + status);
+    if (ep.rfind("DML", 0) != 0) {
+        logLine("WARNING: running on CPU — check DirectML.dll + onnxruntime DirectML build next to host");
+    }
+    std::snprintf(hdr->status, sizeof(hdr->status), "%s", ep.c_str());
     hdr->host_ready = 1;
 
     CaptureState capture;
@@ -345,10 +387,10 @@ int main() {
             continue;
         }
 
-    // Cross-process shared blit needs settle time (v45 Sleep(8) -> nz=0).
-    // After first good frame, shorten settle for FPS (~8fps was Sleep(50)+1080p Map).
+    // Cross-process shared blit settle. mapToRgba already waits on a GPU event query.
+    // After first good frame keep settle tiny — 12ms+ was a big chunk of ~8fps.
     static bool s_had_good = false;
-    Sleep(s_had_good ? 12 : 50);
+    Sleep(s_had_good ? 4 : 40);
 
     if (!capture.mapToRgba(scratch_in)) {
         failKick("map_failed");
@@ -388,7 +430,8 @@ int main() {
     hdr->done_seq = last_kick;
     s_had_good = true;
     if (frames <= 3u || (frames % 30u) == 1u) {
-        const double fps = ms > 1.0 ? (1000.0 / (ms + (s_had_good ? 12.0 : 50.0))) : 0.0;
+        const double settle = s_had_good ? 4.0 : 40.0;
+        const double fps = ms > 1.0 ? (1000.0 / (ms + settle)) : 0.0;
         logLine("matte_ok nz=" + std::to_string(out_nz) + " infer_ms=" + std::to_string(ms) +
                 " ep=" + remover.executionProvider() + " in_nz=" + std::to_string(nz) +
                 " size=" + std::to_string(w) + "x" + std::to_string(h) +

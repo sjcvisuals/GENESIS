@@ -125,7 +125,8 @@ bool BgRemover::tryInitRvm(std::string* out_status) {
         rvm_ = new RvmState();
     }
     std::string error;
-    if (!rvm_->session.load(settings_.model_path, &error, settings_.prefer_cpu_ep)) {
+    if (!rvm_->session.load(settings_.model_path, &error, settings_.prefer_cpu_ep,
+                            settings_.dml_device_id, settings_.adapter_luid)) {
         if (out_status) {
             *out_status = error;
         }

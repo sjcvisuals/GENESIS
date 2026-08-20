@@ -86,9 +86,9 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
     debug_status_ = add_parameter<ParameterString>("debug_status");
     debug_status_->set_property(PropertyNames::name, "Debug Status");
     debug_status_->set_property(PropertyNames::group_name, "Debug");
-    debug_status_->set_value(std::string("v47 upright + faster oop matte"));
+    debug_status_->set_value(std::string("v48 DirectML GPU oop matte"));
 
-    removerLog(std::format("Input ctor v47 oop-orient adapter_luid={:016x}", adapter_luid_));
+    removerLog(std::format("Input ctor v48 oop-gpu adapter_luid={:016x}", adapter_luid_));
 }
 
 Input::~Input() {
@@ -257,8 +257,9 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     }
     const bool host_ready = matte_host_ && matte_host_->hostReady();
     const std::string ui =
-        std::format("v47 {} vin={} host={} matte={}", dbg.stage ? dbg.stage : "?",
-                    dbg.has_video_in ? 1 : 0, host_ready ? 1 : 0, matte_live_ ? 1 : 0);
+        std::format("v48 {} vin={} host={} matte={} ep={}", dbg.stage ? dbg.stage : "?",
+                    dbg.has_video_in ? 1 : 0, host_ready ? 1 : 0, matte_live_ ? 1 : 0,
+                    matte_host_ ? matte_host_->hostEp() : "?");
     if (debug_status_) {
         debug_status_->set_value(ui);
     }
@@ -269,10 +270,11 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
         const std::uint64_t sync_n = d3d_ ? d3d_->syncCallbacks() : 0;
         removerLog(std::format(
             "STATUS stage={} vin={} dl={} nz={} mid=({},{},{},{}) {}x{} matte={} host={} "
-            "luid={:016x} fence={}/{} sync={}",
+            "ep={} luid={:016x} fence={}/{} sync={}",
             dbg.stage ? dbg.stage : "?", dbg.has_video_in ? 1 : 0, dbg.download_ok ? 1 : 0,
             dbg.nonzero_rgb, dbg.mid_r, dbg.mid_g, dbg.mid_b, dbg.mid_a, dbg.width, dbg.height,
-            dbg.matte_copied ? 1 : 0, host_ready ? 1 : 0, adapter_luid_, fence_done, fence_c,
+            dbg.matte_copied ? 1 : 0, host_ready ? 1 : 0,
+            matte_host_ ? matte_host_->hostEp() : "?", adapter_luid_, fence_done, fence_c,
             sync_n));
     }
 }
@@ -307,7 +309,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     ensureMatteHost();
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v47 upright + faster oop matte"));
+        debug_status_->set_value(std::string("v48 DirectML GPU oop matte"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -465,7 +467,10 @@ RenderResult Input::render() noexcept try {
         (last_capture_kick_tick_ == 0 ||
          render_ticks_ - last_capture_kick_tick_ >= kKickInterval) &&
         d3d_capture_share_ && d3d_capture_share_->rtv() && width_ >= 16 && height_ >= 16) {
-        const std::uint32_t cap_w = width_ > 960u ? 960u : width_;
+        const std::uint32_t max_cap_w = (quality_ && quality_->value() >= 2) ? 1280u
+                                          : (quality_ && quality_->value() == 1) ? 960u
+                                                                                : 640u;
+        const std::uint32_t cap_w = width_ > max_cap_w ? max_cap_w : width_;
         const std::uint32_t cap_h =
             static_cast<std::uint32_t>((static_cast<std::uint64_t>(height_) * cap_w) / width_);
         if (cap_h == 0) {

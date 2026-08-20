@@ -14,6 +14,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 namespace genesis {
 
@@ -157,7 +158,7 @@ void RvmOnnxSession::reset() {
 }
 
 bool RvmOnnxSession::load(const std::filesystem::path& model_path, std::string* out_error,
-                          bool prefer_cpu) {
+                          bool prefer_cpu, int dml_device_id, std::uint64_t adapter_luid) {
     delete impl_;
     impl_ = nullptr;
     ready_ = false;
@@ -193,28 +194,58 @@ bool RvmOnnxSession::load(const std::filesystem::path& model_path, std::string* 
 
 #if defined(_WIN32) && defined(GENESIS_HAS_ORT_DIRECTML)
         if (!prefer_cpu) {
-            Ort::SessionOptions dml_opts;
-            dml_opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-            dml_opts.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
-            dml_opts.DisableMemPattern();
-            dml_opts.SetIntraOpNumThreads(1);
-            dml_opts.SetInterOpNumThreads(1);
-            try {
-                std::unordered_map<std::string, std::string> provider_options{{"device_id", "0"}};
-                dml_opts.AppendExecutionProvider("DML", provider_options);
-                if (try_create(dml_opts, "DML")) {
-                    ready_ = true;
-                    if (out_error) {
-                        *out_error = "rvm-onnx DML loaded: " + model_path.string();
-                    }
-                    return true;
+            // Build candidate DXGI adapter indices. device_id 0 is often the iGPU on laptops;
+            // PIXERA Adapter LUID usually points at the discrete / preview GPU.
+            std::vector<int> candidates;
+            auto push_unique = [&](int id) {
+                if (id < 0) {
+                    return;
                 }
-            } catch (const std::exception& ex) {
-                dml_err = ex.what();
+                for (int c : candidates) {
+                    if (c == id) {
+                        return;
+                    }
+                }
+                candidates.push_back(id);
+            };
+            if (dml_device_id >= 0) {
+                push_unique(dml_device_id);
+            }
+            (void)adapter_luid; // resolved by caller into dml_device_id when possible
+            for (int id = 0; id < 8; ++id) {
+                push_unique(id);
+            }
+
+            for (int id : candidates) {
+                Ort::SessionOptions dml_opts;
+                dml_opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+                dml_opts.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
+                dml_opts.DisableMemPattern();
+                dml_opts.SetIntraOpNumThreads(1);
+                dml_opts.SetInterOpNumThreads(1);
+                try {
+                    std::unordered_map<std::string, std::string> provider_options{
+                        {"device_id", std::to_string(id)},
+                        {"performance_preference", "high_performance"},
+                    };
+                    dml_opts.AppendExecutionProvider("DML", provider_options);
+                    const std::string label = "DML:" + std::to_string(id);
+                    if (try_create(dml_opts, label.c_str())) {
+                        ready_ = true;
+                        if (out_error) {
+                            *out_error = "rvm-onnx " + label + " loaded: " + model_path.string();
+                        }
+                        return true;
+                    }
+                } catch (const std::exception& ex) {
+                    dml_err = ex.what();
+                }
             }
         }
 #else
         (void)prefer_cpu;
+        (void)dml_device_id;
+        (void)adapter_luid;
 #endif
 
         const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
@@ -238,7 +269,7 @@ bool RvmOnnxSession::load(const std::filesystem::path& model_path, std::string* 
             } else if (!dml_err.empty()) {
                 *out_error = "rvm-onnx CPU loaded (DML failed: " + dml_err + "): " + model_path.string();
             } else {
-                *out_error = "rvm-onnx CPU loaded: " + model_path.string();
+                *out_error = "rvm-onnx CPU loaded (DML unavailable): " + model_path.string();
             }
         }
         return true;
@@ -361,7 +392,8 @@ namespace genesis {
 
 RvmOnnxSession::~RvmOnnxSession() = default;
 
-bool RvmOnnxSession::load(const std::filesystem::path&, std::string* out_error) {
+bool RvmOnnxSession::load(const std::filesystem::path&, std::string* out_error, bool, int,
+                          std::uint64_t) {
     if (out_error) {
         *out_error = "ONNX Runtime not enabled (GENESIS_ENABLE_ONNXRUNTIME=OFF)";
     }

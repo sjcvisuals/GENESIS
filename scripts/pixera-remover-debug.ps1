@@ -4,21 +4,20 @@
 $ErrorActionPreference = 'Continue'
 Write-Host @'
 
-GENESIS Remover v47 - upright + faster OOP matte
-================================================
-v46 cutout worked but was upside-down (~8fps on 1080p Map).
-
-v47:
-  capture blit without V-flip (matte was flipped twice)
-  capture at max 960 wide (cheaper Map+RVM)
-  adaptive host settle (50ms then 12ms)
-  dump script uses ASCII single-quoted strings only
+GENESIS Remover v48 - DirectML GPU matte host
+=============================================
+RVM should run on GPU via DirectML in GenesisRemoverMatteHost.exe
+(not inside PIXERA). Bind DML to the PIXERA Adapter LUID.
 
 Expect:
-  stamp remover-timeline-v47-oop-orient-*
-  upright cutout
-  host matte_ok with size=960x540 (or similar) and ~fps=
-  dump-remover-log.ps1 runs without string terminator errors
+  stamp remover-timeline-v48-oop-gpu-*
+  host: BgRemover ready ep=DML:N  (NOT ep=CPU)
+  DLL STATUS ep=DML:N
+  DirectML.dll next to the host exe
+  faster cutout (640-wide Fast capture + shorter settle)
+
+If ep=CPU: rebuild/install so onnxruntime DirectML build + DirectML.dll
+sit next to GenesisRemoverMatteHost.exe.
 
 1) Quit PIXERA completely
 2) git pull

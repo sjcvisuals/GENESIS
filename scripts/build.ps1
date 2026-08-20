@@ -265,7 +265,7 @@ Re-run cmake configure (delete build\CMakeCache.txt if the target is missing), t
         }
 
         $stamp = @"
-build=remover-timeline-v47-oop-orient-20260820
+build=remover-timeline-v48-oop-gpu-20260820
 dll=$remOut\ExtGenesisRemover.dll
 host=$remOut\GenesisRemoverMatteHost.exe
 time=$(Get-Date -Format o)

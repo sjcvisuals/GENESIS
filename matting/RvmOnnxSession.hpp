@@ -26,11 +26,12 @@ public:
 
     // prefer_cpu=true skips DirectML (required inside PIXERA: DML on the preview GPU
     // freezes Video In / shared output blit while the model loads / runs).
+    // dml_device_id: DXGI adapter index for DML (-1 = auto). adapter_luid: prefer matching GPU.
     bool load(const std::filesystem::path& model_path, std::string* out_error = nullptr,
-              bool prefer_cpu = false);
+              bool prefer_cpu = false, int dml_device_id = -1, std::uint64_t adapter_luid = 0);
     bool ready() const { return ready_; }
     void reset();
-    // "DML" / "CPU" / empty before load.
+    // "DML" / "CPU" / empty before load. After DML: may be "DML:0" etc.
     const std::string& executionProvider() const { return ep_name_; }
 
     // in_rgba: full-res RGBA8. Writes soft alpha [0,1] into out_alpha (width*height).

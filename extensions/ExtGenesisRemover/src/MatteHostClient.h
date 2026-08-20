@@ -35,6 +35,8 @@ public:
     bool busy() const;
     // If host wedged (kick never acked), clear local busy so we can kick again.
     void clearBusyIfStale(std::uint32_t stale_ms = 1500);
+    // Host writes ep name into IPC status (e.g. "DML:1" or "CPU").
+    std::string hostEp() const;
 
 private:
     bool openIpc();
