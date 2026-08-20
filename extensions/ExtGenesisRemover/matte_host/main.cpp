@@ -48,6 +48,7 @@ LUID toLuid(std::uint64_t value) {
 }
 
 // DML device_id matches IDXGIFactory::EnumAdapters order (not EnumAdapters1).
+// Logs every adapter; returns index matching want_luid (or -1).
 int findDmlDeviceId(std::uint64_t want_luid) {
     IDXGIFactory* factory = nullptr;
     if (FAILED(CreateDXGIFactory(__uuidof(IDXGIFactory), reinterpret_cast<void**>(&factory))) ||
@@ -56,6 +57,10 @@ int findDmlDeviceId(std::uint64_t want_luid) {
         return -1;
     }
     int matched = -1;
+    std::string matched_name;
+    int nvidia_id = -1;
+    std::string nvidia_name;
+    std::uint64_t nvidia_luid = 0;
     IDXGIAdapter* adapter = nullptr;
     for (UINT i = 0; factory->EnumAdapters(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i) {
         DXGI_ADAPTER_DESC desc{};
@@ -65,14 +70,62 @@ int findDmlDeviceId(std::uint64_t want_luid) {
             desc.AdapterLuid.LowPart;
         char name[128]{};
         WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, name, sizeof(name), nullptr, nullptr);
-        logLine("DXGI adapter[" + std::to_string(i) + "] luid=" + std::to_string(luid) + " " + name);
+        char hex[32]{};
+        std::snprintf(hex, sizeof(hex), "%016llx", static_cast<unsigned long long>(luid));
+        logLine(std::string("DXGI adapter[") + std::to_string(i) + "] luid_hex=" + hex +
+                " luid_dec=" + std::to_string(luid) + " " + name);
+        const std::string name_s = name;
+        std::string lower = name_s;
+        for (char& c : lower) {
+            if (c >= 'A' && c <= 'Z') {
+                c = static_cast<char>(c - 'A' + 'a');
+            }
+        }
+        if (lower.find("nvidia") != std::string::npos || lower.find("geforce") != std::string::npos ||
+            lower.find("quadro") != std::string::npos || lower.find("rtx") != std::string::npos) {
+            nvidia_id = static_cast<int>(i);
+            nvidia_name = name_s;
+            nvidia_luid = luid;
+        }
         if (want_luid != 0 && luid == want_luid) {
             matched = static_cast<int>(i);
+            matched_name = name_s;
         }
         adapter->Release();
         adapter = nullptr;
     }
     factory->Release();
+
+    if (matched >= 0) {
+        char hex[32]{};
+        std::snprintf(hex, sizeof(hex), "%016llx", static_cast<unsigned long long>(want_luid));
+        logLine(std::string("ACTIVE GPU (PIXERA Adapter LUID match): DML:") + std::to_string(matched) +
+                " luid_hex=" + hex + " " + matched_name);
+        std::string lower = matched_name;
+        for (char& c : lower) {
+            if (c >= 'A' && c <= 'Z') {
+                c = static_cast<char>(c - 'A' + 'a');
+            }
+        }
+        const bool on_igpu = lower.find("amd") != std::string::npos ||
+                             lower.find("radeon(tm) graphics") != std::string::npos ||
+                             lower.find("intel") != std::string::npos;
+        if (on_igpu && nvidia_id >= 0) {
+            char nhex[32]{};
+            std::snprintf(nhex, sizeof(nhex), "%016llx", static_cast<unsigned long long>(nvidia_luid));
+            logLine(std::string("NOTE: Remover is on iGPU/APU, not NVIDIA. To use ") + nvidia_name +
+                    ", set PIXERA preview + Remover Adapter LUID to " + nhex +
+                    " (DML:" + std::to_string(nvidia_id) + ")");
+        }
+    } else {
+        logLine("ACTIVE GPU: no LUID match yet (will try DML device_id cascade)");
+        if (nvidia_id >= 0) {
+            char nhex[32]{};
+            std::snprintf(nhex, sizeof(nhex), "%016llx", static_cast<unsigned long long>(nvidia_luid));
+            logLine(std::string("NVIDIA seen at DML:") + std::to_string(nvidia_id) +
+                    " luid_hex=" + nhex + " " + nvidia_name);
+        }
+    }
     return matched;
 }
 

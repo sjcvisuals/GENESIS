@@ -7,6 +7,23 @@ $ErrorActionPreference = 'Continue'
 $log = Join-Path $env:TEMP 'ExtGenesisRemover.log'
 $hostLog = Join-Path $env:TEMP 'GenesisRemoverMatteHost.log'
 
+Write-Host '=== Which GPU is Remover using? ==='
+if (Test-Path -LiteralPath $hostLog) {
+    $gpuLines = Select-String -LiteralPath $hostLog -Pattern 'DXGI adapter\[|ACTIVE GPU|NOTE: Remover|preferred DML|BgRemover ready ep=' |
+        Select-Object -Last 40
+    if ($gpuLines) {
+        $gpuLines | ForEach-Object { Write-Host $_.Line }
+    } else {
+        Write-Host 'No GPU lines yet - start Live Input once, then re-run this script.'
+    }
+} else {
+    Write-Host ('MISSING host log: ' + $hostLog)
+}
+Write-Host ''
+Write-Host 'To use NVIDIA: set PIXERA preview engine + Remover Adapter LUID to the NVIDIA luid_hex above.'
+Write-Host 'Shared textures require Remover and PIXERA on the SAME GPU.'
+Write-Host ''
+
 Write-Host '=== ExtGenesisRemover.log ==='
 Write-Host ('path: ' + $log)
 if (Test-Path -LiteralPath $log) {
