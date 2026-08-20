@@ -16,7 +16,7 @@
 
 namespace rxext::genesis_remover {
 
-// v45: live blit in PIXERA + fast out-of-process RVM (GenesisRemoverMatteHost.exe).
+// v46: live blit in PIXERA + OOP RVM (settle + always-ack failed kicks).
 // ORT must not load in the PIXERA process (v39–v42 froze the preview).
 class Input : public rxext::InputStream {
 public:

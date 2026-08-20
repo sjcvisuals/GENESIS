@@ -178,6 +178,22 @@ bool MatteHostClient::busy() const {
     return h->kick_seq != h->done_seq;
 }
 
+void MatteHostClient::clearBusyIfStale(std::uint32_t stale_ms) {
+    if (!view_ || !busy() || last_kick_tick_ms_ == 0) {
+        return;
+    }
+    const std::uint32_t now = GetTickCount();
+    if (now - last_kick_tick_ms_ < stale_ms) {
+        return;
+    }
+    auto* h = asHeader(view_);
+    removerLog(std::format("MatteHostClient stale busy kick={} done={} — acking locally",
+                           h->kick_seq, h->done_seq));
+    h->result_ok = 0;
+    h->done_seq = h->kick_seq;
+    last_kick_tick_ms_ = 0;
+}
+
 bool MatteHostClient::duplicateCaptureHandle(void* local_nt_handle) {
     if (!local_nt_handle || !host_process_ || !view_) {
         return false;
@@ -228,6 +244,7 @@ bool MatteHostClient::kickCapture(D3d11SharedTexture& capture, std::uint32_t wid
     h->result_ok = 0;
     ++h->kick_seq;
     SetEvent(static_cast<HANDLE>(kick_event_));
+    last_kick_tick_ms_ = GetTickCount();
     // Throttle: per-kick log + flush tanks matte FPS on disk.
     if ((h->kick_seq % 30u) == 1u) {
         removerLog(std::format("MatteHostClient kick seq={} {}x{}", h->kick_seq, width, height));

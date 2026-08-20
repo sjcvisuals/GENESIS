@@ -167,7 +167,7 @@ try {
     Write-Host "In PIXERA:" -ForegroundColor Green
     Write-Host "  Re-import:"
     Write-Host "    $(Join-Path $dest 'ExtGenesisRemover.dll')"
-    Write-Host "  Stamp must be: remover-timeline-v45-oop-fast-20260820"
+    Write-Host "  Stamp must be: remover-timeline-v46-oop-settle-20260820"
     Write-Host "  Matte host auto-launches; log: %TEMP%\GenesisRemoverMatteHost.log"
     Write-Host ("Install log: {0}" -f $LogPath)
     exit 0

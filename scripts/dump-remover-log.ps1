@@ -30,7 +30,7 @@ if (Test-Path -LiteralPath $hostLog) {
 }
 
 Write-Host ""
-Write-Host "Expect stamp remover-timeline-v45-oop-fast-..."
-Write-Host "DLL:  matte host alive, matte_applied=1, matte_nz>0"
-Write-Host "Host: ep=DML (or CPU), infer_ms, process kick complete"
+Write-Host "Expect stamp remover-timeline-v46-oop-settle-..."
+Write-Host "DLL:  matte host alive, applied host matte, matte_nz>0 (not stuck busy=1)"
+Write-Host "Host: ep=DML (or CPU), matte_ok / infer_ms — NOT stuck on capture_nz0 without ack"
 Write-Host "Adapter LUID = PREVIEW engine GPU when testing preview."

@@ -234,7 +234,7 @@ int main() {
     const std::filesystem::path roots[] = {module_dir, module_dir / "assets"};
     genesis::setAssetSearchRoots(roots);
 
-    logLine("start v45-oop-fast " + module_dir.string());
+    logLine("start v46-oop-settle " + module_dir.string());
 
     HANDLE mapping = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, L"Local\\GenesisRemoverMatteIpc_v44");
     if (!mapping) {
@@ -300,6 +300,16 @@ int main() {
     std::uint64_t last_kick = 0;
     std::uint64_t frames = 0;
 
+    // ALWAYS advance done_seq on failure. If we leave kick_seq != done_seq, the DLL
+    // stays busy=1 forever and never kicks again (v45 regression: nz=0 -> no cutout).
+    auto failKick = [&](const char* reason) {
+        logLine(std::string("kick fail: ") + reason);
+        hdr->result_ok = 0;
+        hdr->result_nz = 0;
+        std::snprintf(hdr->stage, sizeof(hdr->stage), "%s", reason);
+        hdr->done_seq = last_kick;
+    };
+
     for (;;) {
         HANDLE waits[] = {stop, kick};
         const DWORD wr = WaitForMultipleObjects(2, waits, FALSE, 50);
@@ -323,28 +333,37 @@ int main() {
 
         if (w == 0 || h == 0 || w > genesis::matte_ipc::kMaxWidth ||
             h > genesis::matte_ipc::kMaxHeight || !cap_handle) {
-            logLine("bad kick params");
+            failKick("bad_params");
             continue;
         }
 
         if (!capture.ensureDevice(hdr->adapter_luid) ||
             !capture.openCapture(cap_handle, w, h)) {
+            failKick("open_capture");
             continue;
         }
 
-        // Short settle — DLL does not Flush; 8ms is enough for a blit to retire.
-        Sleep(8);
+        // Cross-process shared blit needs settle time (v45 Sleep(8) -> nz=0).
+        // No Flush on PIXERA device — host sleeps + event query in mapToRgba.
+        Sleep(50);
 
         if (!capture.mapToRgba(scratch_in)) {
+            failKick("map_failed");
             continue;
         }
-        // Keep the shared capture open across kicks (reopen was killing FPS).
 
-        const std::size_t nz = countNz(scratch_in.data(), scratch_in.size());
+        std::size_t nz = countNz(scratch_in.data(), scratch_in.size());
         if (nz == 0) {
-            if (frames <= 5u || (frames % 60u) == 1u) {
-                logLine("capture nz=0");
+            // One retry after extra settle (first kick after DML init is often empty).
+            Sleep(50);
+            if (!capture.mapToRgba(scratch_in)) {
+                failKick("map_retry_failed");
+                continue;
             }
+            nz = countNz(scratch_in.data(), scratch_in.size());
+        }
+        if (nz == 0) {
+            failKick("capture_nz0");
             continue;
         }
 
@@ -354,7 +373,7 @@ int main() {
         const auto t1 = std::chrono::steady_clock::now();
         const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
         if (!ok) {
-            logLine("RVM process failed");
+            failKick("rvm_failed");
             continue;
         }
 
@@ -366,7 +385,7 @@ int main() {
         hdr->done_seq = last_kick;
         if (frames <= 3u || (frames % 30u) == 1u) {
             logLine("matte_ok nz=" + std::to_string(out_nz) + " infer_ms=" + std::to_string(ms) +
-                    " ep=" + remover.executionProvider());
+                    " ep=" + remover.executionProvider() + " in_nz=" + std::to_string(nz));
         }
     }
 

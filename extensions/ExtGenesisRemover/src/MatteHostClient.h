@@ -33,6 +33,8 @@ public:
     bool tryTakeMatte(std::vector<std::uint8_t>& out_rgba, std::uint32_t& out_w, std::uint32_t& out_h,
                       ::genesis::RemoverFrameDebug* dbg);
     bool busy() const;
+    // If host wedged (kick never acked), clear local busy so we can kick again.
+    void clearBusyIfStale(std::uint32_t stale_ms = 1500);
 
 private:
     bool openIpc();
@@ -48,6 +50,7 @@ private:
     std::uint64_t adapter_luid_ = 0;
     std::uint64_t last_done_seq_ = 0;
     std::uint64_t last_dup_handle_ = 0;
+    std::uint32_t last_kick_tick_ms_ = 0;
     int quality_ = 0;
     bool started_ = false;
 };

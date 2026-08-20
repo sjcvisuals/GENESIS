@@ -4,20 +4,23 @@
 $ErrorActionPreference = "Continue"
 Write-Host @"
 
-GENESIS Remover v45 - faster out-of-process matte
-=================================================
-PIXERA DLL: live blit, no ORT, no console host window.
-MatteHost: DML preferred, kicks ASAP when idle, keeps capture open.
+GENESIS Remover v46 - OOP matte settle + ack
+===========================================
+v45 broke cutout: Sleep(8) -> capture nz=0, host never acked done_seq,
+DLL stuck busy=1 forever (live camera + lime only).
+
+v46: host Sleep(50) + nz=0 remap retry; ALWAYS set done_seq on failure;
+DLL clears stale busy after 2s.
 
 Expect:
-  no blank console window
-  smoother cutout FPS
-  host log shows ep=DML (or CPU) and infer_ms
+  stamp remover-timeline-v46-oop-settle-*
+  host matte_ok (not stuck on capture_nz0 without further kicks)
+  DLL applied host matte / stage=matte
 
 1) Quit PIXERA completely
 2) git pull
 3) BUILD-REMOVER.bat
-4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v45-oop-fast-*)
+4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v46-oop-settle-*)
 5) Re-import ExtGenesisRemover.dll
 6) Adapter LUID = preview GPU; drag Live Input
 7) Dump log
