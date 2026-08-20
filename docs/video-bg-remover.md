@@ -91,17 +91,16 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for `STATUS stage=` lines and stamp `remover-timeline-v48-oop-gpu-*`.
+Look for `STATUS stage=` lines and stamp `remover-timeline-v49-live-mask-*`.
 
 | Colour / stage | Meaning |
 |----------------|---------|
 | cyan / `waiting_video_in` | Video In slot empty — drag Live Input in |
 | `passthrough` | live blit (lime moving; waiting on matte host) |
-| `matte` | person cutout from out-of-process host |
+| `matte` | live camera gated by OOP matte alpha |
 
-v48: RVM runs on **DirectML GPU** in `GenesisRemoverMatteHost.exe`, bound to the
-PIXERA Adapter LUID. DLL `STATUS` shows `ep=DML:N`. If you see `ep=CPU`,
-`DirectML.dll` / ORT DirectML build is missing next to the host.
+v49: GPU matte confirmed (`ep=DML`). Preview composites **live Video In** with the
+latest alpha so motion stays smooth while the silhouette updates at `matte_fps`.
 
 Also check `%TEMP%\GenesisRemoverMatteHost.log`.
 Checklist: `.\scripts\pixera-remover-debug.ps1`

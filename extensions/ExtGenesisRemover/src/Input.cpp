@@ -86,9 +86,9 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
     debug_status_ = add_parameter<ParameterString>("debug_status");
     debug_status_->set_property(PropertyNames::name, "Debug Status");
     debug_status_->set_property(PropertyNames::group_name, "Debug");
-    debug_status_->set_value(std::string("v48 DirectML GPU oop matte"));
+    debug_status_->set_value(std::string("v49 live+mask (GPU matte)"));
 
-    removerLog(std::format("Input ctor v48 oop-gpu adapter_luid={:016x}", adapter_luid_));
+    removerLog(std::format("Input ctor v49 live-mask adapter_luid={:016x}", adapter_luid_));
 }
 
 Input::~Input() {
@@ -257,7 +257,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     }
     const bool host_ready = matte_host_ && matte_host_->hostReady();
     const std::string ui =
-        std::format("v48 {} vin={} host={} matte={} ep={}", dbg.stage ? dbg.stage : "?",
+        std::format("v49 {} vin={} host={} matte={} ep={}", dbg.stage ? dbg.stage : "?",
                     dbg.has_video_in ? 1 : 0, host_ready ? 1 : 0, matte_live_ ? 1 : 0,
                     matte_host_ ? matte_host_->hostEp() : "?");
     if (debug_status_) {
@@ -309,7 +309,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     ensureMatteHost();
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v48 DirectML GPU oop matte"));
+        debug_status_->set_value(std::string("v49 live+mask (GPU matte)"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -435,9 +435,11 @@ RenderResult Input::render() noexcept try {
         }
     }
 
-    if (matte_live_ && d3d_matte_tex_ && d3d_matte_tex_->srv()) {
-        passthrough_->draw(d3d_->context(), d3d_matte_tex_->srv(), d3d_output_->rtv(), width_,
-                           height_, /*flip_v=*/true);
+    if (matte_live_ && d3d_matte_tex_ && d3d_matte_tex_->srv() && d3d_video_in_->srv()) {
+        // Live Video In every present; matte alpha updates ~15fps — feels like 60fps.
+        d3d_output_->clear(0.0f, 0.0f, 0.0f, 1.0f);
+        passthrough_->drawLiveMasked(d3d_->context(), d3d_video_in_->srv(), d3d_matte_tex_->srv(),
+                                     d3d_output_->rtv(), width_, height_, /*flip_v=*/true);
         dbg.width = width_;
         dbg.height = height_;
         dbg.has_video_in = true;
@@ -492,7 +494,7 @@ RenderResult Input::render() noexcept try {
 
     if (render_ticks_ <= 8u || (render_ticks_ % 60u) == 1u) {
         removerLog(std::format("gpu_present {} {}x{} matte_live={} host_ready={} busy={}",
-                               matte_live_ ? "matte" : "live", width_, height_,
+                               matte_live_ ? "live+mask" : "live", width_, height_,
                                matte_live_ ? 1 : 0, matte_host_ && matte_host_->hostReady() ? 1 : 0,
                                matte_host_ && matte_host_->busy() ? 1 : 0));
     }

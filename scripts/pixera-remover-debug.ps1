@@ -4,20 +4,18 @@
 $ErrorActionPreference = 'Continue'
 Write-Host @'
 
-GENESIS Remover v48 - DirectML GPU matte host
-=============================================
-RVM should run on GPU via DirectML in GenesisRemoverMatteHost.exe
-(not inside PIXERA). Bind DML to the PIXERA Adapter LUID.
+GENESIS Remover v49 - live camera + matte alpha mask
+====================================================
+v48 confirmed GPU: ep=DML:0, infer_ms ~12-18.
+Lag was from displaying the whole cutout at matte rate (~15fps).
+
+v49: each PIXERA present samples LIVE Video In, gated by latest matte alpha.
+Camera motion stays smooth; silhouette updates at matte_fps.
 
 Expect:
-  stamp remover-timeline-v48-oop-gpu-*
-  host: BgRemover ready ep=DML:N  (NOT ep=CPU)
-  DLL STATUS ep=DML:N
-  DirectML.dll next to the host exe
-  faster cutout (640-wide Fast capture + shorter settle)
-
-If ep=CPU: rebuild/install so onnxruntime DirectML build + DirectML.dll
-sit next to GenesisRemoverMatteHost.exe.
+  stamp remover-timeline-v49-live-mask-*
+  ep=DML:N
+  preview feels live (not stepped)
 
 1) Quit PIXERA completely
 2) git pull

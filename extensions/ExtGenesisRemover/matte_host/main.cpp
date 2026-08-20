@@ -263,7 +263,7 @@ int main() {
     const std::filesystem::path roots[] = {module_dir, module_dir / "assets"};
     genesis::setAssetSearchRoots(roots);
 
-    logLine("start v48-oop-gpu " + module_dir.string());
+    logLine("start v49-live-mask " + module_dir.string());
 
     HANDLE mapping = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, L"Local\\GenesisRemoverMatteIpc_v44");
     if (!mapping) {
@@ -388,9 +388,9 @@ int main() {
         }
 
     // Cross-process shared blit settle. mapToRgba already waits on a GPU event query.
-    // After first good frame keep settle tiny — 12ms+ was a big chunk of ~8fps.
     static bool s_had_good = false;
-    Sleep(s_had_good ? 4 : 40);
+    static auto s_last_ok = std::chrono::steady_clock::now();
+    Sleep(s_had_good ? 1 : 40);
 
     if (!capture.mapToRgba(scratch_in)) {
         failKick("map_failed");
@@ -429,13 +429,16 @@ int main() {
     std::snprintf(hdr->stage, sizeof(hdr->stage), "matte");
     hdr->done_seq = last_kick;
     s_had_good = true;
+    const auto now = std::chrono::steady_clock::now();
+    const double cycle_ms =
+        std::chrono::duration<double, std::milli>(now - s_last_ok).count();
+    s_last_ok = now;
     if (frames <= 3u || (frames % 30u) == 1u) {
-        const double settle = s_had_good ? 4.0 : 40.0;
-        const double fps = ms > 1.0 ? (1000.0 / (ms + settle)) : 0.0;
+        const double cycle_fps = cycle_ms > 1.0 ? (1000.0 / cycle_ms) : 0.0;
         logLine("matte_ok nz=" + std::to_string(out_nz) + " infer_ms=" + std::to_string(ms) +
                 " ep=" + remover.executionProvider() + " in_nz=" + std::to_string(nz) +
                 " size=" + std::to_string(w) + "x" + std::to_string(h) +
-                " ~fps=" + std::to_string(fps));
+                " cycle_ms=" + std::to_string(cycle_ms) + " matte_fps=" + std::to_string(cycle_fps));
     }
     }
 

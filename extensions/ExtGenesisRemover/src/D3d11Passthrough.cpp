@@ -40,6 +40,20 @@ float4 main(PSIn i) : SV_Target {
 }
 )";
 
+// t0 = live Video In, t1 = RVM matte (premultiplied RGBA; use .a as soft mask).
+const char* kMaskPs = R"(
+Texture2D liveTex : register(t0);
+Texture2D matteTex : register(t1);
+SamplerState samp : register(s0);
+struct PSIn { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
+float4 main(PSIn i) : SV_Target {
+  float4 live = liveTex.Sample(samp, i.uv);
+  float4 matte = matteTex.Sample(samp, i.uv);
+  float a = saturate(matte.a);
+  return float4(live.rgb * a, a);
+}
+)";
+
 const char* kSolidPs = R"(
 float4 main() : SV_Target {
   return float4(0.2, 1.0, 0.1, 1.0);
@@ -88,13 +102,17 @@ D3d11Passthrough::D3d11Passthrough(ID3D11Device* device) {
     }
     ID3DBlob* vs_blob = compile(kVs, "main", "vs_5_0");
     ID3DBlob* ps_blob = compile(kPs, "main", "ps_5_0");
+    ID3DBlob* mask_blob = compile(kMaskPs, "main", "ps_5_0");
     ID3DBlob* solid_blob = compile(kSolidPs, "main", "ps_5_0");
-    if (!vs_blob || !ps_blob || !solid_blob) {
+    if (!vs_blob || !ps_blob || !mask_blob || !solid_blob) {
         if (vs_blob) {
             vs_blob->Release();
         }
         if (ps_blob) {
             ps_blob->Release();
+        }
+        if (mask_blob) {
+            mask_blob->Release();
         }
         if (solid_blob) {
             solid_blob->Release();
@@ -112,25 +130,26 @@ D3d11Passthrough::D3d11Passthrough(ID3D11Device* device) {
                                              nullptr, &vs_)) &&
         SUCCEEDED(device->CreatePixelShader(ps_blob->GetBufferPointer(), ps_blob->GetBufferSize(),
                                             nullptr, &ps_)) &&
+        SUCCEEDED(device->CreatePixelShader(mask_blob->GetBufferPointer(),
+                                            mask_blob->GetBufferSize(), nullptr, &mask_ps_)) &&
         SUCCEEDED(device->CreatePixelShader(solid_blob->GetBufferPointer(),
                                             solid_blob->GetBufferSize(), nullptr, &solid_ps_)) &&
         SUCCEEDED(device->CreateInputLayout(layout, 2, vs_blob->GetBufferPointer(),
                                             vs_blob->GetBufferSize(), &layout_));
     vs_blob->Release();
     ps_blob->Release();
+    mask_blob->Release();
     solid_blob->Release();
-    if (!ok || !vs_ || !ps_ || !solid_ps_ || !layout_) {
+    if (!ok || !vs_ || !ps_ || !mask_ps_ || !solid_ps_ || !layout_) {
         return;
     }
 
-    // Flipped: PIXERA shared Video In is top-left origin (GL-like).
     const std::array<Vertex, 4> verts_flip = {{
         {-1.f, -1.f, 0.f, 1.f, 0.f, 0.f},
         {-1.f, 1.f, 0.f, 1.f, 0.f, 1.f},
         {1.f, -1.f, 0.f, 1.f, 1.f, 0.f},
         {1.f, 1.f, 0.f, 1.f, 1.f, 1.f},
     }};
-    // Unflipped: preserve texture row order for capture -> host Map -> matte upload.
     const std::array<Vertex, 4> verts_nflip = {{
         {-1.f, -1.f, 0.f, 1.f, 0.f, 1.f},
         {-1.f, 1.f, 0.f, 1.f, 0.f, 0.f},
@@ -145,16 +164,16 @@ D3d11Passthrough::D3d11Passthrough(ID3D11Device* device) {
 
     D3D11_SAMPLER_DESC sd{};
     sd.Filter = D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT;
-    sd.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
-    sd.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
-    sd.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+    sd.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sd.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
     sd.MaxLOD = D3D11_FLOAT32_MAX;
     if (FAILED(device->CreateSamplerState(&sd, &sampler_)) || !sampler_) {
         return;
     }
 
     ready_ = true;
-    removerLog("D3d11Passthrough ready (GPU blit + heartbeat, flip/nflip VBs)");
+    removerLog("D3d11Passthrough ready (blit + live-masked matte)");
 }
 
 D3d11Passthrough::~D3d11Passthrough() {
@@ -177,6 +196,10 @@ D3d11Passthrough::~D3d11Passthrough() {
     if (solid_ps_) {
         solid_ps_->Release();
         solid_ps_ = nullptr;
+    }
+    if (mask_ps_) {
+        mask_ps_->Release();
+        mask_ps_ = nullptr;
     }
     if (ps_) {
         ps_->Release();
@@ -219,6 +242,45 @@ void D3d11Passthrough::draw(ID3D11DeviceContext* context, ID3D11ShaderResourceVi
 
     ID3D11ShaderResourceView* null_srv = nullptr;
     context->PSSetShaderResources(0, 1, &null_srv);
+    ID3D11RenderTargetView* null_rtv = nullptr;
+    context->OMSetRenderTargets(0, &null_rtv, nullptr);
+}
+
+void D3d11Passthrough::drawLiveMasked(ID3D11DeviceContext* context,
+                                      ID3D11ShaderResourceView* live_srv,
+                                      ID3D11ShaderResourceView* matte_srv,
+                                      ID3D11RenderTargetView* rtv, std::uint32_t width,
+                                      std::uint32_t height, bool flip_v) {
+    if (!ready_ || !context || !live_srv || !matte_srv || !rtv || !mask_ps_ || width == 0 ||
+        height == 0) {
+        return;
+    }
+    ID3D11Buffer* vb = flip_v ? vb_flip_ : vb_nflip_;
+    if (!vb) {
+        return;
+    }
+
+    context->OMSetRenderTargets(1, &rtv, nullptr);
+    D3D11_VIEWPORT vp{};
+    vp.Width = static_cast<float>(width);
+    vp.Height = static_cast<float>(height);
+    vp.MaxDepth = 1.0f;
+    context->RSSetViewports(1, &vp);
+
+    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    const UINT stride = sizeof(Vertex);
+    const UINT offset = 0;
+    context->IASetVertexBuffers(0, 1, &vb, &stride, &offset);
+    context->IASetInputLayout(layout_);
+    context->VSSetShader(vs_, nullptr, 0);
+    context->PSSetShader(mask_ps_, nullptr, 0);
+    ID3D11ShaderResourceView* srvs[2] = {live_srv, matte_srv};
+    context->PSSetShaderResources(0, 2, srvs);
+    context->PSSetSamplers(0, 1, &sampler_);
+    context->Draw(4, 0);
+
+    ID3D11ShaderResourceView* null_srvs[2] = {nullptr, nullptr};
+    context->PSSetShaderResources(0, 2, null_srvs);
     ID3D11RenderTargetView* null_rtv = nullptr;
     context->OMSetRenderTargets(0, &null_rtv, nullptr);
 }

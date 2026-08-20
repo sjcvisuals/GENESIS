@@ -16,7 +16,7 @@
 
 namespace rxext::genesis_remover {
 
-// v48: OOP RVM on DirectML GPU bound to PIXERA Adapter LUID.
+// v49: live Video In each frame, matte alpha from OOP DirectML host.
 // ORT must not load in the PIXERA process (v39–v42 froze the preview).
 class Input : public rxext::InputStream {
 public:
