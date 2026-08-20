@@ -76,7 +76,10 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v46-oop-settle-20260820
+  remover-timeline-v47-oop-orient-20260820
+
+v47 = upright matte (capture unflipped) + <=960 capture for FPS; adaptive
+  settle 50ms then 12ms; dump script ASCII single-quotes only.
 
 v46 = fix v45 busy-stuck: host always acks done_seq on failure; Sleep(50)
   settle restored (Sleep(8) mapped empty capture); nz=0 remap retry.
@@ -85,19 +88,11 @@ v45 = v44 OOP matte + faster host kicks (DML preferred, no console window,
   capture share kept open, kick ASAP when host idle). Broke cutout when
   settle was too short (nz=0 left kick unacked).
 
-v44 = live blit in PIXERA + out-of-process RVM host:
-  v43 confirmed live works without ORT. Cutout needs ORT, but ORT-in-process
-  freezes PIXERA (v39–v42). Fix: GenesisRemoverMatteHost.exe loads ORT;
-  DLL blits Video In -> capture share, duplicates handle, kicks host; host
-  returns RGBA via shared memory; DLL UpdateSubresource + blit.
-
-v43 = live blit only (no matte).
-v42–v38 = in-process ORT / capture variants (froze).
-v36 = blit-only diagnostic (live proven).
+v44 = live blit in PIXERA + out-of-process RVM host.
 
 Dump: .\scripts\dump-remover-log.ps1
-Expect stamp v46-oop-settle, host_ready=1, applied host matte, moving lime until cutout.
-Host log: %TEMP%\GenesisRemoverMatteHost.log (ep=DML or CPU, matte_ok / infer_ms)
+Expect stamp v47-oop-orient, upright cutout, host ~fps= and size=960x...
+Host log: %TEMP%\GenesisRemoverMatteHost.log
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log

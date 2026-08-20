@@ -26,8 +26,12 @@ public:
     D3d11Passthrough& operator=(const D3d11Passthrough&) = delete;
 
     bool ready() const { return ready_; }
+    // flip_v=true: PIXERA Video In is top-left origin; flip for correct preview.
+    // flip_v=false: keep texture orientation (use for capture share so host Map
+    // matches Video In; matte then displays with flip_v=true once).
     void draw(ID3D11DeviceContext* context, ID3D11ShaderResourceView* srv,
-              ID3D11RenderTargetView* rtv, std::uint32_t width, std::uint32_t height);
+              ID3D11RenderTargetView* rtv, std::uint32_t width, std::uint32_t height,
+              bool flip_v = true);
     // Moving lime stripe so we can tell if shared output is updating (vs stale compositor).
     void drawHeartbeat(ID3D11DeviceContext* context, ID3D11RenderTargetView* rtv,
                        std::uint32_t width, std::uint32_t height, std::uint64_t tick);
@@ -38,7 +42,8 @@ private:
     ID3D11PixelShader* ps_ = nullptr;
     ID3D11PixelShader* solid_ps_ = nullptr;
     ID3D11InputLayout* layout_ = nullptr;
-    ID3D11Buffer* vb_ = nullptr;
+    ID3D11Buffer* vb_flip_ = nullptr;
+    ID3D11Buffer* vb_nflip_ = nullptr;
     ID3D11SamplerState* sampler_ = nullptr;
 };
 

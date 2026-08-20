@@ -91,7 +91,7 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for `STATUS stage=` lines and stamp `remover-timeline-v46-oop-settle-*`.
+Look for `STATUS stage=` lines and stamp `remover-timeline-v47-oop-orient-*`.
 
 | Colour / stage | Meaning |
 |----------------|---------|
@@ -99,9 +99,8 @@ Look for `STATUS stage=` lines and stamp `remover-timeline-v46-oop-settle-*`.
 | `passthrough` | live blit (lime moving; waiting on matte host) |
 | `matte` | person cutout from out-of-process host |
 
-v46: fixes v45 busy-stuck (`capture nz=0` never acked `done_seq`). Host settles
-50ms, retries empty maps, always advances `done_seq`. Expect `matte_ok` +
-`applied host matte` while lime stays live until cutout appears.
+v47: upright cutout (capture unflipped; display flips once) + half-res capture
+for FPS. Host log shows `~fps=` and `size=960x540` (or similar).
 
 Also check `%TEMP%\GenesisRemoverMatteHost.log`.
 Checklist: `.\scripts\pixera-remover-debug.ps1`

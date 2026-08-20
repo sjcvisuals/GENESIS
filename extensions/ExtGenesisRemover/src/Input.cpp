@@ -86,9 +86,9 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
     debug_status_ = add_parameter<ParameterString>("debug_status");
     debug_status_->set_property(PropertyNames::name, "Debug Status");
     debug_status_->set_property(PropertyNames::group_name, "Debug");
-    debug_status_->set_value(std::string("v46 live + oop matte (settle ack)"));
+    debug_status_->set_value(std::string("v47 upright + faster oop matte"));
 
-    removerLog(std::format("Input ctor v46 oop-settle adapter_luid={:016x}", adapter_luid_));
+    removerLog(std::format("Input ctor v47 oop-orient adapter_luid={:016x}", adapter_luid_));
 }
 
 Input::~Input() {
@@ -257,7 +257,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     }
     const bool host_ready = matte_host_ && matte_host_->hostReady();
     const std::string ui =
-        std::format("v46 {} vin={} host={} matte={}", dbg.stage ? dbg.stage : "?",
+        std::format("v47 {} vin={} host={} matte={}", dbg.stage ? dbg.stage : "?",
                     dbg.has_video_in ? 1 : 0, host_ready ? 1 : 0, matte_live_ ? 1 : 0);
     if (debug_status_) {
         debug_status_->set_value(ui);
@@ -307,7 +307,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     ensureMatteHost();
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v46 live + oop matte (settle ack)"));
+        debug_status_->set_value(std::string("v47 upright + faster oop matte"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -420,21 +420,22 @@ RenderResult Input::render() noexcept try {
     std::uint32_t mw = 0;
     std::uint32_t mh = 0;
     ::genesis::RemoverFrameDebug host_dbg{};
-    if (matte_host_->tryTakeMatte(host_matte_rgba_, mw, mh, &host_dbg) && mw == width_ &&
-        mh == height_ && !host_matte_rgba_.empty()) {
-        d3d_matte_tex_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
+    if (matte_host_->tryTakeMatte(host_matte_rgba_, mw, mh, &host_dbg) && mw > 0 && mh > 0 &&
+        !host_matte_rgba_.empty()) {
+        d3d_matte_tex_->allocate(mw, mh, Format::R8G8B8A8_UNORM, /*is_target=*/true,
                                  /*publish_share=*/false);
-        if (d3d_matte_tex_->uploadRgba8UpdateSubresource(host_matte_rgba_.data(), width_,
-                                                         height_)) {
+        if (d3d_matte_tex_->uploadRgba8UpdateSubresource(host_matte_rgba_.data(), mw, mh)) {
             matte_live_ = true;
             dbg = host_dbg;
-            removerLog(std::format("applied host matte nz={}", dbg.nonzero_rgb));
+            if ((render_ticks_ % 30u) == 1u) {
+                removerLog(std::format("applied host matte nz={} {}x{}", dbg.nonzero_rgb, mw, mh));
+            }
         }
     }
 
     if (matte_live_ && d3d_matte_tex_ && d3d_matte_tex_->srv()) {
         passthrough_->draw(d3d_->context(), d3d_matte_tex_->srv(), d3d_output_->rtv(), width_,
-                           height_);
+                           height_, /*flip_v=*/true);
         dbg.width = width_;
         dbg.height = height_;
         dbg.has_video_in = true;
@@ -444,7 +445,7 @@ RenderResult Input::render() noexcept try {
     } else {
         d3d_output_->clear(0.0f, 0.0f, 0.0f, 1.0f);
         passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_output_->rtv(), width_,
-                           height_);
+                           height_, /*flip_v=*/true);
         passthrough_->drawHeartbeat(d3d_->context(), d3d_output_->rtv(), width_, height_,
                                     render_ticks_);
         dbg.width = width_;
@@ -453,9 +454,9 @@ RenderResult Input::render() noexcept try {
         dbg.stage = "passthrough";
     }
 
-    // Kick host as soon as idle (was ~2s interval — looked like low FPS).
+    // Capture at <=960 wide (Map+RVM on 1080p ~8fps). Unflipped so host rows match Video In.
     constexpr std::uint64_t kFirstKickTick = 30;
-    constexpr std::uint64_t kKickInterval = 2;
+    constexpr std::uint64_t kKickInterval = 1;
     if (matte_host_) {
         matte_host_->clearBusyIfStale(2000);
     }
@@ -463,17 +464,22 @@ RenderResult Input::render() noexcept try {
         render_ticks_ >= kFirstKickTick &&
         (last_capture_kick_tick_ == 0 ||
          render_ticks_ - last_capture_kick_tick_ >= kKickInterval) &&
-        d3d_capture_share_ && d3d_capture_share_->rtv() && width_ <= 1920 && height_ <= 1080) {
-        if (d3d_capture_share_->width() != width_ || d3d_capture_share_->height() != height_) {
-            d3d_capture_share_->allocate(width_, height_, Format::R8G8B8A8_UNORM,
-                                        /*is_target=*/true, /*publish_share=*/true);
-        }
-        passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_capture_share_->rtv(),
-                           width_, height_);
-        // Do not Flush / waitGpuIdle on the PIXERA device (historically stalled preview).
-        // Host settles 50ms + event query before Map.
-        if (matte_host_->kickCapture(*d3d_capture_share_, width_, height_)) {
-            last_capture_kick_tick_ = render_ticks_;
+        d3d_capture_share_ && d3d_capture_share_->rtv() && width_ >= 16 && height_ >= 16) {
+        const std::uint32_t cap_w = width_ > 960u ? 960u : width_;
+        const std::uint32_t cap_h =
+            static_cast<std::uint32_t>((static_cast<std::uint64_t>(height_) * cap_w) / width_);
+        if (cap_h == 0) {
+            // skip
+        } else {
+            if (d3d_capture_share_->width() != cap_w || d3d_capture_share_->height() != cap_h) {
+                d3d_capture_share_->allocate(cap_w, cap_h, Format::R8G8B8A8_UNORM,
+                                            /*is_target=*/true, /*publish_share=*/true);
+            }
+            passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_capture_share_->rtv(),
+                               cap_w, cap_h, /*flip_v=*/false);
+            if (matte_host_->kickCapture(*d3d_capture_share_, cap_w, cap_h)) {
+                last_capture_kick_tick_ = render_ticks_;
+            }
         }
     } else if (matte_host_ && !matte_host_->hostReady() && (render_ticks_ % 60u) == 1u) {
         removerLog("waiting GenesisRemoverMatteHost.exe ready (ORT loads out-of-process)");

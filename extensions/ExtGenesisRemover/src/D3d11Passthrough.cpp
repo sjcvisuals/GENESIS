@@ -66,6 +66,20 @@ ID3DBlob* compile(const char* src, const char* entry, const char* target) {
     return blob;
 }
 
+ID3D11Buffer* makeVb(ID3D11Device* device, const std::array<Vertex, 4>& verts) {
+    D3D11_BUFFER_DESC bd{};
+    bd.ByteWidth = static_cast<UINT>(sizeof(verts));
+    bd.Usage = D3D11_USAGE_IMMUTABLE;
+    bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    D3D11_SUBRESOURCE_DATA init{};
+    init.pSysMem = verts.data();
+    ID3D11Buffer* buf = nullptr;
+    if (FAILED(device->CreateBuffer(&bd, &init, &buf))) {
+        return nullptr;
+    }
+    return buf;
+}
+
 } // namespace
 
 D3d11Passthrough::D3d11Passthrough(ID3D11Device* device) {
@@ -109,27 +123,28 @@ D3d11Passthrough::D3d11Passthrough(ID3D11Device* device) {
         return;
     }
 
-    // Fullscreen strip. V flipped vs D3D default - PIXERA shared Video In is top-left origin
-    // like GL; without this the feed appears upside-down in preview.
-    const std::array<Vertex, 4> verts = {{
+    // Flipped: PIXERA shared Video In is top-left origin (GL-like).
+    const std::array<Vertex, 4> verts_flip = {{
         {-1.f, -1.f, 0.f, 1.f, 0.f, 0.f},
         {-1.f, 1.f, 0.f, 1.f, 0.f, 1.f},
         {1.f, -1.f, 0.f, 1.f, 1.f, 0.f},
         {1.f, 1.f, 0.f, 1.f, 1.f, 1.f},
     }};
-    D3D11_BUFFER_DESC bd{};
-    bd.ByteWidth = static_cast<UINT>(sizeof(verts));
-    bd.Usage = D3D11_USAGE_IMMUTABLE;
-    bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-    D3D11_SUBRESOURCE_DATA init{};
-    init.pSysMem = verts.data();
-    if (FAILED(device->CreateBuffer(&bd, &init, &vb_)) || !vb_) {
+    // Unflipped: preserve texture row order for capture -> host Map -> matte upload.
+    const std::array<Vertex, 4> verts_nflip = {{
+        {-1.f, -1.f, 0.f, 1.f, 0.f, 1.f},
+        {-1.f, 1.f, 0.f, 1.f, 0.f, 0.f},
+        {1.f, -1.f, 0.f, 1.f, 1.f, 1.f},
+        {1.f, 1.f, 0.f, 1.f, 1.f, 0.f},
+    }};
+    vb_flip_ = makeVb(device, verts_flip);
+    vb_nflip_ = makeVb(device, verts_nflip);
+    if (!vb_flip_ || !vb_nflip_) {
         return;
     }
 
     D3D11_SAMPLER_DESC sd{};
     sd.Filter = D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT;
-    // Match ExtSampleD3D Quad sampler (WRAP).
     sd.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
     sd.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
     sd.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
@@ -139,7 +154,7 @@ D3d11Passthrough::D3d11Passthrough(ID3D11Device* device) {
     }
 
     ready_ = true;
-    removerLog("D3d11Passthrough ready (GPU Video In -> output blit + heartbeat)");
+    removerLog("D3d11Passthrough ready (GPU blit + heartbeat, flip/nflip VBs)");
 }
 
 D3d11Passthrough::~D3d11Passthrough() {
@@ -147,9 +162,13 @@ D3d11Passthrough::~D3d11Passthrough() {
         sampler_->Release();
         sampler_ = nullptr;
     }
-    if (vb_) {
-        vb_->Release();
-        vb_ = nullptr;
+    if (vb_nflip_) {
+        vb_nflip_->Release();
+        vb_nflip_ = nullptr;
+    }
+    if (vb_flip_) {
+        vb_flip_->Release();
+        vb_flip_ = nullptr;
     }
     if (layout_) {
         layout_->Release();
@@ -170,9 +189,13 @@ D3d11Passthrough::~D3d11Passthrough() {
 }
 
 void D3d11Passthrough::draw(ID3D11DeviceContext* context, ID3D11ShaderResourceView* srv,
-                            ID3D11RenderTargetView* rtv, std::uint32_t width,
-                            std::uint32_t height) {
+                            ID3D11RenderTargetView* rtv, std::uint32_t width, std::uint32_t height,
+                            bool flip_v) {
     if (!ready_ || !context || !srv || !rtv || width == 0 || height == 0) {
+        return;
+    }
+    ID3D11Buffer* vb = flip_v ? vb_flip_ : vb_nflip_;
+    if (!vb) {
         return;
     }
 
@@ -186,7 +209,7 @@ void D3d11Passthrough::draw(ID3D11DeviceContext* context, ID3D11ShaderResourceVi
     context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
     const UINT stride = sizeof(Vertex);
     const UINT offset = 0;
-    context->IASetVertexBuffers(0, 1, &vb_, &stride, &offset);
+    context->IASetVertexBuffers(0, 1, &vb, &stride, &offset);
     context->IASetInputLayout(layout_);
     context->VSSetShader(vs_, nullptr, 0);
     context->PSSetShader(ps_, nullptr, 0);
@@ -203,7 +226,7 @@ void D3d11Passthrough::draw(ID3D11DeviceContext* context, ID3D11ShaderResourceVi
 void D3d11Passthrough::drawHeartbeat(ID3D11DeviceContext* context, ID3D11RenderTargetView* rtv,
                                      std::uint32_t width, std::uint32_t height,
                                      std::uint64_t tick) {
-    if (!ready_ || !context || !rtv || !solid_ps_ || width == 0 || height < 16) {
+    if (!ready_ || !context || !rtv || !solid_ps_ || !vb_flip_ || width == 0 || height < 16) {
         return;
     }
     constexpr float kBarH = 14.0f;
@@ -222,7 +245,7 @@ void D3d11Passthrough::drawHeartbeat(ID3D11DeviceContext* context, ID3D11RenderT
     context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
     const UINT stride = sizeof(Vertex);
     const UINT offset = 0;
-    context->IASetVertexBuffers(0, 1, &vb_, &stride, &offset);
+    context->IASetVertexBuffers(0, 1, &vb_flip_, &stride, &offset);
     context->IASetInputLayout(layout_);
     context->VSSetShader(vs_, nullptr, 0);
     context->PSSetShader(solid_ps_, nullptr, 0);

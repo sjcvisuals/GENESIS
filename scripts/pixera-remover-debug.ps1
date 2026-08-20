@@ -1,30 +1,33 @@
 # Quick checklist after installing Remover.
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\pixera-remover-debug.ps1
 
-$ErrorActionPreference = "Continue"
-Write-Host @"
+$ErrorActionPreference = 'Continue'
+Write-Host @'
 
-GENESIS Remover v46 - OOP matte settle + ack
-===========================================
-v45 broke cutout: Sleep(8) -> capture nz=0, host never acked done_seq,
-DLL stuck busy=1 forever (live camera + lime only).
+GENESIS Remover v47 - upright + faster OOP matte
+================================================
+v46 cutout worked but was upside-down (~8fps on 1080p Map).
 
-v46: host Sleep(50) + nz=0 remap retry; ALWAYS set done_seq on failure;
-DLL clears stale busy after 2s.
+v47:
+  capture blit without V-flip (matte was flipped twice)
+  capture at max 960 wide (cheaper Map+RVM)
+  adaptive host settle (50ms then 12ms)
+  dump script uses ASCII single-quoted strings only
 
 Expect:
-  stamp remover-timeline-v46-oop-settle-*
-  host matte_ok (not stuck on capture_nz0 without further kicks)
-  DLL applied host matte / stage=matte
+  stamp remover-timeline-v47-oop-orient-*
+  upright cutout
+  host matte_ok with size=960x540 (or similar) and ~fps=
+  dump-remover-log.ps1 runs without string terminator errors
 
 1) Quit PIXERA completely
 2) git pull
 3) BUILD-REMOVER.bat
-4) INSTALL-PIXERA-REMOVER.bat  (stamp remover-timeline-v46-oop-settle-*)
+4) INSTALL-PIXERA-REMOVER.bat
 5) Re-import ExtGenesisRemover.dll
 6) Adapter LUID = preview GPU; drag Live Input
 7) Dump log
 
-"@
+'@
 
 & "$PSScriptRoot\dump-remover-log.ps1"

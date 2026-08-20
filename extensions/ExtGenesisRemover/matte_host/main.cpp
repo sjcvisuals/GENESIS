@@ -234,7 +234,7 @@ int main() {
     const std::filesystem::path roots[] = {module_dir, module_dir / "assets"};
     genesis::setAssetSearchRoots(roots);
 
-    logLine("start v46-oop-settle " + module_dir.string());
+    logLine("start v47-oop-orient " + module_dir.string());
 
     HANDLE mapping = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, L"Local\\GenesisRemoverMatteIpc_v44");
     if (!mapping) {
@@ -281,7 +281,9 @@ int main() {
     settings.quality = genesis::BgRemoverQuality::Fast;
     // Out-of-process: DML is OK here (in-PIXERA ORT was the freeze). Falls back to CPU.
     settings.prefer_cpu_ep = false;
-    settings.temporal_alpha = 0.20f;
+    settings.temporal_alpha = 0.15f;
+    // Stronger downsample on top of Fast for realtime PIXERA preview.
+    settings.rvm_downsample = 0.18f;
     remover.setSettings(settings);
     std::string status;
     logLine("BgRemover initialize begin (DML preferred, separate process)");
@@ -343,50 +345,55 @@ int main() {
             continue;
         }
 
-        // Cross-process shared blit needs settle time (v45 Sleep(8) -> nz=0).
-        // No Flush on PIXERA device — host sleeps + event query in mapToRgba.
+    // Cross-process shared blit needs settle time (v45 Sleep(8) -> nz=0).
+    // After first good frame, shorten settle for FPS (~8fps was Sleep(50)+1080p Map).
+    static bool s_had_good = false;
+    Sleep(s_had_good ? 12 : 50);
+
+    if (!capture.mapToRgba(scratch_in)) {
+        failKick("map_failed");
+        continue;
+    }
+
+    std::size_t nz = countNz(scratch_in.data(), scratch_in.size());
+    if (nz == 0) {
+        // One retry after extra settle (first kick after DML init is often empty).
         Sleep(50);
-
         if (!capture.mapToRgba(scratch_in)) {
-            failKick("map_failed");
+            failKick("map_retry_failed");
             continue;
         }
+        nz = countNz(scratch_in.data(), scratch_in.size());
+    }
+    if (nz == 0) {
+        failKick("capture_nz0");
+        continue;
+    }
 
-        std::size_t nz = countNz(scratch_in.data(), scratch_in.size());
-        if (nz == 0) {
-            // One retry after extra settle (first kick after DML init is often empty).
-            Sleep(50);
-            if (!capture.mapToRgba(scratch_in)) {
-                failKick("map_retry_failed");
-                continue;
-            }
-            nz = countNz(scratch_in.data(), scratch_in.size());
-        }
-        if (nz == 0) {
-            failKick("capture_nz0");
-            continue;
-        }
+    scratch_out.resize(scratch_in.size());
+    const auto t0 = std::chrono::steady_clock::now();
+    const bool ok = remover.process(scratch_in.data(), scratch_out.data(), w, h);
+    const auto t1 = std::chrono::steady_clock::now();
+    const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    if (!ok) {
+        failKick("rvm_failed");
+        continue;
+    }
 
-        scratch_out.resize(scratch_in.size());
-        const auto t0 = std::chrono::steady_clock::now();
-        const bool ok = remover.process(scratch_in.data(), scratch_out.data(), w, h);
-        const auto t1 = std::chrono::steady_clock::now();
-        const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-        if (!ok) {
-            failKick("rvm_failed");
-            continue;
-        }
-
-        const std::size_t out_nz = countNz(scratch_out.data(), scratch_out.size());
-        std::memcpy(genesis::matte_ipc::pixels(hdr), scratch_out.data(), scratch_out.size());
-        hdr->result_nz = static_cast<std::uint32_t>(out_nz);
-        hdr->result_ok = 1;
-        std::snprintf(hdr->stage, sizeof(hdr->stage), "matte");
-        hdr->done_seq = last_kick;
-        if (frames <= 3u || (frames % 30u) == 1u) {
-            logLine("matte_ok nz=" + std::to_string(out_nz) + " infer_ms=" + std::to_string(ms) +
-                    " ep=" + remover.executionProvider() + " in_nz=" + std::to_string(nz));
-        }
+    const std::size_t out_nz = countNz(scratch_out.data(), scratch_out.size());
+    std::memcpy(genesis::matte_ipc::pixels(hdr), scratch_out.data(), scratch_out.size());
+    hdr->result_nz = static_cast<std::uint32_t>(out_nz);
+    hdr->result_ok = 1;
+    std::snprintf(hdr->stage, sizeof(hdr->stage), "matte");
+    hdr->done_seq = last_kick;
+    s_had_good = true;
+    if (frames <= 3u || (frames % 30u) == 1u) {
+        const double fps = ms > 1.0 ? (1000.0 / (ms + (s_had_good ? 12.0 : 50.0))) : 0.0;
+        logLine("matte_ok nz=" + std::to_string(out_nz) + " infer_ms=" + std::to_string(ms) +
+                " ep=" + remover.executionProvider() + " in_nz=" + std::to_string(nz) +
+                " size=" + std::to_string(w) + "x" + std::to_string(h) +
+                " ~fps=" + std::to_string(fps));
+    }
     }
 
     capture.releaseAll();
