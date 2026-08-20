@@ -76,10 +76,14 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v45-oop-fast-20260820
+  remover-timeline-v46-oop-settle-20260820
+
+v46 = fix v45 busy-stuck: host always acks done_seq on failure; Sleep(50)
+  settle restored (Sleep(8) mapped empty capture); nz=0 remap retry.
 
 v45 = v44 OOP matte + faster host kicks (DML preferred, no console window,
-  capture share kept open, kick ASAP when host idle).
+  capture share kept open, kick ASAP when host idle). Broke cutout when
+  settle was too short (nz=0 left kick unacked).
 
 v44 = live blit in PIXERA + out-of-process RVM host:
   v43 confirmed live works without ORT. Cutout needs ORT, but ORT-in-process
@@ -92,8 +96,8 @@ v42–v38 = in-process ORT / capture variants (froze).
 v36 = blit-only diagnostic (live proven).
 
 Dump: .\scripts\dump-remover-log.ps1
-Expect stamp v45-oop-fast, host_ready=1, applied host matte, moving lime until cutout.
-Host log: %TEMP%\GenesisRemoverMatteHost.log (ep=DML or CPU, infer_ms)
+Expect stamp v46-oop-settle, host_ready=1, applied host matte, moving lime until cutout.
+Host log: %TEMP%\GenesisRemoverMatteHost.log (ep=DML or CPU, matte_ok / infer_ms)
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log
