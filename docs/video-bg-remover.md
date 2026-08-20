@@ -91,7 +91,7 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for `STATUS stage=` lines and stamp `remover-timeline-v44-oop-matte-*`.
+Look for `STATUS stage=` lines and stamp `remover-timeline-v45-oop-fast-*`.
 
 | Colour / stage | Meaning |
 |----------------|---------|
@@ -99,9 +99,9 @@ Look for `STATUS stage=` lines and stamp `remover-timeline-v44-oop-matte-*`.
 | `passthrough` | live blit (lime moving; waiting on matte host) |
 | `matte` | person cutout from out-of-process host |
 
-v44: PIXERA DLL stays on the proven live blit (no ORT in-process).
+v45: same OOP matte as v44, faster (DML preferred, kick ASAP, no console window).
 `GenesisRemoverMatteHost.exe` loads ORT, Maps our capture share, returns RGBA via
-shared memory. Expect `MatteHost launched`, `host_ready=1`, host log `matte_ok`,
+shared memory. Expect `MatteHost launched`, `host_ready=1`, host log `matte_ok` + `infer_ms`,
 then `applied host matte` while lime stays live until cutout appears.
 
 Also check `%TEMP%\GenesisRemoverMatteHost.log`.
