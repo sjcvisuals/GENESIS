@@ -474,6 +474,7 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
     add_library(ExtGenesisRemover SHARED
         ${EXT_REMOVER_DIR}/src/Extension.cpp
         ${EXT_REMOVER_DIR}/src/Device.cpp
+        ${EXT_REMOVER_DIR}/src/AdapterGpu.cpp
         ${EXT_REMOVER_DIR}/src/Input.cpp
         ${EXT_REMOVER_DIR}/src/D3d11SharedTexture.cpp
         ${EXT_REMOVER_DIR}/src/D3d11Passthrough.cpp

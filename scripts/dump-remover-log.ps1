@@ -19,8 +19,16 @@ if (Test-Path -LiteralPath $hostLog) {
 } else {
     Write-Host ('MISSING host log: ' + $hostLog)
 }
+if (Test-Path -LiteralPath $log) {
+    Write-Host ''
+    Write-Host 'DLL auto-pick / LUID lines:'
+    Select-String -LiteralPath $log -Pattern 'pickAdapter|AUTO adapter_luid|using PIXERA/injected LUID|Device::initialize' |
+        Select-Object -Last 20 |
+        ForEach-Object { Write-Host $_.Line }
+}
 Write-Host ''
-Write-Host 'To use NVIDIA: set PIXERA preview engine + Remover Adapter LUID to the NVIDIA luid_hex above.'
+Write-Host 'Note: C++ extensions cannot read PIXERA output assignments. LUID 0 = auto'
+Write-Host '(first GPU with Windows displays, prefer NVIDIA). Non-zero LUID = follow PIXERA.'
 Write-Host 'Shared textures require Remover and PIXERA on the SAME GPU.'
 Write-Host ''
 
@@ -47,7 +55,5 @@ if (Test-Path -LiteralPath $hostLog) {
 }
 
 Write-Host ''
-Write-Host 'Expect stamp remover-timeline-v49-live-mask-...'
-Write-Host 'DLL: stage=matte, ep=DML:N - preview should feel live (camera motion at present rate).'
-Write-Host 'Host: infer_ms ~10-20, matte_fps (alpha update rate; silhouette may be ~15fps).'
-Write-Host 'Adapter LUID = PREVIEW engine GPU when testing preview.'
+Write-Host 'Expect stamp remover-timeline-v50-auto-gpu-...'
+Write-Host 'Adapter LUID = 0 for auto, or NVIDIA luid_hex to force. Same GPU as PIXERA preview.'

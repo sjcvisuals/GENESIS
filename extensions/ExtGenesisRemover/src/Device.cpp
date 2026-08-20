@@ -1,6 +1,7 @@
 #include "WinPrefix.h"
 #include "Device.h"
 
+#include "AdapterGpu.h"
 #include "Input.h"
 #include "RemoverLog.h"
 #include "common/string.h"
@@ -21,14 +22,28 @@ Device::Device(ValueSet settings) : settings_(std::move(settings)) {
 bool Device::initialize() noexcept try {
     const string luid_hex = settings_.get(SettingNames::adapter_luid, string("0000000000000000"));
     adapter_luid_ = common::from_hex_string<std::uint64_t>(luid_hex);
-    removerLog(std::format("Device::initialize adapter_luid={:016x}", adapter_luid_));
-    host().log_info(std::format("GENESIS Remover device ready (adapter_luid={:016x})",
-                                adapter_luid_));
+    removerLog(std::format("Device::initialize settings adapter_luid={:016x}", adapter_luid_));
+
+    // PIXERA usually injects the engine GPU LUID. When left at 0, auto-pick the first
+    // GPU that has Windows displays attached (prefer NVIDIA). We cannot read PIXERA's
+    // own output-assignment table from the C++ extension host API.
     if (adapter_luid_ == 0) {
-        removerLog("WARNING: adapter_luid is 0 - PIXERA must inject the engine GPU LUID "
-                   "or shared Video In stays black/orange");
-        host().log_error("GENESIS Remover: adapter LUID is 0 - set device Adapter LUID to the "
-                         "PIXERA engine GPU or shared textures will stay black");
+        const std::uint64_t picked = pickAdapterLuidWithDisplays();
+        if (picked != 0) {
+            adapter_luid_ = picked;
+            removerLog(std::format("Device::initialize AUTO adapter_luid={:016x} ({})",
+                                   adapter_luid_, adapterDescription(adapter_luid_)));
+            host().log_info(std::format("GENESIS Remover auto GPU {:016x} ({})", adapter_luid_,
+                                        adapterDescription(adapter_luid_)));
+        } else {
+            removerLog("WARNING: adapter_luid is 0 and auto-pick found no GPU");
+            host().log_error("GENESIS Remover: adapter LUID is 0 - set Adapter LUID or connect a display");
+        }
+    } else {
+        removerLog(std::format("Device::initialize using PIXERA/injected LUID {:016x} ({})",
+                               adapter_luid_, adapterDescription(adapter_luid_)));
+        host().log_info(std::format("GENESIS Remover device ready (adapter_luid={:016x} {})",
+                                    adapter_luid_, adapterDescription(adapter_luid_)));
     }
 
     // ExtSampleD3D: one D3D11 device + shared fence for the whole StreamDevice.

@@ -26,7 +26,8 @@ string Extension::get_property(string_view name) noexcept {
     }
     if (name == PropertyNames::stream_device_settings_desc) {
         SettingsDescBuilder settings_desc;
-        settings_desc.add_string(SettingNames::adapter_luid, "Adapter LUID (hex)");
+        settings_desc.add_string(SettingNames::adapter_luid,
+                                 "Adapter LUID (hex; 0=auto GPU with displays, prefer NVIDIA)");
         return settings_desc.str();
     }
     return {};
