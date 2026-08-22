@@ -525,9 +525,6 @@ RenderResult Input::render() noexcept try {
     constexpr std::uint32_t kCapMaxW = 640u;
     constexpr double kMinKickMs = 33.0; // ~30 matte fps ceiling when infer is fast
 
-    last_kick_wall_ = {}; // ensure first kick is allowed
-    // (wall clock updated on successful kickCapture)
-
     if (matte_host_) {
         matte_host_->clearBusyIfStale(2500);
     }
