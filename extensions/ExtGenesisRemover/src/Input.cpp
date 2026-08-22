@@ -111,9 +111,9 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
     debug_status_ = add_parameter<ParameterString>("debug_status");
     debug_status_->set_property(PropertyNames::name, "Debug Status");
     debug_status_->set_property(PropertyNames::group_name, "Debug");
-    debug_status_->set_value(std::string("v54 kick throttle fix (no cycle spiral)"));
+    debug_status_->set_value(std::string("v55 map-stall cooldown"));
 
-    removerLog(std::format("Input ctor v54 throttle-fix adapter_luid={:016x}", adapter_luid_));
+    removerLog(std::format("Input ctor v55 map-cooldown adapter_luid={:016x}", adapter_luid_));
 }
 
 Input::~Input() {
@@ -301,7 +301,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     }
     const bool host_ready = matte_host_ && matte_host_->hostReady();
     const std::string ui =
-        std::format("v54 {} vin={} host={} matte={} ep={}", dbg.stage ? dbg.stage : "?",
+        std::format("v55 {} vin={} host={} matte={} ep={}", dbg.stage ? dbg.stage : "?",
                     dbg.has_video_in ? 1 : 0, host_ready ? 1 : 0, matte_live_ ? 1 : 0,
                     matte_host_ ? matte_host_->hostEp() : "?");
     if (debug_status_) {
@@ -353,7 +353,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     ensureMatteHost();
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v54 kick throttle fix (no cycle spiral)"));
+        debug_status_->set_value(std::string("v55 map-stall cooldown"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -517,28 +517,61 @@ RenderResult Input::render() noexcept try {
         dbg.stage = "passthrough";
     }
 
-    // Kick pacing: wait for host !busy (one in flight), plus a small wall-clock floor.
-    // Do NOT pace from host cycle_ms — that includes idle time until the next kick and
-    // creates a death spiral (v53 made preview+output both laggy).
-    // Do NOT treat Input::render gaps as FPS — PIXERA calls are not vsync-steady.
+    // Shared-capture Map in the matte host stalls the same GPU PIXERA uses for outputs.
+    // When map_ms spikes, STOP kicking (cooldown) so live blit can run at full rate with
+    // the last matte — this is what recovers preview after outputs are disabled.
     constexpr std::uint64_t kFirstKickTick = 30;
-    constexpr std::uint32_t kCapMaxW = 640u;
-    constexpr double kMinKickMs = 33.0; // ~30 matte fps ceiling when infer is fast
+    constexpr double kMinKickMs = 50.0;       // ~20 matte fps ceiling
+    constexpr double kStressedKickMs = 100.0; // after a cooldown
+    constexpr float kSlowMapMs = 45.0f;       // Map alone should be a few ms when healthy
+    constexpr std::uint32_t kSlowMapStreak = 2;
+    constexpr double kCooldownMs = 2000.0;
 
     if (matte_host_) {
         matte_host_->clearBusyIfStale(2500);
+        const float map_ms = matte_host_->hostMapMs();
+        if (map_ms > 0.1f && map_ms != last_seen_map_ms_) {
+            last_seen_map_ms_ = map_ms;
+            if (map_ms >= kSlowMapMs) {
+                ++slow_map_streak_;
+            } else {
+                slow_map_streak_ = 0;
+                // Healthy maps after cooldown → leave stressed mode gradually.
+                if (stressed_ && map_ms < 20.0f && now >= cooldown_until_) {
+                    stressed_ = false;
+                    removerLog("matte_unstressed (map_ms healthy again)");
+                }
+            }
+            if (slow_map_streak_ >= kSlowMapStreak && now >= cooldown_until_) {
+                slow_map_streak_ = 0;
+                ++cooldown_count_;
+                stressed_ = true;
+                cooldown_until_ =
+                    now + std::chrono::milliseconds(static_cast<int>(kCooldownMs));
+                removerLog(std::format(
+                    "matte_cooldown {:.0f}ms — map_ms={:.1f} infer_ms={:.1f} (stop kicks so "
+                    "PIXERA GPU can recover; live+last-matte continues) #{}",
+                    kCooldownMs, map_ms, matte_host_->hostInferMs(), cooldown_count_));
+                if (cooldown_count_ >= 2u) {
+                    (void)matte_host_->restartHost("repeated slow shared Map under outputs");
+                    cooldown_count_ = 0;
+                    pushed_quality_ = -1;
+                    last_seen_map_ms_ = 0.0f;
+                }
+            }
+        }
     }
 
-    // Pace from infer time only (pure GPU/ORT work), not end-to-end cycle.
-    double min_kick_ms = kMinKickMs;
+    const bool in_cooldown = now < cooldown_until_;
+    const std::uint32_t cap_max_w = stressed_ ? 320u : 480u;
+    double min_kick_ms = stressed_ ? kStressedKickMs : kMinKickMs;
     if (matte_host_) {
         const float infer = matte_host_->hostInferMs();
         if (infer > 1.0f) {
-            min_kick_ms = std::max(kMinKickMs, static_cast<double>(infer) + 8.0);
+            min_kick_ms = std::max(min_kick_ms, static_cast<double>(infer) + 10.0);
         }
-        // Soft cap so a slow infer under outputs doesn't freeze matte updates forever.
-        if (min_kick_ms > 120.0) {
-            min_kick_ms = 120.0;
+        if (min_kick_ms > 150.0) {
+            min_kick_ms = 150.0;
         }
     }
 
@@ -547,10 +580,10 @@ RenderResult Input::render() noexcept try {
             ? 1e9
             : std::chrono::duration<double, std::milli>(now - last_kick_wall_).count();
 
-    if (matte_host_ && matte_host_->hostReady() && !matte_host_->busy() &&
+    if (matte_host_ && matte_host_->hostReady() && !matte_host_->busy() && !in_cooldown &&
         render_ticks_ >= kFirstKickTick && since_kick_ms >= min_kick_ms &&
         d3d_capture_share_ && d3d_capture_share_->rtv() && width_ >= 16 && height_ >= 16) {
-        const std::uint32_t cap_w = width_ > kCapMaxW ? kCapMaxW : width_;
+        const std::uint32_t cap_w = width_ > cap_max_w ? cap_max_w : width_;
         const std::uint32_t cap_h =
             static_cast<std::uint32_t>((static_cast<std::uint64_t>(height_) * cap_w) / width_);
         if (cap_h > 0) {
@@ -571,13 +604,13 @@ RenderResult Input::render() noexcept try {
 
     if (render_ticks_ <= 8u || (render_ticks_ % 60u) == 1u) {
         removerLog(std::format(
-            "gpu_present {} {}x{} matte_live={} host_ready={} busy={} min_kick_ms={:.0f} "
-            "infer_ms={:.0f} cycle_ms={:.0f}",
+            "gpu_present {} {}x{} matte_live={} busy={} min_kick_ms={:.0f} map_ms={:.1f} "
+            "infer_ms={:.0f} cooldown={} stressed={} cap_w={}",
             matte_live_ ? "live+mask" : "live", width_, height_, matte_live_ ? 1 : 0,
-            matte_host_ && matte_host_->hostReady() ? 1 : 0,
             matte_host_ && matte_host_->busy() ? 1 : 0, min_kick_ms,
-            matte_host_ ? matte_host_->hostInferMs() : 0.0f,
-            matte_host_ ? matte_host_->hostCycleMs() : 0.0f));
+            matte_host_ ? matte_host_->hostMapMs() : 0.0f,
+            matte_host_ ? matte_host_->hostInferMs() : 0.0f, in_cooldown ? 1 : 0,
+            stressed_ ? 1 : 0, cap_max_w));
     }
 
     logStatusMaybe(dbg);

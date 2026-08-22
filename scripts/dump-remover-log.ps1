@@ -55,8 +55,7 @@ if (Test-Path -LiteralPath $hostLog) {
 }
 
 Write-Host ''
-Write-Host 'Expect stamp remover-timeline-v54-kick-throttle-fix-...'
-Write-Host 'Quality Custom: set Custom Downsample + Custom Infer Side.'
-Write-Host 'Camera Delay (ms): delay live feed to match matte lag (try cycle_ms from host log).'
-Write-Host 'v54: kick pacing uses infer_ms only (v53 cycle_ms backoff was a death spiral).'
+Write-Host 'Expect stamp remover-timeline-v55-map-cooldown-...'
+Write-Host 'Look for matte_cooldown / map_ms= in logs when outputs make GPU stall.'
+Write-Host 'Quality Custom + Camera Delay still available.'
 Write-Host 'Adapter LUID = 0 for auto, or NVIDIA luid_hex to force. Same GPU as PIXERA preview.'

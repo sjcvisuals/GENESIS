@@ -4,28 +4,31 @@
 $ErrorActionPreference = 'Continue'
 Write-Host @'
 
-GENESIS Remover v54 - kick throttle fix
-=======================================
-v53 made both preview and output laggy: it paced kicks from host
-cycle_ms (includes idle until next kick) which ratcheted slower,
-and mistook Input::render gaps for low FPS then paused kicks.
+GENESIS Remover v55 - map-stall cooldown
+========================================
+Root cause of sticky 2-3fps: matte host Copy+Map of the shared capture
+stalls the same GPU PIXERA uses. Under outputs Map gets slow; keeping
+kicking keeps preview stalled after outputs are off.
 
-v54:
-  - pace from infer_ms only (+ small floor ~33ms)
-  - no present_ms kick pauses / no auto host restart
-  - still one-in-flight (busy gate) so Map stalls cannot stack
+v55:
+  - host publishes map_ms
+  - if map_ms stays high, cooldown (no kicks ~2s) so live+last-matte
+    can run at full rate and the GPU recovers
+  - after repeated cooldowns, relaunch matte host
+  - stressed mode: 320-wide capture, slower kicks
 
 Expect:
-  stamp remover-timeline-v54-kick-throttle-fix-*
-  gpu_present ... min_kick_ms=~33-40 infer_ms=~12-20
+  stamp remover-timeline-v55-map-cooldown-*
+  host: matte_ok ... map_ms=...
+  dll: matte_cooldown ... when outputs thrash the GPU
 
 1) Quit PIXERA completely
 2) git pull
 3) BUILD-REMOVER.bat
 4) INSTALL-PIXERA-REMOVER.bat
 5) Re-import ExtGenesisRemover.dll
-6) Live Input; preview should feel snappy again; then try outputs
-7) Dump log
+6) Live Input OK -> enable outputs -> disable outputs (preview should recover)
+7) Dump log — check map_ms and matte_cooldown lines
 
 '@
 

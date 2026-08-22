@@ -210,6 +210,13 @@ float MatteHostClient::hostInferMs() const {
     return asHeader(view_)->last_infer_ms;
 }
 
+float MatteHostClient::hostMapMs() const {
+    if (!view_) {
+        return 0.0f;
+    }
+    return asHeader(view_)->last_map_ms;
+}
+
 bool MatteHostClient::restartHost(const char* reason) {
     removerLog(std::format("MatteHostClient restartHost ({})", reason ? reason : "?"));
     if (stop_event_) {
@@ -238,6 +245,7 @@ bool MatteHostClient::restartHost(const char* reason) {
         h->capture_handle = 0;
         h->last_cycle_ms = 0;
         h->last_infer_ms = 0;
+        h->last_map_ms = 0;
         if (stop_event_) {
             ResetEvent(static_cast<HANDLE>(stop_event_));
         }

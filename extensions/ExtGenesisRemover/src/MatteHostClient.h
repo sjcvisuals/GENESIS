@@ -39,9 +39,10 @@ public:
     void clearBusyIfStale(std::uint32_t stale_ms = 1500);
     // Host writes ep name into IPC status (e.g. "DML:1" or "CPU").
     std::string hostEp() const;
-    // Last host cycle / infer times (ms); 0 if unknown.
+    // Last host cycle / infer / map times (ms); 0 if unknown.
     float hostCycleMs() const;
     float hostInferMs() const;
+    float hostMapMs() const;
     // Kill + relaunch host (recover from GPU thrash after outputs).
     bool restartHost(const char* reason);
 

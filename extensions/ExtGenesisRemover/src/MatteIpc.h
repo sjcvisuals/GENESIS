@@ -4,17 +4,17 @@
 #include <cstdint>
 
 // Shared between ExtGenesisRemover.dll and GenesisRemoverMatteHost.exe.
-// Named file mapping: Local\GenesisRemoverMatteIpc_v53
-// Named event:       Local\GenesisRemoverMatteKick_v53
-// v53: host publishes cycle/infer ms so the DLL can throttle kicks under load.
+// Named file mapping: Local\GenesisRemoverMatteIpc_v55
+// Named event:       Local\GenesisRemoverMatteKick_v55
+// v55: host publishes last_map_ms (shared-texture readback) for GPU-stall cooldown.
 namespace genesis::matte_ipc {
 
-inline constexpr char kMappingName[] = "Local\\GenesisRemoverMatteIpc_v53";
-inline constexpr char kKickEventName[] = "Local\\GenesisRemoverMatteKick_v53";
-inline constexpr char kStopEventName[] = "Local\\GenesisRemoverMatteStop_v53";
+inline constexpr char kMappingName[] = "Local\\GenesisRemoverMatteIpc_v55";
+inline constexpr char kKickEventName[] = "Local\\GenesisRemoverMatteKick_v55";
+inline constexpr char kStopEventName[] = "Local\\GenesisRemoverMatteStop_v55";
 
 inline constexpr std::uint32_t kMagic = 0x34444d47u; // GMD4
-inline constexpr std::uint32_t kVersion = 3;
+inline constexpr std::uint32_t kVersion = 5;
 inline constexpr std::uint32_t kMaxWidth = 1920;
 inline constexpr std::uint32_t kMaxHeight = 1080;
 inline constexpr std::uint32_t kMaxBytes = kMaxWidth * kMaxHeight * 4u;
@@ -42,9 +42,10 @@ struct Header {
     // Custom quality (quality==3). downsample 0 → host clamps to a safe default.
     float rvm_downsample = 0.0f;
     std::uint32_t max_infer_side = 0;
-    // Host → DLL: last successful matte cycle / infer (ms). Used for kick backoff.
+    // Host → DLL telemetry (ms). map = shared capture Copy+Map (stalls PIXERA GPU).
     float last_cycle_ms = 0.0f;
     float last_infer_ms = 0.0f;
+    float last_map_ms = 0.0f;
     // RGBA8 pixels follow when done_seq updates (tight pack, row pitch = width*4).
 };
 #pragma pack(pop)

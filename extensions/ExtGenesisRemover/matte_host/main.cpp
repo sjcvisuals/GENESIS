@@ -1,7 +1,7 @@
 // Out-of-process RVM host for ExtGenesisRemover.
 // ORT must NOT load inside PIXERA (v39–v42 froze the preview). This exe owns ORT.
 //
-// IPC: Local\GenesisRemoverMatteIpc_v53 + Kick/Stop events (see MatteIpc.h).
+// IPC: Local\GenesisRemoverMatteIpc_v55 + Kick/Stop events (see MatteIpc.h).
 // Log: %TEMP%\GenesisRemoverMatteHost.log
 
 #include "MatteIpc.h"
@@ -268,10 +268,11 @@ struct CaptureState {
         return true;
     }
 
-    bool mapToRgba(std::vector<std::uint8_t>& out) {
+    bool mapToRgba(std::vector<std::uint8_t>& out, double* out_map_ms) {
         if (!opened || !staging || !context) {
             return false;
         }
+        const auto t0 = std::chrono::steady_clock::now();
         context->CopyResource(staging, opened);
         D3D11_QUERY_DESC qd{};
         qd.Query = D3D11_QUERY_EVENT;
@@ -298,6 +299,11 @@ struct CaptureState {
                         src + static_cast<std::size_t>(y) * mapped.RowPitch, w * 4u);
         }
         context->Unmap(staging, 0);
+        if (out_map_ms) {
+            *out_map_ms = std::chrono::duration<double, std::milli>(
+                              std::chrono::steady_clock::now() - t0)
+                              .count();
+        }
         return true;
     }
 };
@@ -320,7 +326,7 @@ int main() {
     const std::filesystem::path roots[] = {module_dir, module_dir / "assets"};
     genesis::setAssetSearchRoots(roots);
 
-    logLine("start v54-kick-throttle-fix " + module_dir.string());
+    logLine("start v55-map-cooldown " + module_dir.string());
 
     HANDLE mapping =
         OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, genesis::matte_ipc::kMappingName);
@@ -493,9 +499,12 @@ int main() {
         // Cross-process shared blit settle. mapToRgba already waits on a GPU event query.
     static bool s_had_good = false;
     static auto s_last_ok = std::chrono::steady_clock::now();
-    Sleep(s_had_good ? 1 : 40);
+    if (!s_had_good) {
+        Sleep(40);
+    }
 
-    if (!capture.mapToRgba(scratch_in)) {
+    double map_ms = 0.0;
+    if (!capture.mapToRgba(scratch_in, &map_ms)) {
         failKick("map_failed");
         continue;
     }
@@ -504,7 +513,7 @@ int main() {
     if (nz == 0) {
         // One retry after extra settle (first kick after DML init is often empty).
         Sleep(50);
-        if (!capture.mapToRgba(scratch_in)) {
+        if (!capture.mapToRgba(scratch_in, &map_ms)) {
             failKick("map_retry_failed");
             continue;
         }
@@ -538,6 +547,7 @@ int main() {
     s_last_ok = now;
     hdr->last_cycle_ms = static_cast<float>(cycle_ms);
     hdr->last_infer_ms = static_cast<float>(ms);
+    hdr->last_map_ms = static_cast<float>(map_ms);
     if (frames <= 3u || (frames % 30u) == 1u) {
         const double cycle_fps = cycle_ms > 1.0 ? (1000.0 / cycle_ms) : 0.0;
         std::string qlab;
@@ -548,9 +558,10 @@ int main() {
             qlab = genesis::bgRemoverQualityLabel(settings.quality);
         }
         logLine("matte_ok nz=" + std::to_string(out_nz) + " infer_ms=" + std::to_string(ms) +
-                " ep=" + remover.executionProvider() + " in_nz=" + std::to_string(nz) +
-                " size=" + std::to_string(w) + "x" + std::to_string(h) + " q=" + qlab +
-                " cycle_ms=" + std::to_string(cycle_ms) + " matte_fps=" + std::to_string(cycle_fps));
+                " map_ms=" + std::to_string(map_ms) + " ep=" + remover.executionProvider() +
+                " in_nz=" + std::to_string(nz) + " size=" + std::to_string(w) + "x" +
+                std::to_string(h) + " q=" + qlab + " cycle_ms=" + std::to_string(cycle_ms) +
+                " matte_fps=" + std::to_string(cycle_fps));
     }
     }
 
