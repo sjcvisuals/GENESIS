@@ -13,6 +13,7 @@
 #include <dxgi.h>
 
 #include <chrono>
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -316,7 +317,7 @@ int main() {
     const std::filesystem::path roots[] = {module_dir, module_dir / "assets"};
     genesis::setAssetSearchRoots(roots);
 
-    logLine("start v50-auto-gpu " + module_dir.string());
+    logLine("start v51-quality-fix " + module_dir.string());
 
     HANDLE mapping = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, L"Local\\GenesisRemoverMatteIpc_v44");
     if (!mapping) {
@@ -374,7 +375,8 @@ int main() {
     settings.dml_device_id = dml_id;
     settings.adapter_luid = hdr->adapter_luid;
     settings.temporal_alpha = 0.12f;
-    settings.rvm_downsample = 0.16f;
+    // 0 = use Fast/Balanced/Quality presets from hdr->quality (do not force Fast downsample).
+    settings.rvm_downsample = 0.0f;
     remover.setSettings(settings);
     std::string status;
     logLine("BgRemover initialize begin (DirectML GPU preferred)");
@@ -396,6 +398,7 @@ int main() {
     std::vector<std::uint8_t> scratch_out;
     std::uint64_t last_kick = 0;
     std::uint64_t frames = 0;
+    int applied_quality = -1;
 
     // ALWAYS advance done_seq on failure. If we leave kick_seq != done_seq, the DLL
     // stays busy=1 forever and never kicks again (v45 regression: nz=0 -> no cutout).
@@ -405,6 +408,19 @@ int main() {
         hdr->result_nz = 0;
         std::snprintf(hdr->stage, sizeof(hdr->stage), "%s", reason);
         hdr->done_seq = last_kick;
+    };
+
+    auto applyQualityFromHdr = [&]() {
+        const int q = static_cast<int>(std::min<std::uint32_t>(2u, hdr->quality));
+        if (q == applied_quality) {
+            return;
+        }
+        settings.quality = static_cast<genesis::BgRemoverQuality>(q);
+        settings.rvm_downsample = 0.0f;
+        remover.setSettings(settings);
+        remover.resetTemporalState();
+        applied_quality = q;
+        logLine(std::string("quality -> ") + genesis::bgRemoverQualityLabel(settings.quality));
     };
 
     for (;;) {
@@ -440,7 +456,9 @@ int main() {
             continue;
         }
 
-    // Cross-process shared blit settle. mapToRgba already waits on a GPU event query.
+        applyQualityFromHdr();
+
+        // Cross-process shared blit settle. mapToRgba already waits on a GPU event query.
     static bool s_had_good = false;
     static auto s_last_ok = std::chrono::steady_clock::now();
     Sleep(s_had_good ? 1 : 40);
@@ -491,6 +509,7 @@ int main() {
         logLine("matte_ok nz=" + std::to_string(out_nz) + " infer_ms=" + std::to_string(ms) +
                 " ep=" + remover.executionProvider() + " in_nz=" + std::to_string(nz) +
                 " size=" + std::to_string(w) + "x" + std::to_string(h) +
+                " q=" + genesis::bgRemoverQualityLabel(settings.quality) +
                 " cycle_ms=" + std::to_string(cycle_ms) + " matte_fps=" + std::to_string(cycle_fps));
     }
     }

@@ -55,5 +55,5 @@ if (Test-Path -LiteralPath $hostLog) {
 }
 
 Write-Host ''
-Write-Host 'Expect stamp remover-timeline-v50-auto-gpu-...'
+Write-Host 'Expect stamp remover-timeline-v51-quality-fix-...'
 Write-Host 'Adapter LUID = 0 for auto, or NVIDIA luid_hex to force. Same GPU as PIXERA preview.'

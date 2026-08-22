@@ -96,9 +96,17 @@ BgRemover::~BgRemover() {
 }
 
 void BgRemover::setSettings(const BgRemoverSettings& settings) {
+    const bool needs_reload = settings.backend != settings_.backend ||
+                              settings.prefer_cpu_ep != settings_.prefer_cpu_ep ||
+                              settings.dml_device_id != settings_.dml_device_id ||
+                              settings.adapter_luid != settings_.adapter_luid ||
+                              settings.model_path != settings_.model_path;
     settings_ = settings;
-    initialized_ = false;
-    rvm_ready_ = false;
+    // Quality / downsample / temporal can change every frame — do not drop the ORT session.
+    if (needs_reload) {
+        initialized_ = false;
+        rvm_ready_ = false;
+    }
 }
 
 void BgRemover::resetTemporalState() {

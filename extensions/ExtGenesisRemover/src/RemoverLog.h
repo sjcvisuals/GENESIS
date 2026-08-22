@@ -13,6 +13,6 @@ void removerLog(const std::string& line);
 std::filesystem::path removerTempLogPath();
 
 // Bump when diagnosing timeline load so the log proves the new DLL is running.
-inline constexpr const char* kRemoverBuildStamp = "remover-timeline-v50-auto-gpu-20260820";
+inline constexpr const char* kRemoverBuildStamp = "remover-timeline-v51-quality-fix-20260822";
 
 } // namespace rxext::genesis_remover

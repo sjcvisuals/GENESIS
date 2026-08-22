@@ -458,9 +458,12 @@ RenderResult Input::render() noexcept try {
         dbg.stage = "passthrough";
     }
 
-    // Capture at <=960 wide (Map+RVM on 1080p ~8fps). Unflipped so host rows match Video In.
+    // Capture size is fixed — quality toggles must NOT realloc the shared capture
+    // (that broke cutout when switching Fast→Balanced/Quality). RVM quality is
+    // applied in the matte host via IPC hdr->quality presets.
     constexpr std::uint64_t kFirstKickTick = 30;
     constexpr std::uint64_t kKickInterval = 1;
+    constexpr std::uint32_t kCapMaxW = 640u;
     if (matte_host_) {
         matte_host_->clearBusyIfStale(2000);
     }
@@ -469,10 +472,7 @@ RenderResult Input::render() noexcept try {
         (last_capture_kick_tick_ == 0 ||
          render_ticks_ - last_capture_kick_tick_ >= kKickInterval) &&
         d3d_capture_share_ && d3d_capture_share_->rtv() && width_ >= 16 && height_ >= 16) {
-        const std::uint32_t max_cap_w = (quality_ && quality_->value() >= 2) ? 1280u
-                                          : (quality_ && quality_->value() == 1) ? 960u
-                                                                                : 640u;
-        const std::uint32_t cap_w = width_ > max_cap_w ? max_cap_w : width_;
+        const std::uint32_t cap_w = width_ > kCapMaxW ? kCapMaxW : width_;
         const std::uint32_t cap_h =
             static_cast<std::uint32_t>((static_cast<std::uint64_t>(height_) * cap_w) / width_);
         if (cap_h == 0) {
