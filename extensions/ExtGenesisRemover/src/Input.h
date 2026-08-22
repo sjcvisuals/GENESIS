@@ -72,8 +72,8 @@ private:
     std::chrono::steady_clock::time_point cooldown_until_{};
     std::uint32_t slow_map_streak_ = 0;
     std::uint32_t cooldown_count_ = 0;
+    std::uint64_t last_map_sample_seq_ = 0;
     bool stressed_ = false; // smaller capture / slower kicks after a cooldown
-    float last_seen_map_ms_ = 0.0f;
     int pushed_quality_ = -1;
     float pushed_ds_ = -1.0f;
     std::uint32_t pushed_side_ = 0;

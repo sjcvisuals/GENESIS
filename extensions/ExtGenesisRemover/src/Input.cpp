@@ -529,15 +529,15 @@ RenderResult Input::render() noexcept try {
 
     if (matte_host_) {
         matte_host_->clearBusyIfStale(2500);
-        const float map_ms = matte_host_->hostMapMs();
-        if (map_ms > 0.1f && map_ms != last_seen_map_ms_) {
-            last_seen_map_ms_ = map_ms;
+        const std::uint64_t done = matte_host_->doneSeq();
+        if (done != 0 && done != last_map_sample_seq_) {
+            last_map_sample_seq_ = done;
+            const float map_ms = matte_host_->hostMapMs();
             if (map_ms >= kSlowMapMs) {
                 ++slow_map_streak_;
             } else {
                 slow_map_streak_ = 0;
-                // Healthy maps after cooldown → leave stressed mode gradually.
-                if (stressed_ && map_ms < 20.0f && now >= cooldown_until_) {
+                if (stressed_ && map_ms > 0.1f && map_ms < 20.0f && now >= cooldown_until_) {
                     stressed_ = false;
                     removerLog("matte_unstressed (map_ms healthy again)");
                 }
@@ -556,7 +556,7 @@ RenderResult Input::render() noexcept try {
                     (void)matte_host_->restartHost("repeated slow shared Map under outputs");
                     cooldown_count_ = 0;
                     pushed_quality_ = -1;
-                    last_seen_map_ms_ = 0.0f;
+                    last_map_sample_seq_ = 0;
                 }
             }
         }

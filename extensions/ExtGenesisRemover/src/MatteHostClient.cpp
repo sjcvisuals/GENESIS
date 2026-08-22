@@ -163,6 +163,13 @@ bool MatteHostClient::hostReady() const {
     return h->host_ready != 0 && h->host_pid != 0;
 }
 
+std::uint64_t MatteHostClient::doneSeq() const {
+    if (!view_) {
+        return 0;
+    }
+    return asHeader(view_)->done_seq;
+}
+
 void MatteHostClient::writeQualityToHeader() {
     if (!view_) {
         return;
