@@ -1,7 +1,7 @@
 // Out-of-process RVM host for ExtGenesisRemover.
 // ORT must NOT load inside PIXERA (v39–v42 froze the preview). This exe owns ORT.
 //
-// IPC: Local\GenesisRemoverMatteIpc_v52 + Kick/Stop events (see MatteIpc.h).
+// IPC: Local\GenesisRemoverMatteIpc_v53 + Kick/Stop events (see MatteIpc.h).
 // Log: %TEMP%\GenesisRemoverMatteHost.log
 
 #include "MatteIpc.h"
@@ -278,10 +278,20 @@ struct CaptureState {
         ID3D11Query* q = nullptr;
         if (SUCCEEDED(device->CreateQuery(&qd, &q)) && q) {
             context->End(q);
+            // Soft poll — tight GetData+Sleep(1) under PIXERA output load stalls the GPU.
+            int spins = 0;
             while (context->GetData(q, nullptr, 0, 0) == S_FALSE) {
-                Sleep(1);
+                ++spins;
+                Sleep(spins < 4 ? 1 : 3);
+                if (spins > 200) { // ~500ms+ — give up this frame
+                    break;
+                }
             }
             q->Release();
+            if (spins > 200) {
+                logLine("mapToRgba GPU wait timeout");
+                return false;
+            }
         }
         D3D11_MAPPED_SUBRESOURCE mapped{};
         if (FAILED(context->Map(staging, 0, D3D11_MAP_READ, 0, &mapped)) || !mapped.pData) {
@@ -317,7 +327,7 @@ int main() {
     const std::filesystem::path roots[] = {module_dir, module_dir / "assets"};
     genesis::setAssetSearchRoots(roots);
 
-    logLine("start v52-custom-quality-camera-delay " + module_dir.string());
+    logLine("start v53-output-load-throttle " + module_dir.string());
 
     HANDLE mapping =
         OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, genesis::matte_ipc::kMappingName);
@@ -533,6 +543,8 @@ int main() {
     const double cycle_ms =
         std::chrono::duration<double, std::milli>(now - s_last_ok).count();
     s_last_ok = now;
+    hdr->last_cycle_ms = static_cast<float>(cycle_ms);
+    hdr->last_infer_ms = static_cast<float>(ms);
     if (frames <= 3u || (frames % 30u) == 1u) {
         const double cycle_fps = cycle_ms > 1.0 ? (1000.0 / cycle_ms) : 0.0;
         std::string qlab;

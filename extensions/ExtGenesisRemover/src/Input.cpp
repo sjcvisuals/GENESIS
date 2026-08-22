@@ -10,6 +10,9 @@
 #include <Windows.h>
 #include <d3d11.h>
 
+#include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <format>
 #include <stdexcept>
@@ -108,9 +111,9 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
     debug_status_ = add_parameter<ParameterString>("debug_status");
     debug_status_->set_property(PropertyNames::name, "Debug Status");
     debug_status_->set_property(PropertyNames::group_name, "Debug");
-    debug_status_->set_value(std::string("v52 custom quality + camera delay"));
+    debug_status_->set_value(std::string("v53 output-load throttle + recover"));
 
-    removerLog(std::format("Input ctor v52 custom+delay adapter_luid={:016x}", adapter_luid_));
+    removerLog(std::format("Input ctor v53 throttle+recover adapter_luid={:016x}", adapter_luid_));
 }
 
 Input::~Input() {
@@ -150,6 +153,12 @@ void Input::pushQualityToHost() {
         ds = custom_downsample_ ? static_cast<float>(custom_downsample_->value()) : 0.25f;
         side = custom_infer_side_ ? static_cast<std::uint32_t>(custom_infer_side_->value()) : 512u;
     }
+    if (q == pushed_quality_ && ds == pushed_ds_ && side == pushed_side_) {
+        return;
+    }
+    pushed_quality_ = q;
+    pushed_ds_ = ds;
+    pushed_side_ = side;
     matte_host_->setQuality(q, ds, side);
 }
 
@@ -292,7 +301,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     }
     const bool host_ready = matte_host_ && matte_host_->hostReady();
     const std::string ui =
-        std::format("v52 {} vin={} host={} matte={} ep={}", dbg.stage ? dbg.stage : "?",
+        std::format("v53 {} vin={} host={} matte={} ep={}", dbg.stage ? dbg.stage : "?",
                     dbg.has_video_in ? 1 : 0, host_ready ? 1 : 0, matte_live_ ? 1 : 0,
                     matte_host_ ? matte_host_->hostEp() : "?");
     if (debug_status_) {
@@ -344,7 +353,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     ensureMatteHost();
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v52 custom quality + camera delay"));
+        debug_status_->set_value(std::string("v53 output-load throttle + recover"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -470,9 +479,17 @@ RenderResult Input::render() noexcept try {
         }
     }
 
+    const auto now_early = std::chrono::steady_clock::now();
+    double present_ms_early = 16.0;
+    if (last_present_tp_.time_since_epoch().count() != 0) {
+        present_ms_early =
+            std::chrono::duration<double, std::milli>(now_early - last_present_tp_).count();
+    }
+    const bool shed_delay = present_ms_early >= 200.0 || now_early < kick_pause_until_;
+
     ID3D11ShaderResourceView* live_srv = d3d_video_in_->srv();
     const double delay_ms = camera_delay_ms_ ? camera_delay_ms_->value() : 0.0;
-    if (live_srv && delay_ms > 0.5) {
+    if (live_srv && delay_ms > 0.5 && !shed_delay) {
         live_srv = live_delay_.pushAndSample(*d3d_, *passthrough_, d3d_video_in_->srv(), width_,
                                              height_, delay_ms);
         if ((render_ticks_ % 60u) == 1u) {
@@ -480,6 +497,10 @@ RenderResult Input::render() noexcept try {
                                    delay_ms));
         }
     } else {
+        if (shed_delay && delay_ms > 0.5 && (render_ticks_ % 60u) == 1u) {
+            removerLog(std::format("camera_delay shed (present_ms={:.0f} or kick pause)",
+                                   present_ms_early));
+        }
         live_delay_.reset();
     }
 
@@ -506,26 +527,78 @@ RenderResult Input::render() noexcept try {
         dbg.stage = "passthrough";
     }
 
-    // Capture size is fixed — quality toggles must NOT realloc the shared capture
-    // (that broke cutout when switching Fast→Balanced/Quality). RVM quality is
-    // applied in the matte host via IPC hdr->quality presets.
+    // Capture size is fixed — quality toggles must NOT realloc the shared capture.
+    // Kick throttling is critical: host Map/readback of the shared capture stalls the
+    // same GPU PIXERA uses for outputs. Under output load, kicking every free slot
+    // collapses preview to ~2-3fps and that thrash can persist after outputs drop.
     constexpr std::uint64_t kFirstKickTick = 30;
-    constexpr std::uint64_t kKickInterval = 1;
     constexpr std::uint32_t kCapMaxW = 640u;
-    if (matte_host_) {
-        matte_host_->clearBusyIfStale(2000);
+    constexpr double kMinKickMs = 100.0;   // hard cap ~10 matte fps
+    constexpr double kSlowPresentMs = 280.0;
+    constexpr std::uint32_t kSlowStreakBeforePause = 8;
+    constexpr double kKickPauseMs = 1500.0;
+
+    const auto now = std::chrono::steady_clock::now();
+    double present_ms = 16.0;
+    if (last_present_tp_.time_since_epoch().count() != 0) {
+        present_ms = std::chrono::duration<double, std::milli>(now - last_present_tp_).count();
     }
-    if (matte_host_ && matte_host_->hostReady() && !matte_host_->busy() &&
-        render_ticks_ >= kFirstKickTick &&
-        (last_capture_kick_tick_ == 0 ||
-         render_ticks_ - last_capture_kick_tick_ >= kKickInterval) &&
+    last_present_tp_ = now;
+
+    if (present_ms >= kSlowPresentMs) {
+        ++slow_present_streak_;
+    } else {
+        slow_present_streak_ = 0;
+    }
+
+    if (slow_present_streak_ >= kSlowStreakBeforePause) {
+        slow_present_streak_ = 0;
+        ++recover_count_;
+        kick_pause_until_ =
+            now + std::chrono::milliseconds(static_cast<int>(kKickPauseMs));
+        live_delay_.reset();
+        if (matte_host_) {
+            matte_host_->clearBusyIfStale(0);
+        }
+        removerLog(std::format(
+            "gpu_recover pause kicks {:.0f}ms (present_ms={:.0f} streak) recover#{}",
+            kKickPauseMs, present_ms, recover_count_));
+        // After repeated collapses, relaunch the matte host (clears DML thrash).
+        if (recover_count_ >= 2u && matte_host_) {
+            (void)matte_host_->restartHost("sticky slow after outputs");
+            recover_count_ = 0;
+            pushed_quality_ = -1; // re-push after host comes back
+        }
+    }
+
+    if (matte_host_) {
+        matte_host_->clearBusyIfStale(2500);
+    }
+
+    const bool kicks_paused = now < kick_pause_until_;
+    double min_kick_ms = kMinKickMs;
+    if (matte_host_) {
+        const float cycle = matte_host_->hostCycleMs();
+        if (cycle > min_kick_ms) {
+            // Stay slightly behind the host so we never pile Map stalls onto PIXERA.
+            min_kick_ms = static_cast<double>(cycle) * 1.05;
+        }
+        if (min_kick_ms > 500.0) {
+            min_kick_ms = 500.0;
+        }
+    }
+    const double since_kick_ms =
+        last_kick_wall_.time_since_epoch().count() == 0
+            ? 1e9
+            : std::chrono::duration<double, std::milli>(now - last_kick_wall_).count();
+
+    if (matte_host_ && matte_host_->hostReady() && !matte_host_->busy() && !kicks_paused &&
+        render_ticks_ >= kFirstKickTick && since_kick_ms >= min_kick_ms &&
         d3d_capture_share_ && d3d_capture_share_->rtv() && width_ >= 16 && height_ >= 16) {
         const std::uint32_t cap_w = width_ > kCapMaxW ? kCapMaxW : width_;
         const std::uint32_t cap_h =
             static_cast<std::uint32_t>((static_cast<std::uint64_t>(height_) * cap_w) / width_);
-        if (cap_h == 0) {
-            // skip
-        } else {
+        if (cap_h > 0) {
             if (d3d_capture_share_->width() != cap_w || d3d_capture_share_->height() != cap_h) {
                 d3d_capture_share_->allocate(cap_w, cap_h, Format::R8G8B8A8_UNORM,
                                             /*is_target=*/true, /*publish_share=*/true);
@@ -534,6 +607,7 @@ RenderResult Input::render() noexcept try {
                                cap_w, cap_h, /*flip_v=*/false);
             if (matte_host_->kickCapture(*d3d_capture_share_, cap_w, cap_h)) {
                 last_capture_kick_tick_ = render_ticks_;
+                last_kick_wall_ = now;
             }
         }
     } else if (matte_host_ && !matte_host_->hostReady() && (render_ticks_ % 60u) == 1u) {
@@ -541,10 +615,13 @@ RenderResult Input::render() noexcept try {
     }
 
     if (render_ticks_ <= 8u || (render_ticks_ % 60u) == 1u) {
-        removerLog(std::format("gpu_present {} {}x{} matte_live={} host_ready={} busy={}",
-                               matte_live_ ? "live+mask" : "live", width_, height_,
-                               matte_live_ ? 1 : 0, matte_host_ && matte_host_->hostReady() ? 1 : 0,
-                               matte_host_ && matte_host_->busy() ? 1 : 0));
+        removerLog(std::format(
+            "gpu_present {} {}x{} matte_live={} host_ready={} busy={} present_ms={:.1f} "
+            "min_kick_ms={:.0f} host_cycle_ms={:.0f} paused={}",
+            matte_live_ ? "live+mask" : "live", width_, height_, matte_live_ ? 1 : 0,
+            matte_host_ && matte_host_->hostReady() ? 1 : 0,
+            matte_host_ && matte_host_->busy() ? 1 : 0, present_ms, min_kick_ms,
+            matte_host_ ? matte_host_->hostCycleMs() : 0.0f, kicks_paused ? 1 : 0));
     }
 
     logStatusMaybe(dbg);

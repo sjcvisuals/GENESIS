@@ -196,6 +196,55 @@ std::string MatteHostClient::hostEp() const {
     return std::string(asHeader(view_)->status);
 }
 
+float MatteHostClient::hostCycleMs() const {
+    if (!view_) {
+        return 0.0f;
+    }
+    return asHeader(view_)->last_cycle_ms;
+}
+
+float MatteHostClient::hostInferMs() const {
+    if (!view_) {
+        return 0.0f;
+    }
+    return asHeader(view_)->last_infer_ms;
+}
+
+bool MatteHostClient::restartHost(const char* reason) {
+    removerLog(std::format("MatteHostClient restartHost ({})", reason ? reason : "?"));
+    if (stop_event_) {
+        SetEvent(static_cast<HANDLE>(stop_event_));
+    }
+    if (host_process_) {
+        WaitForSingleObject(static_cast<HANDLE>(host_process_), 2500);
+        DWORD code = 0;
+        if (GetExitCodeProcess(static_cast<HANDLE>(host_process_), &code) &&
+            code == STILL_ACTIVE) {
+            TerminateProcess(static_cast<HANDLE>(host_process_), 1);
+            WaitForSingleObject(static_cast<HANDLE>(host_process_), 1000);
+        }
+        CloseHandle(static_cast<HANDLE>(host_process_));
+        host_process_ = nullptr;
+    }
+    last_done_seq_ = 0;
+    last_dup_handle_ = 0;
+    last_kick_tick_ms_ = 0;
+    if (view_) {
+        auto* h = asHeader(view_);
+        h->host_ready = 0;
+        h->host_pid = 0;
+        h->kick_seq = 0;
+        h->done_seq = 0;
+        h->capture_handle = 0;
+        h->last_cycle_ms = 0;
+        h->last_infer_ms = 0;
+        if (stop_event_) {
+            ResetEvent(static_cast<HANDLE>(stop_event_));
+        }
+    }
+    return launchHost();
+}
+
 void MatteHostClient::clearBusyIfStale(std::uint32_t stale_ms) {
     if (!view_ || !busy() || last_kick_tick_ms_ == 0) {
         return;

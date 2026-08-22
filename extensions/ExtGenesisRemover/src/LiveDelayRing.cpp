@@ -4,6 +4,8 @@
 #include "D3d11Passthrough.h"
 #include "rxext.h"
 
+#include <algorithm>
+#include <cmath>
 #include <limits>
 
 namespace rxext::genesis_remover {
@@ -14,6 +16,14 @@ void LiveDelayRing::reset() {
     filled_ = 0;
     width_ = 0;
     height_ = 0;
+    delay_ms_ = 0.0;
+}
+
+std::size_t LiveDelayRing::slotsForDelay(double delay_ms) {
+    // Assume ~60 present/sec; keep a couple of spare slots. Cap hard for VRAM.
+    const double frames = std::ceil(delay_ms / (1000.0 / 60.0)) + 2.0;
+    const auto n = static_cast<std::size_t>(std::clamp(frames, 3.0, static_cast<double>(kMaxFrames)));
+    return n;
 }
 
 ID3D11ShaderResourceView* LiveDelayRing::pushAndSample(SharedD3d11& d3d, D3d11Passthrough& blit,
@@ -27,10 +37,12 @@ ID3D11ShaderResourceView* LiveDelayRing::pushAndSample(SharedD3d11& d3d, D3d11Pa
         return live_srv;
     }
 
-    if (slots_.size() != kMaxFrames || width_ != width || height_ != height) {
+    const std::size_t need = slotsForDelay(delay_ms);
+    if (slots_.size() != need || width_ != width || height_ != height ||
+        std::abs(delay_ms_ - delay_ms) > 15.0) {
         slots_.clear();
-        slots_.resize(kMaxFrames);
-        for (std::size_t i = 0; i < kMaxFrames; ++i) {
+        slots_.resize(need);
+        for (std::size_t i = 0; i < need; ++i) {
             slots_[i].tex = std::make_unique<D3d11SharedTexture>(d3d.device(), d3d.context());
             slots_[i].tex->allocate(width, height, Format::R8G8B8A8_UNORM, /*is_target=*/true,
                                     /*publish_share=*/false);
@@ -40,23 +52,22 @@ ID3D11ShaderResourceView* LiveDelayRing::pushAndSample(SharedD3d11& d3d, D3d11Pa
         filled_ = 0;
         width_ = width;
         height_ = height;
+        delay_ms_ = delay_ms;
     }
 
     const auto now = std::chrono::steady_clock::now();
-    // Store Video In in texture orientation (display path still flips).
+    const std::size_t n = slots_.size();
     blit.draw(d3d.context(), live_srv, slots_[write_].tex->rtv(), width, height, /*flip_v=*/false);
     slots_[write_].stamped = now;
     slots_[write_].valid = true;
-    write_ = (write_ + 1) % kMaxFrames;
-    if (filled_ < kMaxFrames) {
+    write_ = (write_ + 1) % n;
+    if (filled_ < n) {
         ++filled_;
     }
 
-    // Prefer a frame at least as old as delay_ms; among those, closest to the target age.
-    // If the ring is still filling, take the oldest available.
-    std::size_t best = kMaxFrames;
+    std::size_t best = n;
     double best_score = std::numeric_limits<double>::infinity();
-    for (std::size_t i = 0; i < kMaxFrames; ++i) {
+    for (std::size_t i = 0; i < n; ++i) {
         if (!slots_[i].valid) {
             continue;
         }
@@ -69,7 +80,7 @@ ID3D11ShaderResourceView* LiveDelayRing::pushAndSample(SharedD3d11& d3d, D3d11Pa
             best = i;
         }
     }
-    if (best >= kMaxFrames || !slots_[best].tex) {
+    if (best >= n || !slots_[best].tex) {
         return live_srv;
     }
     return slots_[best].tex->srv();
