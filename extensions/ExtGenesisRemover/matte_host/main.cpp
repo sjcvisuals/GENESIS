@@ -1,7 +1,7 @@
 // Out-of-process RVM host for ExtGenesisRemover.
 // ORT must NOT load inside PIXERA (v39–v42 froze the preview). This exe owns ORT.
 //
-// IPC: Local\GenesisRemoverMatteIpc_v44 + Kick/Stop events.
+// IPC: Local\GenesisRemoverMatteIpc_v52 + Kick/Stop events (see MatteIpc.h).
 // Log: %TEMP%\GenesisRemoverMatteHost.log
 
 #include "MatteIpc.h"
@@ -355,8 +355,8 @@ int main() {
     if (hdr->magic != genesis::matte_ipc::kMagic) {
         std::memset(hdr, 0, sizeof(*hdr));
         hdr->magic = genesis::matte_ipc::kMagic;
-        hdr->version = genesis::matte_ipc::kVersion;
     }
+    hdr->version = genesis::matte_ipc::kVersion;
     hdr->host_pid = GetCurrentProcessId();
 
     // Wait briefly for DLL to publish Adapter LUID (set before CreateProcess, usually ready).
