@@ -59,9 +59,9 @@ bool MatteHostClient::openIpc() {
     if (view_) {
         return true;
     }
-    HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
-                                        0, static_cast<DWORD>(::genesis::matte_ipc::kMappingBytes),
-                                        L"Local\\GenesisRemoverMatteIpc_v44");
+    HANDLE mapping = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
+                                        static_cast<DWORD>(::genesis::matte_ipc::kMappingBytes),
+                                        ::genesis::matte_ipc::kMappingName);
     if (!mapping) {
         removerLog(std::format("MatteHostClient CreateFileMapping failed err={}", GetLastError()));
         return false;
@@ -73,8 +73,8 @@ bool MatteHostClient::openIpc() {
         removerLog(std::format("MatteHostClient MapViewOfFile failed err={}", GetLastError()));
         return false;
     }
-    HANDLE kick = CreateEventW(nullptr, FALSE, FALSE, L"Local\\GenesisRemoverMatteKick_v44");
-    HANDLE stop = CreateEventW(nullptr, TRUE, FALSE, L"Local\\GenesisRemoverMatteStop_v44");
+    HANDLE kick = CreateEventA(nullptr, FALSE, FALSE, ::genesis::matte_ipc::kKickEventName);
+    HANDLE stop = CreateEventA(nullptr, TRUE, FALSE, ::genesis::matte_ipc::kStopEventName);
     if (!kick || !stop) {
         if (kick) {
             CloseHandle(kick);
@@ -97,11 +97,11 @@ bool MatteHostClient::openIpc() {
     if (h->magic != ::genesis::matte_ipc::kMagic) {
         std::memset(h, 0, sizeof(*h));
         h->magic = ::genesis::matte_ipc::kMagic;
-        h->version = ::genesis::matte_ipc::kVersion;
     }
+    h->version = ::genesis::matte_ipc::kVersion;
     h->dll_pid = GetCurrentProcessId();
     h->adapter_luid = adapter_luid_;
-    h->quality = static_cast<std::uint32_t>(quality_);
+    writeQualityToHeader();
     ResetEvent(static_cast<HANDLE>(stop_event_));
     return true;
 }
@@ -163,11 +163,22 @@ bool MatteHostClient::hostReady() const {
     return h->host_ready != 0 && h->host_pid != 0;
 }
 
-void MatteHostClient::setQuality(int quality_0_to_2) {
-    quality_ = quality_0_to_2 < 0 ? 0 : (quality_0_to_2 > 2 ? 2 : quality_0_to_2);
-    if (view_) {
-        asHeader(view_)->quality = static_cast<std::uint32_t>(quality_);
+void MatteHostClient::writeQualityToHeader() {
+    if (!view_) {
+        return;
     }
+    auto* h = asHeader(view_);
+    h->quality = static_cast<std::uint32_t>(quality_);
+    h->rvm_downsample = custom_downsample_;
+    h->max_infer_side = custom_max_infer_side_;
+}
+
+void MatteHostClient::setQuality(int quality_0_to_3, float custom_downsample,
+                                 std::uint32_t custom_max_infer_side) {
+    quality_ = quality_0_to_3 < 0 ? 0 : (quality_0_to_3 > 3 ? 3 : quality_0_to_3);
+    custom_downsample_ = custom_downsample;
+    custom_max_infer_side_ = custom_max_infer_side;
+    writeQualityToHeader();
 }
 
 bool MatteHostClient::busy() const {
@@ -247,7 +258,7 @@ bool MatteHostClient::kickCapture(D3d11SharedTexture& capture, std::uint32_t wid
     h->width = width;
     h->height = height;
     h->adapter_luid = adapter_luid_;
-    h->quality = static_cast<std::uint32_t>(quality_);
+    writeQualityToHeader();
     h->result_ok = 0;
     ++h->kick_seq;
     SetEvent(static_cast<HANDLE>(kick_event_));

@@ -317,13 +317,14 @@ int main() {
     const std::filesystem::path roots[] = {module_dir, module_dir / "assets"};
     genesis::setAssetSearchRoots(roots);
 
-    logLine("start v51-quality-fix " + module_dir.string());
+    logLine("start v52-custom-quality-camera-delay " + module_dir.string());
 
-    HANDLE mapping = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, L"Local\\GenesisRemoverMatteIpc_v44");
+    HANDLE mapping =
+        OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, genesis::matte_ipc::kMappingName);
     if (!mapping) {
-        mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
+        mapping = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
                                      static_cast<DWORD>(genesis::matte_ipc::kMappingBytes),
-                                     L"Local\\GenesisRemoverMatteIpc_v44");
+                                     genesis::matte_ipc::kMappingName);
     }
     if (!mapping) {
         logLine("Open/CreateFileMapping failed");
@@ -335,15 +336,15 @@ int main() {
         CloseHandle(mapping);
         return 1;
     }
-    HANDLE kick = OpenEventW(SYNCHRONIZE | EVENT_MODIFY_STATE, FALSE,
-                             L"Local\\GenesisRemoverMatteKick_v44");
-    HANDLE stop = OpenEventW(SYNCHRONIZE | EVENT_MODIFY_STATE, FALSE,
-                             L"Local\\GenesisRemoverMatteStop_v44");
+    HANDLE kick =
+        OpenEventA(SYNCHRONIZE | EVENT_MODIFY_STATE, FALSE, genesis::matte_ipc::kKickEventName);
+    HANDLE stop =
+        OpenEventA(SYNCHRONIZE | EVENT_MODIFY_STATE, FALSE, genesis::matte_ipc::kStopEventName);
     if (!kick) {
-        kick = CreateEventW(nullptr, FALSE, FALSE, L"Local\\GenesisRemoverMatteKick_v44");
+        kick = CreateEventA(nullptr, FALSE, FALSE, genesis::matte_ipc::kKickEventName);
     }
     if (!stop) {
-        stop = CreateEventW(nullptr, TRUE, FALSE, L"Local\\GenesisRemoverMatteStop_v44");
+        stop = CreateEventA(nullptr, TRUE, FALSE, genesis::matte_ipc::kStopEventName);
     }
     if (!kick || !stop) {
         logLine("Open/CreateEvent failed");
@@ -411,16 +412,44 @@ int main() {
     };
 
     auto applyQualityFromHdr = [&]() {
-        const int q = static_cast<int>(std::min<std::uint32_t>(2u, hdr->quality));
-        if (q == applied_quality) {
+        const int q = static_cast<int>(std::min<std::uint32_t>(3u, hdr->quality));
+        float ds = hdr->rvm_downsample;
+        std::uint32_t max_side = hdr->max_infer_side;
+        if (q < 3) {
+            ds = 0.0f;
+            max_side = 0;
+        } else {
+            if (ds < 0.05f) {
+                ds = 0.20f;
+            }
+            if (ds > 1.0f) {
+                ds = 1.0f;
+            }
+            if (max_side < 128u) {
+                max_side = 384u;
+            }
+            if (max_side > 1280u) {
+                max_side = 1280u;
+            }
+        }
+        const int ds_milli = static_cast<int>(ds * 1000.0f + 0.5f);
+        const int key = (q << 20) ^ (ds_milli << 8) ^ static_cast<int>(max_side);
+        if (key == applied_quality) {
             return;
         }
-        settings.quality = static_cast<genesis::BgRemoverQuality>(q);
-        settings.rvm_downsample = 0.0f;
+        settings.quality =
+            q >= 3 ? genesis::BgRemoverQuality::Balanced : static_cast<genesis::BgRemoverQuality>(q);
+        settings.rvm_downsample = ds;
+        settings.rvm_max_infer_side = max_side;
         remover.setSettings(settings);
         remover.resetTemporalState();
-        applied_quality = q;
-        logLine(std::string("quality -> ") + genesis::bgRemoverQualityLabel(settings.quality));
+        applied_quality = key;
+        if (q >= 3) {
+            logLine("quality -> Custom downsample=" + std::to_string(ds) +
+                    " max_side=" + std::to_string(max_side));
+        } else {
+            logLine(std::string("quality -> ") + genesis::bgRemoverQualityLabel(settings.quality));
+        }
     };
 
     for (;;) {
@@ -506,10 +535,16 @@ int main() {
     s_last_ok = now;
     if (frames <= 3u || (frames % 30u) == 1u) {
         const double cycle_fps = cycle_ms > 1.0 ? (1000.0 / cycle_ms) : 0.0;
+        std::string qlab;
+        if (static_cast<int>(hdr->quality) >= 3) {
+            qlab = "Custom(ds=" + std::to_string(settings.rvm_downsample) +
+                   ",side=" + std::to_string(settings.rvm_max_infer_side) + ")";
+        } else {
+            qlab = genesis::bgRemoverQualityLabel(settings.quality);
+        }
         logLine("matte_ok nz=" + std::to_string(out_nz) + " infer_ms=" + std::to_string(ms) +
                 " ep=" + remover.executionProvider() + " in_nz=" + std::to_string(nz) +
-                " size=" + std::to_string(w) + "x" + std::to_string(h) +
-                " q=" + genesis::bgRemoverQualityLabel(settings.quality) +
+                " size=" + std::to_string(w) + "x" + std::to_string(h) + " q=" + qlab +
                 " cycle_ms=" + std::to_string(cycle_ms) + " matte_fps=" + std::to_string(cycle_fps));
     }
     }

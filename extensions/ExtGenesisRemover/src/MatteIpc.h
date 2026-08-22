@@ -4,16 +4,17 @@
 #include <cstdint>
 
 // Shared between ExtGenesisRemover.dll and GenesisRemoverMatteHost.exe.
-// Named file mapping: Local\GenesisRemoverMatteIpc_v44
-// Named event:       Local\GenesisRemoverMatteKick_v44
+// Named file mapping: Local\GenesisRemoverMatteIpc_v52
+// Named event:       Local\GenesisRemoverMatteKick_v52
+// Bumped from v44: Header gained custom quality fields before pixel payload.
 namespace genesis::matte_ipc {
 
-inline constexpr char kMappingName[] = "Local\\GenesisRemoverMatteIpc_v44";
-inline constexpr char kKickEventName[] = "Local\\GenesisRemoverMatteKick_v44";
-inline constexpr char kStopEventName[] = "Local\\GenesisRemoverMatteStop_v44";
+inline constexpr char kMappingName[] = "Local\\GenesisRemoverMatteIpc_v52";
+inline constexpr char kKickEventName[] = "Local\\GenesisRemoverMatteKick_v52";
+inline constexpr char kStopEventName[] = "Local\\GenesisRemoverMatteStop_v52";
 
 inline constexpr std::uint32_t kMagic = 0x34444d47u; // GMD4
-inline constexpr std::uint32_t kVersion = 1;
+inline constexpr std::uint32_t kVersion = 2;
 inline constexpr std::uint32_t kMaxWidth = 1920;
 inline constexpr std::uint32_t kMaxHeight = 1080;
 inline constexpr std::uint32_t kMaxBytes = kMaxWidth * kMaxHeight * 4u;
@@ -30,13 +31,17 @@ struct Header {
     std::uint32_t host_pid = 0;
     std::uint32_t host_ready = 0; // 1 once ORT loaded
     std::uint32_t dll_pid = 0;
-    std::uint32_t quality = 0; // 0=Fast 1=Balanced 2=Quality
+    // 0=Fast 1=Balanced 2=Quality 3=Custom (uses rvm_downsample + max_infer_side).
+    std::uint32_t quality = 0;
     std::uint64_t kick_seq = 0;
     std::uint64_t done_seq = 0;
     std::uint32_t result_nz = 0;
     std::uint32_t result_ok = 0;
     char stage[32]{};
     char status[96]{};
+    // Custom quality (quality==3). downsample 0 → host clamps to a safe default.
+    float rvm_downsample = 0.0f;
+    std::uint32_t max_infer_side = 0;
     // RGBA8 pixels follow when done_seq updates (tight pack, row pitch = width*4).
 };
 #pragma pack(pop)

@@ -71,8 +71,30 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
     quality_->set_property(PropertyNames::name, "Quality");
     quality_->set_property(PropertyNames::group_name, "Matte");
     quality_->set_property<std::vector<std::string>>(PropertyNames::enum_names,
-                                                      {"Fast", "Balanced", "Quality"});
+                                                      {"Fast", "Balanced", "Quality", "Custom"});
     quality_->set_value(0);
+
+    custom_downsample_ = add_parameter<ParameterValue>("custom_downsample", 0.25);
+    custom_downsample_->set_property(PropertyNames::name, "Custom Downsample");
+    custom_downsample_->set_property(PropertyNames::group_name, "Matte");
+    custom_downsample_->set_property(PropertyNames::min_value, 0.08);
+    custom_downsample_->set_property(PropertyNames::max_value, 1.0);
+    custom_downsample_->set_property(PropertyNames::min_value_ui, 0.08);
+    custom_downsample_->set_property(PropertyNames::max_value_ui, 1.0);
+
+    custom_infer_side_ = add_parameter<ParameterInt>("custom_infer_side", 512);
+    custom_infer_side_->set_property(PropertyNames::name, "Custom Infer Side");
+    custom_infer_side_->set_property(PropertyNames::group_name, "Matte");
+    custom_infer_side_->set_property(PropertyNames::min_value, 192);
+    custom_infer_side_->set_property(PropertyNames::max_value, 1280);
+
+    camera_delay_ms_ = add_parameter<ParameterValue>("camera_delay_ms", 0.0);
+    camera_delay_ms_->set_property(PropertyNames::name, "Camera Delay (ms)");
+    camera_delay_ms_->set_property(PropertyNames::group_name, "Sync");
+    camera_delay_ms_->set_property(PropertyNames::min_value, 0.0);
+    camera_delay_ms_->set_property(PropertyNames::max_value, 300.0);
+    camera_delay_ms_->set_property(PropertyNames::min_value_ui, 0.0);
+    camera_delay_ms_->set_property(PropertyNames::max_value_ui, 300.0);
 
     debug_stage_ = add_parameter<ParameterInt>("debug_stage");
     debug_stage_->set_property(PropertyNames::name, "Debug Stage");
@@ -86,9 +108,9 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
     debug_status_ = add_parameter<ParameterString>("debug_status");
     debug_status_->set_property(PropertyNames::name, "Debug Status");
     debug_status_->set_property(PropertyNames::group_name, "Debug");
-    debug_status_->set_value(std::string("v49 live+mask (GPU matte)"));
+    debug_status_->set_value(std::string("v52 custom quality + camera delay"));
 
-    removerLog(std::format("Input ctor v49 live-mask adapter_luid={:016x}", adapter_luid_));
+    removerLog(std::format("Input ctor v52 custom+delay adapter_luid={:016x}", adapter_luid_));
 }
 
 Input::~Input() {
@@ -117,13 +139,25 @@ void Input::ensureD3dTextures() {
     }
 }
 
+void Input::pushQualityToHost() {
+    if (!matte_host_ || !quality_) {
+        return;
+    }
+    const int q = quality_->value();
+    float ds = 0.0f;
+    std::uint32_t side = 0;
+    if (q >= 3) {
+        ds = custom_downsample_ ? static_cast<float>(custom_downsample_->value()) : 0.25f;
+        side = custom_infer_side_ ? static_cast<std::uint32_t>(custom_infer_side_->value()) : 512u;
+    }
+    matte_host_->setQuality(q, ds, side);
+}
+
 void Input::ensureMatteHost() {
     if (!matte_host_) {
         matte_host_ = std::make_unique<MatteHostClient>();
     }
-    if (quality_) {
-        matte_host_->setQuality(quality_->value());
-    }
+    pushQualityToHost();
     (void)matte_host_->ensureStarted(adapter_luid_);
 }
 
@@ -134,6 +168,7 @@ void Input::clearVideoInLink(const char* reason) {
     removerLog(std::format("video_in cleared ({})", reason ? reason : "?"));
     video_in_ready_ = false;
     matte_live_ = false;
+    live_delay_.reset();
     if (d3d_video_in_) {
         d3d_video_in_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
     }
@@ -257,7 +292,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     }
     const bool host_ready = matte_host_ && matte_host_->hostReady();
     const std::string ui =
-        std::format("v49 {} vin={} host={} matte={} ep={}", dbg.stage ? dbg.stage : "?",
+        std::format("v52 {} vin={} host={} matte={} ep={}", dbg.stage ? dbg.stage : "?",
                     dbg.has_video_in ? 1 : 0, host_ready ? 1 : 0, matte_live_ ? 1 : 0,
                     matte_host_ ? matte_host_->hostEp() : "?");
     if (debug_status_) {
@@ -309,7 +344,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     ensureMatteHost();
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v49 live+mask (GPU matte)"));
+        debug_status_->set_value(std::string("v52 custom quality + camera delay"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -416,7 +451,7 @@ RenderResult Input::render() noexcept try {
     }
 
     if (quality_ && matte_host_) {
-        matte_host_->setQuality(quality_->value());
+        pushQualityToHost();
     }
 
     std::uint32_t mw = 0;
@@ -435,10 +470,23 @@ RenderResult Input::render() noexcept try {
         }
     }
 
-    if (matte_live_ && d3d_matte_tex_ && d3d_matte_tex_->srv() && d3d_video_in_->srv()) {
-        // Live Video In every present; matte alpha updates ~15fps — feels like 60fps.
+    ID3D11ShaderResourceView* live_srv = d3d_video_in_->srv();
+    const double delay_ms = camera_delay_ms_ ? camera_delay_ms_->value() : 0.0;
+    if (live_srv && delay_ms > 0.5) {
+        live_srv = live_delay_.pushAndSample(*d3d_, *passthrough_, d3d_video_in_->srv(), width_,
+                                             height_, delay_ms);
+        if ((render_ticks_ % 60u) == 1u) {
+            removerLog(std::format("camera_delay_ms={:.1f} (live feed delayed; matte unchanged)",
+                                   delay_ms));
+        }
+    } else {
+        live_delay_.reset();
+    }
+
+    if (matte_live_ && d3d_matte_tex_ && d3d_matte_tex_->srv() && live_srv) {
+        // Delayed (or live) Video In; matte alpha updates independently.
         d3d_output_->clear(0.0f, 0.0f, 0.0f, 1.0f);
-        passthrough_->drawLiveMasked(d3d_->context(), d3d_video_in_->srv(), d3d_matte_tex_->srv(),
+        passthrough_->drawLiveMasked(d3d_->context(), live_srv, d3d_matte_tex_->srv(),
                                      d3d_output_->rtv(), width_, height_, /*flip_v=*/true);
         dbg.width = width_;
         dbg.height = height_;
@@ -448,8 +496,8 @@ RenderResult Input::render() noexcept try {
         dbg.stage = "matte";
     } else {
         d3d_output_->clear(0.0f, 0.0f, 0.0f, 1.0f);
-        passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_output_->rtv(), width_,
-                           height_, /*flip_v=*/true);
+        passthrough_->draw(d3d_->context(), live_srv ? live_srv : d3d_video_in_->srv(),
+                           d3d_output_->rtv(), width_, height_, /*flip_v=*/true);
         passthrough_->drawHeartbeat(d3d_->context(), d3d_output_->rtv(), width_, height_,
                                     render_ticks_);
         dbg.width = width_;

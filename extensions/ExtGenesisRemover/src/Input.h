@@ -5,6 +5,7 @@
 
 #include "D3d11Passthrough.h"
 #include "D3d11SharedTexture.h"
+#include "LiveDelayRing.h"
 #include "MatteHostClient.h"
 #include "RemoverFrameDebug.h"
 #include "SharedD3d11.h"
@@ -16,8 +17,7 @@
 
 namespace rxext::genesis_remover {
 
-// v49: live Video In each frame, matte alpha from OOP DirectML host.
-// ORT must not load in the PIXERA process (v39–v42 froze the preview).
+// Live Video In (optionally delayed) gated by OOP DirectML matte alpha.
 class Input : public rxext::InputStream {
 public:
     Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, ValueSet settings);
@@ -39,6 +39,7 @@ private:
     void publishVideoInTexture();
     void logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg);
     void clearVideoInLink(const char* reason);
+    void pushQualityToHost();
 
     std::shared_ptr<SharedD3d11> d3d_;
     std::uint64_t adapter_luid_ = 0;
@@ -46,6 +47,9 @@ private:
     ParameterTexture* sampler_ = nullptr;
     ParameterTexture* video_in_ = nullptr;
     ParameterInt* quality_ = nullptr;
+    ParameterValue* custom_downsample_ = nullptr;
+    ParameterInt* custom_infer_side_ = nullptr;
+    ParameterValue* camera_delay_ms_ = nullptr;
     ParameterValue* time_ = nullptr;
     ParameterValue* frame_counter_ = nullptr;
     ParameterInt* debug_stage_ = nullptr;
@@ -57,6 +61,7 @@ private:
     std::unique_ptr<D3d11SharedTexture> d3d_matte_tex_;
     std::unique_ptr<D3d11Passthrough> passthrough_;
     std::unique_ptr<MatteHostClient> matte_host_;
+    LiveDelayRing live_delay_;
     std::vector<std::uint8_t> host_matte_rgba_;
     std::uint32_t width_ = 1920;
     std::uint32_t height_ = 1080;

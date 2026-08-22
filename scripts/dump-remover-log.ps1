@@ -55,5 +55,7 @@ if (Test-Path -LiteralPath $hostLog) {
 }
 
 Write-Host ''
-Write-Host 'Expect stamp remover-timeline-v51-quality-fix-...'
+Write-Host 'Expect stamp remover-timeline-v52-custom-quality-delay-...'
+Write-Host 'Quality Custom: set Custom Downsample + Custom Infer Side.'
+Write-Host 'Camera Delay (ms): delay live feed to match matte lag (try cycle_ms from host log).'
 Write-Host 'Adapter LUID = 0 for auto, or NVIDIA luid_hex to force. Same GPU as PIXERA preview.'

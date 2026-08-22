@@ -265,7 +265,7 @@ Re-run cmake configure (delete build\CMakeCache.txt if the target is missing), t
         }
 
         $stamp = @"
-build=remover-timeline-v51-quality-fix-20260822
+build=remover-timeline-v52-custom-quality-delay-20260822
 dll=$remOut\ExtGenesisRemover.dll
 host=$remOut\GenesisRemoverMatteHost.exe
 time=$(Get-Date -Format o)

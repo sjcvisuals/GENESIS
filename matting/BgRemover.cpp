@@ -249,7 +249,9 @@ bool BgRemover::processRvm(const std::uint8_t* in_rgba, std::uint8_t* out_rgba, 
     }
     RvmInferParams params{};
     params.downsample_ratio = downsampleForQuality(settings_.quality, settings_.rvm_downsample);
-    params.max_infer_side = maxInferSideForQuality(settings_.quality);
+    params.max_infer_side = settings_.rvm_max_infer_side > 0
+                                ? settings_.rvm_max_infer_side
+                                : maxInferSideForQuality(settings_.quality);
     params.bilinear_upsample = bilinearUpsampleForQuality(settings_.quality);
 
     std::string error;

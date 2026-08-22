@@ -34,6 +34,8 @@ struct BgRemoverSettings {
     // RVM downsample override. 0 = use Quality preset (Fast/Balanced/Quality).
     // Explicit >0 forces that ratio (e.g. 0.25 ≈ 1080p→~270).
     float rvm_downsample = 0.0f;
+    // Hard cap on network input long side. 0 = use quality preset.
+    std::uint32_t rvm_max_infer_side = 0;
     std::filesystem::path model_path; // empty → assets/matting/rvm_mobilenetv3_fp16.onnx
     // Skip DirectML — use ORT CPU EP. Required for PIXERA Remover worker (DML freezes GPU).
     bool prefer_cpu_ep = false;
