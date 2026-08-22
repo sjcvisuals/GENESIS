@@ -68,11 +68,7 @@ private:
     std::uint32_t height_ = 1080;
     std::uint64_t render_ticks_ = 0;
     std::uint64_t last_capture_kick_tick_ = 0;
-    std::chrono::steady_clock::time_point last_present_tp_{};
     std::chrono::steady_clock::time_point last_kick_wall_{};
-    std::chrono::steady_clock::time_point kick_pause_until_{};
-    std::uint32_t slow_present_streak_ = 0;
-    std::uint32_t recover_count_ = 0;
     int pushed_quality_ = -1;
     float pushed_ds_ = -1.0f;
     std::uint32_t pushed_side_ = 0;

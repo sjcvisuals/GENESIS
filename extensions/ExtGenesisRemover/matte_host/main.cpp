@@ -278,20 +278,13 @@ struct CaptureState {
         ID3D11Query* q = nullptr;
         if (SUCCEEDED(device->CreateQuery(&qd, &q)) && q) {
             context->End(q);
-            // Soft poll — tight GetData+Sleep(1) under PIXERA output load stalls the GPU.
+            // Soft poll — avoid tight GetData+Sleep(1) spinning under PIXERA output load.
             int spins = 0;
             while (context->GetData(q, nullptr, 0, 0) == S_FALSE) {
                 ++spins;
-                Sleep(spins < 4 ? 1 : 3);
-                if (spins > 200) { // ~500ms+ — give up this frame
-                    break;
-                }
+                Sleep(spins < 8 ? 1 : 2);
             }
             q->Release();
-            if (spins > 200) {
-                logLine("mapToRgba GPU wait timeout");
-                return false;
-            }
         }
         D3D11_MAPPED_SUBRESOURCE mapped{};
         if (FAILED(context->Map(staging, 0, D3D11_MAP_READ, 0, &mapped)) || !mapped.pData) {
@@ -327,7 +320,7 @@ int main() {
     const std::filesystem::path roots[] = {module_dir, module_dir / "assets"};
     genesis::setAssetSearchRoots(roots);
 
-    logLine("start v53-output-load-throttle " + module_dir.string());
+    logLine("start v54-kick-throttle-fix " + module_dir.string());
 
     HANDLE mapping =
         OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, genesis::matte_ipc::kMappingName);

@@ -111,9 +111,9 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
     debug_status_ = add_parameter<ParameterString>("debug_status");
     debug_status_->set_property(PropertyNames::name, "Debug Status");
     debug_status_->set_property(PropertyNames::group_name, "Debug");
-    debug_status_->set_value(std::string("v53 output-load throttle + recover"));
+    debug_status_->set_value(std::string("v54 kick throttle fix (no cycle spiral)"));
 
-    removerLog(std::format("Input ctor v53 throttle+recover adapter_luid={:016x}", adapter_luid_));
+    removerLog(std::format("Input ctor v54 throttle-fix adapter_luid={:016x}", adapter_luid_));
 }
 
 Input::~Input() {
@@ -301,7 +301,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     }
     const bool host_ready = matte_host_ && matte_host_->hostReady();
     const std::string ui =
-        std::format("v53 {} vin={} host={} matte={} ep={}", dbg.stage ? dbg.stage : "?",
+        std::format("v54 {} vin={} host={} matte={} ep={}", dbg.stage ? dbg.stage : "?",
                     dbg.has_video_in ? 1 : 0, host_ready ? 1 : 0, matte_live_ ? 1 : 0,
                     matte_host_ ? matte_host_->hostEp() : "?");
     if (debug_status_) {
@@ -353,7 +353,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     ensureMatteHost();
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v53 output-load throttle + recover"));
+        debug_status_->set_value(std::string("v54 kick throttle fix (no cycle spiral)"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -479,17 +479,11 @@ RenderResult Input::render() noexcept try {
         }
     }
 
-    const auto now_early = std::chrono::steady_clock::now();
-    double present_ms_early = 16.0;
-    if (last_present_tp_.time_since_epoch().count() != 0) {
-        present_ms_early =
-            std::chrono::duration<double, std::milli>(now_early - last_present_tp_).count();
-    }
-    const bool shed_delay = present_ms_early >= 200.0 || now_early < kick_pause_until_;
+    const auto now = std::chrono::steady_clock::now();
 
     ID3D11ShaderResourceView* live_srv = d3d_video_in_->srv();
     const double delay_ms = camera_delay_ms_ ? camera_delay_ms_->value() : 0.0;
-    if (live_srv && delay_ms > 0.5 && !shed_delay) {
+    if (live_srv && delay_ms > 0.5) {
         live_srv = live_delay_.pushAndSample(*d3d_, *passthrough_, d3d_video_in_->srv(), width_,
                                              height_, delay_ms);
         if ((render_ticks_ % 60u) == 1u) {
@@ -497,10 +491,6 @@ RenderResult Input::render() noexcept try {
                                    delay_ms));
         }
     } else {
-        if (shed_delay && delay_ms > 0.5 && (render_ticks_ % 60u) == 1u) {
-            removerLog(std::format("camera_delay shed (present_ms={:.0f} or kick pause)",
-                                   present_ms_early));
-        }
         live_delay_.reset();
     }
 
@@ -527,72 +517,40 @@ RenderResult Input::render() noexcept try {
         dbg.stage = "passthrough";
     }
 
-    // Capture size is fixed — quality toggles must NOT realloc the shared capture.
-    // Kick throttling is critical: host Map/readback of the shared capture stalls the
-    // same GPU PIXERA uses for outputs. Under output load, kicking every free slot
-    // collapses preview to ~2-3fps and that thrash can persist after outputs drop.
+    // Kick pacing: wait for host !busy (one in flight), plus a small wall-clock floor.
+    // Do NOT pace from host cycle_ms — that includes idle time until the next kick and
+    // creates a death spiral (v53 made preview+output both laggy).
+    // Do NOT treat Input::render gaps as FPS — PIXERA calls are not vsync-steady.
     constexpr std::uint64_t kFirstKickTick = 30;
     constexpr std::uint32_t kCapMaxW = 640u;
-    constexpr double kMinKickMs = 100.0;   // hard cap ~10 matte fps
-    constexpr double kSlowPresentMs = 280.0;
-    constexpr std::uint32_t kSlowStreakBeforePause = 8;
-    constexpr double kKickPauseMs = 1500.0;
+    constexpr double kMinKickMs = 33.0; // ~30 matte fps ceiling when infer is fast
 
-    const auto now = std::chrono::steady_clock::now();
-    double present_ms = 16.0;
-    if (last_present_tp_.time_since_epoch().count() != 0) {
-        present_ms = std::chrono::duration<double, std::milli>(now - last_present_tp_).count();
-    }
-    last_present_tp_ = now;
-
-    if (present_ms >= kSlowPresentMs) {
-        ++slow_present_streak_;
-    } else {
-        slow_present_streak_ = 0;
-    }
-
-    if (slow_present_streak_ >= kSlowStreakBeforePause) {
-        slow_present_streak_ = 0;
-        ++recover_count_;
-        kick_pause_until_ =
-            now + std::chrono::milliseconds(static_cast<int>(kKickPauseMs));
-        live_delay_.reset();
-        if (matte_host_) {
-            matte_host_->clearBusyIfStale(0);
-        }
-        removerLog(std::format(
-            "gpu_recover pause kicks {:.0f}ms (present_ms={:.0f} streak) recover#{}",
-            kKickPauseMs, present_ms, recover_count_));
-        // After repeated collapses, relaunch the matte host (clears DML thrash).
-        if (recover_count_ >= 2u && matte_host_) {
-            (void)matte_host_->restartHost("sticky slow after outputs");
-            recover_count_ = 0;
-            pushed_quality_ = -1; // re-push after host comes back
-        }
-    }
+    last_kick_wall_ = {}; // ensure first kick is allowed
+    // (wall clock updated on successful kickCapture)
 
     if (matte_host_) {
         matte_host_->clearBusyIfStale(2500);
     }
 
-    const bool kicks_paused = now < kick_pause_until_;
+    // Pace from infer time only (pure GPU/ORT work), not end-to-end cycle.
     double min_kick_ms = kMinKickMs;
     if (matte_host_) {
-        const float cycle = matte_host_->hostCycleMs();
-        if (cycle > min_kick_ms) {
-            // Stay slightly behind the host so we never pile Map stalls onto PIXERA.
-            min_kick_ms = static_cast<double>(cycle) * 1.05;
+        const float infer = matte_host_->hostInferMs();
+        if (infer > 1.0f) {
+            min_kick_ms = std::max(kMinKickMs, static_cast<double>(infer) + 8.0);
         }
-        if (min_kick_ms > 500.0) {
-            min_kick_ms = 500.0;
+        // Soft cap so a slow infer under outputs doesn't freeze matte updates forever.
+        if (min_kick_ms > 120.0) {
+            min_kick_ms = 120.0;
         }
     }
+
     const double since_kick_ms =
         last_kick_wall_.time_since_epoch().count() == 0
             ? 1e9
             : std::chrono::duration<double, std::milli>(now - last_kick_wall_).count();
 
-    if (matte_host_ && matte_host_->hostReady() && !matte_host_->busy() && !kicks_paused &&
+    if (matte_host_ && matte_host_->hostReady() && !matte_host_->busy() &&
         render_ticks_ >= kFirstKickTick && since_kick_ms >= min_kick_ms &&
         d3d_capture_share_ && d3d_capture_share_->rtv() && width_ >= 16 && height_ >= 16) {
         const std::uint32_t cap_w = width_ > kCapMaxW ? kCapMaxW : width_;
@@ -616,12 +574,13 @@ RenderResult Input::render() noexcept try {
 
     if (render_ticks_ <= 8u || (render_ticks_ % 60u) == 1u) {
         removerLog(std::format(
-            "gpu_present {} {}x{} matte_live={} host_ready={} busy={} present_ms={:.1f} "
-            "min_kick_ms={:.0f} host_cycle_ms={:.0f} paused={}",
+            "gpu_present {} {}x{} matte_live={} host_ready={} busy={} min_kick_ms={:.0f} "
+            "infer_ms={:.0f} cycle_ms={:.0f}",
             matte_live_ ? "live+mask" : "live", width_, height_, matte_live_ ? 1 : 0,
             matte_host_ && matte_host_->hostReady() ? 1 : 0,
-            matte_host_ && matte_host_->busy() ? 1 : 0, present_ms, min_kick_ms,
-            matte_host_ ? matte_host_->hostCycleMs() : 0.0f, kicks_paused ? 1 : 0));
+            matte_host_ && matte_host_->busy() ? 1 : 0, min_kick_ms,
+            matte_host_ ? matte_host_->hostInferMs() : 0.0f,
+            matte_host_ ? matte_host_->hostCycleMs() : 0.0f));
     }
 
     logStatusMaybe(dbg);

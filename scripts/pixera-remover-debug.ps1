@@ -4,28 +4,27 @@
 $ErrorActionPreference = 'Continue'
 Write-Host @'
 
-GENESIS Remover v53 - output-load throttle + recover
-====================================================
-Preview OK but outputs drop to 2-3fps (and stay slow after):
-  matte host Map/readback was stalling the shared GPU. v53:
-  - wall-clock kick throttle (~10fps max, backs off with host cycle)
-  - pause kicks + drop delay ring if present_ms stays >280ms
-  - relaunch matte host after repeated collapses
-  - leaner camera-delay ring (fewer HD buffers)
+GENESIS Remover v54 - kick throttle fix
+=======================================
+v53 made both preview and output laggy: it paced kicks from host
+cycle_ms (includes idle until next kick) which ratcheted slower,
+and mistook Input::render gaps for low FPS then paused kicks.
 
-Also still has v52 Custom quality + Camera Delay (ms).
+v54:
+  - pace from infer_ms only (+ small floor ~33ms)
+  - no present_ms kick pauses / no auto host restart
+  - still one-in-flight (busy gate) so Map stalls cannot stack
 
 Expect:
-  stamp remover-timeline-v53-output-throttle-*
-  gpu_present ... present_ms=.. min_kick_ms=.. host_cycle_ms=..
-  gpu_recover pause kicks ... if overload detected
+  stamp remover-timeline-v54-kick-throttle-fix-*
+  gpu_present ... min_kick_ms=~33-40 infer_ms=~12-20
 
 1) Quit PIXERA completely
 2) git pull
 3) BUILD-REMOVER.bat
 4) INSTALL-PIXERA-REMOVER.bat
 5) Re-import ExtGenesisRemover.dll
-6) Live Input; enable outputs; watch FPS; disable outputs - should recover
+6) Live Input; preview should feel snappy again; then try outputs
 7) Dump log
 
 '@
