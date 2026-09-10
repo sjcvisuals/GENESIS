@@ -169,6 +169,8 @@ find_package(Threads REQUIRED)
 add_library(genesis_matting STATIC
     matting/BgRemover.cpp
     matting/RvmOnnxSession.cpp
+    matting/MapOnnxSession.cpp
+    matting/VisionEffect.cpp
     matting/AsyncMatteWorker.cpp
 )
 target_include_directories(genesis_matting PUBLIC ${CMAKE_SOURCE_DIR})
