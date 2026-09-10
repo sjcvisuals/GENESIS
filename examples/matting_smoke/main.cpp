@@ -203,6 +203,31 @@ int main() {
             return 1;
         }
         std::printf("matting_smoke: empty model_path keeps RVM session ok\n");
+
+        // v59: initialize() must be idempotent — Host used to call it every vision apply.
+        const std::string ep_before = auto_remover.executionProvider();
+        std::string rein;
+        if (!auto_remover.initialize(&rein) || !auto_remover.isRvmReady()) {
+            std::fprintf(stderr, "matting_smoke: idempotent initialize lost RVM\n");
+            return 1;
+        }
+        if (auto_remover.executionProvider() != ep_before) {
+            std::fprintf(stderr, "matting_smoke: idempotent initialize changed EP\n");
+            return 1;
+        }
+        std::printf("matting_smoke: idempotent initialize ok (%s)\n", ep_before.c_str());
+
+        // v59: activation/norm flip must not unload Person Matte (RVM ignores them).
+        genesis::BgRemoverSettings act = auto_remover.settings();
+        act.model_path.clear();
+        act.activation = genesis::VisionActivation::None;
+        act.norm = genesis::VisionNorm::ZeroToOne;
+        auto_remover.setSettings(act);
+        if (!auto_remover.isInitialized() || !auto_remover.isRvmReady()) {
+            std::fprintf(stderr, "matting_smoke: activation flip unloaded RVM\n");
+            return 1;
+        }
+        std::printf("matting_smoke: RVM ignores activation/norm flip ok\n");
     }
 
     return 0;

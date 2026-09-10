@@ -127,14 +127,21 @@ void BgRemover::setSettings(const BgRemoverSettings& settings) {
         !settings_.model_path.empty()) {
         merged.model_path = settings_.model_path;
     }
-    const bool needs_reload =
+    // Person Matte (RVM) ignores activation/norm/size_override. Do not let Host
+    // flipping Auto→None on vision IPC mark the warm DML session for reload.
+    const bool rvm_only = merged.vision_effect == VisionEffect::PersonMatteRvm &&
+                          settings_.vision_effect == VisionEffect::PersonMatteRvm;
+    bool needs_reload =
         merged.backend != settings_.backend || merged.prefer_cpu_ep != settings_.prefer_cpu_ep ||
         merged.dml_device_id != settings_.dml_device_id ||
         merged.adapter_luid != settings_.adapter_luid ||
         merged.model_path != settings_.model_path ||
-        merged.vision_effect != settings_.vision_effect ||
-        merged.activation != settings_.activation || merged.norm != settings_.norm ||
-        merged.size_override != settings_.size_override;
+        merged.vision_effect != settings_.vision_effect;
+    if (!rvm_only) {
+        needs_reload = needs_reload || merged.activation != settings_.activation ||
+                       merged.norm != settings_.norm ||
+                       merged.size_override != settings_.size_override;
+    }
     settings_ = merged;
     if (needs_reload) {
         initialized_ = false;
@@ -236,6 +243,15 @@ bool BgRemover::tryInitVision(std::string* out_status) {
 }
 
 bool BgRemover::initialize(std::string* out_status) {
+    // Idempotent: applyVisionFromHdr / process() may call initialize every kick.
+    // Only rebuild ORT when setSettings() cleared initialized_.
+    if (initialized_) {
+        if (out_status) {
+            *out_status = status_;
+        }
+        return true;
+    }
+
     rvm_ready_ = false;
     vision_ready_ = false;
 

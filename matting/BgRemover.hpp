@@ -70,6 +70,8 @@ public:
 
     bool initialize(std::string* out_status = nullptr);
 
+    // True after a successful initialize() until setSettings() invalidates the session.
+    bool isInitialized() const { return initialized_; }
     bool isRvmReady() const { return rvm_ready_; }
     bool isVisionReady() const { return vision_ready_; }
     BgRemoverBackend activeBackend() const { return active_backend_; }
