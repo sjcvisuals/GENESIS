@@ -91,6 +91,28 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
     custom_infer_side_->set_property(PropertyNames::min_value, 192);
     custom_infer_side_->set_property(PropertyNames::max_value, 1280);
 
+    vision_effect_ = add_parameter<ParameterInt>("vision_effect");
+    vision_effect_->set_property(PropertyNames::name, "Vision Effect");
+    vision_effect_->set_property(PropertyNames::group_name, "Vision");
+    vision_effect_->set_property<std::vector<std::string>>(
+        PropertyNames::enum_names,
+        {"Person Matte (RVM)", "Depth Map", "BiRefNet Matte", "Saliency", "Human Parse",
+         "Colour / Style", "Optical Flow (soon)", "Face Landmarks (soon)", "Object Detect (soon)",
+         "Custom ONNX"});
+    vision_effect_->set_value(0);
+
+    result_as_ = add_parameter<ParameterInt>("result_as");
+    result_as_->set_property(PropertyNames::name, "Result As");
+    result_as_->set_property(PropertyNames::group_name, "Vision");
+    result_as_->set_property<std::vector<std::string>>(PropertyNames::enum_names,
+                                                       {"Alpha (key)", "Greyscale (view)", "Both"});
+    result_as_->set_value(0);
+
+    model_file_ = add_parameter<ParameterString>("model_file");
+    model_file_->set_property(PropertyNames::name, "Model File");
+    model_file_->set_property(PropertyNames::group_name, "Vision");
+    model_file_->set_value(std::string{});
+
     camera_delay_ms_ = add_parameter<ParameterValue>("camera_delay_ms", 0.0);
     camera_delay_ms_->set_property(PropertyNames::name, "Camera Delay (ms)");
     camera_delay_ms_->set_property(PropertyNames::group_name, "Sync");
@@ -111,9 +133,9 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
     debug_status_ = add_parameter<ParameterString>("debug_status");
     debug_status_->set_property(PropertyNames::name, "Debug Status");
     debug_status_->set_property(PropertyNames::group_name, "Debug");
-    debug_status_->set_value(std::string("v56 no-fence + update kick (ExtOnnxVision)"));
+    debug_status_->set_value(std::string("v57 multi-model vision (ExtOnnxVision-style)"));
 
-    removerLog(std::format("Input ctor v56 ExtOnnxVision-style adapter_luid={:016x}", adapter_luid_));
+    removerLog(std::format("Input ctor v57 multi-model adapter_luid={:016x}", adapter_luid_));
 }
 
 Input::~Input() {
@@ -162,11 +184,35 @@ void Input::pushQualityToHost() {
     matte_host_->setQuality(q, ds, side);
 }
 
+void Input::pushVisionToHost() {
+    if (!matte_host_) {
+        return;
+    }
+    const int effect = vision_effect_ ? vision_effect_->value() : 0;
+    const int result = result_as_ ? result_as_->value() : 0;
+    std::string model;
+    if (model_file_) {
+        try {
+            model = model_file_->value();
+        } catch (...) {
+            model.clear();
+        }
+    }
+    if (effect == pushed_effect_ && result == pushed_result_as_ && model == pushed_model_path_) {
+        return;
+    }
+    pushed_effect_ = effect;
+    pushed_result_as_ = result;
+    pushed_model_path_ = model;
+    matte_host_->setVision(effect, result, model);
+}
+
 void Input::ensureMatteHost() {
     if (!matte_host_) {
         matte_host_ = std::make_unique<MatteHostClient>();
     }
     pushQualityToHost();
+    pushVisionToHost();
     (void)matte_host_->ensureStarted(adapter_luid_);
 }
 
@@ -301,7 +347,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     }
     const bool host_ready = matte_host_ && matte_host_->hostReady();
     const std::string ui =
-        std::format("v56 {} vin={} host={} matte={} ep={}", dbg.stage ? dbg.stage : "?",
+        std::format("v57 {} vin={} host={} matte={} ep={}", dbg.stage ? dbg.stage : "?",
                     dbg.has_video_in ? 1 : 0, host_ready ? 1 : 0, matte_live_ ? 1 : 0,
                     matte_host_ ? matte_host_->hostEp() : "?");
     if (debug_status_) {
@@ -353,7 +399,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     ensureMatteHost();
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v56 no-fence + update kick (ExtOnnxVision)"));
+        debug_status_->set_value(std::string("v57 multi-model vision (ExtOnnxVision-style)"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -408,6 +454,7 @@ bool Input::update() noexcept try {
     ensureMatteHost();
     if (quality_ && matte_host_) {
         pushQualityToHost();
+        pushVisionToHost();
     }
     kickMatteIfReady();
     return true;
@@ -459,6 +506,9 @@ void Input::kickMatteIfReady() {
                 (void)matte_host_->restartHost("repeated slow shared Map under outputs");
                 cooldown_count_ = 0;
                 pushed_quality_ = -1;
+                pushed_effect_ = -1;
+                pushed_result_as_ = -1;
+                pushed_model_path_.clear();
                 last_map_sample_seq_ = 0;
             }
         }

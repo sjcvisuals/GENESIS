@@ -1,11 +1,12 @@
-// Out-of-process RVM host for ExtGenesisRemover.
+// Out-of-process matte / vision host for ExtGenesisRemover.
 // ORT must NOT load inside PIXERA (v39–v42 froze the preview). This exe owns ORT.
 //
-// IPC: Local\GenesisRemoverMatteIpc_v55 + Kick/Stop events (see MatteIpc.h).
+// IPC: Local\GenesisRemoverMatteIpc_v57 + Kick/Stop events (see MatteIpc.h).
 // Log: %TEMP%\GenesisRemoverMatteHost.log
 
 #include "MatteIpc.h"
 #include "matting/BgRemover.hpp"
+#include "matting/VisionEffect.hpp"
 #include "platform/Paths.hpp"
 
 #include <Windows.h>
@@ -380,6 +381,8 @@ int main() {
     genesis::BgRemoverSettings settings;
     settings.backend = genesis::BgRemoverBackend::Auto;
     settings.quality = genesis::BgRemoverQuality::Fast;
+    settings.vision_effect = genesis::VisionEffect::PersonMatteRvm;
+    settings.result_as = genesis::VisionResultAs::Alpha;
     // Out-of-process: DirectML GPU is the intended path (in-PIXERA ORT froze preview).
     settings.prefer_cpu_ep = false;
     settings.dml_device_id = dml_id;
@@ -397,10 +400,10 @@ int main() {
     }
     const std::string ep = remover.executionProvider();
     logLine("BgRemover ready ep=" + ep + " " + status);
-    if (ep.rfind("DML", 0) != 0) {
+    if (ep.rfind("DML", 0) != 0 && !ep.empty()) {
         logLine("WARNING: running on CPU — check DirectML.dll + onnxruntime DirectML build next to host");
     }
-    std::snprintf(hdr->status, sizeof(hdr->status), "%s", ep.c_str());
+    std::snprintf(hdr->status, sizeof(hdr->status), "%s", ep.empty() ? status.c_str() : ep.c_str());
     hdr->host_ready = 1;
 
     CaptureState capture;
@@ -409,6 +412,9 @@ int main() {
     std::uint64_t last_kick = 0;
     std::uint64_t frames = 0;
     int applied_quality = -1;
+    int applied_effect = -1;
+    int applied_result_as = -1;
+    std::string applied_model;
 
     // ALWAYS advance done_seq on failure. If we leave kick_seq != done_seq, the DLL
     // stays busy=1 forever and never kicks again (v45 regression: nz=0 -> no cutout).
@@ -461,6 +467,40 @@ int main() {
         }
     };
 
+    auto applyVisionFromHdr = [&]() {
+        const int effect = static_cast<int>(std::min<std::uint32_t>(9u, hdr->vision_effect));
+        const int result = static_cast<int>(std::min<std::uint32_t>(2u, hdr->result_as));
+        std::string model(hdr->model_path);
+        // Trim at first NUL (already C string) — strip trailing spaces just in case.
+        while (!model.empty() && (model.back() == ' ' || model.back() == '\0')) {
+            model.pop_back();
+        }
+        if (effect == applied_effect && result == applied_result_as && model == applied_model) {
+            return;
+        }
+        settings.vision_effect = static_cast<genesis::VisionEffect>(effect);
+        settings.result_as = static_cast<genesis::VisionResultAs>(result);
+        settings.activation = genesis::visionEffectDefaultActivation(settings.vision_effect);
+        settings.norm = genesis::visionEffectDefaultNorm(settings.vision_effect);
+        settings.size_override = genesis::visionEffectDefaultSize(settings.vision_effect);
+        if (model.empty()) {
+            settings.model_path.clear();
+        } else {
+            settings.model_path = model;
+        }
+        remover.setSettings(settings);
+        std::string init_status;
+        (void)remover.initialize(&init_status);
+        applied_effect = effect;
+        applied_result_as = result;
+        applied_model = model;
+        logLine(std::string("vision -> ") + genesis::visionEffectLabel(settings.vision_effect) +
+                " result=" + genesis::visionResultAsLabel(settings.result_as) + " " + init_status);
+        const std::string ep_now = remover.executionProvider();
+        std::snprintf(hdr->status, sizeof(hdr->status), "%s",
+                      ep_now.empty() ? init_status.c_str() : ep_now.c_str());
+    };
+
     for (;;) {
         HANDLE waits[] = {stop, kick};
         const DWORD wr = WaitForMultipleObjects(2, waits, FALSE, 50);
@@ -495,6 +535,7 @@ int main() {
         }
 
         applyQualityFromHdr();
+        applyVisionFromHdr();
 
         // Cross-process shared blit settle. mapToRgba already waits on a GPU event query.
     static bool s_had_good = false;
@@ -560,7 +601,9 @@ int main() {
         logLine("matte_ok nz=" + std::to_string(out_nz) + " infer_ms=" + std::to_string(ms) +
                 " map_ms=" + std::to_string(map_ms) + " ep=" + remover.executionProvider() +
                 " in_nz=" + std::to_string(nz) + " size=" + std::to_string(w) + "x" +
-                std::to_string(h) + " q=" + qlab + " cycle_ms=" + std::to_string(cycle_ms) +
+                std::to_string(h) + " q=" + qlab +
+                " effect=" + genesis::visionEffectLabel(settings.vision_effect) +
+                " cycle_ms=" + std::to_string(cycle_ms) +
                 " matte_fps=" + std::to_string(cycle_fps));
     }
     }

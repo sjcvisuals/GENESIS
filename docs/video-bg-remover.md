@@ -91,7 +91,7 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for `STATUS stage=` lines and stamp `remover-timeline-v56-extonnxvision-nofence-*`.
+Look for `STATUS stage=` lines and stamp `remover-vision-v57-multimodel-*`.
 
 | Colour / stage | Meaning |
 |----------------|---------|
@@ -99,18 +99,31 @@ Look for `STATUS stage=` lines and stamp `remover-timeline-v56-extonnxvision-nof
 | `passthrough` | live blit (lime moving; waiting on matte host) |
 | `matte` | live camera gated by OOP matte alpha |
 
+### Multi-model vision (v57)
+
+Same OOP host as RVM, ExtOnnxVision-style effect switch:
+
+| UI (Vision group) | Purpose |
+|-------------------|---------|
+| **Vision Effect** | Person Matte (RVM), Depth, BiRefNet, Saliency, Human Parse, Colour/Style, Custom ONNX; Flow/Face/Detect stubbed as passthrough |
+| **Result As** | Alpha (key), Greyscale (view maps), or Both |
+| **Model File** | Optional path override / required for Custom ONNX |
+
+Models live under `assets/vision/` (see `assets/vision/README.md`). IPC bumped to `…MatteIpc_v57`.
+
 ### Lessons from ExtOnnxVision (blackdown/pixera-onnx-plugin)
 
 A PIXERA employee’s working ONNX extension (verified PIXERA 26.1 R39, TensorRT)
-informed v56:
+informed v56+:
 
-| ExtOnnxVision | Our previous bug | v56 adoption |
+| ExtOnnxVision | Our previous bug | Adoption |
 |---|---|---|
 | No Device `TimelineSemaphore` / GPU Wait | Fence Wait amplified shared-Map stalls → sticky 2–3fps after outputs | Removed Device fence publish / Wait |
 | Matte/infer driven from `update()`, skip when busy | Kicking from `render()` coupled presents to Map | Kick only from `update()`; skip when busy |
 | Live video at full rate; model refreshes async | Present waited on matte path | Unchanged: live × last matte every present |
+| Generic map/colour ONNX + Result As | RVM-only | v57 `MapOnnxSession` + Vision Effect UI |
 | In-process ORT as `ExtOnnxVisionOrt.dll` (`ORT_API_MANUAL_INIT`) | Windows ML’s System32 `onnxruntime.dll` can hijack imports | Still OOP host for now; rename pattern is the path if we bring ORT in-process again |
-| TensorRT >> DirectML for heavy models | DML Map+infer on shared GPU under outputs | Keep RVM/DML in host; cooldown on slow `map_ms` |
+| TensorRT >> DirectML for heavy models | DML Map+infer on shared GPU under outputs | Keep ORT/DML in host; cooldown on slow `map_ms` |
 
 Also check `%TEMP%\GenesisRemoverMatteHost.log`.
 Checklist: `.\scripts\pixera-remover-debug.ps1`

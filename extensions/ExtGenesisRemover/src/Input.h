@@ -41,6 +41,7 @@ private:
     void logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg);
     void clearVideoInLink(const char* reason);
     void pushQualityToHost();
+    void pushVisionToHost();
     // ExtOnnxVision pattern: kick matte from update(), never from Device::render.
     // Skip when busy / cooling — never queue frames.
     void kickMatteIfReady();
@@ -53,6 +54,9 @@ private:
     ParameterInt* quality_ = nullptr;
     ParameterValue* custom_downsample_ = nullptr;
     ParameterInt* custom_infer_side_ = nullptr;
+    ParameterInt* vision_effect_ = nullptr;
+    ParameterInt* result_as_ = nullptr;
+    ParameterString* model_file_ = nullptr;
     ParameterValue* camera_delay_ms_ = nullptr;
     ParameterValue* time_ = nullptr;
     ParameterValue* frame_counter_ = nullptr;
@@ -80,6 +84,9 @@ private:
     int pushed_quality_ = -1;
     float pushed_ds_ = -1.0f;
     std::uint32_t pushed_side_ = 0;
+    int pushed_effect_ = -1;
+    int pushed_result_as_ = -1;
+    std::string pushed_model_path_;
     std::string last_stage_;
     bool video_in_ready_ = false;
     bool matte_live_ = false;

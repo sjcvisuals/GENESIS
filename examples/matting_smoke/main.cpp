@@ -1,8 +1,10 @@
 #include "matting/AsyncMatteWorker.hpp"
 #include "matting/BgRemover.hpp"
+#include "matting/VisionEffect.hpp"
 
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <thread>
 #include <vector>
 
@@ -136,6 +138,58 @@ int main() {
                     static_cast<unsigned long long>(worker.skipped()),
                     out[((kH / 2u) * kW + (kW / 2u)) * 4u + 3u]);
         worker.stop();
+    }
+
+    // --- Vision effect metadata + missing-model soft fail ---
+    {
+        using genesis::VisionEffect;
+        if (std::strcmp(genesis::visionEffectLabel(VisionEffect::DepthMap), "Depth Map") != 0) {
+            std::fprintf(stderr, "matting_smoke: visionEffectLabel mismatch\n");
+            return 1;
+        }
+        if (!genesis::visionEffectNeedsDecoder(VisionEffect::OpticalFlow) ||
+            genesis::visionEffectNeedsDecoder(VisionEffect::DepthMap)) {
+            std::fprintf(stderr, "matting_smoke: visionEffectNeedsDecoder mismatch\n");
+            return 1;
+        }
+
+        genesis::BgRemover vision;
+        genesis::BgRemoverSettings vs{};
+        vs.vision_effect = VisionEffect::DepthMap;
+        vs.result_as = genesis::VisionResultAs::Greyscale;
+        vs.temporal_alpha = 0.0f;
+        // Deliberately missing model → soft-init to passthrough.
+        vs.model_path = "assets/vision/__missing_depth__.onnx";
+        vision.setSettings(vs);
+        std::string vst;
+        vision.initialize(&vst);
+        std::printf("matting_smoke: depth missing-model → %s (%s)\n",
+                    genesis::bgRemoverBackendLabel(vision.activeBackend()), vst.c_str());
+        constexpr std::uint32_t kW = 32;
+        constexpr std::uint32_t kH = 32;
+        const auto in = makeGreenScreenPerson(kW, kH);
+        std::vector<std::uint8_t> out = in;
+        if (!vision.process(in.data(), out.data(), kW, kH)) {
+            std::fprintf(stderr, "matting_smoke: vision passthrough process failed\n");
+            return 1;
+        }
+        if (out[3] != 255) {
+            std::fprintf(stderr, "matting_smoke: expected opaque passthrough alpha\n");
+            return 1;
+        }
+        std::printf("matting_smoke: vision soft-fail passthrough ok\n");
+
+        genesis::BgRemover flow;
+        genesis::BgRemoverSettings fs{};
+        fs.vision_effect = VisionEffect::OpticalFlow;
+        flow.setSettings(fs);
+        std::string fst;
+        flow.initialize(&fst);
+        if (flow.activeBackend() != genesis::BgRemoverBackend::Passthrough) {
+            std::fprintf(stderr, "matting_smoke: OpticalFlow should passthrough\n");
+            return 1;
+        }
+        std::printf("matting_smoke: optical-flow stub ok (%s)\n", fst.c_str());
     }
 
     return 0;

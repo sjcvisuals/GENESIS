@@ -314,9 +314,14 @@ if(GENESIS_BUILD_EXAMPLES)
     add_custom_command(TARGET genesis_matting_smoke POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "$<TARGET_FILE_DIR:genesis_matting_smoke>/assets/matting"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:genesis_matting_smoke>/assets/vision"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/assets/matting"
             "$<TARGET_FILE_DIR:genesis_matting_smoke>/assets/matting"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets/vision"
+            "$<TARGET_FILE_DIR:genesis_matting_smoke>/assets/vision"
         COMMENT "Copying matting assets next to genesis_matting_smoke")
 
     # Standalone webcam + RVM cutout (isolates matte from PIXERA I/O).
@@ -534,9 +539,14 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
     add_custom_command(TARGET ExtGenesisRemover POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "$<TARGET_FILE_DIR:ExtGenesisRemover>/assets/matting"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:ExtGenesisRemover>/assets/vision"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/assets/matting"
             "$<TARGET_FILE_DIR:ExtGenesisRemover>/assets/matting"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets/vision"
+            "$<TARGET_FILE_DIR:ExtGenesisRemover>/assets/vision"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_SOURCE_DIR}/deploy/GenesisRemover.manifest.json"
             "$<TARGET_FILE_DIR:ExtGenesisRemover>/GenesisRemover.manifest.json"
