@@ -16,7 +16,7 @@
 namespace rxext::genesis_remover {
 
 Device::Device(ValueSet settings) : settings_(std::move(settings)) {
-    removerLog("Device ctor (v57 multi-model; ExtOnnxVision-style: no timeline fence)");
+    removerLog("Device ctor (v58 no-rvm-reload; ExtOnnxVision-style: no timeline fence)");
 }
 
 bool Device::initialize() noexcept try {

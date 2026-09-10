@@ -133,9 +133,9 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
     debug_status_ = add_parameter<ParameterString>("debug_status");
     debug_status_->set_property(PropertyNames::name, "Debug Status");
     debug_status_->set_property(PropertyNames::group_name, "Debug");
-    debug_status_->set_value(std::string("v57 multi-model vision (ExtOnnxVision-style)"));
+    debug_status_->set_value(std::string("v58 no RVM reload on empty Model File"));
 
-    removerLog(std::format("Input ctor v57 multi-model adapter_luid={:016x}", adapter_luid_));
+    removerLog(std::format("Input ctor v58 no-rvm-reload adapter_luid={:016x}", adapter_luid_));
 }
 
 Input::~Input() {
@@ -347,7 +347,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     }
     const bool host_ready = matte_host_ && matte_host_->hostReady();
     const std::string ui =
-        std::format("v57 {} vin={} host={} matte={} ep={}", dbg.stage ? dbg.stage : "?",
+        std::format("v58 {} vin={} host={} matte={} ep={}", dbg.stage ? dbg.stage : "?",
                     dbg.has_video_in ? 1 : 0, host_ready ? 1 : 0, matte_live_ ? 1 : 0,
                     matte_host_ ? matte_host_->hostEp() : "?");
     if (debug_status_) {
@@ -399,7 +399,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     ensureMatteHost();
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v57 multi-model vision (ExtOnnxVision-style)"));
+        debug_status_->set_value(std::string("v58 no RVM reload on empty Model File"));
     }
     return true;
 } catch (const std::exception& ex) {
