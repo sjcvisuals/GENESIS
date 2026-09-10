@@ -31,6 +31,9 @@ public:
     // quality: 0=Fast 1=Balanced 2=Quality 3=Custom (downsample + max_infer_side).
     void setQuality(int quality_0_to_3, float custom_downsample = 0.0f,
                     std::uint32_t custom_max_infer_side = 0);
+    // vision_effect / result_as match genesis::VisionEffect / VisionResultAs.
+    // model_path empty → host uses the effect's default asset path.
+    void setVision(int vision_effect, int result_as, const std::string& model_path = {});
     // Blit already done into capture; publish handle + kick host.
     bool kickCapture(D3d11SharedTexture& capture, std::uint32_t width, std::uint32_t height);
     bool tryTakeMatte(std::vector<std::uint8_t>& out_rgba, std::uint32_t& out_w, std::uint32_t& out_h,
@@ -53,6 +56,7 @@ private:
     bool launchHost();
     bool duplicateCaptureHandle(void* local_nt_handle);
     void writeQualityToHeader();
+    void writeVisionToHeader();
 
     void* mapping_ = nullptr; // HANDLE
     void* view_ = nullptr;    // Header*
@@ -66,6 +70,9 @@ private:
     int quality_ = 0;
     float custom_downsample_ = 0.0f;
     std::uint32_t custom_max_infer_side_ = 0;
+    int vision_effect_ = 0;
+    int result_as_ = 0;
+    std::string model_path_;
     bool started_ = false;
 };
 

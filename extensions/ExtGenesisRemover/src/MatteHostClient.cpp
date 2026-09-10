@@ -102,6 +102,7 @@ bool MatteHostClient::openIpc() {
     h->dll_pid = GetCurrentProcessId();
     h->adapter_luid = adapter_luid_;
     writeQualityToHeader();
+    writeVisionToHeader();
     ResetEvent(static_cast<HANDLE>(stop_event_));
     return true;
 }
@@ -180,12 +181,34 @@ void MatteHostClient::writeQualityToHeader() {
     h->max_infer_side = custom_max_infer_side_;
 }
 
+void MatteHostClient::writeVisionToHeader() {
+    if (!view_) {
+        return;
+    }
+    auto* h = asHeader(view_);
+    h->vision_effect = static_cast<std::uint32_t>(vision_effect_ < 0 ? 0 : vision_effect_);
+    h->result_as = static_cast<std::uint32_t>(result_as_ < 0 ? 0 : result_as_);
+    std::memset(h->model_path, 0, sizeof(h->model_path));
+    if (!model_path_.empty()) {
+        const std::size_t n =
+            std::min(model_path_.size(), static_cast<std::size_t>(sizeof(h->model_path) - 1));
+        std::memcpy(h->model_path, model_path_.data(), n);
+    }
+}
+
 void MatteHostClient::setQuality(int quality_0_to_3, float custom_downsample,
                                  std::uint32_t custom_max_infer_side) {
     quality_ = quality_0_to_3 < 0 ? 0 : (quality_0_to_3 > 3 ? 3 : quality_0_to_3);
     custom_downsample_ = custom_downsample;
     custom_max_infer_side_ = custom_max_infer_side;
     writeQualityToHeader();
+}
+
+void MatteHostClient::setVision(int vision_effect, int result_as, const std::string& model_path) {
+    vision_effect_ = vision_effect < 0 ? 0 : vision_effect;
+    result_as_ = result_as < 0 ? 0 : (result_as > 2 ? 2 : result_as);
+    model_path_ = model_path;
+    writeVisionToHeader();
 }
 
 bool MatteHostClient::busy() const {
