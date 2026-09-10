@@ -77,6 +77,8 @@ private:
     std::uint64_t last_capture_kick_tick_ = 0;
     std::chrono::steady_clock::time_point last_kick_wall_{};
     std::chrono::steady_clock::time_point cooldown_until_{};
+    // After host restart, ignore slow map_ms briefly (DML settle spikes are expected).
+    std::chrono::steady_clock::time_point map_sample_grace_until_{};
     std::uint32_t slow_map_streak_ = 0;
     std::uint32_t cooldown_count_ = 0;
     std::uint64_t last_map_sample_seq_ = 0;

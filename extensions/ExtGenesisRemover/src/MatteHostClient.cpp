@@ -253,12 +253,13 @@ bool MatteHostClient::restartHost(const char* reason) {
         SetEvent(static_cast<HANDLE>(stop_event_));
     }
     if (host_process_) {
-        WaitForSingleObject(static_cast<HANDLE>(host_process_), 2500);
+        // Keep waits short — restartHost runs on the PIXERA update thread.
+        WaitForSingleObject(static_cast<HANDLE>(host_process_), 400);
         DWORD code = 0;
         if (GetExitCodeProcess(static_cast<HANDLE>(host_process_), &code) &&
             code == STILL_ACTIVE) {
             TerminateProcess(static_cast<HANDLE>(host_process_), 1);
-            WaitForSingleObject(static_cast<HANDLE>(host_process_), 1000);
+            WaitForSingleObject(static_cast<HANDLE>(host_process_), 400);
         }
         CloseHandle(static_cast<HANDLE>(host_process_));
         host_process_ = nullptr;
@@ -279,6 +280,9 @@ bool MatteHostClient::restartHost(const char* reason) {
         if (stop_event_) {
             ResetEvent(static_cast<HANDLE>(stop_event_));
         }
+        // Re-publish current vision/quality so the new host sees defaults immediately.
+        writeQualityToHeader();
+        writeVisionToHeader();
     }
     return launchHost();
 }
@@ -346,6 +350,7 @@ bool MatteHostClient::kickCapture(D3d11SharedTexture& capture, std::uint32_t wid
     h->height = height;
     h->adapter_luid = adapter_luid_;
     writeQualityToHeader();
+    writeVisionToHeader(); // every kick — avoid stale vision fields after host restart
     h->result_ok = 0;
     ++h->kick_seq;
     SetEvent(static_cast<HANDLE>(kick_event_));

@@ -91,7 +91,7 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for `STATUS stage=` lines and stamp `remover-vision-v57-multimodel-*`.
+Look for `STATUS stage=` lines and stamp `remover-vision-v59-idempotent-init-*`.
 
 | Colour / stage | Meaning |
 |----------------|---------|
@@ -110,6 +110,8 @@ Same OOP host as RVM, ExtOnnxVision-style effect switch:
 | **Model File** | Optional path override / required for Custom ONNX |
 
 Models live under `assets/vision/` (see `assets/vision/README.md`). IPC bumped to `…MatteIpc_v57`.
+
+v58/v59: empty Model File must not reload RVM; `BgRemover::initialize()` is idempotent so Host vision IPC cannot thrash ORT on default Person Matte. Host log should show `start v59-idempotent-init` and must **not** spam `vision ->` every kick.
 
 ### Lessons from ExtOnnxVision (blackdown/pixera-onnx-plugin)
 

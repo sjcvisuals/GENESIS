@@ -327,7 +327,7 @@ int main() {
     const std::filesystem::path roots[] = {module_dir, module_dir / "assets"};
     genesis::setAssetSearchRoots(roots);
 
-    logLine("start v55-map-cooldown " + module_dir.string());
+    logLine("start v59-idempotent-init " + module_dir.string());
 
     HANDLE mapping =
         OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, genesis::matte_ipc::kMappingName);
@@ -418,7 +418,62 @@ int main() {
     // Match startup defaults so the first kick does not tear down a warm RVM session.
     int applied_effect = static_cast<int>(settings.vision_effect);
     int applied_result_as = static_cast<int>(settings.result_as);
-    std::string applied_model;
+    // Normalized model key: "" means "effect default" (empty IPC or default asset path).
+    std::string applied_model_key;
+
+    auto trimModel = [](std::string model) {
+        while (!model.empty() &&
+               (model.back() == '\0' || model.back() == ' ' || model.back() == '\t' ||
+                model.back() == '\r' || model.back() == '\n')) {
+            model.pop_back();
+        }
+        std::size_t start = 0;
+        while (start < model.size() &&
+               (model[start] == ' ' || model[start] == '\t' || model[start] == '\r' ||
+                model[start] == '\n')) {
+            ++start;
+        }
+        if (start > 0) {
+            model.erase(0, start);
+        }
+        return model;
+    };
+
+    // Collapse empty / default-asset paths to one key so UI sending the default RVM
+    // path does not thrash against IPC "".
+    auto modelKeyForEffect = [&trimModel](int effect, std::string model) {
+        model = trimModel(std::move(model));
+        if (model.empty()) {
+            return std::string{};
+        }
+        const char* def = genesis::visionEffectDefaultModel(
+            static_cast<genesis::VisionEffect>(effect));
+        if (def && *def) {
+            if (model == def) {
+                return std::string{};
+            }
+            const std::string def_s(def);
+            if (model.size() >= def_s.size() &&
+                model.compare(model.size() - def_s.size(), def_s.size(), def_s) == 0) {
+                // Absolute resolved path ending in the default relative asset.
+                if (model.size() == def_s.size() || model[model.size() - def_s.size() - 1] == '/' ||
+                    model[model.size() - def_s.size() - 1] == '\\') {
+                    return std::string{};
+                }
+            }
+            const auto slash = def_s.find_last_of("/\\");
+            const std::string base =
+                slash == std::string::npos ? def_s : def_s.substr(slash + 1);
+            if (!base.empty() && model.size() >= base.size() &&
+                model.compare(model.size() - base.size(), base.size(), base) == 0) {
+                if (model.size() == base.size() || model[model.size() - base.size() - 1] == '/' ||
+                    model[model.size() - base.size() - 1] == '\\') {
+                    return std::string{};
+                }
+            }
+        }
+        return model;
+    };
 
     // ALWAYS advance done_seq on failure. If we leave kick_seq != done_seq, the DLL
     // stays busy=1 forever and never kicks again (v45 regression: nz=0 -> no cutout).
@@ -479,35 +534,50 @@ int main() {
     auto applyVisionFromHdr = [&]() {
         const int effect = static_cast<int>(std::min<std::uint32_t>(9u, hdr->vision_effect));
         const int result = static_cast<int>(std::min<std::uint32_t>(2u, hdr->result_as));
-        std::string model(hdr->model_path);
-        while (!model.empty() && (model.back() == ' ' || model.back() == '\0')) {
-            model.pop_back();
-        }
-        if (effect == applied_effect && result == applied_result_as && model == applied_model) {
+        const std::string model = trimModel(std::string(hdr->model_path));
+        const std::string model_key = modelKeyForEffect(effect, model);
+        if (effect == applied_effect && result == applied_result_as &&
+            model_key == applied_model_key) {
             return;
         }
-        const bool session_change = (effect != applied_effect) || (model != applied_model);
+        const bool session_change =
+            (effect != applied_effect) || (model_key != applied_model_key);
         settings.vision_effect = static_cast<genesis::VisionEffect>(effect);
         settings.result_as = static_cast<genesis::VisionResultAs>(result);
-        if (!model.empty()) {
+        if (!model_key.empty()) {
             settings.model_path = model;
         } else if (session_change) {
-            // Effect changed with no override — resolve the new effect's default on init.
+            // Effect changed / default key — resolve the effect's default on init.
             settings.model_path.clear();
         }
         // else keep resolved path (Person Matte default "" must not unload RVM).
 
         if (session_change) {
-            settings.activation = genesis::visionEffectDefaultActivation(settings.vision_effect);
-            settings.norm = genesis::visionEffectDefaultNorm(settings.vision_effect);
-            settings.size_override = genesis::visionEffectDefaultSize(settings.vision_effect);
+            // RVM ignores activation/norm/size; skipping avoids Auto→None reload marks.
+            if (settings.vision_effect != genesis::VisionEffect::PersonMatteRvm) {
+                settings.activation =
+                    genesis::visionEffectDefaultActivation(settings.vision_effect);
+                settings.norm = genesis::visionEffectDefaultNorm(settings.vision_effect);
+                settings.size_override =
+                    genesis::visionEffectDefaultSize(settings.vision_effect);
+            }
             remover.setSettings(settings);
             std::string init_status;
+            // initialize() is idempotent when setSettings kept the session warm.
+            const bool was_init = remover.isInitialized();
             (void)remover.initialize(&init_status);
             settings = remover.settings();
-            logLine(std::string("vision -> ") + genesis::visionEffectLabel(settings.vision_effect) +
-                    " result=" + genesis::visionResultAsLabel(settings.result_as) + " " +
-                    init_status);
+            if (was_init && remover.isInitialized()) {
+                logLine(std::string("vision keep-warm ") +
+                        genesis::visionEffectLabel(settings.vision_effect) +
+                        " result=" + genesis::visionResultAsLabel(settings.result_as) +
+                        " (no ORT reload)");
+            } else {
+                logLine(std::string("vision -> ") +
+                        genesis::visionEffectLabel(settings.vision_effect) +
+                        " result=" + genesis::visionResultAsLabel(settings.result_as) + " " +
+                        init_status);
+            }
             const std::string ep_now = remover.executionProvider();
             std::snprintf(hdr->status, sizeof(hdr->status), "%s",
                           ep_now.empty() ? init_status.c_str() : ep_now.c_str());
@@ -520,7 +590,7 @@ int main() {
         }
         applied_effect = effect;
         applied_result_as = result;
-        applied_model = model;
+        applied_model_key = model_key;
     };
 
     for (;;) {

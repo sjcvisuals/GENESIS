@@ -133,9 +133,9 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
     debug_status_ = add_parameter<ParameterString>("debug_status");
     debug_status_->set_property(PropertyNames::name, "Debug Status");
     debug_status_->set_property(PropertyNames::group_name, "Debug");
-    debug_status_->set_value(std::string("v58 no RVM reload on empty Model File"));
+    debug_status_->set_value(std::string("v59 idempotent init (no ORT thrash)"));
 
-    removerLog(std::format("Input ctor v58 no-rvm-reload adapter_luid={:016x}", adapter_luid_));
+    removerLog(std::format("Input ctor v59 idempotent-init adapter_luid={:016x}", adapter_luid_));
 }
 
 Input::~Input() {
@@ -197,6 +197,21 @@ void Input::pushVisionToHost() {
         } catch (...) {
             model.clear();
         }
+    }
+    // Trim whitespace — PIXERA string params sometimes carry spaces.
+    while (!model.empty() &&
+           (model.back() == ' ' || model.back() == '\t' || model.back() == '\r' ||
+            model.back() == '\n' || model.back() == '\0')) {
+        model.pop_back();
+    }
+    std::size_t start = 0;
+    while (start < model.size() &&
+           (model[start] == ' ' || model[start] == '\t' || model[start] == '\r' ||
+            model[start] == '\n')) {
+        ++start;
+    }
+    if (start > 0) {
+        model.erase(0, start);
     }
     if (effect == pushed_effect_ && result == pushed_result_as_ && model == pushed_model_path_) {
         return;
@@ -347,7 +362,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     }
     const bool host_ready = matte_host_ && matte_host_->hostReady();
     const std::string ui =
-        std::format("v58 {} vin={} host={} matte={} ep={}", dbg.stage ? dbg.stage : "?",
+        std::format("v59 {} vin={} host={} matte={} ep={}", dbg.stage ? dbg.stage : "?",
                     dbg.has_video_in ? 1 : 0, host_ready ? 1 : 0, matte_live_ ? 1 : 0,
                     matte_host_ ? matte_host_->hostEp() : "?");
     if (debug_status_) {
@@ -399,7 +414,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     ensureMatteHost();
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v58 no RVM reload on empty Model File"));
+        debug_status_->set_value(std::string("v59 idempotent init (no ORT thrash)"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -476,15 +491,20 @@ void Input::kickMatteIfReady() {
     constexpr double kMinKickMs = 50.0;
     constexpr double kStressedKickMs = 100.0;
     constexpr float kSlowMapMs = 45.0f;
-    constexpr std::uint32_t kSlowMapStreak = 2;
+    constexpr std::uint32_t kSlowMapStreak = 3;
     constexpr double kCooldownMs = 2000.0;
+    // Restarting the host Wait()s on the PIXERA thread — require sustained pain.
+    constexpr std::uint32_t kRestartsAfterCooldowns = 4;
 
     matte_host_->clearBusyIfStale(2500);
     const std::uint64_t done = matte_host_->doneSeq();
     if (done != 0 && done != last_map_sample_seq_) {
         last_map_sample_seq_ = done;
         const float map_ms = matte_host_->hostMapMs();
-        if (map_ms >= kSlowMapMs) {
+        if (now < map_sample_grace_until_) {
+            // Post-restart / post-ORT settle: ignore map spikes.
+            slow_map_streak_ = 0;
+        } else if (map_ms >= kSlowMapMs) {
             ++slow_map_streak_;
         } else {
             slow_map_streak_ = 0;
@@ -502,7 +522,7 @@ void Input::kickMatteIfReady() {
                 "matte_cooldown {:.0f}ms — map_ms={:.1f} infer_ms={:.1f} (skip kicks; "
                 "live+last-matte continues) #{}",
                 kCooldownMs, map_ms, matte_host_->hostInferMs(), cooldown_count_));
-            if (cooldown_count_ >= 2u) {
+            if (cooldown_count_ >= kRestartsAfterCooldowns) {
                 (void)matte_host_->restartHost("repeated slow shared Map under outputs");
                 cooldown_count_ = 0;
                 pushed_quality_ = -1;
@@ -510,6 +530,8 @@ void Input::kickMatteIfReady() {
                 pushed_result_as_ = -1;
                 pushed_model_path_.clear();
                 last_map_sample_seq_ = 0;
+                map_sample_grace_until_ =
+                    now + std::chrono::milliseconds(4000); // ignore settle spikes
             }
         }
     }
