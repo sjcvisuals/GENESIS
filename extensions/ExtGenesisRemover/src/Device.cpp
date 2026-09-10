@@ -16,7 +16,7 @@
 namespace rxext::genesis_remover {
 
 Device::Device(ValueSet settings) : settings_(std::move(settings)) {
-    removerLog("Device ctor (D3D11 + TimelineSemaphore fence)");
+    removerLog("Device ctor (v56 ExtOnnxVision-style: no timeline fence)");
 }
 
 bool Device::initialize() noexcept try {
@@ -25,8 +25,7 @@ bool Device::initialize() noexcept try {
     removerLog(std::format("Device::initialize settings adapter_luid={:016x}", adapter_luid_));
 
     // PIXERA usually injects the engine GPU LUID. When left at 0, auto-pick the first
-    // GPU that has Windows displays attached (prefer NVIDIA). We cannot read PIXERA's
-    // own output-assignment table from the C++ extension host API.
+    // GPU that has Windows displays attached (prefer NVIDIA).
     if (adapter_luid_ == 0) {
         const std::uint64_t picked = pickAdapterLuidWithDisplays();
         if (picked != 0) {
@@ -37,7 +36,8 @@ bool Device::initialize() noexcept try {
                                         adapterDescription(adapter_luid_)));
         } else {
             removerLog("WARNING: adapter_luid is 0 and auto-pick found no GPU");
-            host().log_error("GENESIS Remover: adapter LUID is 0 - set Adapter LUID or connect a display");
+            host().log_error(
+                "GENESIS Remover: adapter LUID is 0 - set Adapter LUID or connect a display");
         }
     } else {
         removerLog(std::format("Device::initialize using PIXERA/injected LUID {:016x} ({})",
@@ -46,7 +46,9 @@ bool Device::initialize() noexcept try {
                                     adapter_luid_, adapterDescription(adapter_luid_)));
     }
 
-    // ExtSampleD3D: one D3D11 device + shared fence for the whole StreamDevice.
+    // Own D3D11 device for shared Video In / output / capture (ExtOnnxVision pattern).
+    // Do NOT publish a TimelineSemaphore fence — ExtOnnxVision proves shared D3D11_IMAGE
+    // works without it, and our fence Wait turned host Map stalls into sticky low FPS.
     d3d_ = std::make_shared<SharedD3d11>(adapter_luid_);
     return true;
 } catch (const std::exception& ex) {
@@ -88,55 +90,6 @@ InputStream* Device::create_input_stream(ValueSet settings) noexcept try {
     removerLog(std::format("create_input_stream exception: {}", ex.what()));
     host().log_error(ex.what());
     return nullptr;
-}
-
-SyncDesc Device::before_render() noexcept {
-    if (d3d_) {
-        d3d_->noteSyncCallback();
-        const auto n = d3d_->syncCallbacks();
-        if (n <= 15u || (n % 60u) == 1u) {
-            removerLog(std::format("Device::before_render fence counter={} completed={} calls={}",
-                                   d3d_->fenceCounter(), d3d_->completedValue(), n));
-        }
-    }
-    return get_sync_desc();
-}
-
-void Device::render() noexcept {
-    // ExtSampleD3D: GPU-wait ++fenceCounter (PIXERA signals when Video In is ready).
-    // Input::render must NOT Map unless waitCpu(that value) succeeds — otherwise Map
-    // blocks forever on the still-pending GPU Wait (v21 black hang).
-    if (!d3d_ || !d3d_->context4()) {
-        return;
-    }
-    d3d_->noteSyncCallback();
-    const std::uint64_t wait_for = ++d3d_->fenceCounter();
-    d3d_->wait(wait_for);
-}
-
-SyncDesc Device::after_render() noexcept {
-    if (d3d_) {
-        d3d_->noteSyncCallback();
-        d3d_->signal(++d3d_->fenceCounter());
-        // No Flush — ExtSampleD3D does not Flush after signal; Flush here stalled the
-        // PIXERA fence handshake and correlated with a frozen first Video In frame.
-    }
-    return get_sync_desc();
-}
-
-SyncDesc Device::get_sync_desc() noexcept {
-    if (!d3d_ || !d3d_->fenceShareHandle()) {
-        return {};
-    }
-    // Match ExtSampleD3D: only type + handle (process_id left 0).
-    return {
-        SyncStrategy::TimelineSemaphore,
-        ShareHandle{
-            HandleType::D3D_FENCE,
-            reinterpret_cast<Handle>(d3d_->fenceShareHandle()),
-        },
-        d3d_->fenceCounter(),
-    };
 }
 
 } // namespace rxext::genesis_remover

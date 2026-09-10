@@ -265,7 +265,7 @@ Re-run cmake configure (delete build\CMakeCache.txt if the target is missing), t
         }
 
         $stamp = @"
-build=remover-timeline-v55-map-cooldown-20260822
+build=remover-timeline-v56-extonnxvision-nofence-20260910
 dll=$remOut\ExtGenesisRemover.dll
 host=$remOut\GenesisRemoverMatteHost.exe
 time=$(Get-Date -Format o)

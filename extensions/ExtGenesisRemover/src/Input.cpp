@@ -111,9 +111,9 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
     debug_status_ = add_parameter<ParameterString>("debug_status");
     debug_status_->set_property(PropertyNames::name, "Debug Status");
     debug_status_->set_property(PropertyNames::group_name, "Debug");
-    debug_status_->set_value(std::string("v55 map-stall cooldown"));
+    debug_status_->set_value(std::string("v56 no-fence + update kick (ExtOnnxVision)"));
 
-    removerLog(std::format("Input ctor v55 map-cooldown adapter_luid={:016x}", adapter_luid_));
+    removerLog(std::format("Input ctor v56 ExtOnnxVision-style adapter_luid={:016x}", adapter_luid_));
 }
 
 Input::~Input() {
@@ -301,7 +301,7 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     }
     const bool host_ready = matte_host_ && matte_host_->hostReady();
     const std::string ui =
-        std::format("v55 {} vin={} host={} matte={} ep={}", dbg.stage ? dbg.stage : "?",
+        std::format("v56 {} vin={} host={} matte={} ep={}", dbg.stage ? dbg.stage : "?",
                     dbg.has_video_in ? 1 : 0, host_ready ? 1 : 0, matte_live_ ? 1 : 0,
                     matte_host_ ? matte_host_->hostEp() : "?");
     if (debug_status_) {
@@ -353,7 +353,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     ensureMatteHost();
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v55 map-stall cooldown"));
+        debug_status_->set_value(std::string("v56 no-fence + update kick (ExtOnnxVision)"));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -403,10 +403,114 @@ bool Input::update() noexcept try {
         (void)frame_counter_->value();
     }
     publishVideoInTexture();
+    // ExtOnnxVision: drive matte off update(), skip when busy — never stall Device::render.
+    ensureD3dTextures();
+    ensureMatteHost();
+    if (quality_ && matte_host_) {
+        pushQualityToHost();
+    }
+    kickMatteIfReady();
     return true;
 } catch (const std::exception& ex) {
     removerLog(std::format("update exception: {}", ex.what()));
     return true;
+}
+
+void Input::kickMatteIfReady() {
+    if (!matte_host_ || !video_in_ready_ || !d3d_video_in_ || !d3d_video_in_->srv() ||
+        !passthrough_ || !passthrough_->ready() || !d3d_capture_share_ || width_ < 16 ||
+        height_ < 16) {
+        return;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+
+    // Shared-capture Map stalls the PIXERA GPU. When map_ms spikes, stop kicking.
+    constexpr double kMinKickMs = 50.0;
+    constexpr double kStressedKickMs = 100.0;
+    constexpr float kSlowMapMs = 45.0f;
+    constexpr std::uint32_t kSlowMapStreak = 2;
+    constexpr double kCooldownMs = 2000.0;
+
+    matte_host_->clearBusyIfStale(2500);
+    const std::uint64_t done = matte_host_->doneSeq();
+    if (done != 0 && done != last_map_sample_seq_) {
+        last_map_sample_seq_ = done;
+        const float map_ms = matte_host_->hostMapMs();
+        if (map_ms >= kSlowMapMs) {
+            ++slow_map_streak_;
+        } else {
+            slow_map_streak_ = 0;
+            if (stressed_ && map_ms > 0.1f && map_ms < 20.0f && now >= cooldown_until_) {
+                stressed_ = false;
+                removerLog("matte_unstressed (map_ms healthy again)");
+            }
+        }
+        if (slow_map_streak_ >= kSlowMapStreak && now >= cooldown_until_) {
+            slow_map_streak_ = 0;
+            ++cooldown_count_;
+            stressed_ = true;
+            cooldown_until_ = now + std::chrono::milliseconds(static_cast<int>(kCooldownMs));
+            removerLog(std::format(
+                "matte_cooldown {:.0f}ms — map_ms={:.1f} infer_ms={:.1f} (skip kicks; "
+                "live+last-matte continues) #{}",
+                kCooldownMs, map_ms, matte_host_->hostInferMs(), cooldown_count_));
+            if (cooldown_count_ >= 2u) {
+                (void)matte_host_->restartHost("repeated slow shared Map under outputs");
+                cooldown_count_ = 0;
+                pushed_quality_ = -1;
+                last_map_sample_seq_ = 0;
+            }
+        }
+    }
+
+    const bool in_cooldown = now < cooldown_until_;
+    if (in_cooldown || !matte_host_->hostReady() || matte_host_->busy()) {
+        if (!matte_host_->hostReady() && (render_ticks_ % 60u) == 1u) {
+            removerLog("waiting GenesisRemoverMatteHost.exe ready");
+        }
+        return;
+    }
+
+    const std::uint32_t cap_max_w = stressed_ ? 320u : 480u;
+    double min_kick_ms = stressed_ ? kStressedKickMs : kMinKickMs;
+    const float infer = matte_host_->hostInferMs();
+    if (infer > 1.0f) {
+        min_kick_ms = std::max(min_kick_ms, static_cast<double>(infer) + 10.0);
+    }
+    if (min_kick_ms > 150.0) {
+        min_kick_ms = 150.0;
+    }
+
+    const double since_kick_ms =
+        last_kick_wall_.time_since_epoch().count() == 0
+            ? 1e9
+            : std::chrono::duration<double, std::milli>(now - last_kick_wall_).count();
+    if (since_kick_ms < min_kick_ms) {
+        return;
+    }
+
+    const std::uint32_t cap_w = width_ > cap_max_w ? cap_max_w : width_;
+    const std::uint32_t cap_h =
+        static_cast<std::uint32_t>((static_cast<std::uint64_t>(height_) * cap_w) / width_);
+    if (cap_h == 0) {
+        return;
+    }
+    if (d3d_capture_share_->width() != cap_w || d3d_capture_share_->height() != cap_h) {
+        d3d_capture_share_->allocate(cap_w, cap_h, Format::R8G8B8A8_UNORM, /*is_target=*/true,
+                                     /*publish_share=*/true);
+    }
+    passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_capture_share_->rtv(), cap_w,
+                       cap_h, /*flip_v=*/false);
+    if (matte_host_->kickCapture(*d3d_capture_share_, cap_w, cap_h)) {
+        last_capture_kick_tick_ = render_ticks_;
+        last_kick_wall_ = now;
+        if ((render_ticks_ % 60u) == 1u) {
+            removerLog(std::format(
+                "matte_kick {}x{} min_kick_ms={:.0f} map_ms={:.1f} stressed={} cooldown=0",
+                cap_w, cap_h, min_kick_ms, matte_host_->hostMapMs(), stressed_ ? 1 : 0));
+        }
+    }
 }
 
 SyncDesc Input::before_render() noexcept {
@@ -439,9 +543,8 @@ RenderResult Input::render() noexcept try {
     }
 
     if (render_ticks_ <= 5u || (render_ticks_ % 30u) == 1u) {
-        removerLog(std::format("render vin-ready enter ticks={} fence={}/{} host={}",
-                               render_ticks_, d3d_ ? d3d_->completedValue() : 0,
-                               d3d_ ? d3d_->fenceCounter() : 0,
+        removerLog(std::format("render vin-ready ticks={} host={} (no device fence)",
+                               render_ticks_,
                                matte_host_ && matte_host_->hostReady() ? 1 : 0));
     }
 
@@ -459,15 +562,12 @@ RenderResult Input::render() noexcept try {
         return RenderResult::Succeeded;
     }
 
-    if (quality_ && matte_host_) {
-        pushQualityToHost();
-    }
-
+    // Pull latest matte if ready; present path never waits on Map/infer.
     std::uint32_t mw = 0;
     std::uint32_t mh = 0;
     ::genesis::RemoverFrameDebug host_dbg{};
-    if (matte_host_->tryTakeMatte(host_matte_rgba_, mw, mh, &host_dbg) && mw > 0 && mh > 0 &&
-        !host_matte_rgba_.empty()) {
+    if (matte_host_ && matte_host_->tryTakeMatte(host_matte_rgba_, mw, mh, &host_dbg) &&
+        mw > 0 && mh > 0 && !host_matte_rgba_.empty()) {
         d3d_matte_tex_->allocate(mw, mh, Format::R8G8B8A8_UNORM, /*is_target=*/true,
                                  /*publish_share=*/false);
         if (d3d_matte_tex_->uploadRgba8UpdateSubresource(host_matte_rgba_.data(), mw, mh)) {
@@ -479,23 +579,21 @@ RenderResult Input::render() noexcept try {
         }
     }
 
-    const auto now = std::chrono::steady_clock::now();
-
     ID3D11ShaderResourceView* live_srv = d3d_video_in_->srv();
     const double delay_ms = camera_delay_ms_ ? camera_delay_ms_->value() : 0.0;
     if (live_srv && delay_ms > 0.5) {
         live_srv = live_delay_.pushAndSample(*d3d_, *passthrough_, d3d_video_in_->srv(), width_,
                                              height_, delay_ms);
         if ((render_ticks_ % 60u) == 1u) {
-            removerLog(std::format("camera_delay_ms={:.1f} (live feed delayed; matte unchanged)",
-                                   delay_ms));
+            removerLog(std::format("camera_delay_ms={:.1f}", delay_ms));
         }
     } else {
         live_delay_.reset();
     }
 
+    // Live Video In every present × last matte alpha (ExtOnnxVision: skip frames,
+    // never stall the host on model rate).
     if (matte_live_ && d3d_matte_tex_ && d3d_matte_tex_->srv() && live_srv) {
-        // Delayed (or live) Video In; matte alpha updates independently.
         d3d_output_->clear(0.0f, 0.0f, 0.0f, 1.0f);
         passthrough_->drawLiveMasked(d3d_->context(), live_srv, d3d_matte_tex_->srv(),
                                      d3d_output_->rtv(), width_, height_, /*flip_v=*/true);
@@ -517,100 +615,15 @@ RenderResult Input::render() noexcept try {
         dbg.stage = "passthrough";
     }
 
-    // Shared-capture Map in the matte host stalls the same GPU PIXERA uses for outputs.
-    // When map_ms spikes, STOP kicking (cooldown) so live blit can run at full rate with
-    // the last matte — this is what recovers preview after outputs are disabled.
-    constexpr std::uint64_t kFirstKickTick = 30;
-    constexpr double kMinKickMs = 50.0;       // ~20 matte fps ceiling
-    constexpr double kStressedKickMs = 100.0; // after a cooldown
-    constexpr float kSlowMapMs = 45.0f;       // Map alone should be a few ms when healthy
-    constexpr std::uint32_t kSlowMapStreak = 2;
-    constexpr double kCooldownMs = 2000.0;
-
-    if (matte_host_) {
-        matte_host_->clearBusyIfStale(2500);
-        const std::uint64_t done = matte_host_->doneSeq();
-        if (done != 0 && done != last_map_sample_seq_) {
-            last_map_sample_seq_ = done;
-            const float map_ms = matte_host_->hostMapMs();
-            if (map_ms >= kSlowMapMs) {
-                ++slow_map_streak_;
-            } else {
-                slow_map_streak_ = 0;
-                if (stressed_ && map_ms > 0.1f && map_ms < 20.0f && now >= cooldown_until_) {
-                    stressed_ = false;
-                    removerLog("matte_unstressed (map_ms healthy again)");
-                }
-            }
-            if (slow_map_streak_ >= kSlowMapStreak && now >= cooldown_until_) {
-                slow_map_streak_ = 0;
-                ++cooldown_count_;
-                stressed_ = true;
-                cooldown_until_ =
-                    now + std::chrono::milliseconds(static_cast<int>(kCooldownMs));
-                removerLog(std::format(
-                    "matte_cooldown {:.0f}ms — map_ms={:.1f} infer_ms={:.1f} (stop kicks so "
-                    "PIXERA GPU can recover; live+last-matte continues) #{}",
-                    kCooldownMs, map_ms, matte_host_->hostInferMs(), cooldown_count_));
-                if (cooldown_count_ >= 2u) {
-                    (void)matte_host_->restartHost("repeated slow shared Map under outputs");
-                    cooldown_count_ = 0;
-                    pushed_quality_ = -1;
-                    last_map_sample_seq_ = 0;
-                }
-            }
-        }
-    }
-
-    const bool in_cooldown = now < cooldown_until_;
-    const std::uint32_t cap_max_w = stressed_ ? 320u : 480u;
-    double min_kick_ms = stressed_ ? kStressedKickMs : kMinKickMs;
-    if (matte_host_) {
-        const float infer = matte_host_->hostInferMs();
-        if (infer > 1.0f) {
-            min_kick_ms = std::max(min_kick_ms, static_cast<double>(infer) + 10.0);
-        }
-        if (min_kick_ms > 150.0) {
-            min_kick_ms = 150.0;
-        }
-    }
-
-    const double since_kick_ms =
-        last_kick_wall_.time_since_epoch().count() == 0
-            ? 1e9
-            : std::chrono::duration<double, std::milli>(now - last_kick_wall_).count();
-
-    if (matte_host_ && matte_host_->hostReady() && !matte_host_->busy() && !in_cooldown &&
-        render_ticks_ >= kFirstKickTick && since_kick_ms >= min_kick_ms &&
-        d3d_capture_share_ && d3d_capture_share_->rtv() && width_ >= 16 && height_ >= 16) {
-        const std::uint32_t cap_w = width_ > cap_max_w ? cap_max_w : width_;
-        const std::uint32_t cap_h =
-            static_cast<std::uint32_t>((static_cast<std::uint64_t>(height_) * cap_w) / width_);
-        if (cap_h > 0) {
-            if (d3d_capture_share_->width() != cap_w || d3d_capture_share_->height() != cap_h) {
-                d3d_capture_share_->allocate(cap_w, cap_h, Format::R8G8B8A8_UNORM,
-                                            /*is_target=*/true, /*publish_share=*/true);
-            }
-            passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_capture_share_->rtv(),
-                               cap_w, cap_h, /*flip_v=*/false);
-            if (matte_host_->kickCapture(*d3d_capture_share_, cap_w, cap_h)) {
-                last_capture_kick_tick_ = render_ticks_;
-                last_kick_wall_ = now;
-            }
-        }
-    } else if (matte_host_ && !matte_host_->hostReady() && (render_ticks_ % 60u) == 1u) {
-        removerLog("waiting GenesisRemoverMatteHost.exe ready (ORT loads out-of-process)");
-    }
-
     if (render_ticks_ <= 8u || (render_ticks_ % 60u) == 1u) {
         removerLog(std::format(
-            "gpu_present {} {}x{} matte_live={} busy={} min_kick_ms={:.0f} map_ms={:.1f} "
-            "infer_ms={:.0f} cooldown={} stressed={} cap_w={}",
+            "gpu_present {} {}x{} matte_live={} busy={} map_ms={:.1f} infer_ms={:.0f} "
+            "cooldown={} stressed={}",
             matte_live_ ? "live+mask" : "live", width_, height_, matte_live_ ? 1 : 0,
-            matte_host_ && matte_host_->busy() ? 1 : 0, min_kick_ms,
+            matte_host_ && matte_host_->busy() ? 1 : 0,
             matte_host_ ? matte_host_->hostMapMs() : 0.0f,
-            matte_host_ ? matte_host_->hostInferMs() : 0.0f, in_cooldown ? 1 : 0,
-            stressed_ ? 1 : 0, cap_max_w));
+            matte_host_ ? matte_host_->hostInferMs() : 0.0f,
+            std::chrono::steady_clock::now() < cooldown_until_ ? 1 : 0, stressed_ ? 1 : 0));
     }
 
     logStatusMaybe(dbg);

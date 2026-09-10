@@ -41,6 +41,9 @@ private:
     void logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg);
     void clearVideoInLink(const char* reason);
     void pushQualityToHost();
+    // ExtOnnxVision pattern: kick matte from update(), never from Device::render.
+    // Skip when busy / cooling — never queue frames.
+    void kickMatteIfReady();
 
     std::shared_ptr<SharedD3d11> d3d_;
     std::uint64_t adapter_luid_ = 0;

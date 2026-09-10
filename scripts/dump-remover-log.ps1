@@ -55,7 +55,7 @@ if (Test-Path -LiteralPath $hostLog) {
 }
 
 Write-Host ''
-Write-Host 'Expect stamp remover-timeline-v55-map-cooldown-...'
-Write-Host 'Look for matte_cooldown / map_ms= in logs when outputs make GPU stall.'
-Write-Host 'Quality Custom + Camera Delay still available.'
+Write-Host 'Expect stamp remover-timeline-v56-extonnxvision-nofence-...'
+Write-Host 'v56: no Device TimelineSemaphore fence (ExtOnnxVision pattern); matte kick from update().'
+Write-Host 'Look for matte_cooldown / map_ms= if outputs thrash the GPU.'
 Write-Host 'Adapter LUID = 0 for auto, or NVIDIA luid_hex to force. Same GPU as PIXERA preview.'
