@@ -327,7 +327,12 @@ int main() {
     const std::filesystem::path roots[] = {module_dir, module_dir / "assets"};
     genesis::setAssetSearchRoots(roots);
 
-    logLine("start v59-idempotent-init " + module_dir.string());
+    logLine("start v60-map-pace " + module_dir.string());
+    {
+        const auto vision_dir = module_dir / "assets" / "vision";
+        logLine(std::string("vision assets dir=") + vision_dir.string() +
+                (std::filesystem::exists(vision_dir) ? " (exists)" : " (MISSING)"));
+    }
 
     HANDLE mapping =
         OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, genesis::matte_ipc::kMappingName);
