@@ -120,15 +120,22 @@ std::filesystem::path BgRemover::resolveModelPath() const {
 }
 
 void BgRemover::setSettings(const BgRemoverSettings& settings) {
+    BgRemoverSettings merged = settings;
+    // Empty model_path means "use default / keep previous" — never treat it as a
+    // path change when the effect is unchanged. Host IPC often sends "" every frame.
+    if (merged.model_path.empty() && merged.vision_effect == settings_.vision_effect &&
+        !settings_.model_path.empty()) {
+        merged.model_path = settings_.model_path;
+    }
     const bool needs_reload =
-        settings.backend != settings_.backend || settings.prefer_cpu_ep != settings_.prefer_cpu_ep ||
-        settings.dml_device_id != settings_.dml_device_id ||
-        settings.adapter_luid != settings_.adapter_luid ||
-        settings.model_path != settings_.model_path ||
-        settings.vision_effect != settings_.vision_effect ||
-        settings.activation != settings_.activation || settings.norm != settings_.norm ||
-        settings.size_override != settings_.size_override;
-    settings_ = settings;
+        merged.backend != settings_.backend || merged.prefer_cpu_ep != settings_.prefer_cpu_ep ||
+        merged.dml_device_id != settings_.dml_device_id ||
+        merged.adapter_luid != settings_.adapter_luid ||
+        merged.model_path != settings_.model_path ||
+        merged.vision_effect != settings_.vision_effect ||
+        merged.activation != settings_.activation || merged.norm != settings_.norm ||
+        merged.size_override != settings_.size_override;
+    settings_ = merged;
     if (needs_reload) {
         initialized_ = false;
         rvm_ready_ = false;

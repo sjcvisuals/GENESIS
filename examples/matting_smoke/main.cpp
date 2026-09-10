@@ -192,5 +192,18 @@ int main() {
         std::printf("matting_smoke: optical-flow stub ok (%s)\n", fst.c_str());
     }
 
+    // --- Empty model_path must not unload a warm RVM session (v58 host thrash fix) ---
+    if (auto_remover.isRvmReady()) {
+        genesis::BgRemoverSettings keep = auto_remover.settings();
+        keep.model_path.clear(); // IPC often sends ""
+        keep.result_as = genesis::VisionResultAs::Greyscale;
+        auto_remover.setSettings(keep);
+        if (!auto_remover.isRvmReady() || auto_remover.activeBackend() != genesis::BgRemoverBackend::RvmOnnx) {
+            std::fprintf(stderr, "matting_smoke: empty model_path cleared RVM session\n");
+            return 1;
+        }
+        std::printf("matting_smoke: empty model_path keeps RVM session ok\n");
+    }
+
     return 0;
 }

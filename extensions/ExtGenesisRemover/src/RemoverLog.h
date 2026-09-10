@@ -13,6 +13,6 @@ void removerLog(const std::string& line);
 std::filesystem::path removerTempLogPath();
 
 // Bump when diagnosing timeline load so the log proves the new DLL is running.
-inline constexpr const char* kRemoverBuildStamp = "remover-vision-v57-multimodel-20260910";
+inline constexpr const char* kRemoverBuildStamp = "remover-vision-v58-no-rvm-reload-20260910";
 
 } // namespace rxext::genesis_remover

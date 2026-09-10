@@ -405,6 +405,9 @@ int main() {
     }
     std::snprintf(hdr->status, sizeof(hdr->status), "%s", ep.empty() ? status.c_str() : ep.c_str());
     hdr->host_ready = 1;
+    // Keep local settings in sync with resolved model path so later setSettings
+    // (quality / vision IPC) does not look like a path clear → ORT reload.
+    settings = remover.settings();
 
     CaptureState capture;
     std::vector<std::uint8_t> scratch_in;
@@ -412,8 +415,9 @@ int main() {
     std::uint64_t last_kick = 0;
     std::uint64_t frames = 0;
     int applied_quality = -1;
-    int applied_effect = -1;
-    int applied_result_as = -1;
+    // Match startup defaults so the first kick does not tear down a warm RVM session.
+    int applied_effect = static_cast<int>(settings.vision_effect);
+    int applied_result_as = static_cast<int>(settings.result_as);
     std::string applied_model;
 
     // ALWAYS advance done_seq on failure. If we leave kick_seq != done_seq, the DLL
@@ -452,13 +456,18 @@ int main() {
         if (key == applied_quality) {
             return;
         }
+        const bool had_quality = applied_quality >= 0;
         settings.quality =
             q >= 3 ? genesis::BgRemoverQuality::Balanced : static_cast<genesis::BgRemoverQuality>(q);
         settings.rvm_downsample = ds;
         settings.rvm_max_infer_side = max_side;
         remover.setSettings(settings);
-        remover.resetTemporalState();
+        // First quality publish matches startup defaults — do not wipe RVM recurrent state.
+        if (had_quality) {
+            remover.resetTemporalState();
+        }
         applied_quality = key;
+        settings = remover.settings();
         if (q >= 3) {
             logLine("quality -> Custom downsample=" + std::to_string(ds) +
                     " max_side=" + std::to_string(max_side));
@@ -471,34 +480,47 @@ int main() {
         const int effect = static_cast<int>(std::min<std::uint32_t>(9u, hdr->vision_effect));
         const int result = static_cast<int>(std::min<std::uint32_t>(2u, hdr->result_as));
         std::string model(hdr->model_path);
-        // Trim at first NUL (already C string) — strip trailing spaces just in case.
         while (!model.empty() && (model.back() == ' ' || model.back() == '\0')) {
             model.pop_back();
         }
         if (effect == applied_effect && result == applied_result_as && model == applied_model) {
             return;
         }
+        const bool session_change = (effect != applied_effect) || (model != applied_model);
         settings.vision_effect = static_cast<genesis::VisionEffect>(effect);
         settings.result_as = static_cast<genesis::VisionResultAs>(result);
-        settings.activation = genesis::visionEffectDefaultActivation(settings.vision_effect);
-        settings.norm = genesis::visionEffectDefaultNorm(settings.vision_effect);
-        settings.size_override = genesis::visionEffectDefaultSize(settings.vision_effect);
-        if (model.empty()) {
-            settings.model_path.clear();
-        } else {
+        if (!model.empty()) {
             settings.model_path = model;
+        } else if (session_change) {
+            // Effect changed with no override — resolve the new effect's default on init.
+            settings.model_path.clear();
         }
-        remover.setSettings(settings);
-        std::string init_status;
-        (void)remover.initialize(&init_status);
+        // else keep resolved path (Person Matte default "" must not unload RVM).
+
+        if (session_change) {
+            settings.activation = genesis::visionEffectDefaultActivation(settings.vision_effect);
+            settings.norm = genesis::visionEffectDefaultNorm(settings.vision_effect);
+            settings.size_override = genesis::visionEffectDefaultSize(settings.vision_effect);
+            remover.setSettings(settings);
+            std::string init_status;
+            (void)remover.initialize(&init_status);
+            settings = remover.settings();
+            logLine(std::string("vision -> ") + genesis::visionEffectLabel(settings.vision_effect) +
+                    " result=" + genesis::visionResultAsLabel(settings.result_as) + " " +
+                    init_status);
+            const std::string ep_now = remover.executionProvider();
+            std::snprintf(hdr->status, sizeof(hdr->status), "%s",
+                          ep_now.empty() ? init_status.c_str() : ep_now.c_str());
+        } else {
+            // Result As only — no ORT reload.
+            remover.setSettings(settings);
+            settings = remover.settings();
+            logLine(std::string("result_as -> ") +
+                    genesis::visionResultAsLabel(settings.result_as));
+        }
         applied_effect = effect;
         applied_result_as = result;
         applied_model = model;
-        logLine(std::string("vision -> ") + genesis::visionEffectLabel(settings.vision_effect) +
-                " result=" + genesis::visionResultAsLabel(settings.result_as) + " " + init_status);
-        const std::string ep_now = remover.executionProvider();
-        std::snprintf(hdr->status, sizeof(hdr->status), "%s",
-                      ep_now.empty() ? init_status.c_str() : ep_now.c_str());
     };
 
     for (;;) {
