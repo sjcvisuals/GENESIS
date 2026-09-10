@@ -13,6 +13,22 @@
 
 namespace genesis {
 
+// Per-frame diagnostics for PIXERA Remover debugging (shared Vulkan path).
+struct RemoverFrameDebug {
+    const char* stage = "none"; // no_output / waiting_video_in / download_fail /
+                                // input_black / passthrough / matte / error
+    bool has_video_in = false;
+    bool download_ok = false;
+    bool matte_copied = false;
+    std::size_t nonzero_rgb = 0;
+    unsigned mid_r = 0;
+    unsigned mid_g = 0;
+    unsigned mid_b = 0;
+    unsigned mid_a = 0;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+};
+
 // Headless Pixera-style remover: shared video in → matte → exportable RGBA out.
 // Used by ExtGenesis Remover mode and ExtGenesisRemover.
 //
@@ -32,8 +48,12 @@ public:
     // Creates/resizes the exportable output. Does not create video_in or load ONNX.
     void resize(std::uint32_t width, std::uint32_t height);
 
-    // Lazily create DXGI video_in for the current size. No-op if already sized.
-    void ensureVideoIn();
+    // Lazily create shared video_in. Recreates when size OR format changes.
+    // format must match the TextureDesc advertised to PIXERA (e.g. R16G16B16A16_SFLOAT).
+    void ensureVideoIn(VkFormat format = VK_FORMAT_R8G8B8A8_UNORM);
+
+    // Drop and recreate video_in at the last ensureVideoIn format.
+    void forceRecreateVideoIn();
 
     void setSettings(const BgRemoverSettings& settings);
 
@@ -56,7 +76,17 @@ public:
     VulkanContext& context() { return *context_; }
 
     // Download video_in → matte → upload into output color image.
-    bool processFrame(std::string* out_error = nullptr);
+    // When show_diagnostics is true, waiting/black stages use solid colours instead of
+    // transparent black so PIXERA shows the stall stage (cyan / blue / orange).
+    bool processFrame(std::string* out_error = nullptr, RemoverFrameDebug* debug = nullptr,
+                      bool show_diagnostics = true);
+
+    // CPU RGBA8 ingest (D3D11 Video In staging path). rgba=nullptr → waiting_video_in.
+    // When out_rgba is non-null, receives the RGBAs that were uploaded / would be shown.
+    bool processCpuRgbaFrame(const std::uint8_t* rgba, bool has_input,
+                             std::string* out_error = nullptr, RemoverFrameDebug* debug = nullptr,
+                             bool show_diagnostics = true,
+                             std::vector<std::uint8_t>* out_rgba = nullptr);
 
     // CPU-only path for smoke tests (no shared-image roundtrip). Sync matte.
     bool processCpuFrame(const std::uint8_t* in_rgba, std::uint8_t* out_rgba, std::uint32_t width,
@@ -72,6 +102,7 @@ private:
     void ensureAsyncStarted();
     void ensureRemoverInitialized();
     void ensureScratch();
+    void fillSolid(std::uint8_t r, std::uint8_t g, std::uint8_t b);
 
     std::unique_ptr<VulkanContext> context_;
     std::unique_ptr<ExternalSharedImage> video_in_;
@@ -84,6 +115,7 @@ private:
     std::vector<std::uint8_t> scratch_out_;
     std::uint32_t width_ = 0;
     std::uint32_t height_ = 0;
+    VkFormat video_in_format_ = VK_FORMAT_R8G8B8A8_UNORM;
 };
 
 } // namespace genesis

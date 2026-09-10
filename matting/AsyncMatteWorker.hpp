@@ -12,8 +12,9 @@
 
 namespace genesis {
 
-// One-inflight RVM/chroma worker: render thread never blocks on Ort::Run.
-// When the worker is busy, new frames are skipped and the last completed matte is reused.
+    // One-inflight worker with a latest-wins pending mailbox: render never blocks on
+    // Ort::Run. Frames arriving while busy replace pending (not dropped cold), so the
+    // worker starts the newest frame as soon as the current infer finishes.
 class AsyncMatteWorker {
 public:
     AsyncMatteWorker();
@@ -31,7 +32,8 @@ public:
     // Drop pending + latest; reset temporal state. Call on resize.
     void reset(std::uint32_t width, std::uint32_t height);
 
-    // Non-blocking. Copies the frame if the worker can accept it; otherwise skips.
+    // Non-blocking. Copies into the latest-wins pending slot (even if busy).
+    // Returns false only if stopped / invalid. Superseded pending frames count as skipped.
     bool trySubmit(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height);
 
     // Copies the last completed matte (same size). Returns false if none yet.
@@ -42,6 +44,11 @@ public:
     std::uint64_t submitted() const { return submitted_.load(std::memory_order_relaxed); }
     std::uint64_t completed() const { return completed_.load(std::memory_order_relaxed); }
     std::uint64_t skipped() const { return skipped_.load(std::memory_order_relaxed); }
+    // Last successful process() duration on the worker thread (milliseconds).
+    double lastInferMs() const { return last_infer_ms_.load(std::memory_order_relaxed); }
+    std::uint32_t lastInferWidth() const { return last_infer_w_.load(std::memory_order_relaxed); }
+    std::uint32_t lastInferHeight() const { return last_infer_h_.load(std::memory_order_relaxed); }
+    std::string executionProvider() const;
 
     // Mirror of worker-side status (best-effort; may lag one frame).
     std::string status() const;
@@ -64,6 +71,9 @@ private:
     std::atomic<std::uint64_t> submitted_{0};
     std::atomic<std::uint64_t> completed_{0};
     std::atomic<std::uint64_t> skipped_{0};
+    std::atomic<double> last_infer_ms_{0.0};
+    std::atomic<std::uint32_t> last_infer_w_{0};
+    std::atomic<std::uint32_t> last_infer_h_{0};
 
     BgRemoverSettings settings_{};
     BgRemover remover_;

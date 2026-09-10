@@ -3,86 +3,57 @@
 
 #include "ModulePaths.h"
 #include "RemoverLog.h"
+#include "common/string.h"
 #include "platform/Paths.hpp"
+#include "rxext_util.h"
+
+#include <Windows.h>
+#include <d3d11.h>
 
 #include <algorithm>
-#include <cstring>
+#include <chrono>
+#include <cmath>
+#include <filesystem>
 #include <format>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rxext::genesis_remover {
 
 namespace {
 
-std::size_t nonzeroRgbCount(const std::uint8_t* rgba, std::size_t bytes) {
-    std::size_t n = 0;
-    for (std::size_t i = 0; i + 3 < bytes; i += 4) {
-        if (rgba[i] | rgba[i + 1] | rgba[i + 2]) {
-            ++n;
-        }
+int stageToEnum(const char* stage) {
+    if (!stage) {
+        return 0;
     }
-    return n;
-}
-
-bool matteHasCoverage(const std::uint8_t* rgba, std::uint32_t w, std::uint32_t h) {
-    if (!rgba || w == 0 || h == 0) {
-        return false;
+    const std::string_view s(stage);
+    if (s == "waiting_video_in") {
+        return 1;
     }
-    const std::size_t pixels = static_cast<std::size_t>(w) * h;
-    const std::size_t step = std::max<std::size_t>(1, pixels / 4096u);
-    std::size_t hits = 0;
-    unsigned max_a = 0;
-    for (std::size_t i = 0; i < pixels; i += step) {
-        const unsigned a = rgba[i * 4u + 3u];
-        max_a = std::max(max_a, a);
-        if (a > 16) {
-            ++hits;
-        }
+    if (s == "download_fail") {
+        return 2;
     }
-    return max_a > 32 && hits >= 8;
-}
-
-void fillOpaquePassthrough(const std::uint8_t* in_rgba, std::uint8_t* out_rgba, std::size_t bytes) {
-    std::memcpy(out_rgba, in_rgba, bytes);
-    for (std::size_t i = 3; i < bytes; i += 4) {
-        out_rgba[i] = 255;
+    if (s == "input_black") {
+        return 3;
     }
-}
-
-void fillSolid(std::uint8_t* out_rgba, std::size_t bytes, std::uint8_t r, std::uint8_t g,
-               std::uint8_t b) {
-    for (std::size_t i = 0; i + 3 < bytes; i += 4) {
-        out_rgba[i + 0] = r;
-        out_rgba[i + 1] = g;
-        out_rgba[i + 2] = b;
-        out_rgba[i + 3] = 255;
+    if (s == "passthrough") {
+        return 4;
     }
-}
-
-void logPathOnce(std::string& last, const char* path) {
-    if (last == path) {
-        return;
+    if (s == "matte") {
+        return 5;
     }
-    last = path;
-    removerLog(std::format("render path={}", path));
+    if (s == "error") {
+        return 6;
+    }
+    return 0;
 }
 
 } // namespace
 
-Input::Input(ValueSet settings) : settings_(std::move(settings)) {
-    removerLog("Input ctor (host-texture)");
-}
-
-Input::~Input() {
-    async_.stop();
-    removerLog("Input dtor");
-}
-
-void Input::registerParameters() {
-    if (params_registered_) {
-        return;
-    }
+Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, ValueSet settings)
+    : d3d_(std::move(d3d)), adapter_luid_(adapter_luid), settings_(std::move(settings)) {
     const std::filesystem::path module_dir = extensionModuleDirectory();
     const std::filesystem::path roots[] = {module_dir, module_dir / "assets"};
     ::genesis::setAssetSearchRoots(roots);
@@ -92,8 +63,6 @@ void Input::registerParameters() {
     time_ = add_parameter<ParameterValue>("time");
     time_->set_property(PropertyNames::purpose, PurposeNames::TimelineTime);
 
-    // Needed so update() keeps running after a Video In link while the playhead
-    // is parked (otherwise we stay on cyan forever).
     frame_counter_ = add_parameter<ParameterValue>("frame_counter");
     frame_counter_->set_property(PropertyNames::purpose, PurposeNames::FrameCounter);
 
@@ -105,293 +74,262 @@ void Input::registerParameters() {
     quality_->set_property(PropertyNames::name, "Quality");
     quality_->set_property(PropertyNames::group_name, "Matte");
     quality_->set_property<std::vector<std::string>>(PropertyNames::enum_names,
-                                                      {"Fast", "Balanced", "Quality"});
-    quality_->set_value(1);
+                                                      {"Fast", "Balanced", "Quality", "Custom"});
+    quality_->set_value(0);
 
-    params_registered_ = true;
-    removerLog("parameters registered (host-texture path)");
+    custom_downsample_ = add_parameter<ParameterValue>("custom_downsample", 0.25);
+    custom_downsample_->set_property(PropertyNames::name, "Custom Downsample");
+    custom_downsample_->set_property(PropertyNames::group_name, "Matte");
+    custom_downsample_->set_property(PropertyNames::min_value, 0.08);
+    custom_downsample_->set_property(PropertyNames::max_value, 1.0);
+    custom_downsample_->set_property(PropertyNames::min_value_ui, 0.08);
+    custom_downsample_->set_property(PropertyNames::max_value_ui, 1.0);
+
+    custom_infer_side_ = add_parameter<ParameterInt>("custom_infer_side", 512);
+    custom_infer_side_->set_property(PropertyNames::name, "Custom Infer Side");
+    custom_infer_side_->set_property(PropertyNames::group_name, "Matte");
+    custom_infer_side_->set_property(PropertyNames::min_value, 192);
+    custom_infer_side_->set_property(PropertyNames::max_value, 1280);
+
+    camera_delay_ms_ = add_parameter<ParameterValue>("camera_delay_ms", 0.0);
+    camera_delay_ms_->set_property(PropertyNames::name, "Camera Delay (ms)");
+    camera_delay_ms_->set_property(PropertyNames::group_name, "Sync");
+    camera_delay_ms_->set_property(PropertyNames::min_value, 0.0);
+    camera_delay_ms_->set_property(PropertyNames::max_value, 300.0);
+    camera_delay_ms_->set_property(PropertyNames::min_value_ui, 0.0);
+    camera_delay_ms_->set_property(PropertyNames::max_value_ui, 300.0);
+
+    debug_stage_ = add_parameter<ParameterInt>("debug_stage");
+    debug_stage_->set_property(PropertyNames::name, "Debug Stage");
+    debug_stage_->set_property(PropertyNames::group_name, "Debug");
+    debug_stage_->set_property<std::vector<std::string>>(
+        PropertyNames::enum_names,
+        {"none", "waiting_video_in (cyan)", "download_fail (blue)", "input_black (orange)",
+         "passthrough", "matte", "error"});
+    debug_stage_->set_value(0);
+
+    debug_status_ = add_parameter<ParameterString>("debug_status");
+    debug_status_->set_property(PropertyNames::name, "Debug Status");
+    debug_status_->set_property(PropertyNames::group_name, "Debug");
+    debug_status_->set_value(std::string("v56 no-fence + update kick (ExtOnnxVision)"));
+
+    removerLog(std::format("Input ctor v56 ExtOnnxVision-style adapter_luid={:016x}", adapter_luid_));
 }
 
-void Input::touchHostClock() {
-    if (time_) {
-        (void)time_->value();
+Input::~Input() {
+    matte_host_.reset();
+    removerLog("Input dtor");
+}
+
+void Input::ensureD3dTextures() {
+    if (!d3d_) {
+        throw std::runtime_error("Input: SharedD3d11 is null");
     }
-    if (frame_counter_) {
-        (void)frame_counter_->value();
+    if (!d3d_output_) {
+        d3d_output_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
+    }
+    if (!d3d_video_in_) {
+        d3d_video_in_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
+    }
+    if (!d3d_capture_share_) {
+        d3d_capture_share_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
+    }
+    if (!d3d_matte_tex_) {
+        d3d_matte_tex_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
+    }
+    if (!passthrough_) {
+        passthrough_ = std::make_unique<D3d11Passthrough>(d3d_->device());
     }
 }
 
-void Input::ensureSampler(std::uint32_t width, std::uint32_t height) {
-    if (!sampler_ || width == 0 || height == 0) {
+void Input::pushQualityToHost() {
+    if (!matte_host_ || !quality_) {
         return;
     }
-    width_ = width;
-    height_ = height;
+    const int q = quality_->value();
+    float ds = 0.0f;
+    std::uint32_t side = 0;
+    if (q >= 3) {
+        ds = custom_downsample_ ? static_cast<float>(custom_downsample_->value()) : 0.25f;
+        side = custom_infer_side_ ? static_cast<std::uint32_t>(custom_infer_side_->value()) : 512u;
+    }
+    if (q == pushed_quality_ && ds == pushed_ds_ && side == pushed_side_) {
+        return;
+    }
+    pushed_quality_ = q;
+    pushed_ds_ = ds;
+    pushed_side_ = side;
+    matte_host_->setQuality(q, ds, side);
+}
 
-    bool need_new = true;
-    try {
-        const auto cur = sampler_->texture().desc();
-        need_new =
-            (cur.width != width_ || cur.height != height_ || cur.format != Format::R8G8B8A8_UNORM);
-    } catch (...) {
-        need_new = true;
+void Input::ensureMatteHost() {
+    if (!matte_host_) {
+        matte_host_ = std::make_unique<MatteHostClient>();
     }
-    if (!need_new) {
+    pushQualityToHost();
+    (void)matte_host_->ensureStarted(adapter_luid_);
+}
+
+void Input::clearVideoInLink(const char* reason) {
+    if (!video_in_ready_ && (!d3d_video_in_ || !d3d_video_in_->hasTexture())) {
         return;
     }
+    removerLog(std::format("video_in cleared ({})", reason ? reason : "?"));
+    video_in_ready_ = false;
+    matte_live_ = false;
+    live_delay_.reset();
+    if (d3d_video_in_) {
+        d3d_video_in_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
+    }
+    d3d_capture_share_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
+    last_capture_kick_tick_ = 0;
+    if (d3d_matte_tex_) {
+        d3d_matte_tex_ = std::make_unique<D3d11SharedTexture>(d3d_->device(), d3d_->context());
+    }
+    if (video_in_) {
+        try {
+            video_in_->set_texture({});
+        } catch (...) {
+        }
+    }
+    if (d3d_output_ && d3d_output_->hasTexture()) {
+        d3d_output_->clear(0.0f, 0.86f, 1.0f, 1.0f);
+    }
+}
+
+void Input::publishTargetTexture() {
+    if (!sampler_ || !d3d_) {
+        return;
+    }
+    ensureD3dTextures();
+    d3d_output_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true);
 
     TextureDesc desc{};
     desc.width = width_;
     desc.height = height_;
     desc.format = Format::R8G8B8A8_UNORM;
     desc.is_target = true;
+    desc.share_handle = {HandleType::D3D11_IMAGE,
+                         reinterpret_cast<Handle>(d3d_output_->shareHandle())};
     sampler_->set_texture(host().create_texture(desc));
-
-    // Cyan = DLL alive, waiting for Video In download (unmistakable diagnostic).
-    const std::size_t bytes = static_cast<std::size_t>(width_) * height_ * 4u;
-    scratch_out_.resize(bytes);
-    fillSolid(scratch_out_.data(), bytes, 0, 220, 255);
-    BufferDesc buffer{};
-    buffer.data = scratch_out_.data();
-    buffer.pitch = static_cast<std::size_t>(width_) * 4u;
-    buffer.size = bytes;
-    host().upload_texture(sampler_->texture(), buffer, true, []() noexcept {});
-    matte_live_ = false;
-    removerLog(std::format("sampler host texture {}x{} (cyan placeholder)", width_, height_));
+    removerLog(std::format("shared OUTPUT {}x{} handle=D3D11_IMAGE", desc.width, desc.height));
 }
 
-void Input::ensureVideoInHostTexture() {
+void Input::publishVideoInTexture() {
     if (!video_in_) {
         return;
     }
 
-    auto allocate = [&](TextureDesc desc, const char* reason) {
+    auto allocate = [&](const TextureDesc& desc) {
         if (desc.width == 0 || desc.height == 0) {
             return;
         }
-        if (desc.format == Format::None) {
-            desc.format = Format::R8G8B8A8_UNORM;
-        }
-        desc.is_target = false;
-        desc.share_handle = {};
+        width_ = static_cast<std::uint32_t>(desc.width);
+        height_ = static_cast<std::uint32_t>(desc.height);
+        const Format fmt = desc.format == Format::None ? Format::R8G8B8A8_UNORM : desc.format;
+        removerLog(std::format("video_in allocate {}x{} format={} (D3D11_IMAGE)", width_, height_,
+                               get_format_name(fmt)));
 
-        const auto gen = video_in_generation_.fetch_add(1) + 1;
-        download_pending_.store(false);
+        ensureD3dTextures();
+        ensureMatteHost();
+        d3d_video_in_->allocate(width_, height_, fmt, /*is_target=*/false);
+        d3d_capture_share_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
+                                     /*publish_share=*/true);
+        d3d_matte_tex_->allocate(width_, height_, Format::R8G8B8A8_UNORM, /*is_target=*/true,
+                                 /*publish_share=*/false);
+        publishTargetTexture();
 
-        video_in_->set_texture(host().create_texture(desc));
-        video_in_allocated_ = true;
-        // Never download in the same step as create — that crashed PIXERA.
-        video_in_download_allowed_ = false;
-        download_cooldown_frames_ = 45;
-        ensureSampler(static_cast<std::uint32_t>(desc.width),
-                      static_cast<std::uint32_t>(desc.height));
-        {
-            std::lock_guard<std::mutex> lock(frame_mutex_);
-            has_in_ = false;
-            latest_in_.clear();
-        }
-        last_render_path_.clear();
-        removerLog(std::format("video_in HOST texture {}x{} format={} gen={} ({})", desc.width,
-                               desc.height, get_format_name(desc.format), gen, reason));
+        TextureDesc shared = desc;
+        shared.format = fmt;
+        shared.is_target = false;
+        shared.share_handle = {HandleType::D3D11_IMAGE,
+                               reinterpret_cast<Handle>(d3d_video_in_->shareHandle())};
+        video_in_->set_texture(host().create_texture(shared));
+        video_in_ready_ = true;
+        matte_live_ = false;
+        last_capture_kick_tick_ = 0;
+        removerLog(std::format(
+            "shared VIDEO_IN {}x{} format={} handle=D3D11_IMAGE is_target=0 srv={} (oop matte)",
+            shared.width, shared.height, get_format_name(shared.format),
+            d3d_video_in_->srv() ? 1 : 0));
+        removerLog("capture share ready — matte via GenesisRemoverMatteHost.exe");
     };
 
-    update_input_texture(*video_in_, [&](const TextureDesc& desc) {
-        allocate(desc, "update_input_texture");
-    });
+    update_input_texture(*video_in_, allocate);
 
     const int prop_w = video_in_->get_property<int>(SettingNames::resolution_x, 0);
     const int prop_h = video_in_->get_property<int>(SettingNames::resolution_y, 0);
-    const std::string format_str(video_in_->get_property(SettingNames::format));
-    const Format prop_fmt = get_format_by_name(format_str, Format::R8G8B8A8_UNORM);
 
-    if (!baseline_captured_ && prop_w > 0 && prop_h > 0) {
-        baseline_w_ = prop_w;
-        baseline_h_ = prop_h;
-        baseline_format_ = format_str;
-        baseline_captured_ = true;
-        removerLog(std::format("video_in baseline props {}x{} format='{}'", prop_w, prop_h,
-                               format_str));
-    }
-
-    // PIXERA live inputs often omit format, so the SDK helper never fires.
-    // Allocate when format is explicit or when props change from the pre-link baseline.
-    if (!video_in_allocated_ && prop_w > 0 && prop_h > 0 && baseline_captured_) {
-        const bool format_explicit = !format_str.empty();
-        const bool dims_changed = (prop_w != baseline_w_ || prop_h != baseline_h_);
-        const bool format_changed = (format_str != baseline_format_);
-        if (format_explicit || dims_changed || format_changed) {
-            TextureDesc desc{};
-            desc.width = static_cast<std::size_t>(prop_w);
-            desc.height = static_cast<std::size_t>(prop_h);
-            desc.format = prop_fmt;
-            allocate(desc, format_explicit ? "props+format" : "props-changed");
-        } else if (!same_res_allocate_tried_ && render_ticks_ > 120) {
-            // Same-resolution live link: props may never change. After ~2s of ticks,
-            // create the host texture so PIXERA can write; download arms after cooldown.
-            same_res_allocate_tried_ = true;
-            TextureDesc desc{};
-            desc.width = static_cast<std::size_t>(prop_w);
-            desc.height = static_cast<std::size_t>(prop_h);
-            desc.format = prop_fmt;
-            allocate(desc, "same-res-timeout");
-        }
-    }
-
-    if (video_in_allocated_ && !video_in_download_allowed_) {
-        if (download_cooldown_frames_ > 0) {
-            --download_cooldown_frames_;
-        } else {
-            video_in_download_allowed_ = true;
-            removerLog("video_in download armed");
-        }
-    }
-
-    if (!video_in_allocated_ && (render_ticks_ % 60u) == 1u) {
-        removerLog(std::format("waiting link: props {}x{} format='{}' baseline={}", prop_w, prop_h,
-                               format_str, baseline_captured_ ? 1 : 0));
-    }
-}
-
-void Input::requestVideoDownload() {
-    if (!video_in_ || !video_in_download_allowed_) {
-        return;
-    }
-    TextureDesc desc{};
-    try {
-        desc = video_in_->texture().desc();
-    } catch (...) {
-        return;
-    }
-    if (desc.width == 0 || desc.height == 0 || !video_in_->texture()) {
-        return;
-    }
-    if (download_pending_.exchange(true)) {
+    if (video_in_ready_ && prop_w <= 0 && prop_h <= 0) {
+        clearVideoInLink("props cleared");
         return;
     }
 
-    const auto gen = video_in_generation_.load(std::memory_order_acquire);
-
-    host().download_texture(
-        video_in_->texture(),
-        [this, gen, w = static_cast<std::uint32_t>(desc.width),
-         h = static_cast<std::uint32_t>(desc.height)](BufferDesc buffer,
-                                                      OnComplete on_complete) mutable noexcept {
+    if (!video_in_ready_) {
+        TextureDesc desc{};
+        desc.width = static_cast<std::size_t>(prop_w);
+        desc.height = static_cast<std::size_t>(prop_h);
+        desc.format = get_format_by_name(video_in_->get_property(SettingNames::format),
+                                         Format::R8G8B8A8_UNORM);
+        if (desc.width == 0 || desc.height == 0) {
             try {
-                if (gen != video_in_generation_.load(std::memory_order_acquire)) {
-                    download_pending_.store(false);
-                    on_complete();
-                    return;
-                }
-                const std::size_t expected = static_cast<std::size_t>(w) * h * 4u;
-                if (!buffer.data || buffer.size < expected || w == 0 || h == 0) {
-                    const auto n = downloads_empty_.fetch_add(1) + 1;
-                    if (n <= 5 || (n % 120) == 0) {
-                        removerLog(std::format("download empty/short size={} expected={} n={}",
-                                               buffer.size, expected, n));
-                    }
-                } else {
-                    std::vector<std::uint8_t> packed(expected);
-                    const auto* src = static_cast<const std::uint8_t*>(buffer.data);
-                    const std::size_t src_pitch =
-                        buffer.pitch > 0 ? buffer.pitch : static_cast<std::size_t>(w) * 4u;
-                    for (std::uint32_t y = 0; y < h; ++y) {
-                        std::memcpy(packed.data() + static_cast<std::size_t>(y) * w * 4u,
-                                    src + static_cast<std::size_t>(y) * src_pitch,
-                                    static_cast<std::size_t>(w) * 4u);
-                    }
-                    const std::size_t lit = nonzeroRgbCount(packed.data(), expected);
-                    {
-                        std::lock_guard<std::mutex> lock(frame_mutex_);
-                        latest_in_ = std::move(packed);
-                        in_w_ = w;
-                        in_h_ = h;
-                        has_in_ = true;
-                    }
-                    const auto n = downloads_ok_.fetch_add(1) + 1;
-                    if (n <= 5 || (n % 120) == 0) {
-                        removerLog(std::format("download ok {}x{} nonzero_rgb={} n={}", w, h, lit, n));
+                const auto cur = video_in_->texture().desc();
+                if (cur.width > 0 && cur.height > 0) {
+                    desc.width = cur.width;
+                    desc.height = cur.height;
+                    if (cur.format != Format::None) {
+                        desc.format = cur.format;
                     }
                 }
             } catch (...) {
-                removerLog("download callback exception");
             }
-            download_pending_.store(false);
-            on_complete();
-        });
-}
-
-void Input::applyMatteSettings() {
-    const int q = quality_ ? std::clamp(quality_->value(), 0, 2) : 1;
-    const auto next_q = static_cast<::genesis::BgRemoverQuality>(q);
-    if (matte_settings_applied_ && matte_settings_.backend == ::genesis::BgRemoverBackend::Auto &&
-        matte_settings_.quality == next_q) {
-        return;
-    }
-    matte_settings_.backend = ::genesis::BgRemoverBackend::Auto;
-    matte_settings_.quality = next_q;
-    // Resolve model only when the worker is (about to be) running — avoid SDL/asset
-    // work during cyan scrub-in before Video In is linked.
-    if (async_started_ && matte_settings_.model_path.empty()) {
-        try {
-            matte_settings_.model_path =
-                ::genesis::resolveAssetPath("assets/matting/rvm_mobilenetv3_fp16.onnx");
-            removerLog(std::format("RVM model: {}", matte_settings_.model_path.string()));
-        } catch (const std::exception& ex) {
-            removerLog(std::format("RVM model resolve failed: {}", ex.what()));
+        }
+        if (desc.width > 0 && desc.height > 0) {
+            removerLog("video_in allocate via fallback (D3D11)");
+            allocate(desc);
+        } else if ((render_ticks_ % 60u) == 1u) {
+            removerLog(std::format(
+                "waiting Video In link (props {}x{} format='{}') - cyan is correct until then",
+                prop_w, prop_h, std::string(video_in_->get_property(SettingNames::format))));
         }
     }
-    matte_settings_applied_ = true;
-    if (async_started_) {
-        async_.setSettings(matte_settings_);
-        removerLog(std::format("matte settings applied quality={}", q));
-    }
 }
 
-void Input::uploadOutputRgba(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height) {
-    if (!sampler_ || !rgba || width == 0 || height == 0) {
-        return;
+void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
+    if (debug_stage_) {
+        debug_stage_->set_value(stageToEnum(dbg.stage));
     }
-    ensureSampler(width, height);
-    const std::size_t bytes = static_cast<std::size_t>(width) * height * 4u;
-    BufferDesc buffer{};
-    buffer.data = rgba;
-    buffer.pitch = static_cast<std::size_t>(width) * 4u;
-    buffer.size = bytes;
-    host().upload_texture(sampler_->texture(), buffer, true, []() noexcept {});
-}
-
-void Input::logMatteStatusMaybe() {
-    if (!async_started_) {
-        return;
+    const bool host_ready = matte_host_ && matte_host_->hostReady();
+    const std::string ui =
+        std::format("v56 {} vin={} host={} matte={} ep={}", dbg.stage ? dbg.stage : "?",
+                    dbg.has_video_in ? 1 : 0, host_ready ? 1 : 0, matte_live_ ? 1 : 0,
+                    matte_host_ ? matte_host_->hostEp() : "?");
+    if (debug_status_) {
+        debug_status_->set_value(ui);
     }
-    const auto completed = async_.completed();
-    const std::string status = async_.status();
-    if (status == last_matte_status_ && completed == last_logged_completed_ &&
-        (render_ticks_ % 120u) != 0u) {
-        return;
+    if (last_stage_ != (dbg.stage ? dbg.stage : "") || (render_ticks_ % 30u) == 1u) {
+        last_stage_ = dbg.stage ? dbg.stage : "";
+        const std::uint64_t fence_c = d3d_ ? d3d_->fenceCounter() : 0;
+        const std::uint64_t fence_done = d3d_ ? d3d_->completedValue() : 0;
+        const std::uint64_t sync_n = d3d_ ? d3d_->syncCallbacks() : 0;
+        removerLog(std::format(
+            "STATUS stage={} vin={} dl={} nz={} mid=({},{},{},{}) {}x{} matte={} host={} "
+            "ep={} luid={:016x} fence={}/{} sync={}",
+            dbg.stage ? dbg.stage : "?", dbg.has_video_in ? 1 : 0, dbg.download_ok ? 1 : 0,
+            dbg.nonzero_rgb, dbg.mid_r, dbg.mid_g, dbg.mid_b, dbg.mid_a, dbg.width, dbg.height,
+            dbg.matte_copied ? 1 : 0, host_ready ? 1 : 0,
+            matte_host_ ? matte_host_->hostEp() : "?", adapter_luid_, fence_done, fence_c,
+            sync_n));
     }
-    last_matte_status_ = status;
-    last_logged_completed_ = completed;
-    removerLog(std::format(
-        "matte status='{}' backend={} rvm={} submitted={} completed={} skipped={} busy={} "
-        "matte_live={} dl_ok={} dl_empty={}",
-        status, ::genesis::bgRemoverBackendLabel(async_.activeBackend()),
-        async_.isRvmReady() ? 1 : 0, async_.submitted(), completed, async_.skipped(),
-        async_.busy() ? 1 : 0, matte_live_ ? 1 : 0, downloads_ok_.load(), downloads_empty_.load()));
 }
 
 bool Input::initialize() noexcept try {
     const std::string handle = settings_.get(SettingNames::handle, "main");
-    removerLog(std::format("initialize begin handle='{}' ({})", handle, kRemoverBuildStamp));
+    removerLog(std::format("initialize begin handle='{}' adapter_luid={:016x} ({})", handle,
+                           adapter_luid_, kRemoverBuildStamp));
     host().log_info(std::format("initializing GENESIS Remover stream '{}' ({})", handle,
                                 kRemoverBuildStamp));
-
-    registerParameters();
-    width_ = settings_.get<std::uint32_t>(SettingNames::resolution_x, 1920);
-    height_ = settings_.get<std::uint32_t>(SettingNames::resolution_y, 1080);
-    ensureSampler(width_, height_);
-    removerLog("initialize OK (host-texture path)");
-    return true;
+    return update_settings(std::move(settings_));
 } catch (const std::exception& ex) {
     removerLog(std::format("initialize exception: {}", ex.what()));
     try {
@@ -405,15 +343,26 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     settings_ = std::move(settings);
     width_ = settings_.get<std::uint32_t>(SettingNames::resolution_x, 1920);
     height_ = settings_.get<std::uint32_t>(SettingNames::resolution_y, 1080);
-    removerLog(std::format("update_settings {}x{}", width_, height_));
-    if (!params_registered_) {
-        registerParameters();
+    if (const string stream_luid = settings_.get(SettingNames::adapter_luid, string{});
+        !stream_luid.empty()) {
+        adapter_luid_ = common::from_hex_string<std::uint64_t>(stream_luid);
     }
-    ensureSampler(width_, height_);
+    removerLog(std::format("update_settings {}x{} adapter={:016x} (oop matte host)", width_,
+                           height_, adapter_luid_));
+
+    ensureMatteHost();
+    publishTargetTexture();
+    if (debug_status_) {
+        debug_status_->set_value(std::string("v56 no-fence + update kick (ExtOnnxVision)"));
+    }
     return true;
 } catch (const std::exception& ex) {
     removerLog(std::format("update_settings exception: {}", ex.what()));
-    return true;
+    try {
+        host().log_error(std::format("GENESIS Remover settings failed: {}", ex.what()));
+    } catch (...) {
+    }
+    return false;
 }
 
 ValueSet Input::get_state() noexcept {
@@ -436,95 +385,256 @@ ValueSet Input::get_state() noexcept {
     state.set(StateNames::resolution_y, res_y);
     state.set(StateNames::format, get_format_name(format));
     state.set(StateNames::scale_y, 1);
-    state.set(StateNames::frame_rate, 60.0);
     return state;
 }
 
 string Input::get_property(string_view name) noexcept {
     if (name == PropertyNames::applies_alpha) {
-        // false until covered matte is live — live webcam A=0 + applies_alpha=true = black.
         return string(matte_live_ ? "true" : "false");
     }
     return {};
 }
 
 bool Input::update() noexcept try {
-    touchHostClock();
-    ensureVideoInHostTexture();
-    // Do not call applyMatteSettings / start ORT here — scrub-in must stay light.
-    requestVideoDownload();
+    if (time_) {
+        (void)time_->value();
+    }
+    if (frame_counter_) {
+        (void)frame_counter_->value();
+    }
+    publishVideoInTexture();
+    // ExtOnnxVision: drive matte off update(), skip when busy — never stall Device::render.
+    ensureD3dTextures();
+    ensureMatteHost();
+    if (quality_ && matte_host_) {
+        pushQualityToHost();
+    }
+    kickMatteIfReady();
     return true;
 } catch (const std::exception& ex) {
     removerLog(std::format("update exception: {}", ex.what()));
     return true;
 }
 
+void Input::kickMatteIfReady() {
+    if (!matte_host_ || !video_in_ready_ || !d3d_video_in_ || !d3d_video_in_->srv() ||
+        !passthrough_ || !passthrough_->ready() || !d3d_capture_share_ || width_ < 16 ||
+        height_ < 16) {
+        return;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+
+    // Shared-capture Map stalls the PIXERA GPU. When map_ms spikes, stop kicking.
+    constexpr double kMinKickMs = 50.0;
+    constexpr double kStressedKickMs = 100.0;
+    constexpr float kSlowMapMs = 45.0f;
+    constexpr std::uint32_t kSlowMapStreak = 2;
+    constexpr double kCooldownMs = 2000.0;
+
+    matte_host_->clearBusyIfStale(2500);
+    const std::uint64_t done = matte_host_->doneSeq();
+    if (done != 0 && done != last_map_sample_seq_) {
+        last_map_sample_seq_ = done;
+        const float map_ms = matte_host_->hostMapMs();
+        if (map_ms >= kSlowMapMs) {
+            ++slow_map_streak_;
+        } else {
+            slow_map_streak_ = 0;
+            if (stressed_ && map_ms > 0.1f && map_ms < 20.0f && now >= cooldown_until_) {
+                stressed_ = false;
+                removerLog("matte_unstressed (map_ms healthy again)");
+            }
+        }
+        if (slow_map_streak_ >= kSlowMapStreak && now >= cooldown_until_) {
+            slow_map_streak_ = 0;
+            ++cooldown_count_;
+            stressed_ = true;
+            cooldown_until_ = now + std::chrono::milliseconds(static_cast<int>(kCooldownMs));
+            removerLog(std::format(
+                "matte_cooldown {:.0f}ms — map_ms={:.1f} infer_ms={:.1f} (skip kicks; "
+                "live+last-matte continues) #{}",
+                kCooldownMs, map_ms, matte_host_->hostInferMs(), cooldown_count_));
+            if (cooldown_count_ >= 2u) {
+                (void)matte_host_->restartHost("repeated slow shared Map under outputs");
+                cooldown_count_ = 0;
+                pushed_quality_ = -1;
+                last_map_sample_seq_ = 0;
+            }
+        }
+    }
+
+    const bool in_cooldown = now < cooldown_until_;
+    if (in_cooldown || !matte_host_->hostReady() || matte_host_->busy()) {
+        if (!matte_host_->hostReady() && (render_ticks_ % 60u) == 1u) {
+            removerLog("waiting GenesisRemoverMatteHost.exe ready");
+        }
+        return;
+    }
+
+    const std::uint32_t cap_max_w = stressed_ ? 320u : 480u;
+    double min_kick_ms = stressed_ ? kStressedKickMs : kMinKickMs;
+    const float infer = matte_host_->hostInferMs();
+    if (infer > 1.0f) {
+        min_kick_ms = std::max(min_kick_ms, static_cast<double>(infer) + 10.0);
+    }
+    if (min_kick_ms > 150.0) {
+        min_kick_ms = 150.0;
+    }
+
+    const double since_kick_ms =
+        last_kick_wall_.time_since_epoch().count() == 0
+            ? 1e9
+            : std::chrono::duration<double, std::milli>(now - last_kick_wall_).count();
+    if (since_kick_ms < min_kick_ms) {
+        return;
+    }
+
+    const std::uint32_t cap_w = width_ > cap_max_w ? cap_max_w : width_;
+    const std::uint32_t cap_h =
+        static_cast<std::uint32_t>((static_cast<std::uint64_t>(height_) * cap_w) / width_);
+    if (cap_h == 0) {
+        return;
+    }
+    if (d3d_capture_share_->width() != cap_w || d3d_capture_share_->height() != cap_h) {
+        d3d_capture_share_->allocate(cap_w, cap_h, Format::R8G8B8A8_UNORM, /*is_target=*/true,
+                                     /*publish_share=*/true);
+    }
+    passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_capture_share_->rtv(), cap_w,
+                       cap_h, /*flip_v=*/false);
+    if (matte_host_->kickCapture(*d3d_capture_share_, cap_w, cap_h)) {
+        last_capture_kick_tick_ = render_ticks_;
+        last_kick_wall_ = now;
+        if ((render_ticks_ % 60u) == 1u) {
+            removerLog(std::format(
+                "matte_kick {}x{} min_kick_ms={:.0f} map_ms={:.1f} stressed={} cooldown=0",
+                cap_w, cap_h, min_kick_ms, matte_host_->hostMapMs(), stressed_ ? 1 : 0));
+        }
+    }
+}
+
+SyncDesc Input::before_render() noexcept {
+    return {};
+}
+
 RenderResult Input::render() noexcept try {
-    touchHostClock();
     ++render_ticks_;
-    logMatteStatusMaybe();
+    if (time_) {
+        (void)time_->value();
+    }
+    if (frame_counter_) {
+        (void)frame_counter_->value();
+    }
 
-    std::vector<std::uint8_t> frame;
-    std::uint32_t w = 0;
-    std::uint32_t h = 0;
-    {
-        std::lock_guard<std::mutex> lock(frame_mutex_);
-        if (has_in_ && !latest_in_.empty()) {
-            frame = latest_in_;
-            w = in_w_;
-            h = in_h_;
+    ensureD3dTextures();
+    ensureMatteHost();
+
+    ::genesis::RemoverFrameDebug dbg{};
+
+    if (!video_in_ready_ || !d3d_video_in_ || !d3d_video_in_->hasTexture()) {
+        dbg.width = width_;
+        dbg.height = height_;
+        dbg.stage = "waiting_video_in";
+        if (d3d_output_ && d3d_output_->hasTexture()) {
+            d3d_output_->clear(0.0f, 0.86f, 1.0f, 1.0f);
         }
-    }
-
-    if (frame.empty() || w == 0 || h == 0) {
-        // Keep cyan placeholder visible so we know the DLL is rendering.
-        logPathOnce(last_render_path_, "waiting_download_cyan");
+        logStatusMaybe(dbg);
         return RenderResult::Succeeded;
     }
 
-    const std::size_t bytes = static_cast<std::size_t>(w) * h * 4u;
-    if (frame.size() < bytes) {
+    if (render_ticks_ <= 5u || (render_ticks_ % 30u) == 1u) {
+        removerLog(std::format("render vin-ready ticks={} host={} (no device fence)",
+                               render_ticks_,
+                               matte_host_ && matte_host_->hostReady() ? 1 : 0));
+    }
+
+    if (!passthrough_ || !passthrough_->ready() || !d3d_video_in_->srv() || !d3d_output_ ||
+        !d3d_output_->rtv()) {
+        dbg.width = width_;
+        dbg.height = height_;
+        dbg.has_video_in = true;
+        dbg.download_ok = false;
+        dbg.stage = "download_fail";
+        if (d3d_output_ && d3d_output_->hasTexture()) {
+            d3d_output_->clear(0.12f, 0.35f, 0.86f, 1.0f);
+        }
+        logStatusMaybe(dbg);
         return RenderResult::Succeeded;
     }
 
-    if (!async_started_) {
-        async_.start();
-        async_started_ = true;
-        matte_settings_applied_ = false; // force push now that worker exists
-        applyMatteSettings();
-        async_.reset(w, h);
-        removerLog("async matte worker started (after first video frame)");
-    }
-
-    async_.trySubmit(frame.data(), w, h);
-    scratch_out_.resize(bytes);
-
-    if (async_.copyLatest(scratch_out_.data(), w, h) && matteHasCoverage(scratch_out_.data(), w, h)) {
-        uploadOutputRgba(scratch_out_.data(), w, h);
-        if (!matte_live_) {
+    // Pull latest matte if ready; present path never waits on Map/infer.
+    std::uint32_t mw = 0;
+    std::uint32_t mh = 0;
+    ::genesis::RemoverFrameDebug host_dbg{};
+    if (matte_host_ && matte_host_->tryTakeMatte(host_matte_rgba_, mw, mh, &host_dbg) &&
+        mw > 0 && mh > 0 && !host_matte_rgba_.empty()) {
+        d3d_matte_tex_->allocate(mw, mh, Format::R8G8B8A8_UNORM, /*is_target=*/true,
+                                 /*publish_share=*/false);
+        if (d3d_matte_tex_->uploadRgba8UpdateSubresource(host_matte_rgba_.data(), mw, mh)) {
             matte_live_ = true;
-            removerLog("matte_live=1 (applies_alpha enabled for cutout)");
+            dbg = host_dbg;
+            if ((render_ticks_ % 30u) == 1u) {
+                removerLog(std::format("applied host matte nz={} {}x{}", dbg.nonzero_rgb, mw, mh));
+            }
         }
-        logPathOnce(last_render_path_, "matte");
-        return RenderResult::Succeeded;
     }
 
-    const std::size_t lit = nonzeroRgbCount(frame.data(), bytes);
-    if (lit == 0) {
-        // Linked but empty — magenta diagnostic.
-        fillSolid(scratch_out_.data(), bytes, 255, 0, 255);
-        uploadOutputRgba(scratch_out_.data(), w, h);
-        logPathOnce(last_render_path_, "input_black_magenta");
-        return RenderResult::Succeeded;
+    ID3D11ShaderResourceView* live_srv = d3d_video_in_->srv();
+    const double delay_ms = camera_delay_ms_ ? camera_delay_ms_->value() : 0.0;
+    if (live_srv && delay_ms > 0.5) {
+        live_srv = live_delay_.pushAndSample(*d3d_, *passthrough_, d3d_video_in_->srv(), width_,
+                                             height_, delay_ms);
+        if ((render_ticks_ % 60u) == 1u) {
+            removerLog(std::format("camera_delay_ms={:.1f}", delay_ms));
+        }
+    } else {
+        live_delay_.reset();
     }
 
-    fillOpaquePassthrough(frame.data(), scratch_out_.data(), bytes);
-    uploadOutputRgba(scratch_out_.data(), w, h);
-    logPathOnce(last_render_path_, "opaque_passthrough");
+    // Live Video In every present × last matte alpha (ExtOnnxVision: skip frames,
+    // never stall the host on model rate).
+    if (matte_live_ && d3d_matte_tex_ && d3d_matte_tex_->srv() && live_srv) {
+        d3d_output_->clear(0.0f, 0.0f, 0.0f, 1.0f);
+        passthrough_->drawLiveMasked(d3d_->context(), live_srv, d3d_matte_tex_->srv(),
+                                     d3d_output_->rtv(), width_, height_, /*flip_v=*/true);
+        dbg.width = width_;
+        dbg.height = height_;
+        dbg.has_video_in = true;
+        dbg.download_ok = true;
+        dbg.matte_copied = true;
+        dbg.stage = "matte";
+    } else {
+        d3d_output_->clear(0.0f, 0.0f, 0.0f, 1.0f);
+        passthrough_->draw(d3d_->context(), live_srv ? live_srv : d3d_video_in_->srv(),
+                           d3d_output_->rtv(), width_, height_, /*flip_v=*/true);
+        passthrough_->drawHeartbeat(d3d_->context(), d3d_output_->rtv(), width_, height_,
+                                    render_ticks_);
+        dbg.width = width_;
+        dbg.height = height_;
+        dbg.has_video_in = true;
+        dbg.stage = "passthrough";
+    }
+
+    if (render_ticks_ <= 8u || (render_ticks_ % 60u) == 1u) {
+        removerLog(std::format(
+            "gpu_present {} {}x{} matte_live={} busy={} map_ms={:.1f} infer_ms={:.0f} "
+            "cooldown={} stressed={}",
+            matte_live_ ? "live+mask" : "live", width_, height_, matte_live_ ? 1 : 0,
+            matte_host_ && matte_host_->busy() ? 1 : 0,
+            matte_host_ ? matte_host_->hostMapMs() : 0.0f,
+            matte_host_ ? matte_host_->hostInferMs() : 0.0f,
+            std::chrono::steady_clock::now() < cooldown_until_ ? 1 : 0, stressed_ ? 1 : 0));
+    }
+
+    logStatusMaybe(dbg);
     return RenderResult::Succeeded;
 } catch (const std::exception& ex) {
     removerLog(std::format("render exception: {}", ex.what()));
     return RenderResult::Succeeded;
+}
+
+SyncDesc Input::after_render() noexcept {
+    return {};
 }
 
 } // namespace rxext::genesis_remover

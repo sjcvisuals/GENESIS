@@ -175,6 +175,9 @@ target_include_directories(genesis_matting PUBLIC ${CMAKE_SOURCE_DIR})
 target_link_libraries(genesis_matting PUBLIC genesis_platform_core Threads::Threads)
 if(GENESIS_HAS_ONNXRUNTIME)
     target_compile_definitions(genesis_matting PUBLIC GENESIS_HAS_ONNXRUNTIME=1)
+    if(GENESIS_HAS_ORT_DIRECTML)
+        target_compile_definitions(genesis_matting PUBLIC GENESIS_HAS_ORT_DIRECTML=1)
+    endif()
     target_include_directories(genesis_matting PUBLIC "${GENESIS_ONNXRUNTIME_ROOT}/include")
     if(WIN32)
         target_link_libraries(genesis_matting PUBLIC "${GENESIS_ONNXRUNTIME_ROOT}/lib/onnxruntime.lib")
@@ -314,6 +317,41 @@ if(GENESIS_BUILD_EXAMPLES)
             "$<TARGET_FILE_DIR:genesis_matting_smoke>/assets/matting"
         COMMENT "Copying matting assets next to genesis_matting_smoke")
 
+    # Standalone webcam + RVM cutout (isolates matte from PIXERA I/O).
+    add_executable(genesis_remover_camera_debug examples/remover_camera_debug/main.cpp)
+    target_link_libraries(genesis_remover_camera_debug PRIVATE genesis_matting)
+    if(GENESIS_HAS_ONNXRUNTIME AND UNIX)
+        set_target_properties(genesis_remover_camera_debug PROPERTIES
+            BUILD_RPATH "${GENESIS_ONNXRUNTIME_ROOT}/lib"
+            INSTALL_RPATH "${GENESIS_ONNXRUNTIME_ROOT}/lib")
+        add_custom_command(TARGET genesis_remover_camera_debug POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${GENESIS_ONNXRUNTIME_ROOT}/lib/libonnxruntime.so.1"
+                "$<TARGET_FILE_DIR:genesis_remover_camera_debug>/"
+            COMMENT "Copying ONNX Runtime next to genesis_remover_camera_debug")
+    endif()
+    if(GENESIS_HAS_ONNXRUNTIME AND WIN32)
+        add_custom_command(TARGET genesis_remover_camera_debug POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${GENESIS_ONNXRUNTIME_ROOT}/lib/onnxruntime.dll"
+                "$<TARGET_FILE_DIR:genesis_remover_camera_debug>/onnxruntime.dll"
+            COMMENT "Copying onnxruntime.dll next to genesis_remover_camera_debug")
+        if(EXISTS "${GENESIS_ONNXRUNTIME_ROOT}/lib/DirectML.dll")
+            add_custom_command(TARGET genesis_remover_camera_debug POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${GENESIS_ONNXRUNTIME_ROOT}/lib/DirectML.dll"
+                    "$<TARGET_FILE_DIR:genesis_remover_camera_debug>/DirectML.dll"
+                COMMENT "Copying DirectML.dll next to genesis_remover_camera_debug")
+        endif()
+    endif()
+    add_custom_command(TARGET genesis_remover_camera_debug POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:genesis_remover_camera_debug>/assets/matting"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets/matting"
+            "$<TARGET_FILE_DIR:genesis_remover_camera_debug>/assets/matting"
+        COMMENT "Copying matting assets next to genesis_remover_camera_debug")
+
     add_executable(genesis_multiview_player examples/multiview_player/main.cpp)
     target_link_libraries(genesis_multiview_player PRIVATE genesis_engine)
     add_dependencies(genesis_multiview_player genesis_shaders)
@@ -412,6 +450,14 @@ if(GENESIS_BUILD_RENDERBRIDGE_EXT AND WIN32)
                 "$<TARGET_FILE_DIR:ExtGenesis>/onnxruntime.dll"
             COMMENT "Copying ONNX Runtime next to ExtGenesis"
         )
+        if(EXISTS "${GENESIS_ONNXRUNTIME_ROOT}/lib/DirectML.dll")
+            add_custom_command(TARGET ExtGenesis POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${GENESIS_ONNXRUNTIME_ROOT}/lib/DirectML.dll"
+                    "$<TARGET_FILE_DIR:ExtGenesis>/DirectML.dll"
+                COMMENT "Copying DirectML.dll next to ExtGenesis"
+            )
+        endif()
     endif()
 
     add_custom_target(GenesisDeploy DEPENDS ExtGenesis)
@@ -428,7 +474,13 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
     add_library(ExtGenesisRemover SHARED
         ${EXT_REMOVER_DIR}/src/Extension.cpp
         ${EXT_REMOVER_DIR}/src/Device.cpp
+        ${EXT_REMOVER_DIR}/src/AdapterGpu.cpp
         ${EXT_REMOVER_DIR}/src/Input.cpp
+        ${EXT_REMOVER_DIR}/src/D3d11SharedTexture.cpp
+        ${EXT_REMOVER_DIR}/src/D3d11Passthrough.cpp
+        ${EXT_REMOVER_DIR}/src/SharedD3d11.cpp
+        ${EXT_REMOVER_DIR}/src/MatteHostClient.cpp
+        ${EXT_REMOVER_DIR}/src/LiveDelayRing.cpp
         ${EXT_REMOVER_DIR}/src/ModulePaths.cpp
         ${EXT_REMOVER_DIR}/src/RemoverLog.cpp
         ${RX_SDK_DIR}/libs/common/string.cpp
@@ -441,13 +493,8 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_BINARY_DIR}
     )
-    # Host-texture I/O (download/upload) + CPU matte. No D3D11/Vulkan shared images —
-    # those stayed black with live PIXERA Video In. Do not link genesis_runtime.
-    target_link_libraries(ExtGenesisRemover PRIVATE genesis_matting)
-    if(MSVC AND GENESIS_HAS_ONNXRUNTIME)
-        target_link_options(ExtGenesisRemover PRIVATE "/DELAYLOAD:onnxruntime.dll")
-        target_link_libraries(ExtGenesisRemover PRIVATE delayimp)
-    endif()
+    # v44: D3D11 live blit in PIXERA; ORT runs in GenesisRemoverMatteHost.exe (not linked here).
+    target_link_libraries(ExtGenesisRemover PRIVATE genesis_platform_core d3d11 dxgi d3dcompiler)
     target_compile_definitions(ExtGenesisRemover PRIVATE
         NOMINMAX
         WIN32_LEAN_AND_MEAN
@@ -460,6 +507,28 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/rxExt/ExtGenesisRemover"
     )
 
+    add_executable(GenesisRemoverMatteHost
+        ${EXT_REMOVER_DIR}/matte_host/main.cpp
+    )
+    target_include_directories(GenesisRemoverMatteHost PRIVATE
+        ${EXT_REMOVER_DIR}/src
+        ${CMAKE_SOURCE_DIR}
+        ${CMAKE_BINARY_DIR}
+    )
+    target_link_libraries(GenesisRemoverMatteHost PRIVATE genesis_matting d3d11 dxgi)
+    target_compile_definitions(GenesisRemoverMatteHost PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    set_target_properties(GenesisRemoverMatteHost PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/rxExt/ExtGenesisRemover"
+    )
+    if(MSVC)
+        # No console window (blank cmd flash). Entry stays main().
+        target_link_options(GenesisRemoverMatteHost PRIVATE "/SUBSYSTEM:WINDOWS" "/ENTRY:mainCRTStartup")
+    endif()
+    if(MSVC AND GENESIS_HAS_ONNXRUNTIME)
+        target_link_options(GenesisRemoverMatteHost PRIVATE "/DELAYLOAD:onnxruntime.dll")
+        target_link_libraries(GenesisRemoverMatteHost PRIVATE delayimp)
+    endif()
+
     add_custom_command(TARGET ExtGenesisRemover POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "$<TARGET_FILE_DIR:ExtGenesisRemover>/assets/matting"
@@ -471,18 +540,27 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
             "$<TARGET_FILE_DIR:ExtGenesisRemover>/GenesisRemover.manifest.json"
         COMMENT "Copying ExtGenesisRemover assets next to DLL"
     )
+    add_dependencies(ExtGenesisRemover GenesisRemoverMatteHost)
     if(GENESIS_HAS_ONNXRUNTIME)
-        add_custom_command(TARGET ExtGenesisRemover POST_BUILD
+        add_custom_command(TARGET GenesisRemoverMatteHost POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${GENESIS_ONNXRUNTIME_ROOT}/lib/onnxruntime.dll"
-                "$<TARGET_FILE_DIR:ExtGenesisRemover>/onnxruntime.dll"
-            COMMENT "Copying ONNX Runtime next to ExtGenesisRemover"
+                "$<TARGET_FILE_DIR:GenesisRemoverMatteHost>/onnxruntime.dll"
+            COMMENT "Copying ONNX Runtime next to MatteHost"
         )
+        if(EXISTS "${GENESIS_ONNXRUNTIME_ROOT}/lib/DirectML.dll")
+            add_custom_command(TARGET GenesisRemoverMatteHost POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${GENESIS_ONNXRUNTIME_ROOT}/lib/DirectML.dll"
+                    "$<TARGET_FILE_DIR:GenesisRemoverMatteHost>/DirectML.dll"
+                COMMENT "Copying DirectML.dll next to MatteHost"
+            )
+        endif()
     endif()
 
-    add_custom_target(GenesisRemoverDeploy DEPENDS ExtGenesisRemover)
+    add_custom_target(GenesisRemoverDeploy DEPENDS ExtGenesisRemover GenesisRemoverMatteHost)
     if(TARGET GenesisDeploy)
-        add_dependencies(GenesisDeploy ExtGenesisRemover)
+        add_dependencies(GenesisDeploy ExtGenesisRemover GenesisRemoverMatteHost)
     endif()
 endif()
 

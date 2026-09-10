@@ -40,6 +40,7 @@ Required files
   GenesisRemover.manifest.json
   assets/matting/rvm_mobilenetv3_fp16.onnx
   onnxruntime.dll
+  DirectML.dll          (Windows GPU path; CPU still works if missing)
 
 Usage in PIXERA
 ---------------
@@ -58,7 +59,7 @@ If the resource imports but timeline drag fails
      powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-pixera-remover.ps1
 
 2. Confirm the install printed BUILD_STAMP with:
-     remover-timeline-v4-video-in-20260731
+     remover-timeline-v20-d3d-io-20260817
 
 3. In PIXERA, re-browse to:
      <PIXERA>\data\rxExt\ExtGenesisRemover\ExtGenesisRemover.dll
@@ -75,17 +76,33 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt:
-  remover-timeline-v8c-link-alloc-20260803
+  remover-timeline-v49-live-mask-20260820
 
-Host-texture I/O. FrameCounter keeps update() running after Video In is linked
-(without it the clip stayed cyan forever). Video In allocates when format/dims
-change from baseline, or after a short same-res timeout. download_texture is
-cooldown-gated after allocate (immediate download crashed PIXERA).
-After install: quit PIXERA, re-import Remover, scrub to cyan, link webcam, wait
-~2s. Dump log: .\scripts\dump-remover-log.ps1
+v49 = live Video In each present, masked by latest OOP matte alpha (fixes
+  stepped/laggy look when matte runs ~15fps on DML).
+
+v48 = bind DirectML to PIXERA Adapter LUID; Fast capture 640-wide.
+
+Dump: .\scripts\dump-remover-log.ps1
+Expect stamp v49-live-mask, ep=DML:N, host matte_fps=
+Host log: %TEMP%\GenesisRemoverMatteHost.log
 
 Open diagnostics:
   %TEMP%\ExtGenesisRemover.log
+
+Prove matte outside PIXERA first
+--------------------------------
+If the timeline is still black/cyan/frozen, isolate RVM from PIXERA I/O:
+
+  .\scripts\run-remover-camera-debug.ps1
+
+That opens the laptop camera (left) and the cutout (right). Decision tree:
+
+  .\scripts\diagnose-remover.ps1
+
+Build only the debug exe:
+
+  .\scripts\build.ps1 -CameraDebugOnly
 
 If PIXERA says "Can Not Load Pixera Extension"
 ---------------------------------------------

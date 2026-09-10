@@ -237,13 +237,31 @@ void ExternalSharedImage::create() {
 }
 
 bool ExternalSharedImage::downloadRgba8(std::vector<std::uint8_t>& out_rgba) const {
-    const VkDeviceSize bytes =
-        static_cast<VkDeviceSize>(extent_.width) * extent_.height * 4ull;
-    out_rgba.resize(static_cast<std::size_t>(bytes));
+    const std::size_t pixels = static_cast<std::size_t>(extent_.width) * extent_.height;
+    out_rgba.resize(pixels * 4u);
+
+    std::size_t bpp = 4u;
+    switch (format_) {
+    case VK_FORMAT_R8G8B8A8_UNORM:
+    case VK_FORMAT_B8G8R8A8_UNORM:
+        bpp = 4u;
+        break;
+    case VK_FORMAT_R16G16B16A16_SFLOAT:
+        bpp = 8u;
+        break;
+    case VK_FORMAT_R32G32B32A32_SFLOAT:
+        bpp = 16u;
+        break;
+    default:
+        // Unsupported shared format — still attempt 4 bpp copy.
+        bpp = 4u;
+        break;
+    }
+    const VkDeviceSize raw_bytes = static_cast<VkDeviceSize>(pixels) * bpp;
 
     VkBufferCreateInfo buf_info{};
     buf_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buf_info.size = bytes;
+    buf_info.size = raw_bytes;
     buf_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     VkBuffer staging = VK_NULL_HANDLE;
     if (vkCreateBuffer(context_.device(), &buf_info, nullptr, &staging) != VK_SUCCESS) {
@@ -290,10 +308,80 @@ bool ExternalSharedImage::downloadRgba8(std::vector<std::uint8_t>& out_rgba) con
     layout_ = VK_IMAGE_LAYOUT_GENERAL;
 
     void* mapped = nullptr;
-    vkMapMemory(context_.device(), staging_mem, 0, bytes, 0, &mapped);
-    std::memcpy(out_rgba.data(), mapped, static_cast<std::size_t>(bytes));
-    vkUnmapMemory(context_.device(), staging_mem);
+    vkMapMemory(context_.device(), staging_mem, 0, raw_bytes, 0, &mapped);
+    const auto* src = static_cast<const std::uint8_t*>(mapped);
 
+    auto clamp_u8 = [](float v) -> std::uint8_t {
+        if (v <= 0.0f) {
+            return 0;
+        }
+        if (v >= 1.0f) {
+            return 255;
+        }
+        return static_cast<std::uint8_t>(v * 255.0f + 0.5f);
+    };
+    // IEEE-754 binary16 → float (handles normals; non-finite → 0).
+    auto half_to_float = [](std::uint16_t h) -> float {
+        const std::uint32_t sign = (h >> 15) & 1u;
+        const std::uint32_t exp = (h >> 10) & 0x1fu;
+        const std::uint32_t mant = h & 0x3ffu;
+        std::uint32_t fbits = 0;
+        if (exp == 0) {
+            if (mant == 0) {
+                fbits = sign << 31;
+            } else {
+                std::uint32_t m = mant;
+                std::uint32_t e = 127 - 15 + 1;
+                while ((m & 0x400u) == 0u) {
+                    m <<= 1;
+                    --e;
+                }
+                m &= 0x3ffu;
+                fbits = (sign << 31) | (e << 23) | (m << 13);
+            }
+        } else if (exp == 31) {
+            fbits = (sign << 31) | 0x7f800000u | (mant << 13);
+        } else {
+            fbits = (sign << 31) | ((exp + (127 - 15)) << 23) | (mant << 13);
+        }
+        float out = 0.0f;
+        std::memcpy(&out, &fbits, sizeof(out));
+        if (out != out || out > 1e10f || out < -1e10f) { // NaN/Inf
+            return 0.0f;
+        }
+        return out;
+    };
+
+    if (format_ == VK_FORMAT_R8G8B8A8_UNORM) {
+        std::memcpy(out_rgba.data(), src, pixels * 4u);
+    } else if (format_ == VK_FORMAT_B8G8R8A8_UNORM) {
+        for (std::size_t i = 0; i < pixels; ++i) {
+            out_rgba[i * 4u + 0] = src[i * 4u + 2];
+            out_rgba[i * 4u + 1] = src[i * 4u + 1];
+            out_rgba[i * 4u + 2] = src[i * 4u + 0];
+            out_rgba[i * 4u + 3] = src[i * 4u + 3];
+        }
+    } else if (format_ == VK_FORMAT_R16G16B16A16_SFLOAT) {
+        const auto* h = reinterpret_cast<const std::uint16_t*>(src);
+        for (std::size_t i = 0; i < pixels; ++i) {
+            out_rgba[i * 4u + 0] = clamp_u8(half_to_float(h[i * 4u + 0]));
+            out_rgba[i * 4u + 1] = clamp_u8(half_to_float(h[i * 4u + 1]));
+            out_rgba[i * 4u + 2] = clamp_u8(half_to_float(h[i * 4u + 2]));
+            out_rgba[i * 4u + 3] = clamp_u8(half_to_float(h[i * 4u + 3]));
+        }
+    } else if (format_ == VK_FORMAT_R32G32B32A32_SFLOAT) {
+        const auto* f = reinterpret_cast<const float*>(src);
+        for (std::size_t i = 0; i < pixels; ++i) {
+            out_rgba[i * 4u + 0] = clamp_u8(f[i * 4u + 0]);
+            out_rgba[i * 4u + 1] = clamp_u8(f[i * 4u + 1]);
+            out_rgba[i * 4u + 2] = clamp_u8(f[i * 4u + 2]);
+            out_rgba[i * 4u + 3] = clamp_u8(f[i * 4u + 3]);
+        }
+    } else {
+        std::memcpy(out_rgba.data(), src, pixels * 4u);
+    }
+
+    vkUnmapMemory(context_.device(), staging_mem);
     vkDestroyBuffer(context_.device(), staging, nullptr);
     vkFreeMemory(context_.device(), staging_mem, nullptr);
     return true;

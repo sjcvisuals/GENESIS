@@ -14,5 +14,5 @@
   "assetRoots": [
     "assets/matting"
   ],
-  "notes": "Host-texture Remover (PIXERA download_texture / upload_texture). No D3D11/Vulkan shared Video In. Cyan placeholder until download; magenta if linked input is empty."
+  "notes": "Host-texture Remover (PIXERA download_texture / upload_texture). Shared D3D11 Video In stayed opaque-black. Cyan until download; magenta if empty; live passthrough then matte."
 }

@@ -1,25 +1,55 @@
 #include "WinPrefix.h"
 #include "Device.h"
 
+#include "AdapterGpu.h"
 #include "Input.h"
 #include "RemoverLog.h"
 #include "common/string.h"
 #include "rxext_util.h"
 
+#include <Windows.h>
+#include <d3d11.h>
+
 #include <format>
+#include <stdexcept>
 
 namespace rxext::genesis_remover {
 
 Device::Device(ValueSet settings) : settings_(std::move(settings)) {
-    removerLog("Device ctor (host-texture)");
+    removerLog("Device ctor (v56 ExtOnnxVision-style: no timeline fence)");
 }
 
 bool Device::initialize() noexcept try {
     const string luid_hex = settings_.get(SettingNames::adapter_luid, string("0000000000000000"));
     adapter_luid_ = common::from_hex_string<std::uint64_t>(luid_hex);
-    removerLog(std::format("Device::initialize adapter_luid={:016x}", adapter_luid_));
-    host().log_info(std::format("GENESIS Remover host-texture device ready (adapter_luid={:016x})",
-                                adapter_luid_));
+    removerLog(std::format("Device::initialize settings adapter_luid={:016x}", adapter_luid_));
+
+    // PIXERA usually injects the engine GPU LUID. When left at 0, auto-pick the first
+    // GPU that has Windows displays attached (prefer NVIDIA).
+    if (adapter_luid_ == 0) {
+        const std::uint64_t picked = pickAdapterLuidWithDisplays();
+        if (picked != 0) {
+            adapter_luid_ = picked;
+            removerLog(std::format("Device::initialize AUTO adapter_luid={:016x} ({})",
+                                   adapter_luid_, adapterDescription(adapter_luid_)));
+            host().log_info(std::format("GENESIS Remover auto GPU {:016x} ({})", adapter_luid_,
+                                        adapterDescription(adapter_luid_)));
+        } else {
+            removerLog("WARNING: adapter_luid is 0 and auto-pick found no GPU");
+            host().log_error(
+                "GENESIS Remover: adapter LUID is 0 - set Adapter LUID or connect a display");
+        }
+    } else {
+        removerLog(std::format("Device::initialize using PIXERA/injected LUID {:016x} ({})",
+                               adapter_luid_, adapterDescription(adapter_luid_)));
+        host().log_info(std::format("GENESIS Remover device ready (adapter_luid={:016x} {})",
+                                    adapter_luid_, adapterDescription(adapter_luid_)));
+    }
+
+    // Own D3D11 device for shared Video In / output / capture (ExtOnnxVision pattern).
+    // Do NOT publish a TimelineSemaphore fence — ExtOnnxVision proves shared D3D11_IMAGE
+    // works without it, and our fence Wait turned host Map stalls into sticky low FPS.
+    d3d_ = std::make_shared<SharedD3d11>(adapter_luid_);
     return true;
 } catch (const std::exception& ex) {
     removerLog(std::format("Device::initialize exception: {}", ex.what()));
@@ -52,7 +82,10 @@ vector<ValueSet> Device::enumerate_stream_settings() noexcept {
 
 InputStream* Device::create_input_stream(ValueSet settings) noexcept try {
     removerLog("Device::create_input_stream");
-    return new Input(std::move(settings));
+    if (!d3d_) {
+        throw std::runtime_error("Device D3D11 not initialized");
+    }
+    return new Input(d3d_, adapter_luid_, std::move(settings));
 } catch (const std::exception& ex) {
     removerLog(std::format("create_input_stream exception: {}", ex.what()));
     host().log_error(ex.what());

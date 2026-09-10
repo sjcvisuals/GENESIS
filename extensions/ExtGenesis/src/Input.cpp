@@ -12,6 +12,7 @@
 #include <format>
 #include <algorithm>
 #include <glm/gtc/matrix_transform.hpp>
+#include <volk.h>
 
 namespace rxext::genesis_ext {
 
@@ -336,7 +337,19 @@ void Input::publishVideoInTexture() {
         width_ = static_cast<std::uint32_t>(desc.width);
         height_ = static_cast<std::uint32_t>(desc.height);
         remover_->resize(width_, height_);
-        remover_->ensureVideoIn();
+        const VkFormat vk_fmt = [&]() -> VkFormat {
+            switch (desc.format) {
+            case Format::B8G8R8A8_UNORM:
+                return VK_FORMAT_B8G8R8A8_UNORM;
+            case Format::R16G16B16A16_SFLOAT:
+                return VK_FORMAT_R16G16B16A16_SFLOAT;
+            case Format::R32G32B32A32_SFLOAT:
+                return VK_FORMAT_R32G32B32A32_SFLOAT;
+            default:
+                return VK_FORMAT_R8G8B8A8_UNORM;
+            }
+        }();
+        remover_->ensureVideoIn(vk_fmt);
         const auto& exp = remover_->videoIn().exportInfo();
         TextureDesc shared = desc;
         if (shared.format == Format::None) {

@@ -15,7 +15,8 @@ param(
     [switch]$Run,
     [switch]$EditorOnly,
     [switch]$PixeraOnly,
-    [switch]$RemoverOnly
+    [switch]$RemoverOnly,
+    [switch]$CameraDebugOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -75,9 +76,25 @@ function Invoke-LoggedNative {
 function Resolve-BuiltExe([string]$Name, [string]$Config) {
     foreach ($c in @(
         (Join-Path $BuildDir "$Config\$Name"),
-        (Join-Path $BuildDir $Name)
+        (Join-Path $BuildDir $Name),
+        # ExtGenesisRemover / MatteHost share RUNTIME_OUTPUT_DIRECTORY rxExt\ExtGenesisRemover
+        (Join-Path $BuildDir "rxExt\ExtGenesisRemover\$Config\$Name"),
+        (Join-Path $BuildDir "rxExt\ExtGenesisRemover\$Name"),
+        (Join-Path $BuildDir "rxExt\ExtGenesis\$Config\$Name"),
+        (Join-Path $BuildDir "rxExt\ExtGenesis\$Name")
     )) {
         if (Test-Path $c) { return (Resolve-Path $c).Path }
+    }
+    # Last resort: recursive search under build\ (MSVC layout can vary).
+    if (Test-Path $BuildDir) {
+        $hit = Get-ChildItem -Path $BuildDir -Recurse -Filter $Name -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match [regex]::Escape($Config) -or $Config -eq "" } |
+            Select-Object -First 1
+        if (-not $hit) {
+            $hit = Get-ChildItem -Path $BuildDir -Recurse -Filter $Name -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+        }
+        if ($hit) { return $hit.FullName }
     }
     return $null
 }
@@ -95,6 +112,7 @@ function Resolve-BuiltDll([string]$Name, [string]$Config) {
 
 function Find-OnnxRuntimeDll {
     $preferred = @(
+        (Join-Path $RepoRoot "third_party\onnxruntime-win-x64-directml-1.20.1\lib\onnxruntime.dll"),
         (Join-Path $RepoRoot "third_party\onnxruntime-win-x64-1.20.1\lib\onnxruntime.dll"),
         (Join-Path $RepoRoot "third_party\onnxruntime-win-x64-1.19.2\lib\onnxruntime.dll")
     )
@@ -108,6 +126,22 @@ function Find-OnnxRuntimeDll {
             Select-Object -First 1
         if ($hit) { return $hit.FullName }
         $hit = Get-ChildItem -Path $root -Recurse -Filter "onnxruntime.dll" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($hit) { return $hit.FullName }
+    }
+    return $null
+}
+
+function Find-DirectMLDll {
+    $preferred = @(
+        (Join-Path $RepoRoot "third_party\onnxruntime-win-x64-directml-1.20.1\lib\DirectML.dll")
+    )
+    foreach ($c in $preferred) {
+        if (Test-Path $c) { return (Resolve-Path $c).Path }
+    }
+    $root = Join-Path $RepoRoot "third_party"
+    if (Test-Path $root) {
+        $hit = Get-ChildItem -Path $root -Recurse -Filter "DirectML.dll" -ErrorAction SilentlyContinue |
             Select-Object -First 1
         if ($hit) { return $hit.FullName }
     }
@@ -139,11 +173,17 @@ function Sync-OutFolder {
     $assetsSrc = Join-Path $RepoRoot "assets"
     $shaderSrc = Join-Path $BuildDir "shaders\spv"
     $onnx = Find-OnnxRuntimeDll
+    $directml = Find-DirectMLDll
     if (-not $onnx) {
         Write-Host "WARNING: onnxruntime.dll not found under third_party\. Pixera Remover will fail to load." -ForegroundColor Yellow
         Write-Host "Re-run cmake configure so ONNX Runtime is fetched, then rebuild."
     } else {
         Write-Host "ONNX Runtime: $onnx"
+    }
+    if ($directml) {
+        Write-Host "DirectML: $directml"
+    } else {
+        Write-Host "WARNING: DirectML.dll not found - RVM will fall back to CPU if DML EP is unavailable." -ForegroundColor Yellow
     }
 
     # --- Editor (Debug) ---
@@ -180,6 +220,9 @@ function Sync-OutFolder {
         if ($onnx) {
             Copy-Item -Path $onnx -Destination (Join-Path $extOut "onnxruntime.dll") -Force
         }
+        if ($directml) {
+            Copy-Item -Path $directml -Destination (Join-Path $extOut "DirectML.dll") -Force
+        }
     }
 
     # --- Pixera matte-only DLL (Release) ---
@@ -188,6 +231,16 @@ function Sync-OutFolder {
         $remOut = Join-Path $OutDir "ExtGenesisRemover"
         New-Item -ItemType Directory -Force -Path $remOut | Out-Null
         Copy-Item -Path $removerDll -Destination (Join-Path $remOut "ExtGenesisRemover.dll") -Force
+        $matteHost = Resolve-BuiltExe "GenesisRemoverMatteHost.exe" $PixeraConfig
+        if (-not $matteHost) {
+            throw @"
+GenesisRemoverMatteHost.exe not found under build\ after compile.
+Expected near: build\rxExt\ExtGenesisRemover\$PixeraConfig\GenesisRemoverMatteHost.exe
+Re-run cmake configure (delete build\CMakeCache.txt if the target is missing), then BUILD-REMOVER.bat.
+"@
+        }
+        Write-Host "Matte host built: $matteHost"
+        Copy-Item -Path $matteHost -Destination (Join-Path $remOut "GenesisRemoverMatteHost.exe") -Force
         Sync-Directory (Join-Path $assetsSrc "matting") (Join-Path $remOut "assets\matting")
         Copy-Item -Path (Join-Path $RepoRoot "deploy\GenesisRemover.manifest.json") `
             -Destination (Join-Path $remOut "GenesisRemover.manifest.json") -Force
@@ -196,8 +249,12 @@ function Sync-OutFolder {
         if ($onnx) {
             Copy-Item -Path $onnx -Destination (Join-Path $remOut "onnxruntime.dll") -Force
         }
+        if ($directml) {
+            Copy-Item -Path $directml -Destination (Join-Path $remOut "DirectML.dll") -Force
+        }
 
         Assert-File (Join-Path $remOut "ExtGenesisRemover.dll") "Remover DLL"
+        Assert-File (Join-Path $remOut "GenesisRemoverMatteHost.exe") "out-of-process matte host"
         Assert-File (Join-Path $remOut "onnxruntime.dll") "onnxruntime.dll next to Remover"
         Assert-File (Join-Path $remOut "assets\matting\rvm_mobilenetv3_fp16.onnx") "RVM model"
 
@@ -208,15 +265,41 @@ function Sync-OutFolder {
         }
 
         $stamp = @"
-build=remover-timeline-v8c-link-alloc-20260803
+build=remover-timeline-v56-extonnxvision-nofence-20260910
 dll=$remOut\ExtGenesisRemover.dll
+host=$remOut\GenesisRemoverMatteHost.exe
 time=$(Get-Date -Format o)
 size=$remSize
 log=%TEMP%\ExtGenesisRemover.log
+host_log=%TEMP%\GenesisRemoverMatteHost.log
+ep=CPU-out-of-process
 "@
         Set-Content -Path (Join-Path $remOut "BUILD_STAMP.txt") -Value $stamp -Encoding ASCII
         Write-Host "Wrote BUILD_STAMP.txt (prove PIXERA is using this build)"
         Write-Host "Timeline diagnostics log: %TEMP%\ExtGenesisRemover.log"
+        Write-Host "Matte host log: %TEMP%\GenesisRemoverMatteHost.log"
+    }
+
+    # --- Standalone webcam BG-remover debug (isolates matte from PIXERA) ---
+    $camExe = Resolve-BuiltExe "genesis_remover_camera_debug.exe" $PixeraConfig
+    if (-not $camExe) {
+        $camExe = Resolve-BuiltExe "genesis_remover_camera_debug.exe" $EditorConfig
+    }
+    if ($camExe) {
+        $camOut = Join-Path $OutDir "RemoverCameraDebug"
+        New-Item -ItemType Directory -Force -Path $camOut | Out-Null
+        Copy-Item -Path $camExe -Destination (Join-Path $camOut "genesis_remover_camera_debug.exe") -Force
+        Sync-Directory (Join-Path $assetsSrc "matting") (Join-Path $camOut "assets\matting")
+        if ($onnx) {
+            Copy-Item -Path $onnx -Destination (Join-Path $camOut "onnxruntime.dll") -Force
+        }
+        if ($directml) {
+            Copy-Item -Path $directml -Destination (Join-Path $camOut "DirectML.dll") -Force
+        }
+        Assert-File (Join-Path $camOut "genesis_remover_camera_debug.exe") "camera debug exe"
+        Assert-File (Join-Path $camOut "assets\matting\rvm_mobilenetv3_fp16.onnx") "RVM model (camera debug)"
+        Write-Host "Camera debug: $camOut\genesis_remover_camera_debug.exe"
+        Write-Host "  Run: .\scripts\run-remover-camera-debug.ps1"
     }
 
     # Clear Mark-of-the-Web / Zone.Identifier so PIXERA can LoadLibrary from out\.
@@ -279,15 +362,18 @@ if (Test-Path $Glslc) {
 
 $editorTargets = @()
 $pixeraTargets = @()
-if ($RemoverOnly) {
-    $pixeraTargets = @("ExtGenesisRemover")
+if ($CameraDebugOnly) {
+    # Release preferred: matches Remover CRT + ships next to onnxruntime.dll in out\.
+    $pixeraTargets = @("genesis_remover_camera_debug")
+} elseif ($RemoverOnly) {
+    $pixeraTargets = @("ExtGenesisRemover", "GenesisRemoverMatteHost", "genesis_remover_camera_debug")
 } elseif ($PixeraOnly) {
-    $pixeraTargets = @("ExtGenesis", "ExtGenesisRemover")
+    $pixeraTargets = @("ExtGenesis", "ExtGenesisRemover", "GenesisRemoverMatteHost", "genesis_remover_camera_debug")
 } elseif ($EditorOnly) {
     $editorTargets = @("genesis_gltf_viewer")
 } else {
     $editorTargets = @("genesis_gltf_viewer")
-    $pixeraTargets = @("ExtGenesis", "ExtGenesisRemover")
+    $pixeraTargets = @("ExtGenesis", "ExtGenesisRemover", "GenesisRemoverMatteHost", "genesis_remover_camera_debug")
 }
 
 Write-Host ""
@@ -337,15 +423,19 @@ out\
   Editor\                 <- run the editor from here
   ExtGenesis\             <- point PIXERA at ExtGenesis.dll
   ExtGenesisRemover\      <- point PIXERA at ExtGenesisRemover.dll (cutout only)
+  RemoverCameraDebug\     <- standalone webcam cutout (no PIXERA)
 "@
+$CamDebug = Join-Path $OutDir "RemoverCameraDebug\genesis_remover_camera_debug.exe"
+if (-not (Test-Path $CamDebug)) { $CamDebug = $null }
+
 if ($Editor) {
     Write-Host "Editor:  $Editor"
-} elseif (-not $PixeraOnly -and -not $RemoverOnly) {
+} elseif (-not $PixeraOnly -and -not $RemoverOnly -and -not $CameraDebugOnly) {
     Write-Host "Editor missing under out\Editor - see $LogFile" -ForegroundColor Yellow
 }
 if ($Dll) {
     Write-Host "Pixera:  $Dll"
-} elseif (-not $EditorOnly -and -not $RemoverOnly) {
+} elseif (-not $EditorOnly -and -not $RemoverOnly -and -not $CameraDebugOnly) {
     Write-Host "ExtGenesis.dll missing under out\ExtGenesis (Windows-only)." -ForegroundColor Yellow
 }
 if ($RemoverDll) {
@@ -370,8 +460,14 @@ if ($RemoverDll) {
     if ($checkCode -ne 0) {
         Write-Host "WARNING: Remover LoadLibrary check failed (exit $checkCode). PIXERA will likely reject this DLL." -ForegroundColor Yellow
     }
-} elseif (-not $EditorOnly) {
+} elseif (-not $EditorOnly -and -not $CameraDebugOnly) {
     Write-Host "ExtGenesisRemover.dll missing under out\ExtGenesisRemover (Windows-only)." -ForegroundColor Yellow
+}
+if ($CamDebug) {
+    Write-Host "Camera:  $CamDebug"
+    Write-Host "  Prove matte outside PIXERA: .\scripts\run-remover-camera-debug.ps1"
+} elseif ($CameraDebugOnly -or $RemoverOnly -or -not $EditorOnly) {
+    Write-Host "Camera debug exe missing under out\RemoverCameraDebug - see $LogFile" -ForegroundColor Yellow
 }
 Write-Host ""
 Write-Host "(Ignore build\ for day-to-day testing - that is just the CMake cache.)"

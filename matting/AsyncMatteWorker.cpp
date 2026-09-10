@@ -1,5 +1,6 @@
 #include "matting/AsyncMatteWorker.hpp"
 
+#include <chrono>
 #include <cstring>
 
 namespace genesis {
@@ -48,6 +49,8 @@ void AsyncMatteWorker::setSettings(const BgRemoverSettings& settings) {
             settings_.key_softness == settings.key_softness &&
             settings_.temporal_alpha == settings.temporal_alpha &&
             settings_.rvm_downsample == settings.rvm_downsample &&
+            settings_.rvm_max_infer_side == settings.rvm_max_infer_side &&
+            settings_.prefer_cpu_ep == settings.prefer_cpu_ep &&
             settings_.model_path == settings.model_path) {
             return;
         }
@@ -90,13 +93,10 @@ bool AsyncMatteWorker::trySubmit(const std::uint8_t* rgba, std::uint32_t width, 
         skipped_.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
-    // One in-flight: skip while processing. If idle with unconsumed pending, replace
-    // (latest-wins) and count the superseded frame as skipped.
-    if (busy_.load(std::memory_order_relaxed)) {
-        skipped_.fetch_add(1, std::memory_order_relaxed);
-        return false;
-    }
-    if (has_pending_) {
+    // Always keep a latest-wins mailbox. Previously we dropped submits while busy,
+    // so after infer finished the worker sat idle until the *next* camera frame
+    // (often cutting matte FPS roughly in half vs infer budget).
+    if (has_pending_ || busy_.load(std::memory_order_relaxed)) {
         skipped_.fetch_add(1, std::memory_order_relaxed);
     }
 
@@ -142,6 +142,11 @@ BgRemoverBackend AsyncMatteWorker::activeBackend() const {
     return active_backend_;
 }
 
+std::string AsyncMatteWorker::executionProvider() const {
+    std::lock_guard lock(mu_);
+    return remover_.executionProvider();
+}
+
 void AsyncMatteWorker::applySettingsLocked() {
     remover_.setSettings(settings_);
     std::string st;
@@ -182,7 +187,11 @@ void AsyncMatteWorker::threadMain() {
 
         const std::size_t bytes = static_cast<std::size_t>(w) * h * 4u;
         work_out_.resize(bytes);
+        const auto t0 = std::chrono::steady_clock::now();
         const bool ok = remover_.process(work_in_.data(), work_out_.data(), w, h);
+        const auto t1 = std::chrono::steady_clock::now();
+        const double ms =
+            std::chrono::duration<double, std::milli>(t1 - t0).count();
 
         {
             std::lock_guard lock(mu_);
@@ -195,6 +204,9 @@ void AsyncMatteWorker::threadMain() {
                 rvm_ready_ = remover_.isRvmReady();
                 active_backend_ = remover_.activeBackend();
                 completed_.fetch_add(1, std::memory_order_relaxed);
+                last_infer_ms_.store(ms, std::memory_order_relaxed);
+                last_infer_w_.store(remover_.lastInferWidth(), std::memory_order_relaxed);
+                last_infer_h_.store(remover_.lastInferHeight(), std::memory_order_relaxed);
             }
             busy_.store(false, std::memory_order_release);
         }
