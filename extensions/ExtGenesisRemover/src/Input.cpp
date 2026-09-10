@@ -135,7 +135,7 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
     debug_status_->set_property(PropertyNames::group_name, "Debug");
     debug_status_->set_value(std::string("v59 idempotent init (no ORT thrash)"));
 
-    removerLog(std::format("Input ctor v59 idempotent-init adapter_luid={:016x}", adapter_luid_));
+    removerLog(std::format("Input ctor v60 map-pace adapter_luid={:016x}", adapter_luid_));
 }
 
 Input::~Input() {
@@ -487,10 +487,11 @@ void Input::kickMatteIfReady() {
 
     const auto now = std::chrono::steady_clock::now();
 
-    // Shared-capture Map stalls the PIXERA GPU. When map_ms spikes, stop kicking.
-    constexpr double kMinKickMs = 50.0;
-    constexpr double kStressedKickMs = 100.0;
-    constexpr float kSlowMapMs = 45.0f;
+    // Shared-capture Map stalls the PIXERA GPU. Prefer fewer kicks so live present
+    // stays smooth; matte refreshes async (ExtOnnxVision pattern).
+    constexpr double kMinKickMs = 100.0;
+    constexpr double kStressedKickMs = 160.0;
+    constexpr float kSlowMapMs = 40.0f;
     constexpr std::uint32_t kSlowMapStreak = 3;
     constexpr double kCooldownMs = 2000.0;
     // Restarting the host Wait()s on the PIXERA thread — require sustained pain.
@@ -508,7 +509,7 @@ void Input::kickMatteIfReady() {
             ++slow_map_streak_;
         } else {
             slow_map_streak_ = 0;
-            if (stressed_ && map_ms > 0.1f && map_ms < 20.0f && now >= cooldown_until_) {
+            if (stressed_ && map_ms > 0.1f && map_ms < 18.0f && now >= cooldown_until_) {
                 stressed_ = false;
                 removerLog("matte_unstressed (map_ms healthy again)");
             }
@@ -547,11 +548,16 @@ void Input::kickMatteIfReady() {
     const std::uint32_t cap_max_w = stressed_ ? 320u : 480u;
     double min_kick_ms = stressed_ ? kStressedKickMs : kMinKickMs;
     const float infer = matte_host_->hostInferMs();
+    const float map = matte_host_->hostMapMs();
     if (infer > 1.0f) {
-        min_kick_ms = std::max(min_kick_ms, static_cast<double>(infer) + 10.0);
+        min_kick_ms = std::max(min_kick_ms, static_cast<double>(infer) + 20.0);
     }
-    if (min_kick_ms > 150.0) {
-        min_kick_ms = 150.0;
+    // Map contends with PIXERA on the same GPU — do not kick faster than ~3× map cost.
+    if (map > 1.0f) {
+        min_kick_ms = std::max(min_kick_ms, static_cast<double>(map) * 3.0);
+    }
+    if (min_kick_ms > 220.0) {
+        min_kick_ms = 220.0;
     }
 
     const double since_kick_ms =

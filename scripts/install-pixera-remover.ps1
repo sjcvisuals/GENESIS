@@ -141,6 +141,28 @@ try {
         if (-not (Test-Path $f)) { throw "Install incomplete - missing $f" }
     }
 
+    $visionModels = @(
+        "depth_anything_v2_vits.onnx",
+        "birefnet_512_fp16.onnx",
+        "u2net_saliency.onnx",
+        "human_parse.onnx",
+        "style_mosaic.onnx"
+    )
+    $visionDir = Join-Path $dest "assets\vision"
+    foreach ($name in $visionModels) {
+        $vm = Join-Path $visionDir $name
+        if (-not (Test-Path $vm)) {
+            Write-InstallLog ("WARNING: missing vision model {0} (Vision Effect will passthrough)" -f $vm) "Yellow"
+            continue
+        }
+        $len = (Get-Item $vm).Length
+        if ($len -lt 1000000) {
+            Write-InstallLog ("WARNING: {0} is only {1:N0} bytes — likely a Git LFS pointer. Run: git lfs pull" -f $vm, $len) "Yellow"
+        } else {
+            Write-InstallLog ("vision model OK: {0} ({1:N1} MB)" -f $name, ($len / 1MB))
+        }
+    }
+
     $ort = Get-Item (Join-Path $dest "onnxruntime.dll")
     $ortVer = $ort.VersionInfo.FileVersion
     $dll = Get-Item (Join-Path $dest "ExtGenesisRemover.dll")
@@ -167,7 +189,7 @@ try {
     Write-Host "In PIXERA:" -ForegroundColor Green
     Write-Host "  Re-import:"
     Write-Host "    $(Join-Path $dest 'ExtGenesisRemover.dll')"
-    Write-Host "  Stamp must be: remover-timeline-v56-extonnxvision-nofence-20260910"
+    Write-Host "  Stamp must be: remover-vision-v60-map-pace-*"
     Write-Host "  Matte host auto-launches; log: %TEMP%\GenesisRemoverMatteHost.log"
     Write-Host ("Install log: {0}" -f $LogPath)
     exit 0
