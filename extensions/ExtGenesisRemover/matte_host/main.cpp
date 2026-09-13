@@ -643,21 +643,16 @@ int main() {
         const std::uint32_t w = hdr->width;
         const std::uint32_t h = hdr->height;
         const HANDLE cap_handle = reinterpret_cast<HANDLE>(static_cast<uintptr_t>(hdr->capture_handle));
+        const bool capture_in_shm = hdr->capture_in_shm != 0;
         ++frames;
         if (frames <= 3u || (frames % 30u) == 1u) {
             logLine("kick seq=" + std::to_string(last_kick) + " " + std::to_string(w) + "x" +
-                    std::to_string(h));
+                    std::to_string(h) + (capture_in_shm ? " shm" : " gpu"));
         }
 
         if (w == 0 || h == 0 || w > genesis::matte_ipc::kMaxWidth ||
-            h > genesis::matte_ipc::kMaxHeight || !cap_handle) {
+            h > genesis::matte_ipc::kMaxHeight || (!capture_in_shm && !cap_handle)) {
             failKick("bad_params");
-            continue;
-        }
-
-        if (!capture.ensureDevice(hdr->adapter_luid) ||
-            !capture.openCapture(cap_handle, w, h)) {
-            failKick("open_capture");
             continue;
         }
 
@@ -674,54 +669,72 @@ int main() {
             }
         }
 
-        // Cross-process shared blit settle. mapToRgba already waits on a GPU event query.
-        static bool s_had_good = false;
-        static auto s_last_ok = std::chrono::steady_clock::now();
-        static double s_last_map_ms = 0.0;
-        static int s_map_skip_stride = 0;
-        if (!s_had_good) {
-            Sleep(40);
-        }
-
         double map_ms = 0.0;
-        bool mapped = false;
-        // When shared Map is expensive on the PIXERA GPU, reuse the last good CPU
-        // capture every other kick (still re-infer / refresh temporal RVM). Live
-        // present keeps the latest camera frame; matte edges lag slightly.
-        const bool allow_skip_map =
-            s_had_good && !scratch_in.empty() && scratch_in.size() == static_cast<std::size_t>(w) * h * 4u &&
-            s_last_map_ms >= 28.0 && (s_map_skip_stride++ % 2) == 1;
-        if (allow_skip_map) {
-            map_ms = s_last_map_ms; // keep pacing honest for the DLL
-            mapped = true;
+        if (capture_in_shm) {
+            // v62: DLL already copied capture RGBA into IPC pixels — do NOT OpenShared/Map.
+            // Mapping a shared capture on this process was stalling PIXERA presents.
+            const std::size_t bytes = static_cast<std::size_t>(w) * h * 4u;
+            scratch_in.resize(bytes);
+            std::memcpy(scratch_in.data(), genesis::matte_ipc::pixels(hdr), bytes);
+            map_ms = hdr->last_map_ms; // DLL-reported async download cost
             if ((frames % 30u) == 1u) {
-                logLine("map_skip_reuse (last_map_ms=" + std::to_string(s_last_map_ms) +
-                        ") — protect PIXERA FPS");
+                logLine("capture_from_shm bytes=" + std::to_string(bytes) +
+                        " download_ms=" + std::to_string(map_ms));
             }
-        } else if (!capture.mapToRgba(scratch_in, &map_ms)) {
-            failKick("map_failed");
-            continue;
         } else {
-            mapped = true;
-            s_last_map_ms = map_ms;
-        }
-
-        std::size_t nz = countNz(scratch_in.data(), scratch_in.size());
-        if (nz == 0 && !allow_skip_map) {
-            // One retry after extra settle (first kick after DML init is often empty).
-            Sleep(50);
-            if (!capture.mapToRgba(scratch_in, &map_ms)) {
-                failKick("map_retry_failed");
+            if (!capture.ensureDevice(hdr->adapter_luid) ||
+                !capture.openCapture(cap_handle, w, h)) {
+                failKick("open_capture");
                 continue;
             }
-            s_last_map_ms = map_ms;
-            nz = countNz(scratch_in.data(), scratch_in.size());
+
+            // Legacy GPU-share path (kept for old DLLs). Prefer capture_in_shm.
+            static bool s_had_good = false;
+            static double s_last_map_ms = 0.0;
+            static int s_map_skip_stride = 0;
+            if (!s_had_good) {
+                Sleep(40);
+            }
+
+            bool mapped = false;
+            const bool allow_skip_map =
+                s_had_good && !scratch_in.empty() &&
+                scratch_in.size() == static_cast<std::size_t>(w) * h * 4u &&
+                s_last_map_ms >= 28.0 && (s_map_skip_stride++ % 2) == 1;
+            if (allow_skip_map) {
+                map_ms = s_last_map_ms;
+                mapped = true;
+            } else if (!capture.mapToRgba(scratch_in, &map_ms)) {
+                failKick("map_failed");
+                continue;
+            } else {
+                mapped = true;
+                s_last_map_ms = map_ms;
+            }
+
+            std::size_t nz_legacy = countNz(scratch_in.data(), scratch_in.size());
+            if (nz_legacy == 0 && !allow_skip_map) {
+                Sleep(50);
+                if (!capture.mapToRgba(scratch_in, &map_ms)) {
+                    failKick("map_retry_failed");
+                    continue;
+                }
+                s_last_map_ms = map_ms;
+                nz_legacy = countNz(scratch_in.data(), scratch_in.size());
+            }
+            if (nz_legacy == 0) {
+                failKick("capture_nz0");
+                continue;
+            }
+            s_had_good = true;
+            (void)mapped;
         }
+
+        const std::size_t nz = countNz(scratch_in.data(), scratch_in.size());
         if (nz == 0) {
             failKick("capture_nz0");
             continue;
         }
-        (void)mapped;
 
     scratch_out.resize(scratch_in.size());
     const auto t0 = std::chrono::steady_clock::now();

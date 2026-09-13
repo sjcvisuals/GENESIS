@@ -39,6 +39,9 @@ public:
     void setVision(int vision_effect, int result_as, const std::string& model_path = {});
     // Blit already done into capture; publish handle + kick host.
     bool kickCapture(D3d11SharedTexture& capture, std::uint32_t width, std::uint32_t height);
+    // v62: capture already in CPU RGBA — copy into IPC pixels and kick (no GPU share Map).
+    bool kickCaptureRgba(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height,
+                        float download_ms);
     bool tryTakeMatte(std::vector<std::uint8_t>& out_rgba, std::uint32_t& out_w, std::uint32_t& out_h,
                       ::genesis::RemoverFrameDebug* dbg);
     bool busy() const;

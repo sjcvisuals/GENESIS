@@ -379,6 +379,7 @@ bool MatteHostClient::kickCapture(D3d11SharedTexture& capture, std::uint32_t wid
     h->adapter_luid = adapter_luid_;
     writeQualityToHeader();
     writeVisionToHeader(); // every kick — avoid stale vision fields after host restart
+    h->capture_in_shm = 0;
     h->result_ok = 0;
     ++h->kick_seq;
     SetEvent(static_cast<HANDLE>(kick_event_));
@@ -386,6 +387,44 @@ bool MatteHostClient::kickCapture(D3d11SharedTexture& capture, std::uint32_t wid
     // Throttle: per-kick log + flush tanks matte FPS on disk.
     if ((h->kick_seq % 30u) == 1u) {
         removerLog(std::format("MatteHostClient kick seq={} {}x{}", h->kick_seq, width, height));
+    }
+    return true;
+}
+
+
+bool MatteHostClient::kickCaptureRgba(const std::uint8_t* rgba, std::uint32_t width,
+                                      std::uint32_t height, float download_ms) {
+    if (!ensureStarted(adapter_luid_) || !view_ || !hostReady()) {
+        return false;
+    }
+    if (!rgba || width == 0 || height == 0 || width > ::genesis::matte_ipc::kMaxWidth ||
+        height > ::genesis::matte_ipc::kMaxHeight) {
+        removerLog(std::format("MatteHostClient kickCaptureRgba rejected size {}x{}", width, height));
+        return false;
+    }
+    if (busy()) {
+        return false;
+    }
+
+    auto* h = asHeader(view_);
+    const std::size_t bytes = static_cast<std::size_t>(width) * height * 4u;
+    std::memcpy(::genesis::matte_ipc::pixels(h), rgba, bytes);
+    h->width = width;
+    h->height = height;
+    h->adapter_luid = adapter_luid_;
+    h->capture_handle = 0;
+    h->capture_in_shm = 1;
+    writeQualityToHeader();
+    writeVisionToHeader();
+    h->result_ok = 0;
+    // Report DLL-side download cost so pacing stays honest without host Map.
+    h->last_map_ms = download_ms;
+    ++h->kick_seq;
+    SetEvent(static_cast<HANDLE>(kick_event_));
+    last_kick_tick_ms_ = GetTickCount();
+    if ((h->kick_seq % 30u) == 1u) {
+        removerLog(std::format("MatteHostClient kickCaptureRgba seq={} {}x{} download_ms={:.1f}",
+                               h->kick_seq, width, height, download_ms));
     }
     return true;
 }
