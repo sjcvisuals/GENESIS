@@ -27,6 +27,9 @@ public:
 
     bool ensureStarted(std::uint64_t adapter_luid);
     bool hostReady() const;
+    // True when DLL/host BUILD stamps disagree (mixed install — reinstall both).
+    bool stampMismatch() const;
+    std::string hostStamp() const;
     std::uint64_t doneSeq() const;
     // quality: 0=Fast 1=Balanced 2=Quality 3=Custom (downsample + max_infer_side).
     void setQuality(int quality_0_to_3, float custom_downsample = 0.0f,

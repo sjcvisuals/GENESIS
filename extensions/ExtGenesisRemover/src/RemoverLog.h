@@ -1,5 +1,7 @@
 #pragma once
 
+#include "MatteIpc.h"
+
 #include <filesystem>
 #include <string>
 
@@ -12,7 +14,7 @@ void removerLog(const std::string& line);
 
 std::filesystem::path removerTempLogPath();
 
-// Bump when diagnosing timeline load so the log proves the new DLL is running.
-inline constexpr const char* kRemoverBuildStamp = "remover-vision-v60-map-pace-20260910";
+// Alias of matte_ipc::kBuildStamp — one stamp for DLL, host, BUILD_STAMP.txt, UI.
+inline constexpr const char* kRemoverBuildStamp = ::genesis::matte_ipc::kBuildStamp;
 
 } // namespace rxext::genesis_remover

@@ -133,9 +133,9 @@ Input::Input(std::shared_ptr<SharedD3d11> d3d, std::uint64_t adapter_luid, Value
     debug_status_ = add_parameter<ParameterString>("debug_status");
     debug_status_->set_property(PropertyNames::name, "Debug Status");
     debug_status_->set_property(PropertyNames::group_name, "Debug");
-    debug_status_->set_value(std::string("v60 map-paced kicks (less GPU Map stall)"));
+    debug_status_->set_value(std::string(kRemoverBuildStamp));
 
-    removerLog(std::format("Input ctor v60 map-pace adapter_luid={:016x}", adapter_luid_));
+    removerLog(std::format("Input ctor {} adapter_luid={:016x}", kRemoverBuildStamp, adapter_luid_));
 }
 
 Input::~Input() {
@@ -361,12 +361,24 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
         debug_stage_->set_value(stageToEnum(dbg.stage));
     }
     const bool host_ready = matte_host_ && matte_host_->hostReady();
+    const bool mismatch = matte_host_ && matte_host_->stampMismatch();
+    const float map_ms = matte_host_ ? matte_host_->hostMapMs() : 0.0f;
+    const float infer_ms = matte_host_ ? matte_host_->hostInferMs() : 0.0f;
+    const std::string ep_s = matte_host_ ? matte_host_->hostEp() : std::string("?");
+    const char* ep = ep_s.empty() ? "?" : ep_s.c_str();
+    // Keep under ~120 chars so it stays readable in PIXERA property panes.
     const std::string ui =
-        std::format("v60 {} vin={} host={} matte={} ep={}", dbg.stage ? dbg.stage : "?",
-                    dbg.has_video_in ? 1 : 0, host_ready ? 1 : 0, matte_live_ ? 1 : 0,
-                    matte_host_ ? matte_host_->hostEp() : "?");
+        mismatch ? std::format("{} MISMATCH host={} — reinstall DLL+host", kRemoverBuildStamp,
+                               matte_host_->hostStamp().empty() ? "?" : matte_host_->hostStamp())
+                 : std::format("{} {} map={:.0f}ms infer={:.0f} ep={} matte={}", kRemoverBuildStamp,
+                               dbg.stage ? dbg.stage : "?", map_ms, infer_ms, ep,
+                               matte_live_ ? 1 : 0);
     if (debug_status_) {
         debug_status_->set_value(ui);
+    }
+    if (mismatch && (render_ticks_ % 60u) == 1u) {
+        removerLog(std::format("STAMP_MISMATCH dll={} host={} ipc_ver_need={}", kRemoverBuildStamp,
+                               matte_host_->hostStamp(), ::genesis::matte_ipc::kVersion));
     }
     if (last_stage_ != (dbg.stage ? dbg.stage : "") || (render_ticks_ % 30u) == 1u) {
         last_stage_ = dbg.stage ? dbg.stage : "";
@@ -375,12 +387,12 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
         const std::uint64_t sync_n = d3d_ ? d3d_->syncCallbacks() : 0;
         removerLog(std::format(
             "STATUS stage={} vin={} dl={} nz={} mid=({},{},{},{}) {}x{} matte={} host={} "
-            "ep={} luid={:016x} fence={}/{} sync={}",
+            "ep={} map_ms={:.1f} infer_ms={:.1f} stamp={} mismatch={} luid={:016x} fence={}/{} "
+            "sync={}",
             dbg.stage ? dbg.stage : "?", dbg.has_video_in ? 1 : 0, dbg.download_ok ? 1 : 0,
             dbg.nonzero_rgb, dbg.mid_r, dbg.mid_g, dbg.mid_b, dbg.mid_a, dbg.width, dbg.height,
-            dbg.matte_copied ? 1 : 0, host_ready ? 1 : 0,
-            matte_host_ ? matte_host_->hostEp() : "?", adapter_luid_, fence_done, fence_c,
-            sync_n));
+            dbg.matte_copied ? 1 : 0, host_ready ? 1 : 0, ep, map_ms, infer_ms,
+            kRemoverBuildStamp, mismatch ? 1 : 0, adapter_luid_, fence_done, fence_c, sync_n));
     }
 }
 
@@ -414,7 +426,7 @@ bool Input::update_settings(ValueSet settings) noexcept try {
     ensureMatteHost();
     publishTargetTexture();
     if (debug_status_) {
-        debug_status_->set_value(std::string("v60 map-paced kicks (less GPU Map stall)"));
+        debug_status_->set_value(std::string(kRemoverBuildStamp));
     }
     return true;
 } catch (const std::exception& ex) {
@@ -487,13 +499,13 @@ void Input::kickMatteIfReady() {
 
     const auto now = std::chrono::steady_clock::now();
 
-    // Shared-capture Map stalls the PIXERA GPU. Prefer fewer kicks so live present
-    // stays smooth; matte refreshes async (ExtOnnxVision pattern).
-    constexpr double kMinKickMs = 100.0;
-    constexpr double kStressedKickMs = 160.0;
-    constexpr float kSlowMapMs = 40.0f;
-    constexpr std::uint32_t kSlowMapStreak = 3;
-    constexpr double kCooldownMs = 2000.0;
+    // Shared-capture Map stalls the PIXERA GPU. Prefer fewer / smaller kicks so live
+    // present stays smooth; matte refreshes async (ExtOnnxVision + v61 demo pace).
+    constexpr double kMinKickMs = 130.0;
+    constexpr double kStressedKickMs = 200.0;
+    constexpr float kSlowMapMs = 32.0f;
+    constexpr std::uint32_t kSlowMapStreak = 2;
+    constexpr double kCooldownMs = 2200.0;
     // Restarting the host Wait()s on the PIXERA thread — require sustained pain.
     constexpr std::uint32_t kRestartsAfterCooldowns = 4;
 
@@ -545,19 +557,19 @@ void Input::kickMatteIfReady() {
         return;
     }
 
-    const std::uint32_t cap_max_w = stressed_ ? 320u : 480u;
+    const std::uint32_t cap_max_w = stressed_ ? 256u : 320u;
     double min_kick_ms = stressed_ ? kStressedKickMs : kMinKickMs;
     const float infer = matte_host_->hostInferMs();
     const float map = matte_host_->hostMapMs();
     if (infer > 1.0f) {
-        min_kick_ms = std::max(min_kick_ms, static_cast<double>(infer) + 20.0);
+        min_kick_ms = std::max(min_kick_ms, static_cast<double>(infer) + 30.0);
     }
-    // Map contends with PIXERA on the same GPU — do not kick faster than ~3× map cost.
+    // Map contends with PIXERA on the same GPU — do not kick faster than ~4× map cost.
     if (map > 1.0f) {
-        min_kick_ms = std::max(min_kick_ms, static_cast<double>(map) * 3.0);
+        min_kick_ms = std::max(min_kick_ms, static_cast<double>(map) * 4.0);
     }
-    if (min_kick_ms > 220.0) {
-        min_kick_ms = 220.0;
+    if (min_kick_ms > 280.0) {
+        min_kick_ms = 280.0;
     }
 
     const double since_kick_ms =

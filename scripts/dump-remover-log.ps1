@@ -55,7 +55,8 @@ if (Test-Path -LiteralPath $hostLog) {
 }
 
 Write-Host ''
-Write-Host 'Expect stamp remover-timeline-v56-extonnxvision-nofence-...'
-Write-Host 'v56: no Device TimelineSemaphore fence (ExtOnnxVision pattern); matte kick from update().'
-Write-Host 'Look for matte_cooldown / map_ms= if outputs thrash the GPU.'
+Write-Host 'Expect stamp remover-demo-v61-live-fps-...'
+Write-Host 'v61: demo pace (smaller capture, map-paced kicks, skip-map reuse); DLL/host stamp check.'
+Write-Host 'Look for matte_cooldown / map_ms= / map_skip_reuse if outputs thrash the GPU.'
 Write-Host 'Adapter LUID = 0 for auto, or NVIDIA luid_hex to force. Same GPU as PIXERA preview.'
+Write-Host 'Debug Status should show: stamp + map_ms + infer_ms + ep + matte=1'

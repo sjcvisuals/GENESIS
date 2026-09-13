@@ -7,18 +7,23 @@
 // Named file mapping: Local\GenesisRemoverMatteIpc_v57
 // Named event:       Local\GenesisRemoverMatteKick_v57
 // v57: vision_effect / result_as / model_path for multi-model ONNX (ExtOnnxVision-style).
+// v61: dll/host build stamps + version 7 for demo mismatch detection.
 namespace genesis::matte_ipc {
 
 inline constexpr char kMappingName[] = "Local\\GenesisRemoverMatteIpc_v57";
 inline constexpr char kKickEventName[] = "Local\\GenesisRemoverMatteKick_v57";
 inline constexpr char kStopEventName[] = "Local\\GenesisRemoverMatteStop_v57";
 
+// Single source of truth — must match BUILD_STAMP.txt / Debug Status.
+inline constexpr char kBuildStamp[] = "remover-demo-v61-live-fps-20260913";
+
 inline constexpr std::uint32_t kMagic = 0x34444d47u; // GMD4
-inline constexpr std::uint32_t kVersion = 6;
+inline constexpr std::uint32_t kVersion = 7;
 inline constexpr std::uint32_t kMaxWidth = 1920;
 inline constexpr std::uint32_t kMaxHeight = 1080;
 inline constexpr std::uint32_t kMaxBytes = kMaxWidth * kMaxHeight * 4u;
 inline constexpr std::uint32_t kModelPathBytes = 260;
+inline constexpr std::uint32_t kStampBytes = 64;
 
 #pragma pack(push, 1)
 struct Header {
@@ -46,6 +51,10 @@ struct Header {
     std::uint32_t vision_effect = 0;
     std::uint32_t result_as = 0;
     char model_path[kModelPathBytes]{};
+    // v61: both sides publish kBuildStamp; DLL flags mismatch for UI/logs.
+    char dll_stamp[kStampBytes]{};
+    char host_stamp[kStampBytes]{};
+    std::uint32_t stamp_mismatch = 0;
 };
 #pragma pack(pop)
 

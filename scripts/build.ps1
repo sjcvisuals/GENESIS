@@ -166,6 +166,24 @@ function Assert-File([string]$Path, [string]$Label) {
     }
 }
 
+function Assert-OnnxNotLfs([string]$Path, [string]$Label) {
+    Assert-File $Path $Label
+    $item = Get-Item -LiteralPath $Path
+    if ($item.Length -lt 1000000) {
+        $head = Get-Content -LiteralPath $Path -TotalCount 2 -ErrorAction SilentlyContinue
+        $joined = ($head -join " ")
+        if ($joined -match 'git-lfs') {
+            throw @"
+$Label is a Git LFS pointer, not the real ONNX model:
+  $Path ($($item.Length) bytes)
+Run: git lfs install; git lfs pull
+Then rebuild / reinstall.
+"@
+        }
+        throw "$Label looks too small ($($item.Length) bytes) — expected a real ONNX blob (>= 1 MB): $Path"
+    }
+}
+
 function Sync-OutFolder {
     Write-Host ""
     Write-Host "Syncing WIP outputs to out\ ..." -ForegroundColor Cyan
@@ -242,6 +260,7 @@ Re-run cmake configure (delete build\CMakeCache.txt if the target is missing), t
         Write-Host "Matte host built: $matteHost"
         Copy-Item -Path $matteHost -Destination (Join-Path $remOut "GenesisRemoverMatteHost.exe") -Force
         Sync-Directory (Join-Path $assetsSrc "matting") (Join-Path $remOut "assets\matting")
+        Sync-Directory (Join-Path $assetsSrc "vision") (Join-Path $remOut "assets\vision")
         Copy-Item -Path (Join-Path $RepoRoot "deploy\GenesisRemover.manifest.json") `
             -Destination (Join-Path $remOut "GenesisRemover.manifest.json") -Force
         Copy-Item -Path (Join-Path $RepoRoot "deploy\README-remover.txt") `
@@ -256,7 +275,29 @@ Re-run cmake configure (delete build\CMakeCache.txt if the target is missing), t
         Assert-File (Join-Path $remOut "ExtGenesisRemover.dll") "Remover DLL"
         Assert-File (Join-Path $remOut "GenesisRemoverMatteHost.exe") "out-of-process matte host"
         Assert-File (Join-Path $remOut "onnxruntime.dll") "onnxruntime.dll next to Remover"
-        Assert-File (Join-Path $remOut "assets\matting\rvm_mobilenetv3_fp16.onnx") "RVM model"
+        Assert-OnnxNotLfs (Join-Path $remOut "assets\matting\rvm_mobilenetv3_fp16.onnx") "RVM model"
+
+        $visionModels = @(
+            "depth_anything_v2_vits.onnx",
+            "birefnet_512_fp16.onnx",
+            "u2net_saliency.onnx",
+            "human_parse.onnx",
+            "style_mosaic.onnx"
+        )
+        foreach ($vm in $visionModels) {
+            $vp = Join-Path $remOut "assets\vision\$vm"
+            if (-not (Test-Path $vp)) {
+                Write-Host ("WARNING: missing vision model {0} (Person Matte still OK)" -f $vp) -ForegroundColor Yellow
+                continue
+            }
+            try {
+                Assert-OnnxNotLfs $vp "Vision model $vm"
+                Write-Host ("vision model OK: {0}" -f $vm)
+            } catch {
+                Write-Host $_.Exception.Message -ForegroundColor Yellow
+                Write-Host ("WARNING: {0} not usable — Depth/BiRefNet/etc will fail until git lfs pull" -f $vm) -ForegroundColor Yellow
+            }
+        }
 
         $remSize = (Get-Item (Join-Path $remOut "ExtGenesisRemover.dll")).Length
         Write-Host ("Remover DLL size: {0:N0} bytes" -f $remSize)
@@ -265,14 +306,15 @@ Re-run cmake configure (delete build\CMakeCache.txt if the target is missing), t
         }
 
         $stamp = @"
-build=remover-timeline-v56-extonnxvision-nofence-20260910
+build=remover-demo-v61-live-fps-20260913
 dll=$remOut\ExtGenesisRemover.dll
 host=$remOut\GenesisRemoverMatteHost.exe
 time=$(Get-Date -Format o)
 size=$remSize
 log=%TEMP%\ExtGenesisRemover.log
 host_log=%TEMP%\GenesisRemoverMatteHost.log
-ep=CPU-out-of-process
+ep=DirectML-out-of-process
+demo=Person Matte (RVM) + Quality Fast + Result As Alpha
 "@
         Set-Content -Path (Join-Path $remOut "BUILD_STAMP.txt") -Value $stamp -Encoding ASCII
         Write-Host "Wrote BUILD_STAMP.txt (prove PIXERA is using this build)"
@@ -297,7 +339,7 @@ ep=CPU-out-of-process
             Copy-Item -Path $directml -Destination (Join-Path $camOut "DirectML.dll") -Force
         }
         Assert-File (Join-Path $camOut "genesis_remover_camera_debug.exe") "camera debug exe"
-        Assert-File (Join-Path $camOut "assets\matting\rvm_mobilenetv3_fp16.onnx") "RVM model (camera debug)"
+        Assert-OnnxNotLfs (Join-Path $camOut "assets\matting\rvm_mobilenetv3_fp16.onnx") "RVM model (camera debug)"
         Write-Host "Camera debug: $camOut\genesis_remover_camera_debug.exe"
         Write-Host "  Run: .\scripts\run-remover-camera-debug.ps1"
     }
