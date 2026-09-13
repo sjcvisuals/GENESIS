@@ -180,7 +180,7 @@ Run: git lfs install; git lfs pull
 Then rebuild / reinstall.
 "@
         }
-        throw "$Label looks too small ($($item.Length) bytes) — expected a real ONNX blob (>= 1 MB): $Path"
+        throw "$Label looks too small ($($item.Length) bytes) - expected a real ONNX blob (>= 1 MB): $Path"
     }
 }
 
@@ -295,7 +295,7 @@ Re-run cmake configure (delete build\CMakeCache.txt if the target is missing), t
                 Write-Host ("vision model OK: {0}" -f $vm)
             } catch {
                 Write-Host $_.Exception.Message -ForegroundColor Yellow
-                Write-Host ("WARNING: {0} not usable — Depth/BiRefNet/etc will fail until git lfs pull" -f $vm) -ForegroundColor Yellow
+                Write-Host ("WARNING: {0} not usable - Depth/BiRefNet/etc will fail until git lfs pull" -f $vm) -ForegroundColor Yellow
             }
         }
 

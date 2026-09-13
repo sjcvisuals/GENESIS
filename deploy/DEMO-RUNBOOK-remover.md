@@ -64,7 +64,7 @@ If you see `MISMATCH` → DLL and MatteHost are from different builds; quit PIXE
 - `[remover-demo-v61-live-fps-20260913]` on every line
 - `MatteHost launched pid=…`
 - `STATUS … stage=matte … mismatch=0`
-- `gpu_present live+mask … map_ms=…` (map_ms ideally &lt; 35 under light load)
+- `gpu_present live+mask … map_ms=…` (map_ms ideally under ~35 under light load)
 - Occasional `matte_cooldown` is OK — live frame keeps last matte
 
 **`%TEMP%\GenesisRemoverMatteHost.log`**

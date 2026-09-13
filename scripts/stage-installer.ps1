@@ -93,7 +93,7 @@ Copy-Shaders -DestinationRoot $editorStage
 Copy-FilteredTree -Source $assetsSource -Destination (Join-Path $editorStage "assets")
 Copy-Item -Path (Join-Path $RepoRoot "deploy\README-editor.txt") -Destination (Join-Path $editorStage "README.txt") -Force
 
-# Player (playback + topology tools — multi-output path)
+# Player (playback + topology tools - multi-output path)
 $playerStage = Join-Path $StageRoot "Player"
 New-Item -ItemType Directory -Force -Path $playerStage | Out-Null
 Copy-Item -Path $PlayerExe -Destination $playerStage -Force
@@ -103,7 +103,7 @@ Copy-Item -Path $DeterminismExe -Destination $playerStage -Force
 Copy-Shaders -DestinationRoot $playerStage
 Copy-FilteredTree -Source $assetsSource -Destination (Join-Path $playerStage "assets")
 $playerReadme = @"
-Genesis Player — playback tools
+Genesis Player - playback tools
 ================================
 
 Tools in this folder (not the editor):
