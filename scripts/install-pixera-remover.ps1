@@ -145,7 +145,7 @@ try {
     $rvmLen = (Get-Item $rvm).Length
     if ($rvmLen -lt 1000000) {
         $head = Get-Content -LiteralPath $rvm -TotalCount 2 -ErrorAction SilentlyContinue
-        throw ("RVM model is not a real ONNX blob ({0:N0} bytes). Likely Git LFS pointer. Run: git lfs pull — then BUILD + install again. Head: {1}" -f $rvmLen, ($head -join ' | '))
+        throw ("RVM model is not a real ONNX blob ({0:N0} bytes). Likely Git LFS pointer. Run: git lfs pull - then BUILD + install again. Head: {1}" -f $rvmLen, ($head -join ' | '))
     }
     Write-InstallLog ("RVM model OK: {0:N1} MB" -f ($rvmLen / 1MB)) "Green"
 
@@ -168,7 +168,7 @@ try {
         }
         $len = (Get-Item $vm).Length
         if ($len -lt 1000000) {
-            Write-InstallLog ("ERROR: {0} is only {1:N0} bytes — Git LFS pointer. Run: git lfs pull then rebuild/install" -f $vm, $len) "Red"
+            Write-InstallLog ("ERROR: {0} is only {1:N0} bytes - Git LFS pointer. Run: git lfs pull then rebuild/install" -f $vm, $len) "Red"
             $visionBad++
         } else {
             Write-InstallLog ("vision model OK: {0} ({1:N1} MB)" -f $name, ($len / 1MB))
@@ -176,7 +176,7 @@ try {
         }
     }
     if ($visionBad -gt 0) {
-        Write-InstallLog ("Vision assets incomplete ({0} OK / {1} bad). Wednesday demo uses Person Matte (RVM) — still OK if RVM passed." -f $visionOk, $visionBad) "Yellow"
+        Write-InstallLog ("Vision assets incomplete ({0} OK / {1} bad). Wednesday demo uses Person Matte (RVM) - still OK if RVM passed." -f $visionOk, $visionBad) "Yellow"
     }
 
     $ort = Get-Item (Join-Path $dest "onnxruntime.dll")
@@ -196,7 +196,7 @@ try {
         Get-Content (Join-Path $dest "BUILD_STAMP.txt") | ForEach-Object { Write-InstallLog ("  {0}" -f $_) }
         $stampText = Get-Content (Join-Path $dest "BUILD_STAMP.txt") -Raw
         if ($stampText -notmatch 'remover-demo-v61') {
-            Write-InstallLog "WARNING: BUILD_STAMP does not contain remover-demo-v61 — wrong package?" "Red"
+            Write-InstallLog "WARNING: BUILD_STAMP does not contain remover-demo-v61 - wrong package?" "Red"
         }
     } else {
         Write-InstallLog "WARNING: BUILD_STAMP.txt missing in package" "Yellow"

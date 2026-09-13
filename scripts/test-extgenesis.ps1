@@ -9,7 +9,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $OutDllDir = Join-Path $RepoRoot "out\ExtGenesis"
 $BuildDll = Join-Path $OutDllDir "ExtGenesis.dll"
 if (-not (Test-Path $BuildDll)) {
-    throw "Missing $BuildDll — run BUILD-AND-RUN.bat first."
+    throw "Missing $BuildDll - run BUILD-AND-RUN.bat first."
 }
 
 $RxRoot = Join-Path $RepoRoot "third_party\render-bridge-sdk\RenderBridge\RX"
