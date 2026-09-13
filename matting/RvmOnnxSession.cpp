@@ -2,6 +2,8 @@
 
 #if defined(GENESIS_HAS_ONNXRUNTIME)
 
+#include "platform/Paths.hpp"
+
 #include <onnxruntime_cxx_api.h>
 #include <onnxruntime_float16.h>
 
@@ -167,6 +169,14 @@ bool RvmOnnxSession::load(const std::filesystem::path& model_path, std::string* 
     if (model_path.empty() || !std::filesystem::exists(model_path)) {
         if (out_error) {
             *out_error = "RVM model not found: " + model_path.string();
+        }
+        return false;
+    }
+    if (isGitLfsPointerFile(model_path)) {
+        if (out_error) {
+            *out_error =
+                "RVM model is a Git LFS pointer (not the model). Run: git lfs pull — then rebuild/install. Path: " +
+                model_path.string();
         }
         return false;
     }

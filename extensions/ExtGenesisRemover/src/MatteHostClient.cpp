@@ -101,6 +101,10 @@ bool MatteHostClient::openIpc() {
     h->version = ::genesis::matte_ipc::kVersion;
     h->dll_pid = GetCurrentProcessId();
     h->adapter_luid = adapter_luid_;
+    std::memset(h->dll_stamp, 0, sizeof(h->dll_stamp));
+    std::memcpy(h->dll_stamp, ::genesis::matte_ipc::kBuildStamp,
+                std::min(sizeof(h->dll_stamp) - 1, std::strlen(::genesis::matte_ipc::kBuildStamp)));
+    h->stamp_mismatch = 0;
     writeQualityToHeader();
     writeVisionToHeader();
     ResetEvent(static_cast<HANDLE>(stop_event_));
@@ -162,6 +166,30 @@ bool MatteHostClient::hostReady() const {
     }
     const auto* h = asHeader(view_);
     return h->host_ready != 0 && h->host_pid != 0;
+}
+
+bool MatteHostClient::stampMismatch() const {
+    if (!view_ || !hostReady()) {
+        return false;
+    }
+    const auto* h = asHeader(view_);
+    if (h->stamp_mismatch != 0) {
+        return true;
+    }
+    if (h->host_stamp[0] == '\0') {
+        // Old host without stamp field — treat as mismatch vs v61 DLL.
+        return h->version < ::genesis::matte_ipc::kVersion;
+    }
+    return std::strncmp(h->dll_stamp, h->host_stamp, ::genesis::matte_ipc::kStampBytes) != 0 ||
+           std::strncmp(h->host_stamp, ::genesis::matte_ipc::kBuildStamp,
+                        ::genesis::matte_ipc::kStampBytes) != 0;
+}
+
+std::string MatteHostClient::hostStamp() const {
+    if (!view_) {
+        return {};
+    }
+    return std::string(asHeader(view_)->host_stamp);
 }
 
 std::uint64_t MatteHostClient::doneSeq() const {

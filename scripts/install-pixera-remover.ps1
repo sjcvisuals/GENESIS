@@ -141,6 +141,14 @@ try {
         if (-not (Test-Path $f)) { throw "Install incomplete - missing $f" }
     }
 
+    $rvm = Join-Path $dest "assets\matting\rvm_mobilenetv3_fp16.onnx"
+    $rvmLen = (Get-Item $rvm).Length
+    if ($rvmLen -lt 1000000) {
+        $head = Get-Content -LiteralPath $rvm -TotalCount 2 -ErrorAction SilentlyContinue
+        throw ("RVM model is not a real ONNX blob ({0:N0} bytes). Likely Git LFS pointer. Run: git lfs pull — then BUILD + install again. Head: {1}" -f $rvmLen, ($head -join ' | '))
+    }
+    Write-InstallLog ("RVM model OK: {0:N1} MB" -f ($rvmLen / 1MB)) "Green"
+
     $visionModels = @(
         "depth_anything_v2_vits.onnx",
         "birefnet_512_fp16.onnx",
@@ -149,18 +157,26 @@ try {
         "style_mosaic.onnx"
     )
     $visionDir = Join-Path $dest "assets\vision"
+    $visionOk = 0
+    $visionBad = 0
     foreach ($name in $visionModels) {
         $vm = Join-Path $visionDir $name
         if (-not (Test-Path $vm)) {
-            Write-InstallLog ("WARNING: missing vision model {0} (Vision Effect will passthrough)" -f $vm) "Yellow"
+            Write-InstallLog ("WARNING: missing vision model {0} (Person Matte demo still OK)" -f $vm) "Yellow"
+            $visionBad++
             continue
         }
         $len = (Get-Item $vm).Length
         if ($len -lt 1000000) {
-            Write-InstallLog ("WARNING: {0} is only {1:N0} bytes — likely a Git LFS pointer. Run: git lfs pull" -f $vm, $len) "Yellow"
+            Write-InstallLog ("ERROR: {0} is only {1:N0} bytes — Git LFS pointer. Run: git lfs pull then rebuild/install" -f $vm, $len) "Red"
+            $visionBad++
         } else {
             Write-InstallLog ("vision model OK: {0} ({1:N1} MB)" -f $name, ($len / 1MB))
+            $visionOk++
         }
+    }
+    if ($visionBad -gt 0) {
+        Write-InstallLog ("Vision assets incomplete ({0} OK / {1} bad). Wednesday demo uses Person Matte (RVM) — still OK if RVM passed." -f $visionOk, $visionBad) "Yellow"
     }
 
     $ort = Get-Item (Join-Path $dest "onnxruntime.dll")
@@ -178,6 +194,12 @@ try {
     if (Test-Path (Join-Path $dest "BUILD_STAMP.txt")) {
         Write-InstallLog "BUILD_STAMP.txt:"
         Get-Content (Join-Path $dest "BUILD_STAMP.txt") | ForEach-Object { Write-InstallLog ("  {0}" -f $_) }
+        $stampText = Get-Content (Join-Path $dest "BUILD_STAMP.txt") -Raw
+        if ($stampText -notmatch 'remover-demo-v61') {
+            Write-InstallLog "WARNING: BUILD_STAMP does not contain remover-demo-v61 — wrong package?" "Red"
+        }
+    } else {
+        Write-InstallLog "WARNING: BUILD_STAMP.txt missing in package" "Yellow"
     }
     if (Test-Path (Join-Path $dest "DirectML.dll")) {
         Write-InstallLog "DirectML.dll: present (host may use DML; DLL does not load ORT)" "Green"
@@ -189,7 +211,9 @@ try {
     Write-Host "In PIXERA:" -ForegroundColor Green
     Write-Host "  Re-import:"
     Write-Host "    $(Join-Path $dest 'ExtGenesisRemover.dll')"
-    Write-Host "  Stamp must be: remover-vision-v60-map-pace-*"
+    Write-Host "  Stamp must be: remover-demo-v61-live-fps-*"
+    Write-Host "  Demo defaults: Vision Effect=Person Matte (RVM), Quality=Fast, Result As=Alpha"
+    Write-Host "  Debug Status should show: stamp + map_ms + infer_ms + ep"
     Write-Host "  Matte host auto-launches; log: %TEMP%\GenesisRemoverMatteHost.log"
     Write-Host ("Install log: {0}" -f $LogPath)
     exit 0

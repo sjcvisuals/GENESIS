@@ -327,11 +327,24 @@ int main() {
     const std::filesystem::path roots[] = {module_dir, module_dir / "assets"};
     genesis::setAssetSearchRoots(roots);
 
-    logLine("start v60-map-pace " + module_dir.string());
+    logLine(std::string("start ") + genesis::matte_ipc::kBuildStamp + " " + module_dir.string());
     {
         const auto vision_dir = module_dir / "assets" / "vision";
         logLine(std::string("vision assets dir=") + vision_dir.string() +
                 (std::filesystem::exists(vision_dir) ? " (exists)" : " (MISSING)"));
+        const auto rvm = module_dir / "assets" / "matting" / "rvm_mobilenetv3_fp16.onnx";
+        if (!std::filesystem::exists(rvm)) {
+            logLine("FATAL: RVM model missing: " + rvm.string());
+            return 3;
+        }
+        if (genesis::isGitLfsPointerFile(rvm)) {
+            logLine("FATAL: RVM model is Git LFS pointer — run git lfs pull, rebuild, reinstall: " +
+                    rvm.string());
+            return 3;
+        }
+        std::error_code ec;
+        const auto sz = std::filesystem::file_size(rvm, ec);
+        logLine("RVM model OK bytes=" + std::to_string(ec ? 0ull : static_cast<unsigned long long>(sz)));
     }
 
     HANDLE mapping =
@@ -373,6 +386,23 @@ int main() {
     }
     hdr->version = genesis::matte_ipc::kVersion;
     hdr->host_pid = GetCurrentProcessId();
+    std::memset(hdr->host_stamp, 0, sizeof(hdr->host_stamp));
+    std::memcpy(hdr->host_stamp, genesis::matte_ipc::kBuildStamp,
+                std::min(sizeof(hdr->host_stamp) - 1, std::strlen(genesis::matte_ipc::kBuildStamp)));
+    if (hdr->dll_stamp[0] != '\0' &&
+        std::strncmp(hdr->dll_stamp, genesis::matte_ipc::kBuildStamp,
+                     genesis::matte_ipc::kStampBytes) != 0) {
+        hdr->stamp_mismatch = 1;
+        logLine(std::string("STAMP_MISMATCH dll=") + hdr->dll_stamp +
+                " host=" + genesis::matte_ipc::kBuildStamp +
+                " — quit PIXERA and reinstall ExtGenesisRemover package");
+    } else {
+        hdr->stamp_mismatch = 0;
+        if (hdr->dll_stamp[0] == '\0') {
+            // DLL will fill dll_stamp on next openIpc; leave mismatch clear until then.
+            logLine("dll_stamp empty at host start (DLL will publish)");
+        }
+    }
 
     // Wait briefly for DLL to publish Adapter LUID (set before CreateProcess, usually ready).
     for (int i = 0; i < 50 && hdr->adapter_luid == 0; ++i) {
@@ -633,34 +663,65 @@ int main() {
 
         applyQualityFromHdr();
         applyVisionFromHdr();
+        if (hdr->dll_stamp[0] != '\0') {
+            const bool bad =
+                std::strncmp(hdr->dll_stamp, genesis::matte_ipc::kBuildStamp,
+                             genesis::matte_ipc::kStampBytes) != 0;
+            hdr->stamp_mismatch = bad ? 1u : 0u;
+            if (bad && (frames % 60u) == 1u) {
+                logLine(std::string("STAMP_MISMATCH dll=") + hdr->dll_stamp +
+                        " host=" + genesis::matte_ipc::kBuildStamp);
+            }
+        }
 
         // Cross-process shared blit settle. mapToRgba already waits on a GPU event query.
-    static bool s_had_good = false;
-    static auto s_last_ok = std::chrono::steady_clock::now();
-    if (!s_had_good) {
-        Sleep(40);
-    }
+        static bool s_had_good = false;
+        static auto s_last_ok = std::chrono::steady_clock::now();
+        static double s_last_map_ms = 0.0;
+        static int s_map_skip_stride = 0;
+        if (!s_had_good) {
+            Sleep(40);
+        }
 
-    double map_ms = 0.0;
-    if (!capture.mapToRgba(scratch_in, &map_ms)) {
-        failKick("map_failed");
-        continue;
-    }
+        double map_ms = 0.0;
+        bool mapped = false;
+        // When shared Map is expensive on the PIXERA GPU, reuse the last good CPU
+        // capture every other kick (still re-infer / refresh temporal RVM). Live
+        // present keeps the latest camera frame; matte edges lag slightly.
+        const bool allow_skip_map =
+            s_had_good && !scratch_in.empty() && scratch_in.size() == static_cast<std::size_t>(w) * h * 4u &&
+            s_last_map_ms >= 28.0 && (s_map_skip_stride++ % 2) == 1;
+        if (allow_skip_map) {
+            map_ms = s_last_map_ms; // keep pacing honest for the DLL
+            mapped = true;
+            if ((frames % 30u) == 1u) {
+                logLine("map_skip_reuse (last_map_ms=" + std::to_string(s_last_map_ms) +
+                        ") — protect PIXERA FPS");
+            }
+        } else if (!capture.mapToRgba(scratch_in, &map_ms)) {
+            failKick("map_failed");
+            continue;
+        } else {
+            mapped = true;
+            s_last_map_ms = map_ms;
+        }
 
-    std::size_t nz = countNz(scratch_in.data(), scratch_in.size());
-    if (nz == 0) {
-        // One retry after extra settle (first kick after DML init is often empty).
-        Sleep(50);
-        if (!capture.mapToRgba(scratch_in, &map_ms)) {
-            failKick("map_retry_failed");
+        std::size_t nz = countNz(scratch_in.data(), scratch_in.size());
+        if (nz == 0 && !allow_skip_map) {
+            // One retry after extra settle (first kick after DML init is often empty).
+            Sleep(50);
+            if (!capture.mapToRgba(scratch_in, &map_ms)) {
+                failKick("map_retry_failed");
+                continue;
+            }
+            s_last_map_ms = map_ms;
+            nz = countNz(scratch_in.data(), scratch_in.size());
+        }
+        if (nz == 0) {
+            failKick("capture_nz0");
             continue;
         }
-        nz = countNz(scratch_in.data(), scratch_in.size());
-    }
-    if (nz == 0) {
-        failKick("capture_nz0");
-        continue;
-    }
+        (void)mapped;
 
     scratch_out.resize(scratch_in.size());
     const auto t0 = std::chrono::steady_clock::now();

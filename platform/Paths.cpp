@@ -2,10 +2,11 @@
 
 #include <SDL3/SDL.h>
 
+#include <fstream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
-#include <optional>
 
 namespace genesis {
 
@@ -63,6 +64,27 @@ std::filesystem::path resolveAssetPath(const std::filesystem::path& path) {
 
     throw std::runtime_error("Asset not found: " + path.string() +
                              " (cwd=" + std::filesystem::current_path().string() + ")");
+}
+
+bool isGitLfsPointerFile(const std::filesystem::path& path) {
+    if (path.empty() || !std::filesystem::exists(path) || !std::filesystem::is_regular_file(path)) {
+        return false;
+    }
+    std::error_code ec;
+    const auto sz = std::filesystem::file_size(path, ec);
+    if (ec || sz == 0 || sz > 1024) {
+        // Real ONNX blobs are multi-MB; LFS pointers are tiny text stubs.
+        return false;
+    }
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        return false;
+    }
+    char buf[96]{};
+    in.read(buf, static_cast<std::streamsize>(sizeof(buf) - 1));
+    const std::string head(buf);
+    return head.find("git-lfs.github.com/spec/v1") != std::string::npos ||
+           head.rfind("version https://git-lfs", 0) == 0;
 }
 
 std::filesystem::path resolveShaderDirectory() {

@@ -91,7 +91,7 @@ Press `1` (Fast) for max matte FPS; `3` (Quality) for sharper edges / lower FPS.
 .\scripts\dump-remover-log.ps1
 ```
 
-Look for `STATUS stage=` lines and stamp `remover-vision-v59-idempotent-init-*`.
+Look for `STATUS stage=` lines and stamp `remover-demo-v61-live-fps-*`.
 
 | Colour / stage | Meaning |
 |----------------|---------|
@@ -111,7 +111,9 @@ Same OOP host as RVM, ExtOnnxVision-style effect switch:
 
 Models live under `assets/vision/` (see `assets/vision/README.md`). IPC bumped to `…MatteIpc_v57`.
 
-v58/v59: empty Model File must not reload RVM; `BgRemover::initialize()` is idempotent so Host vision IPC cannot thrash ORT on default Person Matte. Host log should show `start v59-idempotent-init` and must **not** spam `vision ->` every kick.
+v58/v59: empty Model File must not reload RVM; `BgRemover::initialize()` is idempotent so Host vision IPC cannot thrash ORT on default Person Matte. Host log should show `start remover-demo-v61-live-fps-*` (or older `v59-idempotent-init`) and must **not** spam `vision ->` every kick.
+
+v60: pace kicks by `map_ms`. v61 (demo): smaller capture (≤320), stronger map pacing, optional host `map_skip_reuse`, DLL↔host stamp mismatch detection, install fails loud on LFS RVM, Debug Status shows stamp+map+infer+ep.
 
 ### Lessons from ExtOnnxVision (blackdown/pixera-onnx-plugin)
 
