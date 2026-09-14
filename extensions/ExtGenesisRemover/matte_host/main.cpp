@@ -628,6 +628,9 @@ int main() {
         applied_model_key = model_key;
     };
 
+    // Cycle timing lives at loop scope (not inside the legacy GPU branch).
+    auto s_last_ok = std::chrono::steady_clock::now();
+
     for (;;) {
         HANDLE waits[] = {stop, kick};
         const DWORD wr = WaitForMultipleObjects(2, waits, FALSE, 50);
@@ -752,7 +755,6 @@ int main() {
     hdr->result_ok = 1;
     std::snprintf(hdr->stage, sizeof(hdr->stage), "matte");
     hdr->done_seq = last_kick;
-    s_had_good = true;
     const auto now = std::chrono::steady_clock::now();
     const double cycle_ms =
         std::chrono::duration<double, std::milli>(now - s_last_ok).count();
