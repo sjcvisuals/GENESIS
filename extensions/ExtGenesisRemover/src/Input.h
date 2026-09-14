@@ -76,13 +76,11 @@ private:
     std::uint64_t render_ticks_ = 0;
     std::uint64_t last_capture_kick_tick_ = 0;
     std::chrono::steady_clock::time_point last_kick_wall_{};
-    std::chrono::steady_clock::time_point cooldown_until_{};
-    // After host restart, ignore slow map_ms briefly (DML settle spikes are expected).
-    std::chrono::steady_clock::time_point map_sample_grace_until_{};
-    std::uint32_t slow_map_streak_ = 0;
-    std::uint32_t cooldown_count_ = 0;
-    std::uint64_t last_map_sample_seq_ = 0;
-    bool stressed_ = false; // smaller capture / slower kicks after a cooldown
+    std::chrono::steady_clock::time_point capture_download_started_{};
+    std::vector<std::uint8_t> capture_rgba_;
+    float last_capture_download_ms_ = 0.0f;
+    bool capture_download_pending_ = false;
+    bool stressed_ = false; // smaller capture / slower kicks after slow CPU download
     int pushed_quality_ = -1;
     float pushed_ds_ = -1.0f;
     std::uint32_t pushed_side_ = 0;

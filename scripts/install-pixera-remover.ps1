@@ -195,8 +195,8 @@ try {
         Write-InstallLog "BUILD_STAMP.txt:"
         Get-Content (Join-Path $dest "BUILD_STAMP.txt") | ForEach-Object { Write-InstallLog ("  {0}" -f $_) }
         $stampText = Get-Content (Join-Path $dest "BUILD_STAMP.txt") -Raw
-        if ($stampText -notmatch 'remover-demo-v61') {
-            Write-InstallLog "WARNING: BUILD_STAMP does not contain remover-demo-v61 - wrong package?" "Red"
+        if ($stampText -notmatch 'remover-demo-v62') {
+            Write-InstallLog "WARNING: BUILD_STAMP does not contain remover-demo-v62 - wrong package?" "Red"
         }
     } else {
         Write-InstallLog "WARNING: BUILD_STAMP.txt missing in package" "Yellow"
@@ -211,7 +211,7 @@ try {
     Write-Host "In PIXERA:" -ForegroundColor Green
     Write-Host "  Re-import:"
     Write-Host "    $(Join-Path $dest 'ExtGenesisRemover.dll')"
-    Write-Host "  Stamp must be: remover-demo-v61-live-fps-*"
+    Write-Host "  Stamp must be: remover-demo-v62-live-fps-*"
     Write-Host "  Demo defaults: Vision Effect=Person Matte (RVM), Quality=Fast, Result As=Alpha"
     Write-Host "  Debug Status should show: stamp + map_ms + infer_ms + ep"
     Write-Host "  Matte host auto-launches; log: %TEMP%\GenesisRemoverMatteHost.log"

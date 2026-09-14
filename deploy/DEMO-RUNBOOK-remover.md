@@ -1,8 +1,10 @@
-# GENESIS Remover — Wednesday demo runbook (v61)
+# GENESIS Remover — Wednesday demo runbook (v62)
 
 **Goal:** Person Matte (RVM) cutout on a live camera in PIXERA at usable preview FPS, with PIXERA staff watching.
 
-**Stamp:** `remover-demo-v61-live-fps-20260913`
+**Stamp:** `remover-demo-v62-cpu-capture-20260913`
+
+**v62 fix:** Matte host no longer Maps a shared GPU capture (that froze PIXERA to ~0.3 fps). DLL async-downloads a private RT into IPC; host only runs ORT.
 
 ## Before you leave for the venue
 
@@ -38,7 +40,7 @@ Get-Item assets\matting\rvm_mobilenetv3_fp16.onnx | Select-Object Length
 # or: .\scripts\install-pixera-remover.ps1
 ```
 
-6. Install must print `BUILD_STAMP` with `remover-demo-v61-live-fps-*` and `RVM model OK`.
+6. Install must print `BUILD_STAMP` with `remover-demo-v62-cpu-capture-*` and `RVM model OK`.
 
 ## PIXERA settings (demo defaults)
 
@@ -53,7 +55,7 @@ Get-Item assets\matting\rvm_mobilenetv3_fp16.onnx | Select-Object Length
 
 Leave Debug Status visible — it should read like:
 
-`remover-demo-v61-live-fps-20260913 matte map=…ms infer=…ms ep=DML:N matte=1`
+`remover-demo-v62-cpu-capture-20260913 matte map=…ms infer=…ms ep=DML:N matte=1`
 
 If you see `MISMATCH` → DLL and MatteHost are from different builds; quit PIXERA and reinstall the whole `ExtGenesisRemover` folder.
 
@@ -61,7 +63,7 @@ If you see `MISMATCH` → DLL and MatteHost are from different builds; quit PIXE
 
 **`%TEMP%\ExtGenesisRemover.log`**
 
-- `[remover-demo-v61-live-fps-20260913]` on every line
+- `[remover-demo-v62-cpu-capture-20260913]` on every line
 - `MatteHost launched pid=…`
 - `STATUS … stage=matte … mismatch=0`
 - `gpu_present live+mask … map_ms=…` (map_ms ideally under ~35 under light load)
@@ -69,7 +71,7 @@ If you see `MISMATCH` → DLL and MatteHost are from different builds; quit PIXE
 
 **`%TEMP%\GenesisRemoverMatteHost.log`**
 
-- `start remover-demo-v61-live-fps-20260913`
+- `start remover-demo-v62-cpu-capture-20260913`
 - `RVM model OK bytes=…` (millions, not ~130)
 - `BgRemover ready ep=DML:N` (CPU works but is slower)
 - `matte_ok … map_ms=… infer_ms=… effect=Person Matte`
@@ -86,7 +88,7 @@ If you see `MISMATCH` → DLL and MatteHost are from different builds; quit PIXE
 | Preview freezes hard | ORT must stay out-of-process (do not load ORT in the DLL) |
 | Cyan forever | Video In not linked |
 | `passthrough` forever, host never ready | MatteHost failed to start — check host log |
-| map_ms stuck 40–80+ and preview stutters | Outputs fighting Map; v61 should cooldown / skip-map; reduce outputs or capture load |
+| map_ms stuck 40–80+ and preview stutters | Outputs fighting Map; v62 uses CPU capture (no host GPU Map); if still hitching, reduce capture size / outputs |
 
 ## Quick verify script
 
@@ -98,6 +100,6 @@ If you see `MISMATCH` → DLL and MatteHost are from different builds; quit PIXE
 ## Demo flow (2 minutes)
 
 1. Timeline: ExtGenesisRemover + Live Input → Video In.
-2. Confirm Debug Status stamp = v61 and `matte=1`.
+2. Confirm Debug Status stamp = v62 and `matte=1`.
 3. Person walks in frame → cutout; live camera stays smooth (matte may update a few times/sec).
 4. Optional: flip Result As to Greyscale briefly to show the matte, then back to Alpha.
