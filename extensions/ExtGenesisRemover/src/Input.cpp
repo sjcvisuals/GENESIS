@@ -362,23 +362,25 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
     }
     const bool host_ready = matte_host_ && matte_host_->hostReady();
     const bool mismatch = matte_host_ && matte_host_->stampMismatch();
+    const bool shm = matte_host_ && matte_host_->hostCaptureInShm();
     const float map_ms = matte_host_ ? matte_host_->hostMapMs() : 0.0f;
     const float infer_ms = matte_host_ ? matte_host_->hostInferMs() : 0.0f;
+    const float cycle_ms = matte_host_ ? matte_host_->hostCycleMs() : 0.0f;
     const std::string ep_s = matte_host_ ? matte_host_->hostEp() : std::string("?");
     const char* ep = ep_s.empty() ? "?" : ep_s.c_str();
-    // Keep under ~120 chars so it stays readable in PIXERA property panes.
+    // Keep under ~140 chars so it stays readable in PIXERA property panes.
     const std::string ui =
-        mismatch ? std::format("{} MISMATCH host={} — reinstall DLL+host", kRemoverBuildStamp,
+        mismatch ? std::format("{} MISMATCH host={} - reinstall DLL+host", kRemoverBuildStamp,
                                matte_host_->hostStamp().empty() ? "?" : matte_host_->hostStamp())
-                 : std::format("{} {} map={:.0f}ms infer={:.0f} ep={} matte={}", kRemoverBuildStamp,
-                               dbg.stage ? dbg.stage : "?", map_ms, infer_ms, ep,
-                               matte_live_ ? 1 : 0);
+                 : std::format("{} {} map={:.0f}ms infer={:.0f} ep={} shm={} matte={}",
+                               kRemoverBuildStamp, dbg.stage ? dbg.stage : "?", map_ms, infer_ms, ep,
+                               shm ? 1 : 0, matte_live_ ? 1 : 0);
     if (debug_status_) {
         debug_status_->set_value(ui);
     }
     if (mismatch && (render_ticks_ % 60u) == 1u) {
-        removerLog(std::format("STAMP_MISMATCH dll={} host={} ipc_ver_need={}", kRemoverBuildStamp,
-                               matte_host_->hostStamp(), ::genesis::matte_ipc::kVersion));
+        removerFail(std::format("STAMP_MISMATCH dll={} host={} - quit PIXERA and reinstall package",
+                                kRemoverBuildStamp, matte_host_->hostStamp()));
     }
     if (last_stage_ != (dbg.stage ? dbg.stage : "") || (render_ticks_ % 30u) == 1u) {
         last_stage_ = dbg.stage ? dbg.stage : "";
@@ -387,12 +389,20 @@ void Input::logStatusMaybe(const ::genesis::RemoverFrameDebug& dbg) {
         const std::uint64_t sync_n = d3d_ ? d3d_->syncCallbacks() : 0;
         removerLog(std::format(
             "STATUS stage={} vin={} dl={} nz={} mid=({},{},{},{}) {}x{} matte={} host={} "
-            "ep={} map_ms={:.1f} infer_ms={:.1f} stamp={} mismatch={} luid={:016x} fence={}/{} "
-            "sync={}",
+            "ep={} map_ms={:.1f} infer_ms={:.1f} cycle_ms={:.1f} shm={} stamp={} mismatch={} "
+            "luid={:016x} fence={}/{} sync={}",
             dbg.stage ? dbg.stage : "?", dbg.has_video_in ? 1 : 0, dbg.download_ok ? 1 : 0,
             dbg.nonzero_rgb, dbg.mid_r, dbg.mid_g, dbg.mid_b, dbg.mid_a, dbg.width, dbg.height,
-            dbg.matte_copied ? 1 : 0, host_ready ? 1 : 0, ep, map_ms, infer_ms,
+            dbg.matte_copied ? 1 : 0, host_ready ? 1 : 0, ep, map_ms, infer_ms, cycle_ms, shm ? 1 : 0,
             kRemoverBuildStamp, mismatch ? 1 : 0, adapter_luid_, fence_done, fence_c, sync_n));
+    }
+    // Compact heartbeat for health-check / dump scripts (~2s at 60fps).
+    if ((render_ticks_ % 120u) == 1u) {
+        removerLog(std::format(
+            "HEALTH stamp={} stage={} shm={} mismatch={} matte={} ep={} map_ms={:.1f} "
+            "infer_ms={:.1f} cycle_ms={:.1f} host={} luid={:016x}",
+            kRemoverBuildStamp, dbg.stage ? dbg.stage : "?", shm ? 1 : 0, mismatch ? 1 : 0,
+            matte_live_ ? 1 : 0, ep, map_ms, infer_ms, cycle_ms, host_ready ? 1 : 0, adapter_luid_));
     }
 }
 

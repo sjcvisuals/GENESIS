@@ -184,6 +184,16 @@ try {
     $dll = Get-Item (Join-Path $dest "ExtGenesisRemover.dll")
 
     Write-InstallLog "Installed OK." "Green"
+
+    $health = Join-Path $RepoRoot "scripts\health-check-remover.ps1"
+    if (Test-Path -LiteralPath $health) {
+        Write-InstallLog "Running health-check-remover.ps1 ..." "Cyan"
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $health -InstalledOnly
+        if ($LASTEXITCODE -ne 0) {
+            Write-InstallLog "HEALTH CHECK reported failures - see %TEMP%\ExtGenesisRemover.health.txt" "Yellow"
+        }
+    }
+
     Write-InstallLog ("DLL LastWriteTime: {0}" -f $dll.LastWriteTime)
     Write-InstallLog ("DLL Size:          {0:N0} bytes" -f $dll.Length)
     Write-InstallLog ("MatteHost:         {0}" -f (Join-Path $dest "GenesisRemoverMatteHost.exe"))
@@ -195,8 +205,8 @@ try {
         Write-InstallLog "BUILD_STAMP.txt:"
         Get-Content (Join-Path $dest "BUILD_STAMP.txt") | ForEach-Object { Write-InstallLog ("  {0}" -f $_) }
         $stampText = Get-Content (Join-Path $dest "BUILD_STAMP.txt") -Raw
-        if ($stampText -notmatch 'remover-demo-v62') {
-            Write-InstallLog "WARNING: BUILD_STAMP does not contain remover-demo-v62 - wrong package?" "Red"
+        if ($stampText -notmatch 'remover-demo-v63') {
+            Write-InstallLog "WARNING: BUILD_STAMP does not contain remover-demo-v63 - wrong package?" "Red"
         }
     } else {
         Write-InstallLog "WARNING: BUILD_STAMP.txt missing in package" "Yellow"
@@ -211,7 +221,7 @@ try {
     Write-Host "In PIXERA:" -ForegroundColor Green
     Write-Host "  Re-import:"
     Write-Host "    $(Join-Path $dest 'ExtGenesisRemover.dll')"
-    Write-Host "  Stamp must be: remover-demo-v62-live-fps-*"
+    Write-Host "  Stamp must be: remover-demo-v63-debug-*"
     Write-Host "  Demo defaults: Vision Effect=Person Matte (RVM), Quality=Fast, Result As=Alpha"
     Write-Host "  Debug Status should show: stamp + map_ms + infer_ms + ep"
     Write-Host "  Matte host auto-launches; log: %TEMP%\GenesisRemoverMatteHost.log"

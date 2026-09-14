@@ -35,9 +35,12 @@ void logLine(const std::string& line) {
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::system_clock::now().time_since_epoch())
                         .count();
-    const std::string full = std::to_string(ms) + " [matte-host] " + line;
+    // Stamp every line so dump/health-check greps work on host log too.
+    const std::string full = std::to_string(ms) + " [" +
+                             std::string(genesis::matte_ipc::kBuildStamp) + "] " + line;
     if (g_log) {
-        g_log << full << '\n';
+        g_log << full << '
+';
         g_log.flush();
     }
 }
@@ -328,6 +331,14 @@ int main() {
     genesis::setAssetSearchRoots(roots);
 
     logLine(std::string("start ") + genesis::matte_ipc::kBuildStamp + " " + module_dir.string());
+    {
+        std::error_code ec;
+        const auto host_sz = std::filesystem::file_size(module_dir / "GenesisRemoverMatteHost.exe", ec);
+        logLine(std::string("IDENTITY dir=") + module_dir.string() +
+                " host_bytes=" + std::to_string(ec ? 0ull : static_cast<unsigned long long>(host_sz)) +
+                " ipc_ver=" + std::to_string(genesis::matte_ipc::kVersion) +
+                " capture_path=prefer_shm");
+    }
     {
         const auto vision_dir = module_dir / "assets" / "vision";
         logLine(std::string("vision assets dir=") + vision_dir.string() +
@@ -778,6 +789,12 @@ int main() {
                 " effect=" + genesis::visionEffectLabel(settings.vision_effect) +
                 " cycle_ms=" + std::to_string(cycle_ms) +
                 " matte_fps=" + std::to_string(cycle_fps));
+        logLine("HEALTH stamp=" + std::string(genesis::matte_ipc::kBuildStamp) +
+                " shm=" + std::to_string(capture_in_shm ? 1 : 0) +
+                " map_ms=" + std::to_string(map_ms) +
+                " infer_ms=" + std::to_string(ms) +
+                " cycle_ms=" + std::to_string(cycle_ms) +
+                " ep=" + remover.executionProvider());
     }
     }
 

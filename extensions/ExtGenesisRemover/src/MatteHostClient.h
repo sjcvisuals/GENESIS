@@ -53,6 +53,8 @@ public:
     float hostCycleMs() const;
     float hostInferMs() const;
     float hostMapMs() const;
+    // True when last kick used CPU RGBA IPC (v62+); false = legacy GPU share Map.
+    bool hostCaptureInShm() const;
     // Kill + relaunch host (recover from GPU thrash after outputs).
     bool restartHost(const char* reason);
 

@@ -1,46 +1,43 @@
-# GENESIS Remover — Wednesday demo runbook (v62)
+# GENESIS Remover - demo runbook (v63 debug harness)
 
-**Goal:** Person Matte (RVM) cutout on a live camera in PIXERA at usable preview FPS, with PIXERA staff watching.
+**Goal:** Person Matte (RVM) cutout on a live camera in PIXERA at usable preview FPS.
 
-**Stamp:** `remover-demo-v62-cpu-capture-20260913`
+**Stamp:** `remover-demo-v63-debug-20260914`
 
-**v62 fix:** Matte host no longer Maps a shared GPU capture (that froze PIXERA to ~0.3 fps). DLL async-downloads a private RT into IPC; host only runs ORT.
+**What changed**
+- v62: CPU capture (host no longer Maps shared GPU texture - that froze preview)
+- v63: thorough health-check + HEALTH/FAIL diagnostics so wrong installs are obvious
 
-## Before you leave for the venue
+## Fast path (do this every time)
 
 1. Quit PIXERA completely (Designer + Engine + Manager).
-2. In the repo:
+2. Repo:
 
 ```powershell
 git fetch
-git checkout cursor/remover-demo-ready-7628   # or merge into your demo branch
+git checkout cursor/remover-debug-harness-7628
 git pull
 git lfs install
 git lfs pull
 ```
 
-3. Confirm models are real blobs (not LFS text stubs):
-
-```powershell
-Get-Item assets\matting\rvm_mobilenetv3_fp16.onnx | Select-Object Length
-# Expect ~7+ MB. If ~130 bytes → LFS pointer; stop and fix LFS.
-```
-
-4. Build + package:
+3. Build + install + health check:
 
 ```powershell
 .\BUILD-REMOVER.bat
-# or: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1
+.\INSTALL-PIXERA-REMOVER.bat
+.\HEALTH-CHECK-REMOVER.bat
 ```
 
-5. Install into PIXERA (Run as Administrator):
+4. `HEALTH-CHECK-REMOVER.bat` must show `RESULT pass=N warn=N fail=0` and stamp `remover-demo-v63-debug-*`.
+5. If it fails, open `%TEMP%\ExtGenesisRemover.health.txt` and fix the FAIL lines before touching PIXERA.
+
+## Models must be real blobs
 
 ```powershell
-.\INSTALL-PIXERA-REMOVER.bat
-# or: .\scripts\install-pixera-remover.ps1
+Get-Item assets\matting\rvm_mobilenetv3_fp16.onnx | Select-Object Length
+# Expect ~7+ MB. If ~130 bytes -> LFS pointer; run git lfs pull then rebuild.
 ```
-
-6. Install must print `BUILD_STAMP` with `remover-demo-v62-cpu-capture-*` and `RVM model OK`.
 
 ## PIXERA settings (demo defaults)
 
@@ -51,55 +48,46 @@ Get-Item assets\matting\rvm_mobilenetv3_fp16.onnx | Select-Object Length
 | Result As | **Alpha (key)** |
 | Model File | leave **empty** |
 | Camera Delay | **0** unless you need sync |
-| Adapter LUID | **same GPU as PIXERA preview** (prefer NVIDIA; see host log) |
+| Adapter LUID | **same GPU as PIXERA preview** (prefer NVIDIA) |
 
-Leave Debug Status visible — it should read like:
+Debug Status should look like:
 
-`remover-demo-v62-cpu-capture-20260913 matte map=…ms infer=…ms ep=DML:N matte=1`
+`remover-demo-v63-debug-20260914 matte map=..ms infer=..ms ep=DML:N shm=1 matte=1`
 
-If you see `MISMATCH` → DLL and MatteHost are from different builds; quit PIXERA and reinstall the whole `ExtGenesisRemover` folder.
+- `shm=1` means CPU capture path (good)
+- `MISMATCH` means mixed DLL/host - quit PIXERA and reinstall the whole folder
 
-## Healthy log lines
+## Logs to watch
 
-**`%TEMP%\ExtGenesisRemover.log`**
+| File | What to look for |
+|------|------------------|
+| `%TEMP%\ExtGenesisRemover.log` | `[remover-demo-v63-...]` every line, `HEALTH ... shm=1`, `STATUS ...` |
+| `%TEMP%\GenesisRemoverMatteHost.log` | `start remover-demo-v63-...`, `IDENTITY ...`, `capture_from_shm`, `HEALTH ...` |
+| `%TEMP%\ExtGenesisRemover.FAIL.txt` | Should **not** exist; if present, read it first |
+| `%TEMP%\ExtGenesisRemover.health.txt` | Last health-check report |
 
-- `[remover-demo-v62-cpu-capture-20260913]` on every line
-- `MatteHost launched pid=…`
-- `STATUS … stage=matte … mismatch=0`
-- `gpu_present live+mask … map_ms=…` (map_ms ideally under ~35 under light load)
-- Occasional `matte_cooldown` is OK — live frame keeps last matte
+Dump quickly:
 
-**`%TEMP%\GenesisRemoverMatteHost.log`**
-
-- `start remover-demo-v62-cpu-capture-20260913`
-- `RVM model OK bytes=…` (millions, not ~130)
-- `BgRemover ready ep=DML:N` (CPU works but is slower)
-- `matte_ok … map_ms=… infer_ms=… effect=Person Matte`
-- Optional: `map_skip_reuse` when Map is expensive (intentional)
+```powershell
+.\scripts\dump-remover-log.ps1
+.\scripts\health-check-remover.ps1
+```
 
 ## Unhealthy / stop-and-fix
 
 | Symptom | Meaning |
 |---------|---------|
-| Stamp still v60 / v56 / missing | Wrong DLL path or PIXERA still locking old copy |
-| `STAMP_MISMATCH` | Mixed DLL/host — reinstall package |
-| `RVM model is a Git LFS pointer` | `git lfs pull` then rebuild/install |
-| `Map ONNX is a Git LFS pointer` | Vision model missing; stick to Person Matte for demo |
-| Preview freezes hard | ORT must stay out-of-process (do not load ORT in the DLL) |
+| Debug Status still v61/v62 | Old package still installed - rebuild+reinstall after quit PIXERA |
+| `STAMP_MISMATCH` / FAIL file | Mixed DLL/host - reinstall whole `ExtGenesisRemover` folder |
+| Health check FAIL on RVM size | `git lfs pull` then rebuild/install |
 | Cyan forever | Video In not linked |
-| `passthrough` forever, host never ready | MatteHost failed to start — check host log |
-| map_ms stuck 40–80+ and preview stutters | Outputs fighting Map; v62 uses CPU capture (no host GPU Map); if still hitching, reduce capture size / outputs |
-
-## Quick verify script
-
-```powershell
-.\scripts\dump-remover-log.ps1
-.\scripts\check-pixera-dll.ps1
-```
+| `passthrough` forever | MatteHost failed - read host log |
+| Preview freezes every few seconds | Should be gone on v62+ (`shm=1`). If `shm=0`, wrong build |
+| Build C2065 / parse errors | Pull latest camera-debug branch; do not run half-built package |
 
 ## Demo flow (2 minutes)
 
-1. Timeline: ExtGenesisRemover + Live Input → Video In.
-2. Confirm Debug Status stamp = v62 and `matte=1`.
-3. Person walks in frame → cutout; live camera stays smooth (matte may update a few times/sec).
-4. Optional: flip Result As to Greyscale briefly to show the matte, then back to Alpha.
+1. Timeline: ExtGenesisRemover + Live Input -> Video In.
+2. Confirm Debug Status stamp = **v63** and `shm=1` `matte=1`.
+3. Person walks in frame -> cutout; live camera stays smooth.
+4. Optional: Result As = Greyscale briefly to show matte, then back to Alpha.

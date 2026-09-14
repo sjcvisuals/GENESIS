@@ -305,21 +305,32 @@ Re-run cmake configure (delete build\CMakeCache.txt if the target is missing), t
             throw "ExtGenesisRemover.dll looks too small ($remSize bytes) - build likely incomplete"
         }
 
+        $buildStamp = "remover-demo-v63-debug-20260914"
+        $matteIpc = Join-Path $RepoRoot "extensions\ExtGenesisRemover\src\MatteIpc.h"
+        if (Test-Path -LiteralPath $matteIpc) {
+            $ipcText = Get-Content -LiteralPath $matteIpc -Raw -ErrorAction SilentlyContinue
+            if ($ipcText -match 'kBuildStamp\[\]\s*=\s*"([^"]+)"') {
+                $buildStamp = $Matches[1].Trim()
+            }
+        }
         $stamp = @"
-build=remover-demo-v62-cpu-capture-20260913
+build=$buildStamp
 dll=$remOut\ExtGenesisRemover.dll
 host=$remOut\GenesisRemoverMatteHost.exe
 time=$(Get-Date -Format o)
 size=$remSize
 log=%TEMP%\ExtGenesisRemover.log
 host_log=%TEMP%\GenesisRemoverMatteHost.log
+fail=%TEMP%\ExtGenesisRemover.FAIL.txt
+health=%TEMP%\ExtGenesisRemover.health.txt
 ep=DirectML-out-of-process
 demo=Person Matte (RVM) + Quality Fast + Result As Alpha
 "@
         Set-Content -Path (Join-Path $remOut "BUILD_STAMP.txt") -Value $stamp -Encoding ASCII
-        Write-Host "Wrote BUILD_STAMP.txt (prove PIXERA is using this build)"
+        Write-Host ("Wrote BUILD_STAMP.txt ({0})" -f $buildStamp)
         Write-Host "Timeline diagnostics log: %TEMP%\ExtGenesisRemover.log"
         Write-Host "Matte host log: %TEMP%\GenesisRemoverMatteHost.log"
+        Write-Host "After install: HEALTH-CHECK-REMOVER.bat"
     }
 
     # --- Standalone webcam BG-remover debug (isolates matte from PIXERA) ---
