@@ -31,5 +31,8 @@ if not "%ERR%"=="0" (
 )
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\check-pixera-dll.ps1" -DllPath "%ProgramFiles%\AV Stumpfl\Pixera\build_25-3_INTER_73\data\rxExt\ExtGenesisRemover\ExtGenesisRemover.dll"
+echo.
+echo Running installed health check...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\health-check-remover.ps1" -InstalledOnly
 pause
 exit /b 0

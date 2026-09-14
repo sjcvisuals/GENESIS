@@ -12,5 +12,9 @@ if errorlevel 1 (
   exit /b 1
 )
 echo.
+echo Running package health check...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\health-check-remover.ps1"
+echo.
 echo Next: double-click INSTALL-PIXERA-REMOVER.bat
+echo Then: double-click HEALTH-CHECK-REMOVER.bat
 pause

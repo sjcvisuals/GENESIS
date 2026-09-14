@@ -275,6 +275,13 @@ float MatteHostClient::hostMapMs() const {
     return asHeader(view_)->last_map_ms;
 }
 
+bool MatteHostClient::hostCaptureInShm() const {
+    if (!view_) {
+        return false;
+    }
+    return asHeader(view_)->capture_in_shm != 0;
+}
+
 bool MatteHostClient::restartHost(const char* reason) {
     removerLog(std::format("MatteHostClient restartHost ({})", reason ? reason : "?"));
     if (stop_event_) {

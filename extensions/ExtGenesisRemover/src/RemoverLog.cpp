@@ -51,12 +51,41 @@ std::filesystem::path removerTempLogPath() {
 #endif
 }
 
+std::filesystem::path removerFailPath() {
+#if defined(_WIN32)
+    char temp[MAX_PATH]{};
+    const DWORD n = GetTempPathA(MAX_PATH, temp);
+    if (n == 0 || n >= MAX_PATH) {
+        return {};
+    }
+    return std::filesystem::path(temp) / "ExtGenesisRemover.FAIL.txt";
+#else
+    return std::filesystem::path("/tmp/ExtGenesisRemover.FAIL.txt");
+#endif
+}
+
 void removerLog(const std::string& line) {
     std::lock_guard<std::mutex> lock(g_log_mutex);
     appendToFile(removerTempLogPath(), line);
     const auto module_dir = extensionModuleDirectory();
     if (!module_dir.empty()) {
         appendToFile(module_dir / "remover-init.log", line);
+    }
+}
+
+void removerFail(const std::string& line) {
+    removerLog(std::string("FAIL ") + line);
+    try {
+        const auto path = removerFailPath();
+        if (path.empty()) {
+            return;
+        }
+        std::ofstream out(path, std::ios::trunc);
+        if (!out) {
+            return;
+        }
+        out << kRemoverBuildStamp << '\n' << line << '\n';
+    } catch (...) {
     }
 }
 
