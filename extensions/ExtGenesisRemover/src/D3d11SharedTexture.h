@@ -44,10 +44,14 @@ public:
     // After GPU blit into a private RT (is_target=true), read RGBA8 for matte.
     bool downloadTargetRgba8(std::vector<std::uint8_t>& out_rgba, long* out_hr = nullptr);
     // Non-blocking readback: CopyResource+End(query) now; poll later without stalling render.
-    bool beginAsyncDownload();
+    // do_flush=true submits immediately (needed on Remover's private device). Under PIXERA
+    // output thrash Flush can hang the update thread - callers may pass false temporarily.
+    bool beginAsyncDownload(bool do_flush = true);
     // 0=pending, 1=ready (out filled), -1=idle/failed.
     int pollAsyncDownload(std::vector<std::uint8_t>& out_rgba, long* out_hr = nullptr);
     bool asyncDownloadPending() const { return async_pending_; }
+    // Drop a stuck EVENT query without waiting (output deactivate / GPU thrash recover).
+    void cancelAsyncDownload();
     bool uploadRgba8(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height);
     // Prefer for matte from worker thread results - no staging Map on the PIXERA device.
     bool uploadRgba8UpdateSubresource(const std::uint8_t* rgba, std::uint32_t width,
@@ -66,7 +70,8 @@ public:
 
 private:
     void destroyTexture();
-    bool mapStagingToRgba8(std::vector<std::uint8_t>& out_rgba, long* out_hr);
+    bool mapStagingToRgba8(std::vector<std::uint8_t>& out_rgba, long* out_hr,
+                           bool do_not_wait = false);
 
     ID3D11Device* device_ = nullptr;
     ID3D11DeviceContext* context_ = nullptr;

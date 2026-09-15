@@ -84,6 +84,11 @@ private:
     std::uint32_t capture_ready_w_ = 0;
     std::uint32_t capture_ready_h_ = 0;
     bool stressed_ = false; // smaller capture / slower kicks after slow CPU download
+    // After PIXERA output enable/disable, Flush/GetData can wedge. Recover without
+    // freezing the update thread; keep last good matte on screen.
+    int async_abandon_streak_ = 0;
+    int skip_flush_kicks_remaining_ = 0;
+    std::chrono::steady_clock::time_point last_host_restart_wall_{};
     int pushed_quality_ = -1;
     float pushed_ds_ = -1.0f;
     std::uint32_t pushed_side_ = 0;

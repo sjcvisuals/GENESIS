@@ -303,11 +303,16 @@ void D3d11SharedTexture::logFrameStats(const std::vector<std::uint8_t>& rgba, st
         tr[1], tr[2], bl[0], bl[1], bl[2], br[0], br[1], br[2]));
 }
 
-bool D3d11SharedTexture::mapStagingToRgba8(std::vector<std::uint8_t>& out_rgba, long* out_hr) {
+bool D3d11SharedTexture::mapStagingToRgba8(std::vector<std::uint8_t>& out_rgba, long* out_hr,
+                                           bool do_not_wait) {
     D3D11_MAPPED_SUBRESOURCE mapped{};
-    const HRESULT map_hr = context_->Map(staging_, 0, D3D11_MAP_READ, 0, &mapped);
+    const UINT map_flags = do_not_wait ? D3D11_MAP_FLAG_DO_NOT_WAIT : 0u;
+    const HRESULT map_hr = context_->Map(staging_, 0, D3D11_MAP_READ, map_flags, &mapped);
     if (out_hr) {
         *out_hr = static_cast<long>(map_hr);
+    }
+    if (map_hr == DXGI_ERROR_WAS_STILL_DRAWING) {
+        return false;
     }
     if (FAILED(map_hr) || !mapped.pData) {
         return false;
@@ -423,7 +428,7 @@ bool D3d11SharedTexture::downloadTargetRgba8(std::vector<std::uint8_t>& out_rgba
     return mapStagingToRgba8(out_rgba, out_hr);
 }
 
-bool D3d11SharedTexture::beginAsyncDownload() {
+bool D3d11SharedTexture::beginAsyncDownload(bool do_flush) {
     if (!texture_ || !staging_ || !context_ || !device_ || width_ == 0 || height_ == 0 ||
         !is_target_ || format_ != Format::R8G8B8A8_UNORM || async_pending_) {
         return false;
@@ -440,9 +445,23 @@ bool D3d11SharedTexture::beginAsyncDownload() {
     // Submit only - do not wait. Without Flush, Remover's private device may leave the
     // Copy/End queued for seconds (wall-clock download_ms ~2800) until something else
     // submits. PIXERA Present does not flush this context.
-    context_->Flush();
+    // v63e: after output teardown, Flush can hang the update thread forever - callers may
+    // skip Flush briefly while recovering (download may be slower but preview stays alive).
+    if (do_flush) {
+        context_->Flush();
+    }
     async_pending_ = true;
     return true;
+}
+
+void D3d11SharedTexture::cancelAsyncDownload() {
+    async_pending_ = false;
+    // Recreate the EVENT query next begin - a wedged query after GPU thrash may never
+    // complete GetData, which would permanently block matte kicks.
+    if (async_query_) {
+        async_query_->Release();
+        async_query_ = nullptr;
+    }
 }
 
 int D3d11SharedTexture::pollAsyncDownload(std::vector<std::uint8_t>& out_rgba, long* out_hr) {
@@ -462,7 +481,13 @@ int D3d11SharedTexture::pollAsyncDownload(std::vector<std::uint8_t>& out_rgba, l
         }
         return -1;
     }
-    return mapStagingToRgba8(out_rgba, out_hr) ? 1 : -1;
+    // DO_NOT_WAIT: after output thrash GetData can return S_OK while a blocking Map would
+    // hang the update thread (frozen preview). Fail soft and let kick recover.
+    if (!mapStagingToRgba8(out_rgba, out_hr, /*do_not_wait=*/true)) {
+        cancelAsyncDownload();
+        return -1;
+    }
+    return 1;
 }
 
 bool D3d11SharedTexture::uploadRgba8(const std::uint8_t* rgba, std::uint32_t width,

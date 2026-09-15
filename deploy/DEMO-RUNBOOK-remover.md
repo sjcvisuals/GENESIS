@@ -2,11 +2,12 @@
 
 **Goal:** Person Matte (RVM) cutout on a live camera in PIXERA at usable preview FPS.
 
-**Stamp:** `remover-demo-v63d-live-fps-20260915`
+**Stamp:** `remover-demo-v63e-output-recover-20260915`
 
 **What changed**
 - v62: CPU capture (host no longer Maps shared GPU texture - that froze preview)
 - v63: thorough health-check + HEALTH/FAIL diagnostics so wrong installs are obvious
+- v63e: output recover — abandon stuck async downloads after output toggle, no black clear before masked present (stops flicker), skip Flush briefly + restart matte host after GPU thrash
 
 ## Fast path (do this every time)
 
@@ -15,7 +16,7 @@
 
 ```powershell
 git fetch
-git checkout cursor/remover-debug-harness-7628
+git checkout cursor/remover-output-recover-7628
 git pull
 git lfs install
 git lfs pull
@@ -29,7 +30,7 @@ git lfs pull
 .\HEALTH-CHECK-REMOVER.bat
 ```
 
-4. `HEALTH-CHECK-REMOVER.bat` must show `RESULT pass=N warn=N fail=0` and stamp `remover-demo-v63-debug-*`.
+4. `HEALTH-CHECK-REMOVER.bat` must show `RESULT pass=N warn=N fail=0` and stamp `remover-demo-v63e-output-recover-*`.
 5. If it fails, open `%TEMP%\ExtGenesisRemover.health.txt` and fix the FAIL lines before touching PIXERA.
 
 ## Models must be real blobs
@@ -52,7 +53,7 @@ Get-Item assets\matting\rvm_mobilenetv3_fp16.onnx | Select-Object Length
 
 Debug Status should look like:
 
-`remover-demo-v63d-live-fps-20260915 matte map=..ms infer=..ms ep=DML:N shm=1 matte=1`
+`remover-demo-v63e-output-recover-20260915 matte map=..ms infer=..ms ep=DML:N shm=1 matte=1`
 
 - `shm=1` means CPU capture path (good)
 - `MISMATCH` means mixed DLL/host - quit PIXERA and reinstall the whole folder
@@ -83,11 +84,22 @@ Dump quickly:
 | Cyan forever | Video In not linked |
 | `passthrough` forever | MatteHost failed - read host log |
 | Preview freezes every few seconds | Should be gone on v62+ (`shm=1`). If `shm=0`, wrong build |
-| Build C2065 / parse errors | Pull latest camera-debug branch; do not run half-built package |
+| Matte flickers on real output (preview OK) | Need v63e+ (no clear-before-mask). Rebuild+reinstall |
+| Preview freezes after disabling output | Need v63e+ (async abandon + host restart). Check log for `ABANDON` / `restartHost` |
+| Build C2065 / parse errors | Pull latest output-recover branch; do not run half-built package |
+
+## Real output (not just preview)
+
+1. Same timeline as preview: ExtGenesisRemover + Live Input → Video In, Person Matte, Result As = Alpha.
+2. Screens / Outputs: assign that layer to the physical / NDI output.
+3. Put a plate under Remover so alpha reads clearly.
+4. Toggle the output off/on once — preview must keep moving; Debug Status must stay on **v63e** with `shm=1 matte=1`.
+5. If preview dies after toggle: dump logs (`.\scripts\dump-remover-log.ps1`) and look for `ABANDON` / `restartHost`.
 
 ## Demo flow (2 minutes)
 
 1. Timeline: ExtGenesisRemover + Live Input -> Video In.
-2. Confirm Debug Status stamp = **v63** and `shm=1` `matte=1`.
+2. Confirm Debug Status stamp = **v63e** and `shm=1` `matte=1`.
 3. Person walks in frame -> cutout; live camera stays smooth.
-4. Optional: Result As = Greyscale briefly to show matte, then back to Alpha.
+4. Route to a real output; cutout should stay stable (no flicker). Disable output — preview must recover.
+5. Optional: Result As = Greyscale briefly to show matte, then back to Alpha.
