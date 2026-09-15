@@ -169,14 +169,16 @@ if (-not $SkipHostSmoke) {
     Add-Warn "SkipHostSmoke set"
 }
 
-Write-Step "--- Package health-check ---"
+Write-Step "--- Package health-check (out/ only; install checked separately) ---"
 $health = Join-Path $PSScriptRoot "health-check-remover.ps1"
 if (-not (Test-Path -LiteralPath $health)) {
     Add-Fail "scripts/health-check-remover.ps1 missing"
 } else {
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $health -PackageDir $pkg -PixeraRoot $PixeraRoot
-    if ($LASTEXITCODE -ne 0) { Add-Fail "health-check-remover.ps1 reported failures" }
-    else { Add-Pass "health-check-remover.ps1 pass/warn only" }
+    # PackageOnly: do not fail PREFLIGHT because PIXERA still has an older install.
+    # That is the install step's job after this gate passes.
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $health -PackageDir $pkg -PixeraRoot $PixeraRoot -PackageOnly
+    if ($LASTEXITCODE -ne 0) { Add-Fail "health-check-remover.ps1 reported package failures" }
+    else { Add-Pass "package health-check pass/warn only (out/)" }
 }
 
 $summary = "PREFLIGHT RESULT pass={0} warn={1} fail={2} stamp={3}" -f $script:Pass, $script:Warn, $script:Fail, $expectedStamp
@@ -186,10 +188,10 @@ Write-Host ""
 if ($script:Fail -gt 0) {
     Write-Host $summary -ForegroundColor Red
     Write-Host ("Report: {0}" -f $ReportPath)
-    Write-Host "Fix FAIL lines before INSTALL-PIXERA-REMOVER.bat / PIXERA."
+    Write-Host "Package/smoke FAILED - fix those before INSTALL-PIXERA-REMOVER.bat."
     exit 1
 }
 Write-Host $summary -ForegroundColor Green
 Write-Host ("Report: {0}" -f $ReportPath)
-Write-Host "Safe next step: INSTALL-PIXERA-REMOVER.bat (quit PIXERA first)."
+Write-Host "Package is good. Next: quit PIXERA -> INSTALL-PIXERA-REMOVER.bat -> HEALTH-CHECK-REMOVER.bat"
 exit 0

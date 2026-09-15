@@ -8,10 +8,12 @@ set ERR=%ERRORLEVEL%
 echo.
 echo Report: %TEMP%\ExtGenesisRemover.preflight.txt
 if not "%ERR%"=="0" (
-  echo PREFLIGHT FAILED - do not install into PIXERA yet.
+  echo PREFLIGHT FAILED - package/smoke not ready. Fix report, then retry.
   pause
   exit /b %ERR%
 )
-echo PREFLIGHT PASSED. Next: INSTALL-PIXERA-REMOVER.bat (quit PIXERA first).
+echo PREFLIGHT PASSED - package is ready.
+echo Next: quit PIXERA, then INSTALL-PIXERA-REMOVER.bat
+echo Then: HEALTH-CHECK-REMOVER.bat (confirms installed stamp is v63b)
 pause
 exit /b 0

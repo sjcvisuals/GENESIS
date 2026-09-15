@@ -11,6 +11,7 @@ param(
     [string]$PixeraRoot = "C:\Program Files\AV Stumpfl\Pixera\build_25-3_INTER_73",
     [string]$PackageDir = "",
     [switch]$InstalledOnly,
+    [switch]$PackageOnly,
     [switch]$RequireUnlocked,
     [switch]$Quiet
 )
@@ -203,7 +204,12 @@ function Test-Logs {
         if ($joined -match [regex]::Escape($ExpectedStampPrefix)) {
             Add-Pass ("{0} contains {1}" -f $pair.Name, $ExpectedStampPrefix)
         } elseif ($joined -match 'remover-demo-v6[012]') {
-            Add-Fail ("{0} still shows old stamp (v60/v61/v62) - reinstall v63 package" -f $pair.Name)
+            # Stale logs from an older PIXERA install are expected until INSTALL + reload.
+            if ($PackageOnly) {
+                Add-Warn ("{0} still shows old stamp (v60/v61/v62) - expected until INSTALL-PIXERA-REMOVER.bat + reload" -f $pair.Name)
+            } else {
+                Add-Fail ("{0} still shows old stamp (v60/v61/v62) - reinstall v63 package" -f $pair.Name)
+            }
         } else {
             Add-Warn ("{0} has no recognisable stamp in last 120 lines" -f $pair.Name)
         }
@@ -254,20 +260,26 @@ Write-Host ""
 Write-Report ("Expected stamp = {0}" -f $ExpectedStamp) "INFO"
 Test-PixeraRunning
 
-if (-not $InstalledOnly) {
+if ($PackageOnly) {
+    Test-Package $PackageDir "out"
+} elseif ($InstalledOnly) {
+    Test-Package $InstalledDir "installed"
+} else {
     Test-Package $PackageDir "out"
     Test-Package $InstalledDir "installed" -MissingIsWarn
-} else {
-    Test-Package $InstalledDir "installed"
+    Test-PackageVsInstalled
 }
-Test-PackageVsInstalled
 Test-Logs
 
 Write-Host ""
 $summary = "RESULT pass={0} warn={1} fail={2}" -f $script:PassCount, $script:WarnCount, $script:FailCount
 if ($script:FailCount -gt 0) {
     Write-Host $summary -ForegroundColor Red
-    Write-Host "Next: quit PIXERA -> git pull -> BUILD-REMOVER.bat -> INSTALL-PIXERA-REMOVER.bat -> re-run this." -ForegroundColor Yellow
+    if ($PackageOnly) {
+        Write-Host "Package health FAILED - fix out\ExtGenesisRemover before install." -ForegroundColor Yellow
+    } else {
+        Write-Host "Next: quit PIXERA -> BUILD-REMOVER.bat -> INSTALL-PIXERA-REMOVER.bat -> re-run this." -ForegroundColor Yellow
+    }
 } elseif ($script:WarnCount -gt 0) {
     Write-Host $summary -ForegroundColor Yellow
 } else {
