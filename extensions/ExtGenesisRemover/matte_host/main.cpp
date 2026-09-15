@@ -311,11 +311,94 @@ struct CaptureState {
     }
 };
 
+
+std::vector<std::uint8_t> makeSmokePerson(std::uint32_t w, std::uint32_t h) {
+    std::vector<std::uint8_t> rgba(static_cast<std::size_t>(w) * h * 4u, 0);
+    for (std::uint32_t y = 0; y < h; ++y) {
+        for (std::uint32_t x = 0; x < w; ++x) {
+            const std::size_t i = (static_cast<std::size_t>(y) * w + x) * 4u;
+            rgba[i + 0] = 20;
+            rgba[i + 1] = 180;
+            rgba[i + 2] = 40;
+            rgba[i + 3] = 255;
+            const float cx = (static_cast<float>(x) + 0.5f) / static_cast<float>(w) - 0.5f;
+            const float cy = (static_cast<float>(y) + 0.5f) / static_cast<float>(h) - 0.5f;
+            if (cx * cx * 2.0f + cy * cy * 1.3f < 0.05f) {
+                rgba[i + 0] = 200;
+                rgba[i + 1] = 150;
+                rgba[i + 2] = 120;
+            }
+        }
+    }
+    return rgba;
+}
+
+// Headless host gate: load RVM + one synthetic frame. No PIXERA.
+int runHostSmoke(const std::filesystem::path& module_dir) {
+    logLine(std::string("SMOKE begin ") + genesis::matte_ipc::kBuildStamp);
+    const auto rvm = module_dir / "assets" / "matting" / "rvm_mobilenetv3_fp16.onnx";
+    if (!std::filesystem::exists(rvm)) {
+        logLine("SMOKE FAIL: RVM missing " + rvm.string());
+        return 3;
+    }
+    if (genesis::isGitLfsPointerFile(rvm)) {
+        logLine("SMOKE FAIL: RVM is LFS pointer");
+        return 3;
+    }
+
+    genesis::BgRemover remover;
+    genesis::BgRemoverSettings settings;
+    settings.backend = genesis::BgRemoverBackend::Auto;
+    settings.quality = genesis::BgRemoverQuality::Fast;
+    settings.vision_effect = genesis::VisionEffect::PersonMatteRvm;
+    settings.result_as = genesis::VisionResultAs::Alpha;
+    settings.prefer_cpu_ep = true;
+    settings.dml_device_id = -1;
+    settings.adapter_luid = 0;
+    settings.temporal_alpha = 0.0f;
+    settings.rvm_downsample = 0.5f;
+    remover.setSettings(settings);
+
+    std::string status;
+    if (!remover.initialize(&status) || !remover.isRvmReady()) {
+        logLine("SMOKE FAIL: BgRemover init: " + status);
+        return 2;
+    }
+
+    constexpr std::uint32_t kW = 160;
+    constexpr std::uint32_t kH = 160;
+    const auto in = makeSmokePerson(kW, kH);
+    std::vector<std::uint8_t> out = in;
+    if (!remover.process(in.data(), out.data(), kW, kH)) {
+        logLine("SMOKE FAIL: process returned false");
+        return 2;
+    }
+    const std::size_t center_a = ((kH / 2u) * kW + (kW / 2u)) * 4u + 3u;
+    const std::size_t corner_a = 3u;
+    logLine("SMOKE ok ep=" + remover.executionProvider() +
+            " center_a=" + std::to_string(out[center_a]) +
+            " corner_a=" + std::to_string(out[corner_a]));
+    if (out[center_a] == 0 && out[corner_a] == 255) {
+        logLine("SMOKE FAIL: empty/inverted matte");
+        return 2;
+    }
+    return 0;
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    bool smoke = false;
+    for (int i = 1; i < argc; ++i) {
+        if (argv[i] && std::string(argv[i]) == "--smoke") {
+            smoke = true;
+        }
+    }
     // Belt-and-suspenders with DLL CREATE_NO_WINDOW: never leave a blank console up.
-    FreeConsole();
+    // Keep console for --smoke so PREFLIGHT can capture output.
+    if (!smoke) {
+        FreeConsole();
+    }
 
     wchar_t temp[MAX_PATH]{};
     GetTempPathW(MAX_PATH, temp);
@@ -355,6 +438,12 @@ int main() {
         std::error_code ec;
         const auto sz = std::filesystem::file_size(rvm, ec);
         logLine("RVM model OK bytes=" + std::to_string(ec ? 0ull : static_cast<unsigned long long>(sz)));
+    }
+
+    if (smoke) {
+        const int rc = runHostSmoke(module_dir);
+        logLine(rc == 0 ? "SMOKE PASS" : "SMOKE FAIL");
+        return rc;
     }
 
     HANDLE mapping =

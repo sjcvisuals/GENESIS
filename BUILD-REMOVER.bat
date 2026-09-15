@@ -1,20 +1,23 @@
 @echo off
-REM ============================================================
-REM  GENESIS - build ExtGenesisRemover only (Release) + sync out\
-REM  Double-click this. Bypasses PowerShell execution policy.
-REM ============================================================
+REM Build ExtGenesisRemover then run PREFLIGHT (headless gates before PIXERA).
 cd /d "%~dp0"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\build.ps1" -RemoverOnly
 if errorlevel 1 (
-  echo.
   echo Remover build failed. See build\last-build.log
   pause
   exit /b 1
 )
 echo.
-echo Running package health check...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\health-check-remover.ps1"
+echo Running PREFLIGHT (skip rebuild)...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\preflight-remover.ps1" -SkipBuild
+set ERR=%errorlevel%
+if not "%ERR%"=="0" (
+  echo PREFLIGHT FAILED - do not install into PIXERA yet.
+  echo Report: %TEMP%\ExtGenesisRemover.preflight.txt
+  pause
+  exit /b %ERR%
+)
 echo.
-echo Next: double-click INSTALL-PIXERA-REMOVER.bat
-echo Then: double-click HEALTH-CHECK-REMOVER.bat
+echo PREFLIGHT PASSED. Next: INSTALL-PIXERA-REMOVER.bat (quit PIXERA first).
 pause
+exit /b 0

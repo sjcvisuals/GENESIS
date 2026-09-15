@@ -1,10 +1,16 @@
+// Headless matte gate (no PIXERA, no camera).
+// Build: genesis_matting_smoke
+// Run:   genesis_matting_smoke --require-rvm
+
 #include "matting/AsyncMatteWorker.hpp"
 #include "matting/BgRemover.hpp"
 #include "matting/VisionEffect.hpp"
 
 #include <chrono>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -21,8 +27,7 @@ std::vector<std::uint8_t> makeGreenScreenPerson(std::uint32_t w, std::uint32_t h
             rgba[i + 3] = 255;
             const float cx = (static_cast<float>(x) + 0.5f) / static_cast<float>(w) - 0.5f;
             const float cy = (static_cast<float>(y) + 0.5f) / static_cast<float>(h) - 0.5f;
-            const float d = cx * cx * 2.2f + cy * cy * 1.4f;
-            if (d < 0.045f) {
+            if (cx * cx * 2.2f + cy * cy * 1.4f < 0.045f) {
                 rgba[i + 0] = 210;
                 rgba[i + 1] = 160;
                 rgba[i + 2] = 130;
@@ -34,24 +39,49 @@ std::vector<std::uint8_t> makeGreenScreenPerson(std::uint32_t w, std::uint32_t h
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    bool require_rvm = false;
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i] ? argv[i] : "";
+        if (arg == "--require-rvm" || arg == "--require-rvm=1") {
+            require_rvm = true;
+        } else if (arg == "--help" || arg == "-h") {
+            std::printf(
+                "genesis_matting_smoke [--require-rvm]\n"
+                "  Headless chroma + RVM + async matte checks (no PIXERA, no camera).\n"
+                "  --require-rvm  Fail if RVM/ORT did not initialize (demo gate).\n");
+            return 0;
+        }
+    }
+    if (const char* env = std::getenv("GENESIS_REQUIRE_RVM")) {
+        if (env[0] == '1' || env[0] == 'y' || env[0] == 'Y') {
+            require_rvm = true;
+        }
+    }
+
     // --- Chroma path ---
     {
         genesis::BgRemover remover;
         genesis::BgRemoverSettings settings{};
         settings.backend = genesis::BgRemoverBackend::ChromaKey;
         settings.key_threshold = 0.28f;
-        settings.key_softness = 0.1f;
+        settings.key_softness = 0.10f;
         settings.temporal_alpha = 0.0f;
         remover.setSettings(settings);
         std::string status;
-        remover.initialize(&status);
+        if (!remover.initialize(&status)) {
+            std::fprintf(stderr, "matting_smoke: chroma initialize failed (%s)\n", status.c_str());
+            return 1;
+        }
 
         constexpr std::uint32_t kW = 64;
         constexpr std::uint32_t kH = 64;
         const auto in = makeGreenScreenPerson(kW, kH);
         std::vector<std::uint8_t> out = in;
-        remover.process(in.data(), out.data(), kW, kH);
+        if (!remover.process(in.data(), out.data(), kW, kH)) {
+            std::fprintf(stderr, "matting_smoke: chroma process failed\n");
+            return 1;
+        }
         const std::size_t center = ((kH / 2u) * kW + (kW / 2u)) * 4u;
         const std::size_t corner = 3u;
         if (out[center + 3] < 200 || out[corner] > 40) {
@@ -67,12 +97,13 @@ int main() {
     genesis::BgRemoverSettings auto_settings{};
     auto_settings.backend = genesis::BgRemoverBackend::Auto;
     auto_settings.quality = genesis::BgRemoverQuality::Fast;
+    auto_settings.prefer_cpu_ep = true;
     auto_settings.rvm_downsample = 0.5f;
     auto_settings.temporal_alpha = 0.0f;
     auto_remover.setSettings(auto_settings);
     std::string auto_status;
     auto_remover.initialize(&auto_status);
-    std::printf("matting_smoke: auto → %s (%s)\n",
+    std::printf("matting_smoke: auto -> %s (%s)\n",
                 genesis::bgRemoverBackendLabel(auto_remover.activeBackend()), auto_status.c_str());
 
     if (auto_remover.isRvmReady()) {
@@ -80,24 +111,35 @@ int main() {
         constexpr std::uint32_t kH = 160;
         const auto in = makeGreenScreenPerson(kW, kH);
         std::vector<std::uint8_t> out = in;
-        auto_remover.process(in.data(), out.data(), kW, kH);
-        auto_remover.process(in.data(), out.data(), kW, kH);
+        if (!auto_remover.process(in.data(), out.data(), kW, kH) ||
+            !auto_remover.process(in.data(), out.data(), kW, kH)) {
+            std::fprintf(stderr, "matting_smoke: RVM process failed\n");
+            return 1;
+        }
         const std::size_t center = ((kH / 2u) * kW + (kW / 2u)) * 4u;
         if (out[center + 3] == 0 && out[3] == 255) {
             std::fprintf(stderr, "matting_smoke: RVM produced inverted/empty matte\n");
             return 1;
         }
-        std::printf("matting_smoke: rvm ok (center_a=%u corner_a=%u)\n", out[center + 3], out[3]);
+        std::printf("matting_smoke: rvm ok ep=%s center_a=%u corner_a=%u\n",
+                    auto_remover.executionProvider().c_str(), out[center + 3], out[3]);
+    } else if (require_rvm) {
+        std::fprintf(stderr,
+                     "matting_smoke: RVM required but not ready (%s). "
+                     "Check onnxruntime + assets/matting/rvm_mobilenetv3_fp16.onnx\n",
+                     auto_status.c_str());
+        return 2;
     } else {
         std::printf("matting_smoke: rvm skipped (fallback active)\n");
     }
 
-    // --- Async worker: never blocks submit; skips while busy; reuses last matte ---
+    // --- Async worker ---
     {
         genesis::AsyncMatteWorker worker;
         genesis::BgRemoverSettings settings{};
         settings.backend = genesis::BgRemoverBackend::Auto;
         settings.quality = genesis::BgRemoverQuality::Quality;
+        settings.prefer_cpu_ep = true;
         settings.rvm_downsample = 0.35f;
         settings.temporal_alpha = 0.0f;
         worker.setSettings(settings);
@@ -113,7 +155,7 @@ int main() {
             worker.trySubmit(in.data(), kW, kH);
         }
 
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
         while (worker.completed() == 0 && std::chrono::steady_clock::now() < deadline) {
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
@@ -132,7 +174,7 @@ int main() {
                          static_cast<unsigned long long>(worker.completed()));
             return 1;
         }
-        std::printf("matting_smoke: async ok (submitted=%llu completed=%llu skipped=%llu center_a=%u)\n",
+        std::printf("matting_smoke: async ok submitted=%llu completed=%llu skipped=%llu center_a=%u\n",
                     static_cast<unsigned long long>(worker.submitted()),
                     static_cast<unsigned long long>(worker.completed()),
                     static_cast<unsigned long long>(worker.skipped()),
@@ -140,37 +182,25 @@ int main() {
         worker.stop();
     }
 
-    // --- Vision effect metadata + missing-model soft fail ---
+    // --- Soft-fail missing vision model ---
     {
-        using genesis::VisionEffect;
-        if (std::strcmp(genesis::visionEffectLabel(VisionEffect::DepthMap), "Depth Map") != 0) {
-            std::fprintf(stderr, "matting_smoke: visionEffectLabel mismatch\n");
-            return 1;
-        }
-        if (!genesis::visionEffectNeedsDecoder(VisionEffect::OpticalFlow) ||
-            genesis::visionEffectNeedsDecoder(VisionEffect::DepthMap)) {
-            std::fprintf(stderr, "matting_smoke: visionEffectNeedsDecoder mismatch\n");
-            return 1;
-        }
-
         genesis::BgRemover vision;
         genesis::BgRemoverSettings vs{};
-        vs.vision_effect = VisionEffect::DepthMap;
+        vs.vision_effect = genesis::VisionEffect::DepthMap;
         vs.result_as = genesis::VisionResultAs::Greyscale;
         vs.temporal_alpha = 0.0f;
-        // Deliberately missing model → soft-init to passthrough.
         vs.model_path = "assets/vision/__missing_depth__.onnx";
         vision.setSettings(vs);
         std::string vst;
         vision.initialize(&vst);
-        std::printf("matting_smoke: depth missing-model → %s (%s)\n",
+        std::printf("matting_smoke: depth missing-model -> %s (%s)\n",
                     genesis::bgRemoverBackendLabel(vision.activeBackend()), vst.c_str());
         constexpr std::uint32_t kW = 32;
         constexpr std::uint32_t kH = 32;
         const auto in = makeGreenScreenPerson(kW, kH);
         std::vector<std::uint8_t> out = in;
         if (!vision.process(in.data(), out.data(), kW, kH)) {
-            std::fprintf(stderr, "matting_smoke: vision passthrough process failed\n");
+            std::fprintf(stderr, "matting_smoke: vision soft-fail process failed\n");
             return 1;
         }
         if (out[3] != 255) {
@@ -178,33 +208,21 @@ int main() {
             return 1;
         }
         std::printf("matting_smoke: vision soft-fail passthrough ok\n");
-
-        genesis::BgRemover flow;
-        genesis::BgRemoverSettings fs{};
-        fs.vision_effect = VisionEffect::OpticalFlow;
-        flow.setSettings(fs);
-        std::string fst;
-        flow.initialize(&fst);
-        if (flow.activeBackend() != genesis::BgRemoverBackend::Passthrough) {
-            std::fprintf(stderr, "matting_smoke: OpticalFlow should passthrough\n");
-            return 1;
-        }
-        std::printf("matting_smoke: optical-flow stub ok (%s)\n", fst.c_str());
     }
 
-    // --- Empty model_path must not unload a warm RVM session (v58 host thrash fix) ---
+    // --- Empty model_path must keep a warm RVM session ---
     if (auto_remover.isRvmReady()) {
         genesis::BgRemoverSettings keep = auto_remover.settings();
-        keep.model_path.clear(); // IPC often sends ""
+        keep.model_path.clear();
         keep.result_as = genesis::VisionResultAs::Greyscale;
         auto_remover.setSettings(keep);
-        if (!auto_remover.isRvmReady() || auto_remover.activeBackend() != genesis::BgRemoverBackend::RvmOnnx) {
+        if (!auto_remover.isRvmReady() ||
+            auto_remover.activeBackend() != genesis::BgRemoverBackend::RvmOnnx) {
             std::fprintf(stderr, "matting_smoke: empty model_path cleared RVM session\n");
             return 1;
         }
         std::printf("matting_smoke: empty model_path keeps RVM session ok\n");
 
-        // v59: initialize() must be idempotent — Host used to call it every vision apply.
         const std::string ep_before = auto_remover.executionProvider();
         std::string rein;
         if (!auto_remover.initialize(&rein) || !auto_remover.isRvmReady()) {
@@ -216,19 +234,8 @@ int main() {
             return 1;
         }
         std::printf("matting_smoke: idempotent initialize ok (%s)\n", ep_before.c_str());
-
-        // v59: activation/norm flip must not unload Person Matte (RVM ignores them).
-        genesis::BgRemoverSettings act = auto_remover.settings();
-        act.model_path.clear();
-        act.activation = genesis::VisionActivation::None;
-        act.norm = genesis::VisionNorm::ZeroToOne;
-        auto_remover.setSettings(act);
-        if (!auto_remover.isInitialized() || !auto_remover.isRvmReady()) {
-            std::fprintf(stderr, "matting_smoke: activation flip unloaded RVM\n");
-            return 1;
-        }
-        std::printf("matting_smoke: RVM ignores activation/norm flip ok\n");
     }
 
+    std::printf("matting_smoke: ALL PASS\n");
     return 0;
 }

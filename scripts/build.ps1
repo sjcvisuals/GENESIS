@@ -259,6 +259,11 @@ Re-run cmake configure (delete build\CMakeCache.txt if the target is missing), t
         }
         Write-Host "Matte host built: $matteHost"
         Copy-Item -Path $matteHost -Destination (Join-Path $remOut "GenesisRemoverMatteHost.exe") -Force
+        $smokeExe = Resolve-BuiltExe "genesis_matting_smoke.exe" $PixeraConfig
+        if ($smokeExe) {
+            Copy-Item -Path $smokeExe -Destination (Join-Path $remOut "genesis_matting_smoke.exe") -Force
+        }
+
         Sync-Directory (Join-Path $assetsSrc "matting") (Join-Path $remOut "assets\matting")
         Sync-Directory (Join-Path $assetsSrc "vision") (Join-Path $remOut "assets\vision")
         Copy-Item -Path (Join-Path $RepoRoot "deploy\GenesisRemover.manifest.json") `
@@ -419,7 +424,7 @@ if ($CameraDebugOnly) {
     # Release preferred: matches Remover CRT + ships next to onnxruntime.dll in out\.
     $pixeraTargets = @("genesis_remover_camera_debug")
 } elseif ($RemoverOnly) {
-    $pixeraTargets = @("ExtGenesisRemover", "GenesisRemoverMatteHost", "genesis_remover_camera_debug")
+    $pixeraTargets = @("ExtGenesisRemover", "GenesisRemoverMatteHost", "genesis_matting_smoke", "genesis_remover_camera_debug")
 } elseif ($PixeraOnly) {
     $pixeraTargets = @("ExtGenesis", "ExtGenesisRemover", "GenesisRemoverMatteHost", "genesis_remover_camera_debug")
 } elseif ($EditorOnly) {
