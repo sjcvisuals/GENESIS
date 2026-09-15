@@ -17,7 +17,7 @@
 
 ```powershell
 git fetch
-git checkout cursor/remover-output-recover-7628
+git checkout cursor/remover-host-stable-7628
 git pull
 git lfs install
 git lfs pull
