@@ -7,6 +7,7 @@
 
 #include <Windows.h>
 
+#include <atomic>
 #include <cstring>
 #include <filesystem>
 #include <format>
@@ -19,18 +20,37 @@ namespace {
     return static_cast<::genesis::matte_ipc::Header*>(view);
 }
 
+// PIXERA often destroys/recreates Input streams when toggling outputs. Each stream owns a
+// MatteHostClient. If every dtor signals stop + waits, we kill the OOP host and block the
+// UI thread (~2s) while the next Input respawns ORT/DML (~15s spawn storm). Refcount so only
+// the last client stops the host, and never wait long on the PIXERA thread.
+std::atomic<int> g_matte_host_clients{0};
+
 } // namespace
 
-MatteHostClient::MatteHostClient() = default;
+MatteHostClient::MatteHostClient() {
+    g_matte_host_clients.fetch_add(1, std::memory_order_acq_rel);
+}
 
 MatteHostClient::~MatteHostClient() {
-    if (stop_event_) {
-        SetEvent(static_cast<HANDLE>(stop_event_));
-    }
-    if (host_process_) {
-        WaitForSingleObject(static_cast<HANDLE>(host_process_), 2000);
-        CloseHandle(static_cast<HANDLE>(host_process_));
-        host_process_ = nullptr;
+    const int left = g_matte_host_clients.fetch_sub(1, std::memory_order_acq_rel) - 1;
+    if (left <= 0) {
+        // Last client in this process - ask host to exit, but do NOT block the UI thread.
+        if (stop_event_) {
+            SetEvent(static_cast<HANDLE>(stop_event_));
+        }
+        if (host_process_) {
+            WaitForSingleObject(static_cast<HANDLE>(host_process_), 50);
+            CloseHandle(static_cast<HANDLE>(host_process_));
+            host_process_ = nullptr;
+        }
+    } else {
+        // Sibling / next Input still needs the host - leave it running.
+        if (host_process_) {
+            CloseHandle(static_cast<HANDLE>(host_process_));
+            host_process_ = nullptr;
+        }
+        removerLog(std::format("MatteHostClient dtor leave-host-running clients_left={}", left));
     }
     closeIpc();
 }
@@ -111,6 +131,32 @@ bool MatteHostClient::openIpc() {
     return true;
 }
 
+bool MatteHostClient::adoptRunningHost() {
+    if (!view_) {
+        return false;
+    }
+    const auto* h = asHeader(view_);
+    if (h->host_ready == 0 || h->host_pid == 0) {
+        return false;
+    }
+    HANDLE proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE | PROCESS_DUP_HANDLE,
+                              FALSE, static_cast<DWORD>(h->host_pid));
+    if (!proc) {
+        return false;
+    }
+    DWORD code = 0;
+    if (!GetExitCodeProcess(proc, &code) || code != STILL_ACTIVE) {
+        CloseHandle(proc);
+        return false;
+    }
+    if (host_process_) {
+        CloseHandle(static_cast<HANDLE>(host_process_));
+    }
+    host_process_ = proc;
+    removerLog(std::format("MatteHost adopted live pid={}", h->host_pid));
+    return true;
+}
+
 bool MatteHostClient::launchHost() {
     if (host_process_) {
         DWORD code = STILL_ACTIVE;
@@ -121,11 +167,34 @@ bool MatteHostClient::launchHost() {
         host_process_ = nullptr;
     }
 
+    // Prefer an already-running host published via IPC (survives Input recreate on output toggle).
+    if (adoptRunningHost()) {
+        return true;
+    }
+
+    // Rate-limit CreateProcess - ORT/DML init is ~250-300ms; spawning every tick causes the
+    // ~15s GUI hang when PIXERA toggles outputs.
+    constexpr std::uint32_t kMinLaunchGapMs = 2500;
+    const std::uint32_t now = GetTickCount();
+    if (last_launch_tick_ms_ != 0 && (now - last_launch_tick_ms_) < kMinLaunchGapMs) {
+        return true; // warm-up in progress; do not spawn another
+    }
+
     const std::filesystem::path dir = extensionModuleDirectory();
     const std::filesystem::path exe = dir / "GenesisRemoverMatteHost.exe";
     if (!std::filesystem::exists(exe)) {
         removerLog(std::format("MatteHost missing: {}", exe.string()));
         return false;
+    }
+
+    // Clear stop so a previous Input dtor does not immediately kill the new host.
+    if (stop_event_) {
+        ResetEvent(static_cast<HANDLE>(stop_event_));
+    }
+    if (view_) {
+        auto* h = asHeader(view_);
+        h->host_ready = 0;
+        h->host_pid = 0;
     }
 
     std::wstring cmd = L"\"" + exe.wstring() + L"\"";
@@ -143,11 +212,12 @@ bool MatteHostClient::launchHost() {
     }
     CloseHandle(pi.hThread);
     host_process_ = pi.hProcess;
+    last_launch_tick_ms_ = now;
     removerLog(std::format("MatteHost launched pid={}", pi.dwProcessId));
     return true;
 }
 
-bool MatteHostClient::ensureStarted(std::uint64_t adapter_luid) {
+bool MatteHostClient::ensureStartedbool MatteHostClient::ensureStarted(std::uint64_t adapter_luid) {
     adapter_luid_ = adapter_luid;
     if (!openIpc()) {
         return false;
@@ -284,6 +354,13 @@ bool MatteHostClient::hostCaptureInShm() const {
 
 bool MatteHostClient::restartHost(const char* reason) {
     removerLog(std::format("MatteHostClient restartHost ({})", reason ? reason : "?"));
+    constexpr std::uint32_t kMinRestartGapMs = 8000;
+    const std::uint32_t now = GetTickCount();
+    if (last_launch_tick_ms_ != 0 && (now - last_launch_tick_ms_) < kMinRestartGapMs) {
+        removerLog(std::format("MatteHost restartHost rate-limited ({} ms since launch)",
+                               now - last_launch_tick_ms_));
+        return hostReady();
+    }
     if (stop_event_) {
         SetEvent(static_cast<HANDLE>(stop_event_));
     }
@@ -319,6 +396,7 @@ bool MatteHostClient::restartHost(const char* reason) {
         writeQualityToHeader();
         writeVisionToHeader();
     }
+    last_launch_tick_ms_ = 0; // allow immediate relaunch after intentional restart
     return launchHost();
 }
 

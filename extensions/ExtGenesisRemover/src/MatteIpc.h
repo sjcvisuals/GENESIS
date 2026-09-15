@@ -14,6 +14,8 @@
 // v63d: Live kick pacing (~50ms floor) + 480px capture once download is healthy.
 // v63e: Output recover - abandon stuck async downloads, skip black clear (flicker),
 //       optional Flush skip + host restart after PIXERA output teardown thrash.
+// v63f: Stop MatteHost spawn storm on output deactivate (reuse host, rate-limit launch,
+//       never block PIXERA UI thread waiting for host exit).
 namespace genesis::matte_ipc {
 
 inline constexpr char kMappingName[] = "Local\\GenesisRemoverMatteIpc_v57";
@@ -21,7 +23,7 @@ inline constexpr char kKickEventName[] = "Local\\GenesisRemoverMatteKick_v57";
 inline constexpr char kStopEventName[] = "Local\\GenesisRemoverMatteStop_v57";
 
 // Single source of truth - must match BUILD_STAMP.txt / Debug Status.
-inline constexpr char kBuildStamp[] = "remover-demo-v63e-output-recover-20260915";
+inline constexpr char kBuildStamp[] = "remover-demo-v63f-host-stable-20260915";
 
 inline constexpr std::uint32_t kMagic = 0x34444d47u; // GMD4
 inline constexpr std::uint32_t kVersion = 8;
