@@ -305,7 +305,7 @@ Re-run cmake configure (delete build\CMakeCache.txt if the target is missing), t
             throw "ExtGenesisRemover.dll looks too small ($remSize bytes) - build likely incomplete"
         }
 
-        $buildStamp = "remover-demo-v63-debug-20260914"
+        $buildStamp = "remover-demo-v63b-fix-logline-20260915"
         $matteIpc = Join-Path $RepoRoot "extensions\ExtGenesisRemover\src\MatteIpc.h"
         if (Test-Path -LiteralPath $matteIpc) {
             $ipcText = Get-Content -LiteralPath $matteIpc -Raw -ErrorAction SilentlyContinue

@@ -1,5 +1,5 @@
 // Out-of-process matte / vision host for ExtGenesisRemover.
-// ORT must NOT load inside PIXERA (v39–v42 froze the preview). This exe owns ORT.
+// ORT must NOT load inside PIXERA (v39-v42 froze the preview). This exe owns ORT.
 //
 // IPC: Local\GenesisRemoverMatteIpc_v57 + Kick/Stop events (see MatteIpc.h).
 // Log: %TEMP%\GenesisRemoverMatteHost.log
@@ -39,8 +39,7 @@ void logLine(const std::string& line) {
     const std::string full = std::to_string(ms) + " [" +
                              std::string(genesis::matte_ipc::kBuildStamp) + "] " + line;
     if (g_log) {
-        g_log << full << '
-';
+        g_log << full << '\n';
         g_log.flush();
     }
 }
@@ -283,7 +282,7 @@ struct CaptureState {
         ID3D11Query* q = nullptr;
         if (SUCCEEDED(device->CreateQuery(&qd, &q)) && q) {
             context->End(q);
-            // Soft poll — avoid tight GetData+Sleep(1) spinning under PIXERA output load.
+            // Soft poll - avoid tight GetData+Sleep(1) spinning under PIXERA output load.
             int spins = 0;
             while (context->GetData(q, nullptr, 0, 0) == S_FALSE) {
                 ++spins;
@@ -349,7 +348,7 @@ int main() {
             return 3;
         }
         if (genesis::isGitLfsPointerFile(rvm)) {
-            logLine("FATAL: RVM model is Git LFS pointer — run git lfs pull, rebuild, reinstall: " +
+            logLine("FATAL: RVM model is Git LFS pointer - run git lfs pull, rebuild, reinstall: " +
                     rvm.string());
             return 3;
         }
@@ -406,7 +405,7 @@ int main() {
         hdr->stamp_mismatch = 1;
         logLine(std::string("STAMP_MISMATCH dll=") + hdr->dll_stamp +
                 " host=" + genesis::matte_ipc::kBuildStamp +
-                " — quit PIXERA and reinstall ExtGenesisRemover package");
+                " - quit PIXERA and reinstall ExtGenesisRemover package");
     } else {
         hdr->stamp_mismatch = 0;
         if (hdr->dll_stamp[0] == '\0') {
@@ -447,12 +446,12 @@ int main() {
     const std::string ep = remover.executionProvider();
     logLine("BgRemover ready ep=" + ep + " " + status);
     if (ep.rfind("DML", 0) != 0 && !ep.empty()) {
-        logLine("WARNING: running on CPU — check DirectML.dll + onnxruntime DirectML build next to host");
+        logLine("WARNING: running on CPU - check DirectML.dll + onnxruntime DirectML build next to host");
     }
     std::snprintf(hdr->status, sizeof(hdr->status), "%s", ep.empty() ? status.c_str() : ep.c_str());
     hdr->host_ready = 1;
     // Keep local settings in sync with resolved model path so later setSettings
-    // (quality / vision IPC) does not look like a path clear → ORT reload.
+    // (quality / vision IPC) does not look like a path clear -> ORT reload.
     settings = remover.settings();
 
     CaptureState capture;
@@ -563,7 +562,7 @@ int main() {
         settings.rvm_downsample = ds;
         settings.rvm_max_infer_side = max_side;
         remover.setSettings(settings);
-        // First quality publish matches startup defaults — do not wipe RVM recurrent state.
+        // First quality publish matches startup defaults - do not wipe RVM recurrent state.
         if (had_quality) {
             remover.resetTemporalState();
         }
@@ -593,13 +592,13 @@ int main() {
         if (!model_key.empty()) {
             settings.model_path = model;
         } else if (session_change) {
-            // Effect changed / default key — resolve the effect's default on init.
+            // Effect changed / default key - resolve the effect's default on init.
             settings.model_path.clear();
         }
         // else keep resolved path (Person Matte default "" must not unload RVM).
 
         if (session_change) {
-            // RVM ignores activation/norm/size; skipping avoids Auto→None reload marks.
+            // RVM ignores activation/norm/size; skipping avoids Auto->None reload marks.
             if (settings.vision_effect != genesis::VisionEffect::PersonMatteRvm) {
                 settings.activation =
                     genesis::visionEffectDefaultActivation(settings.vision_effect);
@@ -628,7 +627,7 @@ int main() {
             std::snprintf(hdr->status, sizeof(hdr->status), "%s",
                           ep_now.empty() ? init_status.c_str() : ep_now.c_str());
         } else {
-            // Result As only — no ORT reload.
+            // Result As only - no ORT reload.
             remover.setSettings(settings);
             settings = remover.settings();
             logLine(std::string("result_as -> ") +
@@ -685,7 +684,7 @@ int main() {
 
         double map_ms = 0.0;
         if (capture_in_shm) {
-            // v62: DLL already copied capture RGBA into IPC pixels — do NOT OpenShared/Map.
+            // v62: DLL already copied capture RGBA into IPC pixels - do NOT OpenShared/Map.
             // Mapping a shared capture on this process was stalling PIXERA presents.
             const std::size_t bytes = static_cast<std::size_t>(w) * h * 4u;
             scratch_in.resize(bytes);

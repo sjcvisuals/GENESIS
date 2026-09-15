@@ -367,13 +367,13 @@ bool MatteCaptureWorker::captureAndMatteOnce() {
 }
 
 void MatteCaptureWorker::threadMain() {
-    removerLog("MatteCaptureWorker thread running — preloading CPU RVM before any D3D capture");
+    removerLog("MatteCaptureWorker thread running - preloading CPU RVM before any D3D capture");
     try {
         if (!ensureRemover()) {
-            removerLog("MatteCaptureWorker preload FAILED — kicks disabled");
+            removerLog("MatteCaptureWorker preload FAILED - kicks disabled");
         } else {
             engine_ready_.store(true);
-            removerLog("MatteCaptureWorker preload OK — kicks enabled");
+            removerLog("MatteCaptureWorker preload OK - kicks enabled");
         }
     } catch (const std::exception& ex) {
         removerLog(std::format("MatteCaptureWorker preload exception: {}", ex.what()));

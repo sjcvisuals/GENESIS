@@ -1,7 +1,7 @@
 #pragma once
 
 // Win32 SECURITY_ATTRIBUTES is a typedef (not struct SECURITY_ATTRIBUTES).
-// Never forward-declare it — include Windows.h first.
+// Never forward-declare it - include Windows.h first.
 #ifdef WIN32_LEAN_AND_MEAN
 #undef WIN32_LEAN_AND_MEAN
 #endif

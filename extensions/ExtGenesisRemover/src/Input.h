@@ -43,7 +43,7 @@ private:
     void pushQualityToHost();
     void pushVisionToHost();
     // ExtOnnxVision pattern: kick matte from update(), never from Device::render.
-    // Skip when busy / cooling — never queue frames.
+    // Skip when busy / cooling - never queue frames.
     void kickMatteIfReady();
 
     std::shared_ptr<SharedD3d11> d3d_;

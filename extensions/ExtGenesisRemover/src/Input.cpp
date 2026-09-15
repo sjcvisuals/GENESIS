@@ -198,7 +198,7 @@ void Input::pushVisionToHost() {
             model.clear();
         }
     }
-    // Trim whitespace — PIXERA string params sometimes carry spaces.
+    // Trim whitespace - PIXERA string params sometimes carry spaces.
     while (!model.empty() &&
            (model.back() == ' ' || model.back() == '\t' || model.back() == '\r' ||
             model.back() == '\n' || model.back() == '\0')) {
@@ -313,7 +313,7 @@ void Input::publishVideoInTexture() {
             "shared VIDEO_IN {}x{} format={} handle=D3D11_IMAGE is_target=0 srv={} (oop matte)",
             shared.width, shared.height, get_format_name(shared.format),
             d3d_video_in_->srv() ? 1 : 0));
-        removerLog("capture share ready — matte via GenesisRemoverMatteHost.exe");
+        removerLog("capture share ready - matte via GenesisRemoverMatteHost.exe");
     };
 
     update_input_texture(*video_in_, allocate);
@@ -486,7 +486,7 @@ bool Input::update() noexcept try {
         (void)frame_counter_->value();
     }
     publishVideoInTexture();
-    // ExtOnnxVision: drive matte off update(), skip when busy — never stall Device::render.
+    // ExtOnnxVision: drive matte off update(), skip when busy - never stall Device::render.
     ensureD3dTextures();
     ensureMatteHost();
     if (quality_ && matte_host_) {
@@ -509,9 +509,9 @@ void Input::kickMatteIfReady() {
 
     const auto now = std::chrono::steady_clock::now();
 
-    // v62: NEVER let the matte host Map a shared GPU capture — that stalls PIXERA presents
-    // for hundreds of ms to seconds (looks like ~0.3–0.5 fps). Instead:
-    //   blit → private RT → async staging download on the PIXERA device → CPU IPC kick.
+    // v62: NEVER let the matte host Map a shared GPU capture - that stalls PIXERA presents
+    // for hundreds of ms to seconds (looks like ~0.3-0.5 fps). Instead:
+    //   blit -> private RT -> async staging download on the PIXERA device -> CPU IPC kick.
     // Live present keeps drawing Video In × last matte every tick.
     constexpr double kMinKickMs = 350.0;
     constexpr double kStressedKickMs = 500.0;
@@ -524,7 +524,7 @@ void Input::kickMatteIfReady() {
         long hr = 0;
         const int poll = d3d_capture_share_->pollAsyncDownload(capture_rgba_, &hr);
         if (poll == 0) {
-            return; // still pending — do not stall
+            return; // still pending - do not stall
         }
         if (poll < 0) {
             removerLog(std::format("capture async download failed hr={}", hr));
@@ -578,7 +578,7 @@ void Input::kickMatteIfReady() {
         pace_ms = std::max(pace_ms, static_cast<double>(infer) + 40.0);
     }
     if (last_capture_download_ms_ > 1.0f) {
-        // Soft pace from download cost — never a multi-second kick blackout.
+        // Soft pace from download cost - never a multi-second kick blackout.
         pace_ms = std::max(pace_ms, static_cast<double>(last_capture_download_ms_) * 3.0);
     }
     if (pace_ms > 700.0) {
@@ -600,7 +600,7 @@ void Input::kickMatteIfReady() {
     if (cap_h == 0) {
         return;
     }
-    // Private RT (no NT share) — host never Opens/Maps this texture.
+    // Private RT (no NT share) - host never Opens/Maps this texture.
     if (d3d_capture_share_->width() != cap_w || d3d_capture_share_->height() != cap_h) {
         d3d_capture_share_->allocate(cap_w, cap_h, Format::R8G8B8A8_UNORM, /*is_target=*/true,
                                      /*publish_share=*/false);

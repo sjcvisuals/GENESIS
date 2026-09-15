@@ -26,7 +26,7 @@ public:
     D3d11SharedTexture(const D3d11SharedTexture&) = delete;
     D3d11SharedTexture& operator=(const D3d11SharedTexture&) = delete;
 
-    // is_target=true → BIND_RENDER_TARGET. publish_share=false → private GPU RT (no NT handle);
+    // is_target=true -> BIND_RENDER_TARGET. publish_share=false -> private GPU RT (no NT handle);
     // used to Map for matte without CopyResource on the shared output PIXERA is sampling.
     void allocate(std::uint32_t width, std::uint32_t height, Format format, bool is_target,
                   bool publish_share = true);
@@ -60,7 +60,7 @@ public:
     // Raw mid-pixel diagnostics (FP16 bits or RGBA8 bytes) after a successful download path.
     static void logMidRaw(const std::vector<std::uint8_t>& rgba, Format format, std::uint32_t width,
                           std::uint32_t height, const char* tag);
-    // max_rgb + corner samples — mid can be letterbox black while feed has pixels.
+    // max_rgb + corner samples - mid can be letterbox black while feed has pixels.
     static void logFrameStats(const std::vector<std::uint8_t>& rgba, std::uint32_t width,
                               std::uint32_t height, const char* tag);
 
