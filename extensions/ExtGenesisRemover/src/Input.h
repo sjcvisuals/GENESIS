@@ -80,6 +80,9 @@ private:
     std::vector<std::uint8_t> capture_rgba_;
     float last_capture_download_ms_ = 0.0f;
     bool capture_download_pending_ = false;
+    bool capture_rgba_ready_ = false; // hold last good download until host can kick
+    std::uint32_t capture_ready_w_ = 0;
+    std::uint32_t capture_ready_h_ = 0;
     bool stressed_ = false; // smaller capture / slower kicks after slow CPU download
     int pushed_quality_ = -1;
     float pushed_ds_ = -1.0f;

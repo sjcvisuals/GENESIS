@@ -513,9 +513,46 @@ void Input::kickMatteIfReady() {
     // for hundreds of ms to seconds (looks like ~0.3-0.5 fps). Instead:
     //   blit -> private RT -> async staging download on the PIXERA device -> CPU IPC kick.
     // Live present keeps drawing Video In × last matte every tick.
+    // v63c: Flush after Copy/End so download_ms is real GPU latency (not seconds of
+    // unsubmitted commands). Skip all-zero captures; hold good frames while host busy.
     constexpr double kMinKickMs = 350.0;
     constexpr double kStressedKickMs = 500.0;
-    constexpr float kSlowDownloadMs = 20.0f;
+    constexpr float kSlowDownloadMs = 40.0f;
+
+    auto countCaptureNz = [](const std::uint8_t* rgba, std::size_t bytes) -> std::size_t {
+        std::size_t nz = 0;
+        for (std::size_t i = 0; i + 3 < bytes; i += 4) {
+            if (rgba[i] | rgba[i + 1] | rgba[i + 2]) {
+                ++nz;
+            }
+        }
+        return nz;
+    };
+
+    auto tryKickHeldCapture = [&]() -> bool {
+        if (!capture_rgba_ready_ || !matte_host_->hostReady() || matte_host_->busy()) {
+            return false;
+        }
+        if (capture_ready_w_ == 0 || capture_ready_h_ == 0 ||
+            capture_rgba_.size() !=
+                static_cast<std::size_t>(capture_ready_w_) * capture_ready_h_ * 4u) {
+            capture_rgba_ready_ = false;
+            return false;
+        }
+        if (matte_host_->kickCaptureRgba(capture_rgba_.data(), capture_ready_w_, capture_ready_h_,
+                                         last_capture_download_ms_)) {
+            capture_rgba_ready_ = false;
+            last_capture_kick_tick_ = render_ticks_;
+            last_kick_wall_ = now;
+            if ((render_ticks_ % 60u) == 1u) {
+                removerLog(std::format(
+                    "matte_kick_cpu {}x{} download_ms={:.1f} stressed={}", capture_ready_w_,
+                    capture_ready_h_, last_capture_download_ms_, stressed_ ? 1 : 0));
+            }
+            return true;
+        }
+        return false;
+    };
 
     matte_host_->clearBusyIfStale(2500);
 
@@ -537,31 +574,39 @@ void Input::kickMatteIfReady() {
         last_capture_download_ms_ = static_cast<float>(download_ms);
         if (download_ms >= kSlowDownloadMs) {
             stressed_ = true;
-        } else if (stressed_ && download_ms < 10.0) {
+        } else if (stressed_ && download_ms < 15.0) {
             stressed_ = false;
             removerLog("matte_unstressed (cpu download healthy)");
         }
 
-        if (!matte_host_->hostReady() || matte_host_->busy()) {
-            return;
-        }
         const std::uint32_t cap_w = d3d_capture_share_->width();
         const std::uint32_t cap_h = d3d_capture_share_->height();
         if (capture_rgba_.size() != static_cast<std::size_t>(cap_w) * cap_h * 4u) {
             removerLog("capture rgba size mismatch after async download");
             return;
         }
-        if (matte_host_->kickCaptureRgba(capture_rgba_.data(), cap_w, cap_h,
-                                        last_capture_download_ms_)) {
-            last_capture_kick_tick_ = render_ticks_;
-            last_kick_wall_ = now;
+        const std::size_t nz = countCaptureNz(capture_rgba_.data(), capture_rgba_.size());
+        if (nz == 0) {
             if ((render_ticks_ % 60u) == 1u) {
                 removerLog(std::format(
-                    "matte_kick_cpu {}x{} download_ms={:.1f} stressed={}", cap_w, cap_h,
-                    last_capture_download_ms_, stressed_ ? 1 : 0));
+                    "capture_skip_nz0 {}x{} download_ms={:.1f} (Video In not ready yet)", cap_w,
+                    cap_h, last_capture_download_ms_));
             }
+            return;
         }
+        capture_ready_w_ = cap_w;
+        capture_ready_h_ = cap_h;
+        capture_rgba_ready_ = true;
+        (void)tryKickHeldCapture();
         return;
+    }
+
+    // Host was busy when download finished - kick held frame as soon as free.
+    if (tryKickHeldCapture()) {
+        return;
+    }
+    if (capture_rgba_ready_) {
+        return; // wait for host; do not start another download
     }
 
     if (!matte_host_->hostReady() || matte_host_->busy()) {

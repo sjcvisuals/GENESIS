@@ -10,6 +10,7 @@
 // v61: dll/host build stamps + version 7 for demo mismatch detection.
 // v62: capture_in_shm - DLL uploads capture RGBA; host must NOT Map shared GPU tex.
 // v63: debug harness (HEALTH lines, FAIL file, one-shot health-check script).
+// v63c: Flush after async capture Copy/End (fixes ~3s download_ms + capture_nz0).
 namespace genesis::matte_ipc {
 
 inline constexpr char kMappingName[] = "Local\\GenesisRemoverMatteIpc_v57";
@@ -17,7 +18,7 @@ inline constexpr char kKickEventName[] = "Local\\GenesisRemoverMatteKick_v57";
 inline constexpr char kStopEventName[] = "Local\\GenesisRemoverMatteStop_v57";
 
 // Single source of truth - must match BUILD_STAMP.txt / Debug Status.
-inline constexpr char kBuildStamp[] = "remover-demo-v63b-fix-logline-20260915";
+inline constexpr char kBuildStamp[] = "remover-demo-v63c-fix-flush-20260915";
 
 inline constexpr std::uint32_t kMagic = 0x34444d47u; // GMD4
 inline constexpr std::uint32_t kVersion = 8;

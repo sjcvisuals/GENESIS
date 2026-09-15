@@ -437,6 +437,10 @@ bool D3d11SharedTexture::beginAsyncDownload() {
     }
     context_->CopyResource(staging_, texture_);
     context_->End(async_query_);
+    // Submit only - do not wait. Without Flush, Remover's private device may leave the
+    // Copy/End queued for seconds (wall-clock download_ms ~2800) until something else
+    // submits. PIXERA Present does not flush this context.
+    context_->Flush();
     async_pending_ = true;
     return true;
 }
