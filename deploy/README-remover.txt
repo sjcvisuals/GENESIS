@@ -98,7 +98,7 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt / Debug Status:
-  remover-demo-v63c-fix-flush-20260915
+  remover-demo-v63d-live-fps-20260915
 
 Healthy host log (%TEMP%\GenesisRemoverMatteHost.log):
   start remover-demo-v63-debug-...

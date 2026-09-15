@@ -2,7 +2,7 @@
 
 **Goal:** Person Matte (RVM) cutout on a live camera in PIXERA at usable preview FPS.
 
-**Stamp:** `remover-demo-v63c-fix-flush-20260915`
+**Stamp:** `remover-demo-v63d-live-fps-20260915`
 
 **What changed**
 - v62: CPU capture (host no longer Maps shared GPU texture - that froze preview)
@@ -52,7 +52,7 @@ Get-Item assets\matting\rvm_mobilenetv3_fp16.onnx | Select-Object Length
 
 Debug Status should look like:
 
-`remover-demo-v63c-fix-flush-20260915 matte map=..ms infer=..ms ep=DML:N shm=1 matte=1`
+`remover-demo-v63d-live-fps-20260915 matte map=..ms infer=..ms ep=DML:N shm=1 matte=1`
 
 - `shm=1` means CPU capture path (good)
 - `MISMATCH` means mixed DLL/host - quit PIXERA and reinstall the whole folder

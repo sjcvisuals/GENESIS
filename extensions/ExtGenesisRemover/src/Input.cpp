@@ -515,8 +515,10 @@ void Input::kickMatteIfReady() {
     // Live present keeps drawing Video In × last matte every tick.
     // v63c: Flush after Copy/End so download_ms is real GPU latency (not seconds of
     // unsubmitted commands). Skip all-zero captures; hold good frames while host busy.
-    constexpr double kMinKickMs = 350.0;
-    constexpr double kStressedKickMs = 500.0;
+    // v63d: Kick pacing was stuck at 350ms (~3 matte fps) from the old Map-stall era.
+    // With Flush, download is ~10-20ms and RVM infer ~6ms - pace off real costs.
+    constexpr double kMinKickMs = 50.0;
+    constexpr double kStressedKickMs = 100.0;
     constexpr float kSlowDownloadMs = 40.0f;
 
     auto countCaptureNz = [](const std::uint8_t* rgba, std::size_t bytes) -> std::size_t {
@@ -619,15 +621,13 @@ void Input::kickMatteIfReady() {
     const double min_kick_ms = stressed_ ? kStressedKickMs : kMinKickMs;
     const float infer = matte_host_->hostInferMs();
     double pace_ms = min_kick_ms;
-    if (infer > 1.0f) {
-        pace_ms = std::max(pace_ms, static_cast<double>(infer) + 40.0);
+    // Pace from measured costs + small slack - do NOT force a 350ms floor.
+    if (infer > 1.0f || last_capture_download_ms_ > 1.0f) {
+        pace_ms = std::max(pace_ms, static_cast<double>(infer) +
+                                        static_cast<double>(last_capture_download_ms_) + 20.0);
     }
-    if (last_capture_download_ms_ > 1.0f) {
-        // Soft pace from download cost - never a multi-second kick blackout.
-        pace_ms = std::max(pace_ms, static_cast<double>(last_capture_download_ms_) * 3.0);
-    }
-    if (pace_ms > 700.0) {
-        pace_ms = 700.0;
+    if (pace_ms > 250.0) {
+        pace_ms = 250.0;
     }
 
     const double since_kick_ms =
@@ -638,7 +638,8 @@ void Input::kickMatteIfReady() {
         return;
     }
 
-    const std::uint32_t cap_max_w = stressed_ ? 192u : 256u;
+    // Healthy path: 480px-wide capture (~480x270). Stressed: stay at 256.
+    const std::uint32_t cap_max_w = stressed_ ? 256u : 480u;
     const std::uint32_t cap_w = width_ > cap_max_w ? cap_max_w : width_;
     const std::uint32_t cap_h =
         static_cast<std::uint32_t>((static_cast<std::uint64_t>(height_) * cap_w) / width_);
