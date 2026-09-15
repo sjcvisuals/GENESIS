@@ -14,7 +14,7 @@ data\rxExt\ExtGenesis\. Use a separate ExtGenesisRemover folder.
 
 Wednesday industry demo
 -----------------------
-See deploy\DEMO-RUNBOOK-remover.md (stamp remover-demo-v63-debug-*).
+See deploy\DEMO-RUNBOOK-remover.md (stamp remover-demo-v63e-output-recover-*).
 
 Defaults: Person Matte (RVM), Quality Fast, Result As Alpha. Leave Model File empty.
 
@@ -43,8 +43,8 @@ After build/install, always run:
 
   .\HEALTH-CHECK-REMOVER.bat
 
-Expect RESULT fail=0 and stamp remover-demo-v63-debug-*.
-If Debug Status in PIXERA still shows v61/v62, the old DLL is still loaded.
+Expect RESULT fail=0 and stamp remover-demo-v63e-output-recover-*.
+If Debug Status in PIXERA still shows v61/v62/v63d, the old DLL is still loaded.
 
 Verify before PIXERA (legacy notes)
 --------------------
@@ -68,7 +68,7 @@ Usage in PIXERA
 2. Drag it onto the timeline (stream name is Main, same as ExtGenesis).
 3. Link media / NDI / SDI -> Video In.
 4. Vision Effect = Person Matte (RVM), Quality = Fast, Result As = Alpha.
-5. Confirm Debug Status shows remover-demo-v63-debug-* and matte=1.
+5. Confirm Debug Status shows remover-demo-v63e-output-recover-* and matte=1.
 6. Output sampler is a transparent RGBA cutout.
 
 If the resource imports but timeline drag fails
@@ -81,7 +81,7 @@ If the resource imports but timeline drag fails
      powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-pixera-remover.ps1
 
 2. Confirm the install printed BUILD_STAMP with:
-     remover-demo-v63-debug-*
+     remover-demo-v63e-output-recover-*
 
 3. In PIXERA, re-browse to:
      <PIXERA>\data\rxExt\ExtGenesisRemover\ExtGenesisRemover.dll
@@ -98,10 +98,10 @@ If the resource imports but timeline drag fails
      <PIXERA>\data\rxExt\ExtGenesisRemover\remover-init.log
 
 Build stamp in logs / BUILD_STAMP.txt / Debug Status:
-  remover-demo-v63d-live-fps-20260915
+  remover-demo-v63e-output-recover-20260915
 
 Healthy host log (%TEMP%\GenesisRemoverMatteHost.log):
-  start remover-demo-v63-debug-...
+  start remover-demo-v63e-output-recover-...
   RVM model OK bytes=...
   BgRemover ready ep=DML:N
   matte_ok ... map_ms=... infer_ms=...

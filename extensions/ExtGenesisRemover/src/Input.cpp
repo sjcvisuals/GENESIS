@@ -517,6 +517,8 @@ void Input::kickMatteIfReady() {
     // unsubmitted commands). Skip all-zero captures; hold good frames while host busy.
     // v63d: Kick pacing was stuck at 350ms (~3 matte fps) from the old Map-stall era.
     // With Flush, download is ~10-20ms and RVM infer ~6ms - pace off real costs.
+    // v63e: Abandon stuck async downloads after output toggle; skip Flush while recovering;
+    // restart matte host after repeated abandons.
     constexpr double kMinKickMs = 50.0;
     constexpr double kStressedKickMs = 100.0;
     constexpr float kSlowDownloadMs = 40.0f;
@@ -560,6 +562,35 @@ void Input::kickMatteIfReady() {
 
     // Finish in-flight async download without blocking the present path.
     if (d3d_capture_share_->asyncDownloadPending()) {
+        const double pending_ms =
+            std::chrono::duration<double, std::milli>(now - capture_download_started_).count();
+        // v63e: if PIXERA tears down an output, GetData can stay S_FALSE forever and/or
+        // Flush can hang. Abandon stuck downloads so update() keeps running (preview lives).
+        constexpr double kAsyncAbandonMs = 120.0;
+        if (pending_ms > kAsyncAbandonMs) {
+            removerLog(std::format(
+                "capture async download ABANDON pending_ms={:.0f} (output thrash recover)",
+                pending_ms));
+            d3d_capture_share_->cancelAsyncDownload();
+            capture_download_pending_ = false;
+            stressed_ = true;
+            ++async_abandon_streak_;
+            skip_flush_kicks_remaining_ = std::max(skip_flush_kicks_remaining_, 8);
+            // After repeated abandons, restart OOP host once (GPU thrash after outputs).
+            if (async_abandon_streak_ >= 3) {
+                const double since_restart_ms =
+                    last_host_restart_wall_.time_since_epoch().count() == 0
+                        ? 1e9
+                        : std::chrono::duration<double, std::milli>(now - last_host_restart_wall_)
+                              .count();
+                if (since_restart_ms > 5000.0) {
+                    matte_host_->restartHost("async_download_abandon_streak");
+                    last_host_restart_wall_ = now;
+                    async_abandon_streak_ = 0;
+                }
+            }
+            return;
+        }
         long hr = 0;
         const int poll = d3d_capture_share_->pollAsyncDownload(capture_rgba_, &hr);
         if (poll == 0) {
@@ -568,8 +599,12 @@ void Input::kickMatteIfReady() {
         if (poll < 0) {
             removerLog(std::format("capture async download failed hr={}", hr));
             capture_download_pending_ = false;
+            stressed_ = true;
+            ++async_abandon_streak_;
+            skip_flush_kicks_remaining_ = std::max(skip_flush_kicks_remaining_, 4);
             return;
         }
+        async_abandon_streak_ = 0;
         capture_download_pending_ = false;
         const double download_ms =
             std::chrono::duration<double, std::milli>(now - capture_download_started_).count();
@@ -653,7 +688,11 @@ void Input::kickMatteIfReady() {
     }
     passthrough_->draw(d3d_->context(), d3d_video_in_->srv(), d3d_capture_share_->rtv(), cap_w,
                        cap_h, /*flip_v=*/false);
-    if (!d3d_capture_share_->beginAsyncDownload()) {
+    const bool do_flush = skip_flush_kicks_remaining_ <= 0;
+    if (skip_flush_kicks_remaining_ > 0) {
+        --skip_flush_kicks_remaining_;
+    }
+    if (!d3d_capture_share_->beginAsyncDownload(do_flush)) {
         removerLog("capture beginAsyncDownload failed");
         return;
     }
@@ -661,8 +700,9 @@ void Input::kickMatteIfReady() {
     capture_download_started_ = now;
     last_kick_wall_ = now; // pace from blit start so we don't queue downloads
     if ((render_ticks_ % 60u) == 1u) {
-        removerLog(std::format("matte_capture_async_begin {}x{} pace_ms={:.0f} stressed={}", cap_w,
-                               cap_h, pace_ms, stressed_ ? 1 : 0));
+        removerLog(std::format(
+            "matte_capture_async_begin {}x{} pace_ms={:.0f} stressed={} flush={}", cap_w, cap_h,
+            pace_ms, stressed_ ? 1 : 0, do_flush ? 1 : 0));
     }
 }
 
@@ -733,7 +773,11 @@ RenderResult Input::render() noexcept try {
     }
 
     ID3D11ShaderResourceView* live_srv = d3d_video_in_->srv();
-    const double delay_ms = camera_delay_ms_ ? camera_delay_ms_->value() : 0.0;
+    // Under output stress, skip the delay ring (extra GPU copies) so present stays smooth.
+    const double delay_ms =
+        (stressed_ || skip_flush_kicks_remaining_ > 0)
+            ? 0.0
+            : (camera_delay_ms_ ? camera_delay_ms_->value() : 0.0);
     if (live_srv && delay_ms > 0.5) {
         live_srv = live_delay_.pushAndSample(*d3d_, *passthrough_, d3d_video_in_->srv(), width_,
                                              height_, delay_ms);
@@ -746,8 +790,10 @@ RenderResult Input::render() noexcept try {
 
     // Live Video In every present × last matte alpha (ExtOnnxVision: skip frames,
     // never stall the host on model rate).
+    // v63e: do NOT clear-to-black before masked draw - with a real PIXERA output, the
+    // compositor can sample the shared texture between Clear and Draw (matte flicker).
+    // drawLiveMasked is a full-screen triangle that overwrites every pixel.
     if (matte_live_ && d3d_matte_tex_ && d3d_matte_tex_->srv() && live_srv) {
-        d3d_output_->clear(0.0f, 0.0f, 0.0f, 1.0f);
         passthrough_->drawLiveMasked(d3d_->context(), live_srv, d3d_matte_tex_->srv(),
                                      d3d_output_->rtv(), width_, height_, /*flip_v=*/true);
         dbg.width = width_;
