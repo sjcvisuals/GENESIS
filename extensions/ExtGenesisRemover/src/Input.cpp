@@ -576,18 +576,12 @@ void Input::kickMatteIfReady() {
             stressed_ = true;
             ++async_abandon_streak_;
             skip_flush_kicks_remaining_ = std::max(skip_flush_kicks_remaining_, 8);
-            // After repeated abandons, restart OOP host once (GPU thrash after outputs).
-            if (async_abandon_streak_ >= 3) {
-                const double since_restart_ms =
-                    last_host_restart_wall_.time_since_epoch().count() == 0
-                        ? 1e9
-                        : std::chrono::duration<double, std::milli>(now - last_host_restart_wall_)
-                              .count();
-                if (since_restart_ms > 5000.0) {
-                    matte_host_->restartHost("async_download_abandon_streak");
-                    last_host_restart_wall_ = now;
-                    async_abandon_streak_ = 0;
-                }
+            // v63f: do NOT restartHost here - SetEvent(stop)+relaunch during PIXERA output
+            // teardown caused a MatteHost spawn storm (~15s GUI hang). Hold last matte instead.
+            if (async_abandon_streak_ >= 3 && (render_ticks_ % 120u) == 1u) {
+                removerLog(std::format(
+                    "capture abandon streak={} - holding last matte (no host restart)",
+                    async_abandon_streak_));
             }
             return;
         }
