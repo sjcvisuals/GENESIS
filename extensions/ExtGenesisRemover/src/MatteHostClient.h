@@ -56,12 +56,15 @@ public:
     // True when last kick used CPU RGBA IPC (v62+); false = legacy GPU share Map.
     bool hostCaptureInShm() const;
     // Kill + relaunch host (recover from GPU thrash after outputs).
+    // Rate-limited - safe to call from update thread, but prefer not to during output toggles.
     bool restartHost(const char* reason);
 
 private:
     bool openIpc();
     void closeIpc();
     bool launchHost();
+    // If IPC already has a live host_pid, OpenProcess and reuse it (no CreateProcess).
+    bool adoptRunningHost();
     bool duplicateCaptureHandle(void* local_nt_handle);
     void writeQualityToHeader();
     void writeVisionToHeader();
@@ -71,6 +74,7 @@ private:
     void* kick_event_ = nullptr;
     void* stop_event_ = nullptr;
     void* host_process_ = nullptr;
+    std::uint32_t last_launch_tick_ms_ = 0;
     std::uint64_t adapter_luid_ = 0;
     std::uint64_t last_done_seq_ = 0;
     std::uint64_t last_dup_handle_ = 0;
