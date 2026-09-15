@@ -44,7 +44,7 @@ After build/install, always run:
   .\HEALTH-CHECK-REMOVER.bat
 
 Expect RESULT fail=0 and stamp remover-demo-v63e-output-recover-*.
-If Debug Status in PIXERA still shows v61/v62/v63d/v63d, the old DLL is still loaded.
+If Debug Status in PIXERA still shows v61/v62/v63d, the old DLL is still loaded.
 
 Verify before PIXERA (legacy notes)
 --------------------
@@ -101,7 +101,7 @@ Build stamp in logs / BUILD_STAMP.txt / Debug Status:
   remover-demo-v63e-output-recover-20260915
 
 Healthy host log (%TEMP%\GenesisRemoverMatteHost.log):
-  start remover-demo-v63-debug-...
+  start remover-demo-v63e-output-recover-...
   RVM model OK bytes=...
   BgRemover ready ep=DML:N
   matte_ok ... map_ms=... infer_ms=...
