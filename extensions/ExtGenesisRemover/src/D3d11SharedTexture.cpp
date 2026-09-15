@@ -151,7 +151,7 @@ void D3d11SharedTexture::allocate(std::uint32_t width, std::uint32_t height, For
     if (is_target) {
         desc.BindFlags |= D3D11_BIND_RENDER_TARGET;
     }
-    // ExtSampleD3D: SHARED | SHARED_NTHANDLE (keyed mutex → black). Private matte RT: none.
+    // ExtSampleD3D: SHARED | SHARED_NTHANDLE (keyed mutex -> black). Private matte RT: none.
     if (publish_share) {
         desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
     }
@@ -231,7 +231,7 @@ bool D3d11SharedTexture::fillSentinelMagenta() {
     if (!texture_ || !context_ || width_ == 0 || height_ == 0) {
         return false;
     }
-    // Prefer RTV Clear (no Flush — Flush before PIXERA open hung v25).
+    // Prefer RTV Clear (no Flush - Flush before PIXERA open hung v25).
     if (rtv_) {
         clear(1.0f, 0.0f, 1.0f, 1.0f);
         return true;

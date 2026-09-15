@@ -47,7 +47,7 @@ bool Device::initialize() noexcept try {
     }
 
     // Own D3D11 device for shared Video In / output / capture (ExtOnnxVision pattern).
-    // Do NOT publish a TimelineSemaphore fence — ExtOnnxVision proves shared D3D11_IMAGE
+    // Do NOT publish a TimelineSemaphore fence - ExtOnnxVision proves shared D3D11_IMAGE
     // works without it, and our fence Wait turned host Map stalls into sticky low FPS.
     d3d_ = std::make_shared<SharedD3d11>(adapter_luid_);
     return true;

@@ -20,7 +20,7 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 
 # Prefer stamp from MatteIpc.h (single source of truth); fall back if unreadable.
 $MatteIpcHeader = Join-Path $RepoRoot "extensions\ExtGenesisRemover\src\MatteIpc.h"
-$ExpectedStamp = "remover-demo-v63-debug-20260914"
+$ExpectedStamp = "remover-demo-v63b-fix-logline-20260915"
 if (Test-Path -LiteralPath $MatteIpcHeader) {
     $hdrText = Get-Content -LiteralPath $MatteIpcHeader -Raw -ErrorAction SilentlyContinue
     if ($hdrText -match 'kBuildStamp\[\]\s*=\s*"([^"]+)"') {

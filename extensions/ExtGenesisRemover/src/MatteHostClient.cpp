@@ -177,7 +177,7 @@ bool MatteHostClient::stampMismatch() const {
         return true;
     }
     if (h->host_stamp[0] == '\0') {
-        // Old host without stamp field — treat as mismatch vs v61 DLL.
+        // Old host without stamp field - treat as mismatch vs v61 DLL.
         return h->version < ::genesis::matte_ipc::kVersion;
     }
     return std::strncmp(h->dll_stamp, h->host_stamp, ::genesis::matte_ipc::kStampBytes) != 0 ||
@@ -288,7 +288,7 @@ bool MatteHostClient::restartHost(const char* reason) {
         SetEvent(static_cast<HANDLE>(stop_event_));
     }
     if (host_process_) {
-        // Keep waits short — restartHost runs on the PIXERA update thread.
+        // Keep waits short - restartHost runs on the PIXERA update thread.
         WaitForSingleObject(static_cast<HANDLE>(host_process_), 400);
         DWORD code = 0;
         if (GetExitCodeProcess(static_cast<HANDLE>(host_process_), &code) &&
@@ -331,7 +331,7 @@ void MatteHostClient::clearBusyIfStale(std::uint32_t stale_ms) {
         return;
     }
     auto* h = asHeader(view_);
-    removerLog(std::format("MatteHostClient stale busy kick={} done={} — acking locally",
+    removerLog(std::format("MatteHostClient stale busy kick={} done={} - acking locally",
                            h->kick_seq, h->done_seq));
     h->result_ok = 0;
     h->done_seq = h->kick_seq;
@@ -385,7 +385,7 @@ bool MatteHostClient::kickCapture(D3d11SharedTexture& capture, std::uint32_t wid
     h->height = height;
     h->adapter_luid = adapter_luid_;
     writeQualityToHeader();
-    writeVisionToHeader(); // every kick — avoid stale vision fields after host restart
+    writeVisionToHeader(); // every kick - avoid stale vision fields after host restart
     h->capture_in_shm = 0;
     h->result_ok = 0;
     ++h->kick_seq;

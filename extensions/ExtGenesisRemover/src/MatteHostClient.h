@@ -27,7 +27,7 @@ public:
 
     bool ensureStarted(std::uint64_t adapter_luid);
     bool hostReady() const;
-    // True when DLL/host BUILD stamps disagree (mixed install — reinstall both).
+    // True when DLL/host BUILD stamps disagree (mixed install - reinstall both).
     bool stampMismatch() const;
     std::string hostStamp() const;
     std::uint64_t doneSeq() const;
@@ -35,11 +35,11 @@ public:
     void setQuality(int quality_0_to_3, float custom_downsample = 0.0f,
                     std::uint32_t custom_max_infer_side = 0);
     // vision_effect / result_as match genesis::VisionEffect / VisionResultAs.
-    // model_path empty → host uses the effect's default asset path.
+    // model_path empty -> host uses the effect's default asset path.
     void setVision(int vision_effect, int result_as, const std::string& model_path = {});
     // Blit already done into capture; publish handle + kick host.
     bool kickCapture(D3d11SharedTexture& capture, std::uint32_t width, std::uint32_t height);
-    // v62: capture already in CPU RGBA — copy into IPC pixels and kick (no GPU share Map).
+    // v62: capture already in CPU RGBA - copy into IPC pixels and kick (no GPU share Map).
     bool kickCaptureRgba(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height,
                         float download_ms);
     bool tryTakeMatte(std::vector<std::uint8_t>& out_rgba, std::uint32_t& out_w, std::uint32_t& out_h,
