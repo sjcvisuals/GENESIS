@@ -336,9 +336,9 @@ Re-run cmake configure (delete build\CMakeCache.txt if the target is missing), t
         }
 
         $buildStamp = "remover-demo-v63b-fix-logline-20260915"
-        $matteIpc = Join-Path $RepoRoot "extensions\ExtGenesisRemover\src\MatteIpc.h"
-        if (Test-Path -LiteralPath $matteIpc) {
-            $ipcText = Get-Content -LiteralPath $matteIpc -Raw -ErrorAction SilentlyContinue
+        $buildStampCpp = Join-Path $RepoRoot "extensions\ExtGenesisRemover\src\BuildStamp.cpp"
+        if (Test-Path -LiteralPath $buildStampCpp) {
+            $ipcText = Get-Content -LiteralPath $buildStampCpp -Raw -ErrorAction SilentlyContinue
             if ($ipcText -match 'kBuildStamp\[\]\s*=\s*"([^"]+)"') {
                 $buildStamp = $Matches[1].Trim()
             }
@@ -470,6 +470,29 @@ Write-Host "Out:     $OutDir"
 Write-Host "Editor:  $($editorTargets -join ', ') [$EditorConfig]"
 Write-Host "Pixera:  $($pixeraTargets -join ', ') [$PixeraConfig]"
 Write-Host ""
+
+# Stale Remover DLLs from skipped incremental compiles have lied before.
+# Wipe known outputs so Resolve-BuiltDll cannot copy an old binary.
+if ($RemoverOnly -or $PixeraOnly -or (-not $EditorOnly -and -not $CameraDebugOnly)) {
+    $stale = @(
+        (Join-Path $OutDir "ExtGenesisRemover\ExtGenesisRemover.dll"),
+        (Join-Path $OutDir "ExtGenesisRemover\GenesisRemoverMatteHost.exe"),
+        (Join-Path $BuildDir "rxExt\ExtGenesisRemover\ExtGenesisRemover.dll"),
+        (Join-Path $BuildDir "rxExt\ExtGenesisRemover\GenesisRemoverMatteHost.exe"),
+        (Join-Path $BuildDir "rxExt\ExtGenesisRemover\$PixeraConfig\ExtGenesisRemover.dll"),
+        (Join-Path $BuildDir "rxExt\ExtGenesisRemover\$PixeraConfig\GenesisRemoverMatteHost.exe")
+    )
+    foreach ($p in $stale) {
+        if (Test-Path -LiteralPath $p) {
+            try {
+                Remove-Item -LiteralPath $p -Force -ErrorAction Stop
+                Write-Host ("Deleted stale: {0}" -f $p) -ForegroundColor Yellow
+            } catch {
+                Write-Host ("WARNING: could not delete {0}: {1}" -f $p, $_.Exception.Message) -ForegroundColor Yellow
+            }
+        }
+    }
+}
 
 $LogFile = Join-Path $BuildDir "last-build.log"
 New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null

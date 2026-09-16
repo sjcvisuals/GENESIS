@@ -22,9 +22,9 @@ inline constexpr char kMappingName[] = "Local\\GenesisRemoverMatteIpc_v57";
 inline constexpr char kKickEventName[] = "Local\\GenesisRemoverMatteKick_v57";
 inline constexpr char kStopEventName[] = "Local\\GenesisRemoverMatteStop_v57";
 
-// Single source of truth - must match BUILD_STAMP.txt / Debug Status.
-// v63f2: build.ps1 verifies this string is embedded in DLL+host binaries (BUILD_STAMP.txt alone lied).
-inline constexpr char kBuildStamp[] = "remover-demo-v63f2-dll-stamp-verify-20260916";
+// Single source of truth - defined in BuildStamp.cpp (must match BUILD_STAMP.txt).
+// Keep this as extern (not inline constexpr) so stamp bumps always force a recompile.
+extern char const kBuildStamp[];
 
 inline constexpr std::uint32_t kMagic = 0x34444d47u; // GMD4
 inline constexpr std::uint32_t kVersion = 8;

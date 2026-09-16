@@ -19,11 +19,11 @@ param(
 $ErrorActionPreference = "Continue"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 
-# Prefer stamp from MatteIpc.h (single source of truth); fall back if unreadable.
-$MatteIpcHeader = Join-Path $RepoRoot "extensions\ExtGenesisRemover\src\MatteIpc.h"
+# Prefer stamp from BuildStamp.cpp (single source of truth); fall back if unreadable.
+$BuildStampCpp = Join-Path $RepoRoot "extensions\ExtGenesisRemover\src\BuildStamp.cpp"
 $ExpectedStamp = "remover-demo-v63d-live-fps-20260915"
-if (Test-Path -LiteralPath $MatteIpcHeader) {
-    $hdrText = Get-Content -LiteralPath $MatteIpcHeader -Raw -ErrorAction SilentlyContinue
+if (Test-Path -LiteralPath $BuildStampCpp) {
+    $hdrText = Get-Content -LiteralPath $BuildStampCpp -Raw -ErrorAction SilentlyContinue
     if ($hdrText -match 'kBuildStamp\[\]\s*=\s*"([^"]+)"') {
         $ExpectedStamp = $Matches[1].Trim()
     }
