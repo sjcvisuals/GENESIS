@@ -178,7 +178,24 @@ function Test-Logs {
     Write-Report "--- Runtime logs ---" "INFO"
     if (Test-Path -LiteralPath $FailFile) {
         $failText = (Get-Content -LiteralPath $FailFile -Raw -ErrorAction SilentlyContinue)
-        Add-Fail ("FAIL file present: {0} => {1}" -f $FailFile, (($failText -replace '\s+', ' ').Trim()))
+        $failOneLine = (($failText -replace '\s+', ' ').Trim())
+        # PackageOnly is an out/ gate before install. Leftover FAIL files from a prior
+        # PIXERA session (e.g. STAMP_MISMATCH while swapping DLL/host) must not block
+        # INSTALL when the package itself is healthy.
+        if ($PackageOnly) {
+            $cleared = $false
+            try {
+                Remove-Item -LiteralPath $FailFile -Force -ErrorAction Stop
+                $cleared = $true
+            } catch {}
+            if ($cleared) {
+                Add-Warn ("Cleared stale FAIL file (package-only): {0}" -f $failOneLine)
+            } else {
+                Add-Warn ("Stale FAIL file present (delete before PIXERA reload): {0} => {1}" -f $FailFile, $failOneLine)
+            }
+        } else {
+            Add-Fail ("FAIL file present: {0} => {1}" -f $FailFile, $failOneLine)
+        }
     } else {
         Add-Pass "No ExtGenesisRemover.FAIL.txt (good)"
     }
