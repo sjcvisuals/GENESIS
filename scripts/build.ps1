@@ -148,6 +148,31 @@ function Find-DirectMLDll {
     return $null
 }
 
+function Get-EmbeddedBuildStamp([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { return @() }
+    $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $Path))
+    $text = [System.Text.Encoding]::ASCII.GetString($bytes)
+    $hits = [regex]::Matches($text, 'remover-demo-v[0-9][a-z0-9\-]+') |
+        ForEach-Object { $_.Value } |
+        Sort-Object -Unique
+    return @($hits)
+}
+
+function Assert-BinaryBuildStamp([string]$Path, [string]$ExpectedStamp, [string]$Label) {
+    $hits = @(Get-EmbeddedBuildStamp $Path)
+    if ($hits.Count -eq 0) {
+        throw ("{0} has no remover-demo stamp embedded: {1}" -f $Label, $Path)
+    }
+    if ($hits -notcontains $ExpectedStamp) {
+        throw ("{0} stamp mismatch: expected '{1}' embedded, found [{2}] in {3}. Delete out\ExtGenesisRemover and rebuild." -f `
+            $Label, $ExpectedStamp, ($hits -join ', '), $Path)
+    }
+    if ($hits.Count -gt 1) {
+        Write-Host ("WARNING: {0} embeds multiple stamps: {1}" -f $Label, ($hits -join ', ')) -ForegroundColor Yellow
+    }
+    Write-Host ("{0} binary stamp OK: {1}" -f $Label, $ExpectedStamp) -ForegroundColor Green
+}
+
 function Sync-Directory([string]$Source, [string]$Destination) {
     if (-not (Test-Path $Source)) { return }
     if (Test-Path $Destination) {
@@ -318,6 +343,9 @@ Re-run cmake configure (delete build\CMakeCache.txt if the target is missing), t
                 $buildStamp = $Matches[1].Trim()
             }
         }
+        # BUILD_STAMP.txt alone lied before (header updated, stale DLL copied). Fail loud.
+        Assert-BinaryBuildStamp (Join-Path $remOut "ExtGenesisRemover.dll") $buildStamp "ExtGenesisRemover.dll"
+        Assert-BinaryBuildStamp (Join-Path $remOut "GenesisRemoverMatteHost.exe") $buildStamp "GenesisRemoverMatteHost.exe"
         $stamp = @"
 build=$buildStamp
 dll=$remOut\ExtGenesisRemover.dll
