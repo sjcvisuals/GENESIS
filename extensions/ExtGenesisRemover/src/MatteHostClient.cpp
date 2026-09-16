@@ -217,6 +217,7 @@ bool MatteHostClient::launchHost() {
     return true;
 }
 
+// MSVC build guard: keep this signature exactly as one token (never ensureStartedbool).
 bool MatteHostClient::ensureStarted(std::uint64_t adapter_luid) {
     adapter_luid_ = adapter_luid;
     if (!openIpc()) {
