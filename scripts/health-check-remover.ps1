@@ -145,6 +145,25 @@ function Test-Package([string]$Dir, [string]$Label, [switch]$MissingIsWarn) {
         Add-Pass ("{0} stamp OK: {1}" -f $Label, $stamp)
     }
 
+    # BUILD_STAMP.txt can lie if the DLL was not rebuilt. Check the binary.
+    if (Test-Path -LiteralPath $dll) {
+        try {
+            $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $dll))
+            $text = [System.Text.Encoding]::ASCII.GetString($bytes)
+            $binStamps = @([regex]::Matches($text, 'remover-demo-v[0-9][a-z0-9\-]+') | ForEach-Object { $_.Value } | Sort-Object -Unique)
+            if ($binStamps -contains $ExpectedStamp) {
+                Add-Pass ("{0}/DLL binary stamp OK: {1}" -f $Label, $ExpectedStamp)
+            } elseif ($binStamps.Count -eq 0) {
+                Add-Fail ("{0}/DLL has no remover-demo stamp embedded - rebuild" -f $Label)
+            } else {
+                Add-Fail ("{0}/DLL binary stamp [{1}] != expected {2} (stale DLL; BUILD_STAMP.txt lied) - delete out\\ExtGenesisRemover and rebuild" -f `
+                    $Label, ($binStamps -join ', '), $ExpectedStamp)
+            }
+        } catch {
+            Add-Warn ("{0}/DLL binary stamp check failed: {1}" -f $Label, $_.Exception.Message)
+        }
+    }
+
     if ((Test-Path -LiteralPath $dll) -and $RequireUnlocked) {
         try {
             $fs = [System.IO.File]::Open($dll, 'Open', 'ReadWrite', 'None')
