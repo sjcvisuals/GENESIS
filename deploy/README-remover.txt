@@ -37,6 +37,17 @@ That copies into:
 
 Then browse PIXERA to ExtGenesisRemover.dll inside THAT folder (not ExtGenesis).
 
+Portable package (another machine)
+----------------------------------
+After a good local BUILD-REMOVER.bat:
+
+  .\PACK-REMOVER-PORTABLE.bat
+
+Creates out\GenesisRemover-Portable-<stamp>.zip. Copy that zip to the other PC,
+unzip, right-click INSTALL.bat -> Run as administrator. The installer asks for
+that machine's PIXERA root (folder that contains data\rxExt), then copies the
+package in. Browse PIXERA to data\rxExt\ExtGenesisRemover\ExtGenesisRemover.dll.
+
 Verify before PIXERA
 ---------------------
 After build/install, always run:
