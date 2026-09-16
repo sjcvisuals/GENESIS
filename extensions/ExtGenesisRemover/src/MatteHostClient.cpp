@@ -217,7 +217,7 @@ bool MatteHostClient::launchHost() {
     return true;
 }
 
-bool MatteHostClient::ensureStartedbool MatteHostClient::ensureStarted(std::uint64_t adapter_luid) {
+bool MatteHostClient::ensureStarted(std::uint64_t adapter_luid) {
     adapter_luid_ = adapter_luid;
     if (!openIpc()) {
         return false;
