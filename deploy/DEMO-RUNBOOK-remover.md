@@ -34,6 +34,16 @@ git lfs pull
 4. `HEALTH-CHECK-REMOVER.bat` must show `RESULT pass=N warn=N fail=0` and stamp `remover-demo-v63f3-force-dll-rebuild-*`.
 5. If it fails, open `%TEMP%\ExtGenesisRemover.health.txt` and fix the FAIL lines before touching PIXERA.
 
+## Portable package (other machine)
+
+After a healthy local build:
+
+```powershell
+.\PACK-REMOVER-PORTABLE.bat
+```
+
+Copy `out\GenesisRemover-Portable-*.zip` to the other PC → unzip → right-click `INSTALL.bat` (Run as administrator). Pick that machine's PIXERA root when prompted (folder that contains `data\rxExt`). Browse PIXERA to `data\rxExt\ExtGenesisRemover\ExtGenesisRemover.dll`.
+
 ## Models must be real blobs
 
 ```powershell
