@@ -490,6 +490,7 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
         ${EXT_REMOVER_DIR}/src/LiveDelayRing.cpp
         ${EXT_REMOVER_DIR}/src/ModulePaths.cpp
         ${EXT_REMOVER_DIR}/src/RemoverLog.cpp
+        ${EXT_REMOVER_DIR}/src/BuildStamp.cpp
         ${RX_SDK_DIR}/libs/common/string.cpp
         ${EXT_REMOVER_DIR}/ExtGenesisRemover.def
     )
@@ -516,6 +517,7 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
 
     add_executable(GenesisRemoverMatteHost
         ${EXT_REMOVER_DIR}/matte_host/main.cpp
+        ${EXT_REMOVER_DIR}/src/BuildStamp.cpp
     )
     target_include_directories(GenesisRemoverMatteHost PRIVATE
         ${EXT_REMOVER_DIR}/src

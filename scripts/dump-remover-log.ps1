@@ -11,9 +11,9 @@ $failFile = Join-Path $env:TEMP 'ExtGenesisRemover.FAIL.txt'
 $healthReport = Join-Path $env:TEMP 'ExtGenesisRemover.health.txt'
 
 $expectedStamp = 'remover-demo-v63-debug-...'
-$matteIpc = Join-Path $RepoRoot 'extensions\ExtGenesisRemover\src\MatteIpc.h'
-if (Test-Path -LiteralPath $matteIpc) {
-    $ipcText = Get-Content -LiteralPath $matteIpc -Raw -ErrorAction SilentlyContinue
+$buildStampCpp = Join-Path $RepoRoot 'extensions\ExtGenesisRemover\src\BuildStamp.cpp'
+if (Test-Path -LiteralPath $buildStampCpp) {
+    $ipcText = Get-Content -LiteralPath $buildStampCpp -Raw -ErrorAction SilentlyContinue
     if ($ipcText -match 'kBuildStamp\[\]\s*=\s*"([^"]+)"') {
         $expectedStamp = $Matches[1].Trim()
     }

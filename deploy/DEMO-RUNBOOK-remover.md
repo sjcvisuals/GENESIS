@@ -2,7 +2,7 @@
 
 **Goal:** Person Matte (RVM) cutout on a live camera in PIXERA at usable preview FPS.
 
-**Stamp:** `remover-demo-v63f2-dll-stamp-verify-20260916`
+**Stamp:** `remover-demo-v63f3-force-dll-rebuild-20260916`
 
 **What changed**
 - v62: CPU capture (host no longer Maps shared GPU texture - that froze preview)
@@ -31,7 +31,7 @@ git lfs pull
 .\HEALTH-CHECK-REMOVER.bat
 ```
 
-4. `HEALTH-CHECK-REMOVER.bat` must show `RESULT pass=N warn=N fail=0` and stamp `remover-demo-v63f2-dll-stamp-verify-*`.
+4. `HEALTH-CHECK-REMOVER.bat` must show `RESULT pass=N warn=N fail=0` and stamp `remover-demo-v63f3-force-dll-rebuild-*`.
 5. If it fails, open `%TEMP%\ExtGenesisRemover.health.txt` and fix the FAIL lines before touching PIXERA.
 
 ## Models must be real blobs
@@ -54,7 +54,7 @@ Get-Item assets\matting\rvm_mobilenetv3_fp16.onnx | Select-Object Length
 
 Debug Status should look like:
 
-`remover-demo-v63f2-dll-stamp-verify-20260916 matte map=..ms infer=..ms ep=DML:N shm=1 matte=1`
+`remover-demo-v63f3-force-dll-rebuild-20260916 matte map=..ms infer=..ms ep=DML:N shm=1 matte=1`
 
 - `shm=1` means CPU capture path (good)
 - `MISMATCH` means mixed DLL/host - quit PIXERA and reinstall the whole folder

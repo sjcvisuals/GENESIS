@@ -81,7 +81,7 @@ def main() -> int:
 
     step("--- Static source gates ---")
     host = ROOT / "extensions/ExtGenesisRemover/matte_host/main.cpp"
-    ipc = ROOT / "extensions/ExtGenesisRemover/src/MatteIpc.h"
+    stamp_cpp = ROOT / "extensions/ExtGenesisRemover/src/BuildStamp.cpp"
     rvm = ROOT / "assets/matting/rvm_mobilenetv3_fp16.onnx"
     src_root = ROOT / "extensions/ExtGenesisRemover"
 
@@ -101,16 +101,16 @@ def main() -> int:
             fail("matte_host smoke entry incomplete (--smoke / runHostSmoke)")
 
     stamp = None
-    if not ipc.is_file():
-        fail("MatteIpc.h missing")
+    if not stamp_cpp.is_file():
+        fail("BuildStamp.cpp missing")
     else:
-        text = ipc.read_text(encoding="utf-8", errors="replace")
-        m = re.search(r'(k\w*Stamp)\[\]\s*=\s*"([^"]+)"', text)
+        text = stamp_cpp.read_text(encoding="utf-8", errors="replace")
+        m = re.search(r'(kBuildStamp)\[\]\s*=\s*"([^"]+)"', text)
         if m:
             stamp = m.group(2)
-            ok(f"MatteIpc stamp = {stamp} ({m.group(1)})")
+            ok(f"BuildStamp.cpp stamp = {stamp} ({m.group(1)})")
         else:
-            fail("Could not parse build stamp from MatteIpc.h")
+            fail("Could not parse build stamp from BuildStamp.cpp")
 
     if not rvm.is_file():
         fail(f"RVM model missing: {rvm}")

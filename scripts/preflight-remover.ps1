@@ -37,7 +37,7 @@ Write-Host ""
 
 Write-Step "--- Static source gates ---"
 $matteHost = Join-Path $RepoRoot "extensions\ExtGenesisRemover\matte_host\main.cpp"
-$matteIpc = Join-Path $RepoRoot "extensions\ExtGenesisRemover\src\MatteIpc.h"
+$buildStampCpp = Join-Path $RepoRoot "extensions\ExtGenesisRemover\src\BuildStamp.cpp"
 $rvmSrc = Join-Path $RepoRoot "assets\matting\rvm_mobilenetv3_fp16.onnx"
 
 if (-not (Test-Path -LiteralPath $matteHost)) {
@@ -59,16 +59,16 @@ if (-not (Test-Path -LiteralPath $matteHost)) {
 }
 
 $expectedStamp = $null
-if (Test-Path -LiteralPath $matteIpc) {
-    $ipc = Get-Content -LiteralPath $matteIpc -Raw
-    if ($ipc -match 'k\w*Stamp\[\]\s*=\s*"([^"]+)"') {
+if (Test-Path -LiteralPath $buildStampCpp) {
+    $ipc = Get-Content -LiteralPath $buildStampCpp -Raw
+    if ($ipc -match 'kBuildStamp\[\]\s*=\s*"([^"]+)"') {
         $expectedStamp = $Matches[1].Trim()
-        Add-Pass ("MatteIpc stamp = {0}" -f $expectedStamp)
+        Add-Pass ("BuildStamp.cpp stamp = {0}" -f $expectedStamp)
     } else {
-        Add-Fail "Could not parse kBuildStamp from MatteIpc.h"
+        Add-Fail "Could not parse kBuildStamp from BuildStamp.cpp"
     }
 } else {
-    Add-Fail "MatteIpc.h missing"
+    Add-Fail "BuildStamp.cpp missing"
 }
 
 if (-not (Test-Path -LiteralPath $rvmSrc)) {
