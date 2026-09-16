@@ -80,7 +80,7 @@ Dump quickly:
 | Symptom | Meaning |
 |---------|---------|
 | Debug Status still v61/v62 | Old package still installed - rebuild+reinstall after quit PIXERA |
-| `STAMP_MISMATCH` / FAIL file | Mixed DLL/host - reinstall whole `ExtGenesisRemover` folder |
+| `STAMP_MISMATCH` / FAIL file | Mixed DLL/host — quit PIXERA, `del %TEMP%\ExtGenesisRemover.FAIL.txt`, reinstall whole folder, reload DLL |
 | Health check FAIL on RVM size | `git lfs pull` then rebuild/install |
 | Cyan forever | Video In not linked |
 | `passthrough` forever | MatteHost failed - read host log |
