@@ -4,6 +4,7 @@
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <cstdio>
 
 namespace genesis {
@@ -96,6 +97,50 @@ void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
     } else if (protocol.totalPackets() > 0 && protocol.learnedMessages().empty()) {
         ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.35f, 1.0f),
                            "Packets received but no OSC addresses learned yet. Check parse error above.");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.55f, 0.75f, 0.95f, 1.0f), "Particle emit (XY)");
+    ImGui::TextWrapped(
+        "Send floats x,y to the emit address to burst particles. "
+        "Optional: x,y,count  or  x,y,z,count. Default plane maps x→X, y→Z.");
+
+    OscParticleEmitSettings emit = protocol.particleEmitSettings();
+    bool emit_dirty = false;
+    emit_dirty |= ImGui::Checkbox("Enable XY particle emit", &emit.enabled);
+    char addr_buf[128]{};
+    std::snprintf(addr_buf, sizeof(addr_buf), "%s", emit.address.c_str());
+    if (ImGui::InputText("Emit address", addr_buf, sizeof(addr_buf))) {
+        emit.address = addr_buf;
+        emit_dirty = true;
+    }
+    char path_buf[128]{};
+    std::snprintf(path_buf, sizeof(path_buf), "%s", emit.emitter_path.c_str());
+    if (ImGui::InputText("Emitter path", path_buf, sizeof(path_buf))) {
+        emit.emitter_path = path_buf;
+        emit_dirty = true;
+    }
+    int plane = static_cast<int>(emit.plane);
+    if (ImGui::Combo("XY plane", &plane, "XZ (floor)\0XY (screen)\0")) {
+        emit.plane = static_cast<OscParticlePlane>(plane);
+        emit_dirty = true;
+    }
+    emit_dirty |= ImGui::DragFloat("Scale", &emit.scale, 0.01f, 0.001f, 100.0f, "%.3f");
+    emit_dirty |= ImGui::DragFloat2("Offset", &emit.offset.x, 0.01f);
+    emit_dirty |= ImGui::DragFloat("Plane height", &emit.plane_height, 0.01f);
+    int default_count = static_cast<int>(emit.default_count);
+    if (ImGui::InputInt("Default count", &default_count)) {
+        emit.default_count = static_cast<std::uint32_t>(std::clamp(default_count, 1, 256));
+        emit_dirty = true;
+    }
+    if (emit_dirty) {
+        protocol.setParticleEmitSettings(emit);
+    }
+    ImGui::TextDisabled("Particle emit messages: %llu",
+                        static_cast<unsigned long long>(protocol.totalParticleEmits()));
+    if (ImGui::Button("Clear particle emit queue")) {
+        protocol.clearParticleEmits();
     }
 
     if (protocol.isAwaitingParameterLink()) {

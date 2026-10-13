@@ -5,6 +5,7 @@
 #include "scene/Scene.hpp"
 
 #include <cstdint>
+#include <glm/vec3.hpp>
 #include <unordered_map>
 #include <vector>
 
@@ -27,6 +28,11 @@ public:
 
     // Fixed-step simulation. Call `steps` times with `dt` (usually ProductionClock fixed step).
     void simulate(Scene& scene, std::uint64_t steps, float dt);
+
+    // One-shot burst at an explicit world position (OSC / interactive). Uses emitter
+    // look params from `emitter_node`; spawn origin is `world_position` (not the node).
+    std::uint32_t emitBurstAtWorld(Scene& scene, NodeId emitter_node, const glm::vec3& world_position,
+                                   std::uint32_t count);
 
     // Seek/rebuild helper: clear and fast-forward absolute production time.
     void rebuildToTime(Scene& scene, double production_time_seconds, float fixed_dt);
@@ -75,7 +81,8 @@ private:
     void syncEmitters(Scene& scene);
     void stepOnce(Scene& scene, float dt);
     void spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, const ParticleEmitter& desc,
-                          const Node& node, std::uint32_t count);
+                          const Node& node, std::uint32_t count,
+                          const glm::vec3* origin_override = nullptr);
     std::size_t allocateParticle();
 
     std::uint64_t scene_seed_ = 1;

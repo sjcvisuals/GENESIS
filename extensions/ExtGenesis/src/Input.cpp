@@ -5,6 +5,7 @@
 #include "SceneSelectors.h"
 #include "runtime/HostTimingAdapter.hpp"
 #include "runtime/RuntimePaths.hpp"
+#include "protocol/OscProtocol.hpp"
 #include "common/string.h"
 #include "renderer/vulkan/ExternalRenderTarget.hpp"
 #include "renderer/vulkan/ExternalSync.hpp"
@@ -467,6 +468,16 @@ RenderResult Input::render() noexcept try {
     }
 
     actor_bindings_.apply(session_->sceneRuntime());
+
+    // Shared OSC hub: one UDP listen per process, per-stream cursor for dual-GPU.
+    ::genesis::OscProtocol& osc = ::genesis::sharedOscProtocol();
+    if (osc.settings().listening || osc.isListening()) {
+        osc_time_seconds_ = time_ ? time_->value() : osc_time_seconds_;
+        osc.poll(osc_time_seconds_);
+        osc.applyBindings(session_->sceneRuntime());
+        osc.applyParticleEmits(session_->sceneRuntime(), osc_particle_cursor_);
+    }
+
     const ::genesis::HostTimingInput timing =
         ::genesis::hostTimingFromPixeraTimeline(time_->value());
     const ::genesis::GenesisFrameTime frame_time = session_->advanceProductionTime(timing);

@@ -242,17 +242,24 @@ add_library(genesis_audio STATIC
 target_include_directories(genesis_audio PUBLIC ${CMAKE_SOURCE_DIR})
 target_link_libraries(genesis_audio PUBLIC genesis_engine_runtime genesis_platform imgui_lib)
 
+# OSC receive + particle emit (no ImGui — safe for ExtGenesis / headless).
 add_library(genesis_protocol STATIC
     protocol/OscParser.cpp
     protocol/OscUdpReceiver.cpp
     protocol/OscProtocol.cpp
-    editor/OscProtocolUi.cpp
+    protocol/OscParticleEmit.cpp
 )
 target_include_directories(genesis_protocol PUBLIC ${CMAKE_SOURCE_DIR})
-target_link_libraries(genesis_protocol PUBLIC genesis_runtime genesis_audio imgui_lib)
+target_link_libraries(genesis_protocol PUBLIC genesis_runtime)
 if(WIN32)
     target_link_libraries(genesis_protocol PRIVATE ws2_32)
 endif()
+
+add_library(genesis_protocol_ui STATIC
+    editor/OscProtocolUi.cpp
+)
+target_include_directories(genesis_protocol_ui PUBLIC ${CMAKE_SOURCE_DIR})
+target_link_libraries(genesis_protocol_ui PUBLIC genesis_protocol imgui_lib)
 
 # -----------------------------------------------------------------------------
 # Examples
@@ -267,7 +274,7 @@ if(GENESIS_BUILD_EXAMPLES)
     add_dependencies(genesis_camera genesis_shaders)
 
     add_executable(genesis_gltf_viewer examples/gltf_viewer/main.cpp editor/EditorSession.cpp)
-    target_link_libraries(genesis_gltf_viewer PRIVATE genesis_engine genesis_protocol imguizmo_lib)
+    target_link_libraries(genesis_gltf_viewer PRIVATE genesis_engine genesis_protocol genesis_protocol_ui genesis_audio imguizmo_lib)
     add_dependencies(genesis_gltf_viewer genesis_shaders)
 
     add_custom_command(TARGET genesis_gltf_viewer POST_BUILD
@@ -409,6 +416,7 @@ if(GENESIS_BUILD_RENDERBRIDGE_EXT AND WIN32)
 
     target_link_libraries(ExtGenesis PRIVATE
         genesis_runtime
+        genesis_protocol
     )
     if(MSVC AND GENESIS_HAS_ONNXRUNTIME)
         target_link_options(ExtGenesis PRIVATE "/DELAYLOAD:onnxruntime.dll")
