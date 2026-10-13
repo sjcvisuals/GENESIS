@@ -106,8 +106,45 @@ std::size_t ParticleWorld::allocateParticle() {
     return particles_.size() - 1;
 }
 
+std::uint32_t ParticleWorld::emitBurstAtWorld(Scene& scene, NodeId emitter_node,
+                                              const glm::vec3& world_position, std::uint32_t count) {
+    if (count == 0) {
+        return 0;
+    }
+    syncEmitters(scene);
+    Node* node = scene.find(emitter_node);
+    if (!node || !node->particle_emitter.has_value()) {
+        return 0;
+    }
+
+    EmitterRuntime* runtime = nullptr;
+    for (EmitterRuntime& candidate : emitters_) {
+        if (candidate.node_id == emitter_node) {
+            runtime = &candidate;
+            break;
+        }
+    }
+    if (!runtime) {
+        return 0;
+    }
+
+    const std::uint64_t emit_before = runtime->next_emit_index;
+    spawnFromEmitter(scene, *runtime, *node->particle_emitter, *node, count, &world_position);
+    const std::uint64_t emit_after = runtime->next_emit_index;
+
+    std::uint32_t alive = 0;
+    for (const Particle& p : particles_) {
+        if (p.alive) {
+            ++alive;
+        }
+    }
+    stats_.alive = alive;
+    return static_cast<std::uint32_t>(emit_after - emit_before);
+}
+
 void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, const ParticleEmitter& desc,
-                                     const Node& node, std::uint32_t count) {
+                                     const Node& node, std::uint32_t count,
+                                     const glm::vec3* origin_override) {
     (void)scene;
     if (count == 0 || !desc.enabled || runtime.finished) {
         return;
@@ -122,7 +159,7 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
 
     const std::uint64_t seed = desc.seed_override != 0 ? desc.seed_override : scene_seed_;
     const glm::mat4 world = node.world;
-    const glm::vec3 origin = glm::vec3(world[3]);
+    const glm::vec3 origin = origin_override ? *origin_override : glm::vec3(world[3]);
 
     for (std::uint32_t i = 0; i < count; ++i) {
         if (alive >= desc.max_particles) {

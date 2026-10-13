@@ -1,5 +1,6 @@
 #pragma once
 
+#include "protocol/OscParticleEmit.hpp"
 #include "protocol/OscTypes.hpp"
 #include "protocol/OscUdpReceiver.hpp"
 #include "scene/SceneRuntime.hpp"
@@ -23,19 +24,32 @@ public:
     void setSettings(const Settings& settings);
     const Settings& settings() const { return settings_; }
 
+    OscParticleEmitSettings& particleEmitSettings() { return particle_emit_; }
+    const OscParticleEmitSettings& particleEmitSettings() const { return particle_emit_; }
+    void setParticleEmitSettings(const OscParticleEmitSettings& settings) { particle_emit_ = settings; }
+
     bool startListening(std::string* out_error = nullptr);
     void stopListening();
     bool isListening() const { return receiver_.isListening(); }
 
     void poll(double now_seconds);
+    // Offline / test ingest of an already-decoded OSC message.
+    void ingestDecodedMessage(const OscMessage& message, double now_seconds);
     void applyBindings(SceneRuntime& runtime);
+
+    // Apply queued OSC particle bursts. `consumer_cursor` tracks the last applied
+    // sequence so multiple consumers (e.g. one ExtGenesis session per GPU) can
+    // each apply the same events without draining them for the others.
+    std::uint32_t applyParticleEmits(SceneRuntime& runtime, std::uint64_t& consumer_cursor);
 
     const std::vector<OscLearnedMessage>& learnedMessages() const { return learned_; }
     const std::vector<OscBinding>& bindings() const { return bindings_; }
+    const std::vector<OscParticleEmitEvent>& particleEmitEvents() const { return particle_events_; }
 
     void clearLearned();
     void removeBinding(std::size_t index);
     void clearBindings();
+    void clearParticleEmits();
 
     bool isAwaitingParameterLink() const { return pending_link_.has_value(); }
     const std::string& pendingLinkAddress() const { return pending_link_address_; }
@@ -49,16 +63,20 @@ public:
     std::uint64_t totalPackets() const { return total_packets_; }
     std::uint64_t totalMessages() const { return total_messages_; }
     std::uint64_t parseErrors() const { return parse_errors_; }
+    std::uint64_t totalParticleEmits() const { return total_particle_emits_; }
 
 private:
     void ingestMessage(const OscMessage& message, double now_seconds);
     void updateLearned(const OscMessage& message, double now_seconds);
     void storeLastValues(const OscMessage& message);
+    void ingestParticleEmit(const OscMessage& message);
 
     Settings settings_{};
+    OscParticleEmitSettings particle_emit_{};
     OscUdpReceiver receiver_;
     std::vector<OscLearnedMessage> learned_;
     std::vector<OscBinding> bindings_;
+    std::vector<OscParticleEmitEvent> particle_events_;
     std::unordered_map<std::string, std::vector<OscArg>> last_values_;
 
     struct PendingLink {
@@ -73,7 +91,12 @@ private:
     std::uint64_t total_packets_ = 0;
     std::uint64_t total_messages_ = 0;
     std::uint64_t parse_errors_ = 0;
+    std::uint64_t next_particle_sequence_ = 1;
+    std::uint64_t total_particle_emits_ = 0;
     bool settings_dirty_ = false;
 };
+
+// Process-wide OSC hub for multi-stream hosts (ExtGenesis: one listen, N GPU sessions).
+OscProtocol& sharedOscProtocol();
 
 } // namespace genesis

@@ -138,6 +138,7 @@ protected:
         osc_time_ += static_cast<double>(dt);
         osc_protocol_.poll(osc_time_);
         osc_protocol_.applyBindings(runtime_);
+        osc_protocol_.applyParticleEmits(runtime_, osc_particle_cursor_);
         audio_reactive_.tick(runtime_, dt);
         runtime_.updateTransforms();
         runtime_.tickParticles(dt);
@@ -2443,6 +2444,7 @@ private:
     genesis::OscProtocol osc_protocol_{};
     genesis::AudioReactive audio_reactive_{};
     double osc_time_ = 0.0;
+    std::uint64_t osc_particle_cursor_ = 0;
     float last_frame_dt_ = 1.0f / 60.0f;
     float look_time_seconds_ = 0.0f;
 };

@@ -63,6 +63,8 @@ private:
     std::unique_ptr<::genesis::GenesisSession> session_;
     std::uint32_t width_ = 1920;
     std::uint32_t height_ = 1080;
+    std::uint64_t osc_particle_cursor_ = 0;
+    double osc_time_seconds_ = 0.0;
 };
 
 } // namespace rxext::genesis_ext

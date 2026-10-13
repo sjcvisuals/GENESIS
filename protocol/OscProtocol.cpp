@@ -2,10 +2,51 @@
 
 #include "protocol/OscParser.hpp"
 #include "scene/ParamBinding.hpp"
+#include "scene/ScenePath.hpp"
 
 #include <algorithm>
+#include <memory>
 
 namespace genesis {
+
+namespace {
+
+constexpr std::size_t kMaxQueuedParticleEmits = 4096;
+
+NodeId ensureOscParticleEmitterNode(Scene& scene, const std::string& emitter_path) {
+    if (std::optional<NodeId> existing = findNodeByPath(scene, emitter_path)) {
+        if (Node* node = scene.find(*existing)) {
+            if (!node->particle_emitter.has_value()) {
+                node->has_particle_emitter = true;
+                node->particle_emitter = makeOscParticleEmitter();
+            }
+            return *existing;
+        }
+    }
+
+    std::optional<NodeId> parent;
+    std::string leaf = emitter_path;
+    const std::size_t slash = emitter_path.find_last_of('/');
+    if (slash != std::string::npos) {
+        const std::string parent_path = emitter_path.substr(0, slash);
+        leaf = emitter_path.substr(slash + 1);
+        parent = findNodeByPath(scene, parent_path);
+        if (!parent.has_value() && parent_path == "Scene" && !scene.roots.empty()) {
+            // Prefer an existing root named Scene when present.
+            for (NodeId root_id : scene.roots) {
+                if (const Node* root = scene.find(root_id); root && root->name == "Scene") {
+                    parent = root_id;
+                    break;
+                }
+            }
+        }
+    }
+
+    return scene.createParticleEmitterNode(leaf.empty() ? "OSC Particles" : leaf, parent,
+                                           makeOscParticleEmitter());
+}
+
+} // namespace
 
 void OscProtocol::setSettings(const Settings& settings) {
     const bool endpoint_changed = settings.bind_ip != settings_.bind_ip || settings.port != settings_.port;
@@ -73,10 +114,30 @@ void OscProtocol::poll(double now_seconds) {
     }
 }
 
+void OscProtocol::ingestDecodedMessage(const OscMessage& message, double now_seconds) {
+    ingestMessage(message, now_seconds);
+}
+
 void OscProtocol::ingestMessage(const OscMessage& message, double now_seconds) {
     storeLastValues(message);
+    ingestParticleEmit(message);
     if (settings_.learn_enabled) {
         updateLearned(message, now_seconds);
+    }
+}
+
+void OscProtocol::ingestParticleEmit(const OscMessage& message) {
+    OscParticleEmitEvent event{};
+    if (!tryParseOscParticleEmit(message, particle_emit_, event)) {
+        return;
+    }
+    event.sequence = next_particle_sequence_++;
+    particle_events_.push_back(event);
+    ++total_particle_emits_;
+    if (particle_events_.size() > kMaxQueuedParticleEmits) {
+        const std::size_t drop = particle_events_.size() - kMaxQueuedParticleEmits;
+        particle_events_.erase(particle_events_.begin(),
+                               particle_events_.begin() + static_cast<std::ptrdiff_t>(drop));
     }
 }
 
@@ -134,6 +195,36 @@ void OscProtocol::applyBindings(SceneRuntime& runtime) {
     }
 }
 
+std::uint32_t OscProtocol::applyParticleEmits(SceneRuntime& runtime, std::uint64_t& consumer_cursor) {
+    if (!particle_emit_.enabled || particle_events_.empty()) {
+        return 0;
+    }
+
+    std::uint32_t spawned_total = 0;
+    bool applied_any = false;
+    for (const OscParticleEmitEvent& event : particle_events_) {
+        if (event.sequence <= consumer_cursor) {
+            continue;
+        }
+        const NodeId emitter_id = ensureOscParticleEmitterNode(runtime.scene(), particle_emit_.emitter_path);
+        runtime.updateTransforms();
+        const glm::vec3 world = oscParticleWorldPosition(particle_emit_, event);
+        spawned_total += runtime.particleWorld().emitBurstAtWorld(runtime.scene(), emitter_id, world,
+                                                                 event.count);
+        consumer_cursor = event.sequence;
+        applied_any = true;
+    }
+
+    if (applied_any) {
+        runtime.updateTransforms();
+    }
+    return spawned_total;
+}
+
+void OscProtocol::clearParticleEmits() {
+    particle_events_.clear();
+}
+
 void OscProtocol::clearLearned() {
     learned_.clear();
 }
@@ -186,6 +277,11 @@ bool OscProtocol::completeLink(OscParamTarget target, const std::string& node_pa
 
     cancelLink();
     return true;
+}
+
+OscProtocol& sharedOscProtocol() {
+    static std::unique_ptr<OscProtocol> instance = std::make_unique<OscProtocol>();
+    return *instance;
 }
 
 } // namespace genesis
