@@ -101,14 +101,16 @@ void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
 
     ImGui::Spacing();
     ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.55f, 0.75f, 0.95f, 1.0f), "Particle emit (XY)");
+    ImGui::TextColored(ImVec4(0.55f, 0.75f, 0.95f, 1.0f), "Particle emit (XY tracker)");
     ImGui::TextWrapped(
-        "Send floats x,y to the emit address to burst particles. "
-        "Optional: x,y,count  or  x,y,z,count. Default plane maps x→X, y→Z.");
+        "Send floats x,y to move the OSC Tracker emitter (and optionally burst). "
+        "Continuous bubble spawn uses the emitter Rate. Optional: x,y,count or x,y,z,count.");
 
     OscParticleEmitSettings emit = protocol.particleEmitSettings();
     bool emit_dirty = false;
     emit_dirty |= ImGui::Checkbox("Enable XY particle emit", &emit.enabled);
+    emit_dirty |= ImGui::Checkbox("Track emitter position", &emit.track_emitter_position);
+    emit_dirty |= ImGui::Checkbox("Burst on each message", &emit.burst_on_message);
     char addr_buf[128]{};
     std::snprintf(addr_buf, sizeof(addr_buf), "%s", emit.address.c_str());
     if (ImGui::InputText("Emit address", addr_buf, sizeof(addr_buf))) {
@@ -130,7 +132,7 @@ void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
     emit_dirty |= ImGui::DragFloat2("Offset", &emit.offset.x, 0.01f);
     emit_dirty |= ImGui::DragFloat("Plane height", &emit.plane_height, 0.01f);
     int default_count = static_cast<int>(emit.default_count);
-    if (ImGui::InputInt("Default count", &default_count)) {
+    if (ImGui::InputInt("Burst count", &default_count)) {
         emit.default_count = static_cast<std::uint32_t>(std::clamp(default_count, 1, 256));
         emit_dirty = true;
     }

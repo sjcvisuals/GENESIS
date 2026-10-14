@@ -27,13 +27,17 @@ enum class OscParticlePlane : std::uint8_t {
 struct OscParticleEmitSettings {
     bool enabled = true;
     std::string address = "/genesis/particles/emit";
-    std::string emitter_path = "Scene/OSC Particles";
+    std::string emitter_path = "Scene/OSC Tracker";
     OscParticlePlane plane = OscParticlePlane::XZ;
-    float plane_height = 0.0f;
+    float plane_height = 0.15f;
     float scale = 1.0f;
     glm::vec2 offset{0.0f, 0.0f};
     std::uint32_t default_count = 8;
     std::uint32_t max_count = 64;
+    // Move the emitter node to each OSC xy (continuous spawn uses the emitter rate).
+    bool track_emitter_position = true;
+    // Also burst `count` particles at the point (in addition to continuous rate).
+    bool burst_on_message = false;
 };
 
 struct OscParticleEmitEvent {
@@ -46,24 +50,7 @@ struct OscParticleEmitEvent {
 };
 
 inline ParticleEmitter makeOscParticleEmitter() {
-    ParticleEmitter e = makeDefaultParticleEmitter();
-    e.enabled = true;
-    e.looping = true;
-    e.world_space = true;
-    e.rate_per_second = 0.0f; // OSC bursts only
-    e.burst_count = 0;
-    e.max_particles = 2048;
-    e.lifetime_min = 0.8f;
-    e.lifetime_max = 1.6f;
-    e.speed_min = 0.4f;
-    e.speed_max = 1.2f;
-    e.size_min = 0.04f;
-    e.size_max = 0.1f;
-    e.spawn_shape = ParticleSpawnShape::Point;
-    e.gravity = glm::vec3(0.0f, -1.5f, 0.0f);
-    e.color_start = glm::vec4(0.35f, 0.85f, 1.0f, 1.0f);
-    e.color_end = glm::vec4(0.1f, 0.25f, 1.0f, 0.0f);
-    return e;
+    return makeOscTrackerBubbleEmitter();
 }
 
 inline glm::vec3 oscParticleWorldPosition(const OscParticleEmitSettings& settings,

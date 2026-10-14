@@ -50,6 +50,56 @@ const char* oscParamTargetLabel(OscParamTarget target) {
         return "Light Color B";
     case OscParamTarget::ParticleRate:
         return "Particle Rate";
+    case OscParamTarget::ParticleBurst:
+        return "Particle Burst";
+    case OscParamTarget::ParticleMax:
+        return "Particle Max";
+    case OscParamTarget::ParticleLifetimeMin:
+        return "Particle Lifetime Min";
+    case OscParamTarget::ParticleLifetimeMax:
+        return "Particle Lifetime Max";
+    case OscParamTarget::ParticleSpeedMin:
+        return "Particle Speed Min";
+    case OscParamTarget::ParticleSpeedMax:
+        return "Particle Speed Max";
+    case OscParamTarget::ParticleSizeMin:
+        return "Particle Size Min";
+    case OscParamTarget::ParticleSizeMax:
+        return "Particle Size Max";
+    case OscParamTarget::ParticleSizeEndMul:
+        return "Particle Size End Mul";
+    case OscParamTarget::ParticleColorStartR:
+        return "Particle Color Start R";
+    case OscParamTarget::ParticleColorStartG:
+        return "Particle Color Start G";
+    case OscParamTarget::ParticleColorStartB:
+        return "Particle Color Start B";
+    case OscParamTarget::ParticleColorStartA:
+        return "Particle Color Start A";
+    case OscParamTarget::ParticleColorEndR:
+        return "Particle Color End R";
+    case OscParamTarget::ParticleColorEndG:
+        return "Particle Color End G";
+    case OscParamTarget::ParticleColorEndB:
+        return "Particle Color End B";
+    case OscParamTarget::ParticleColorEndA:
+        return "Particle Color End A";
+    case OscParamTarget::ParticleGravityX:
+        return "Particle Gravity X";
+    case OscParamTarget::ParticleGravityY:
+        return "Particle Gravity Y";
+    case OscParamTarget::ParticleGravityZ:
+        return "Particle Gravity Z";
+    case OscParamTarget::ParticleDrag:
+        return "Particle Drag";
+    case OscParamTarget::ParticleSpawnRadius:
+        return "Particle Spawn Radius";
+    case OscParamTarget::ParticleSpawnHeight:
+        return "Particle Spawn Height";
+    case OscParamTarget::ParticleConeAngle:
+        return "Particle Cone Angle";
+    case OscParamTarget::ParticleEnabled:
+        return "Particle Enabled";
     case OscParamTarget::CameraFov:
         return "Camera FOV";
     case OscParamTarget::FluidSourceDensity:

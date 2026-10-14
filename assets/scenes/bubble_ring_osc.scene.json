@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "source": "builtin",
+  "nodes": [
+    {
+      "path": "Scene",
+      "name": "Scene",
+      "parent": null,
+      "visible": true,
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Directional Light",
+      "name": "Directional Light",
+      "parent": "Scene",
+      "visible": true,
+      "light": {
+        "type": "directional",
+        "color": [1.0, 0.98, 0.94],
+        "intensity": 1.15,
+        "enabled": true,
+        "range": 10.0,
+        "inner_cone_degrees": 20.0,
+        "outer_cone_degrees": 30.0
+      },
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [-0.383493, 0.30204, 0.131901, 0.864788],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Bubble Ring",
+      "name": "Bubble Ring",
+      "parent": "Scene",
+      "visible": true,
+      "particle_emitter": {
+        "enabled": true,
+        "looping": true,
+        "world_space": true,
+        "duration": 0.0,
+        "start_delay": 0.0,
+        "rate": 140.0,
+        "burst": 0,
+        "max_particles": 4096,
+        "lifetime_min": 2.5,
+        "lifetime_max": 4.5,
+        "speed_min": 0.35,
+        "speed_max": 0.75,
+        "size_min": 0.04,
+        "size_max": 0.09,
+        "size_end_multiplier": 0.35,
+        "color_start": [0.55, 0.9, 1.0, 0.85],
+        "color_end": [0.2, 0.45, 1.0, 0.0],
+        "gravity": [0.0, 0.55, 0.0],
+        "drag": 0.35,
+        "spawn_shape": "ring",
+        "spawn_radius": 1.25,
+        "spawn_box_height": 0.08,
+        "cone_angle_degrees": 12.0,
+        "render_mesh": "sphere",
+        "unlit": true,
+        "seed_override": 0,
+        "fluid_coupled": false
+      },
+      "transform": {
+        "position": [0.0, 0.05, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/OSC Tracker",
+      "name": "OSC Tracker",
+      "parent": "Scene",
+      "visible": true,
+      "particle_emitter": {
+        "enabled": true,
+        "looping": true,
+        "world_space": true,
+        "duration": 0.0,
+        "start_delay": 0.0,
+        "rate": 60.0,
+        "burst": 0,
+        "max_particles": 2048,
+        "lifetime_min": 1.8,
+        "lifetime_max": 3.2,
+        "speed_min": 0.45,
+        "speed_max": 0.95,
+        "size_min": 0.035,
+        "size_max": 0.08,
+        "size_end_multiplier": 0.2,
+        "color_start": [1.0, 0.75, 0.35, 0.95],
+        "color_end": [1.0, 0.25, 0.1, 0.0],
+        "gravity": [0.0, 0.7, 0.0],
+        "drag": 0.4,
+        "spawn_shape": "point",
+        "spawn_radius": 0.05,
+        "spawn_box_height": 0.05,
+        "cone_angle_degrees": 18.0,
+        "render_mesh": "sphere",
+        "unlit": true,
+        "seed_override": 0,
+        "fluid_coupled": false
+      },
+      "transform": {
+        "position": [0.0, 0.15, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Camera",
+      "name": "Camera",
+      "parent": "Scene",
+      "visible": true,
+      "camera": {
+        "fov_y_degrees": 45.0,
+        "near": 0.05,
+        "far": 200.0
+      },
+      "transform": {
+        "position": [0.0, 1.6, 4.2],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    }
+  ],
+  "materials": [],
+  "active_output_camera": "Scene/Camera"
+}

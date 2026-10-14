@@ -22,7 +22,7 @@ void drawMeter(const char* label, float value) {
 } // namespace
 
 void drawAudioReactivePanel(AudioReactive& reactive, bool* open,
-                            const std::string& selected_fluid_node_path) {
+                            const std::string& selected_particle_node_path) {
     ImGui::Begin("Audio", open);
 
     ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.65f, 1.0f), "ANALYSER");
@@ -123,18 +123,17 @@ void drawAudioReactivePanel(AudioReactive& reactive, bool* open,
         }
     }
 
-    if (!selected_fluid_node_path.empty()) {
-        if (ImGui::Button("Bass → selected fluid (lava preset)")) {
-            reactive.addLavaLampBassPreset(selected_fluid_node_path);
+    if (!selected_particle_node_path.empty()) {
+        if (ImGui::Button("Bass → selected emitter (rate + lift)")) {
+            reactive.addParticleBassRatePreset(selected_particle_node_path);
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(
-                "Maps bass/beat/onset to source density, rise velocity, and radius on:\n%s",
-                selected_fluid_node_path.c_str());
+            ImGui::SetTooltip("Maps bass→particle rate and beat→gravity Y on:\n%s",
+                             selected_particle_node_path.c_str());
         }
     } else {
         ImGui::BeginDisabled();
-        ImGui::Button("Bass → selected fluid (lava preset)");
+        ImGui::Button("Bass → selected emitter (rate + lift)");
         ImGui::EndDisabled();
     }
 

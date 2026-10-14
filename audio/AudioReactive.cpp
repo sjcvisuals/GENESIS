@@ -176,4 +176,26 @@ void AudioReactive::addLavaLampBassPreset(const std::string& fluid_node_path) {
     addBinding(kick);
 }
 
+void AudioReactive::addParticleBassRatePreset(const std::string& particle_node_path) {
+    AudioBinding rate{};
+    rate.channel = AudioFeatureChannel::Bass;
+    rate.target = OscParamTarget::ParticleRate;
+    rate.node_path = particle_node_path;
+    rate.bias = 20.0f;
+    rate.gain = 180.0f;
+    rate.min_value = 0.0f;
+    rate.max_value = 400.0f;
+    addBinding(rate);
+
+    AudioBinding gravity{};
+    gravity.channel = AudioFeatureChannel::Beat;
+    gravity.target = OscParamTarget::ParticleGravityY;
+    gravity.node_path = particle_node_path;
+    gravity.bias = 0.35f;
+    gravity.gain = 1.2f;
+    gravity.min_value = 0.0f;
+    gravity.max_value = 2.5f;
+    addBinding(gravity);
+}
+
 } // namespace genesis
