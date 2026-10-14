@@ -208,6 +208,22 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
             direction = coneDirection(world, desc.cone_angle_degrees, seed, runtime.node_id, emit_index);
             break;
         }
+        case ParticleSpawnShape::Ring: {
+            // Cylinder ring in local XZ: angle around Y, radius ≈ spawn_radius,
+            // optional vertical jitter via spawn_box_height.
+            constexpr float kTwoPi = 6.28318530718f;
+            const float angle =
+                particleRandom01(seed, runtime.node_id, emit_index, kChanPosX) * kTwoPi;
+            const float radial_jitter =
+                0.9f + 0.1f * particleRandom01(seed, runtime.node_id, emit_index, kChanPosZ);
+            const float radius = desc.spawn_radius * radial_jitter;
+            const float y =
+                (particleRandom01(seed, runtime.node_id, emit_index, kChanPosY) * 2.0f - 1.0f) *
+                desc.spawn_box_height;
+            local_offset = glm::vec3(std::cos(angle) * radius, y, std::sin(angle) * radius);
+            direction = coneDirection(world, desc.cone_angle_degrees, seed, runtime.node_id, emit_index);
+            break;
+        }
         case ParticleSpawnShape::Cone:
         default:
             direction = coneDirection(world, desc.cone_angle_degrees, seed, runtime.node_id, emit_index);

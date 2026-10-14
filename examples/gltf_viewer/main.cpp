@@ -25,7 +25,7 @@
 #include "scene/SceneDrawBatch.hpp"
 #include "scene/ScenePicker.hpp"
 #include "scene/ScenePath.hpp"
-#include "particles/FluidVolume.hpp"
+#include "particles/ParticleEmitter.hpp"
 #include "protocol/OscProtocol.hpp"
 #include "audio/AudioReactive.hpp"
 
@@ -275,10 +275,6 @@ protected:
 
     void onDraw() override {
         runtime_.updateTransforms();
-        if (renderer().canDispatchCompute()) {
-            runtime_.simulateFluids(renderer().currentCommandBuffer(), last_frame_dt_);
-        }
-
         if (show_viewport_ && viewport_.w > 1.0f && viewport_.h > 1.0f) {
             renderer().setViewportDrawRegion(viewport_.x, viewport_.y, viewport_.w, viewport_.h);
         } else {
@@ -293,7 +289,6 @@ protected:
         collect_params.enable_cpu_culling = true;
         collect_params.enable_gpu_culling = false;
         runtime_.collectDrawCommands(draw_commands_, &render_stats, collect_params);
-        runtime_.appendFluidDrawCommands(draw_commands_);
         runtime_.appendParticleDrawCommands(draw_commands_);
         render_stats.draw_calls = static_cast<std::uint32_t>(draw_commands_.size());
         // Recount triangles roughly including particles.
@@ -566,6 +561,25 @@ private:
                 ImGui::EndMenu();
             }
             ImGui::Separator();
+            if (ImGui::BeginMenu("Examples")) {
+                if (ImGui::MenuItem("Bubble Ring + OSC Tracker")) {
+                    const std::filesystem::path example =
+                        genesis::resolveAssetPath("assets/scenes/bubble_ring_osc.scene.json");
+                    try {
+                        loadSceneDocument(example);
+                        genesis::OscParticleEmitSettings emit = osc_protocol_.particleEmitSettings();
+                        emit.emitter_path = "Scene/OSC Tracker";
+                        emit.track_emitter_position = true;
+                        emit.burst_on_message = false;
+                        emit.plane_height = 0.15f;
+                        osc_protocol_.setParticleEmitSettings(emit);
+                    } catch (const std::exception& ex) {
+                        spdlog::error("Open example failed: {}", ex.what());
+                    }
+                }
+                ImGui::EndMenu();
+            }
+            ImGui::Separator();
             if (ImGui::MenuItem("Exit")) {
                 if (session_.dirty) {
                     show_exit_confirm_ = true;
@@ -670,41 +684,24 @@ private:
         });
         ImGui::SameLine();
         createBtn("Particles", half, [&] {
-            genesis::ParticleEmitter emitter = genesis::makeDefaultParticleEmitter();
-            emitter.burst_count = 24;
-            // If a fluid volume is selected, parent under it and enable coupling so
-            // particles ride the lava-lamp velocity field by default.
-            std::optional<genesis::NodeId> parent;
-            if (selection_.size() == 1) {
-                if (const genesis::Node* sel = scene.find(selection_.front())) {
-                    if (sel->particle_fluid.has_value()) {
-                        parent = sel->id;
-                        emitter.fluid_coupled = true;
-                        emitter.world_space = true;
-                        emitter.gravity = glm::vec3(0.0f, -0.35f, 0.0f);
-                        emitter.rate_per_second = 28.0f;
-                        emitter.lifetime_min = 1.5f;
-                        emitter.lifetime_max = 3.0f;
-                        emitter.spawn_radius = 0.08f;
-                    }
-                }
-            }
-            selectNode(scene.createParticleEmitterNode("Particle Emitter", parent, emitter));
+            genesis::ParticleEmitter emitter = genesis::makeBubbleRingEmitter();
+            emitter.rate_per_second = 80.0f;
+            emitter.spawn_radius = 0.6f;
+            selectNode(scene.createParticleEmitterNode("Particle Emitter", std::nullopt, emitter));
             markDirty();
         });
-        if (ImGui::Button("Fluid Volume", ImVec2(full, 0))) {
-            const genesis::NodeId id =
-                scene.createFluidVolumeNode("Lava Lamp", std::nullopt, genesis::makeLavaLampFluidVolume());
-            if (genesis::Node* node = scene.find(id)) {
-                // Lift so the tall lamp sits above the grid and is easy to see.
-                node->local.position = glm::vec3(0.0f, 0.55f, 0.0f);
-            }
-            selectNode(id);
+        ImGui::SameLine();
+        createBtn("OSC Tracker", half, [&] {
+            selectNode(scene.createParticleEmitterNode("OSC Tracker", std::nullopt,
+                                                       genesis::makeOscTrackerBubbleEmitter()));
             markDirty();
-            // Ensure world matrices exist before framing (create does not refresh them).
-            runtime_.updateTransforms();
-            focusEditorCameraOnSelection();
-        }
+            // Align Protocol panel defaults with the new tracker node.
+            genesis::OscParticleEmitSettings emit = osc_protocol_.particleEmitSettings();
+            emit.emitter_path = "Scene/OSC Tracker";
+            emit.track_emitter_position = true;
+            emit.burst_on_message = false;
+            osc_protocol_.setParticleEmitSettings(emit);
+        });
 
         ImGui::Spacing();
         ImGui::Separator();
@@ -751,7 +748,6 @@ private:
             if (n->mesh_resource.has_value()) label += "   M";
             if (n->camera.has_value()) label += "   C";
             if (n->light.has_value()) label += "   L";
-            if (n->particle_fluid.has_value()) label += "   F";
             if (n->particle_emitter.has_value()) label += "   P";
 
             const bool open = ImGui::TreeNodeEx((void*)(uintptr_t)n->id, flags, "%s", label.c_str());
@@ -833,15 +829,15 @@ private:
     }
 
     void drawAudioPanel(genesis::Scene& scene) {
-        std::string fluid_path;
+        std::string particle_path;
         if (selection_.size() == 1) {
             if (const genesis::Node* n = scene.find(selection_.front())) {
-                if (n->particle_fluid.has_value()) {
-                    fluid_path = genesis::nodePath(scene, n->id);
+                if (n->particle_emitter.has_value()) {
+                    particle_path = genesis::nodePath(scene, n->id);
                 }
             }
         }
-        genesis::drawAudioReactivePanel(audio_reactive_, &show_audio_, fluid_path);
+        genesis::drawAudioReactivePanel(audio_reactive_, &show_audio_, particle_path);
     }
 
     void drawInspectorPanel(genesis::Scene& scene) {
@@ -961,8 +957,7 @@ private:
             drawMaterialInspector(*n, node_path, link_ctx);
             drawCameraInspector(scene, *n, node_path, link_ctx);
             drawLightInspector(*n, node_path, link_ctx);
-            drawParticleEmitterInspector(*n, node_path, link_ctx);
-            drawFluidVolumeInspector(*n, node_path, link_ctx, audio_link_ctx);
+            drawParticleEmitterInspector(*n, node_path, link_ctx, audio_link_ctx);
         } else {
             ImGui::TextUnformatted("Selected node not found.");
         }
@@ -1321,58 +1316,131 @@ private:
     }
 
     void drawParticleEmitterInspector(genesis::Node& n, const std::string& node_path,
-                                      genesis::OscLinkUiContext& link_ctx) {
+                                      genesis::OscLinkUiContext& link_ctx,
+                                      genesis::AudioLinkUiContext& audio_link_ctx) {
         if (!n.particle_emitter.has_value()) {
             return;
         }
         ImGui::Separator();
-        ImGui::TextUnformatted("Particle Emitter");
+        ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.95f, 1.0f), "Particle Emitter");
+        ImGui::TextDisabled("Every control has OSC Link; Audio on rate / gravity.");
         genesis::ParticleEmitter& e = *n.particle_emitter;
         bool dirty = false;
+
         dirty |= ImGui::Checkbox("Enabled", &e.enabled);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleEnabled, node_path, 0,
+                                   "p_en");
         ImGui::SameLine();
         dirty |= ImGui::Checkbox("Looping", &e.looping);
+        ImGui::SameLine();
         dirty |= ImGui::Checkbox("World space", &e.world_space);
-        dirty |= ImGui::Checkbox("Fluid coupled", &e.fluid_coupled);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Advect particles using a parent Fluid Volume velocity field.");
-        }
         dirty |= ImGui::Checkbox("Unlit", &e.unlit);
-        dirty |= ImGui::DragFloat("Rate / s", &e.rate_per_second, 1.0f, 0.0f, 5000.0f);
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleRate, node_path, 0,
-                                   "particle_rate");
+
+        dirty |= ImGui::DragFloat("Rate / s", &e.rate_per_second, 1.0f, 0.0f, 20000.0f);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleRate, node_path, 0, "p_rate");
+        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::ParticleRate, node_path, 0,
+                                     "p_rate");
+
         int burst = static_cast<int>(e.burst_count);
         if (ImGui::DragInt("Burst", &burst, 1, 0, 100000)) {
             e.burst_count = static_cast<std::uint32_t>(std::max(burst, 0));
             dirty = true;
         }
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleBurst, node_path, 0, "p_burst");
+
         int max_p = static_cast<int>(e.max_particles);
-        if (ImGui::DragInt("Max particles", &max_p, 1, 1, 16384)) {
+        if (ImGui::DragInt("Max particles", &max_p, 1, 1, 65536)) {
             e.max_particles = static_cast<std::uint32_t>(std::max(max_p, 1));
             dirty = true;
         }
-        dirty |= ImGui::DragFloatRange2("Lifetime", &e.lifetime_min, &e.lifetime_max, 0.01f, 0.01f, 60.0f);
-        dirty |= ImGui::DragFloatRange2("Speed", &e.speed_min, &e.speed_max, 0.01f, 0.0f, 100.0f);
-        dirty |= ImGui::DragFloatRange2("Size", &e.size_min, &e.size_max, 0.001f, 0.001f, 10.0f);
-        dirty |= ImGui::DragFloat("Size end mul", &e.size_end_multiplier, 0.01f, 0.0f, 2.0f);
-        dirty |= ImGui::ColorEdit4("Color start", &e.color_start.x);
-        dirty |= ImGui::ColorEdit4("Color end", &e.color_end.x);
-        dirty |= ImGui::DragFloat3("Gravity", &e.gravity.x, 0.05f);
-        dirty |= ImGui::DragFloat("Drag", &e.drag, 0.01f, 0.0f, 10.0f);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleMax, node_path, 0, "p_max");
 
-        const char* shapes[] = {"Point", "Sphere", "Cone", "Box"};
+        dirty |= ImGui::DragFloat("Duration (0=∞)", &e.duration_seconds, 0.05f, 0.0f, 600.0f);
+        dirty |= ImGui::DragFloat("Start delay", &e.start_delay_seconds, 0.01f, 0.0f, 60.0f);
+
+        dirty |= ImGui::DragFloatRange2("Lifetime", &e.lifetime_min, &e.lifetime_max, 0.01f, 0.01f, 60.0f);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleLifetimeMin, node_path, 0,
+                                   "p_life_min");
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleLifetimeMax, node_path, 0,
+                                   "p_life_max");
+
+        dirty |= ImGui::DragFloatRange2("Speed", &e.speed_min, &e.speed_max, 0.01f, 0.0f, 100.0f);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleSpeedMin, node_path, 0,
+                                   "p_spd_min");
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleSpeedMax, node_path, 0,
+                                   "p_spd_max");
+
+        dirty |= ImGui::DragFloatRange2("Size", &e.size_min, &e.size_max, 0.001f, 0.001f, 10.0f);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleSizeMin, node_path, 0,
+                                   "p_sz_min");
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleSizeMax, node_path, 0,
+                                   "p_sz_max");
+        dirty |= ImGui::DragFloat("Size end mul", &e.size_end_multiplier, 0.01f, 0.0f, 2.0f);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleSizeEndMul, node_path, 0,
+                                   "p_sz_end");
+
+        dirty |= ImGui::ColorEdit4("Color start", &e.color_start.x);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleColorStartR, node_path, 0,
+                                   "p_cs_r");
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleColorStartG, node_path, 0,
+                                   "p_cs_g");
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleColorStartB, node_path, 0,
+                                   "p_cs_b");
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleColorStartA, node_path, 0,
+                                   "p_cs_a");
+        dirty |= ImGui::ColorEdit4("Color end", &e.color_end.x);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleColorEndR, node_path, 0,
+                                   "p_ce_r");
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleColorEndG, node_path, 0,
+                                   "p_ce_g");
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleColorEndB, node_path, 0,
+                                   "p_ce_b");
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleColorEndA, node_path, 0,
+                                   "p_ce_a");
+
+        dirty |= ImGui::DragFloat3("Gravity / buoyancy", &e.gravity.x, 0.05f);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleGravityX, node_path, 0,
+                                   "p_gx");
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleGravityY, node_path, 0,
+                                   "p_gy");
+        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::ParticleGravityY, node_path, 0,
+                                     "p_gy");
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleGravityZ, node_path, 0,
+                                   "p_gz");
+        dirty |= ImGui::DragFloat("Drag", &e.drag, 0.01f, 0.0f, 10.0f);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleDrag, node_path, 0, "p_drag");
+
+        const char* shapes[] = {"Point", "Sphere", "Cone", "Box", "Ring (cylinder)"};
         int shape = static_cast<int>(e.spawn_shape);
-        if (ImGui::Combo("Spawn shape", &shape, shapes, 4)) {
+        if (ImGui::Combo("Spawn shape", &shape, shapes, IM_ARRAYSIZE(shapes))) {
             e.spawn_shape = static_cast<genesis::ParticleSpawnShape>(shape);
             dirty = true;
         }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Ring: spawn on a cylinder circle (radius + height jitter). "
+                "Use positive Gravity Y for rising bubbles.");
+        }
         dirty |= ImGui::DragFloat("Spawn radius", &e.spawn_radius, 0.01f, 0.0f, 50.0f);
-        dirty |= ImGui::DragFloat("Cone angle", &e.cone_angle_degrees, 0.5f, 0.0f, 89.0f);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleSpawnRadius, node_path, 0,
+                                   "p_rad");
+        dirty |= ImGui::DragFloat("Spawn height / box Y", &e.spawn_box_height, 0.01f, 0.0f, 50.0f);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleSpawnHeight, node_path, 0,
+                                   "p_ht");
+        dirty |= ImGui::DragFloat("Cone / rise angle", &e.cone_angle_degrees, 0.5f, 0.0f, 89.0f);
+        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleConeAngle, node_path, 0,
+                                   "p_cone");
 
         const char* meshes[] = {"Cube", "Sphere"};
         int mesh = static_cast<int>(e.render_mesh);
         if (ImGui::Combo("Render mesh", &mesh, meshes, 2)) {
             e.render_mesh = static_cast<genesis::ParticleRenderMesh>(mesh);
+            dirty = true;
+        }
+
+        int seed = static_cast<int>(e.seed_override);
+        if (ImGui::DragInt("Seed override (0=scene)", &seed, 1, 0, 1000000)) {
+            e.seed_override = static_cast<std::uint64_t>(std::max(seed, 0));
             dirty = true;
         }
 
@@ -1383,93 +1451,6 @@ private:
             runtime_.resetParticles();
         }
 
-        if (dirty) {
-            markDirty();
-        }
-    }
-
-    void drawFluidVolumeInspector(genesis::Node& n, const std::string& node_path,
-                                  genesis::OscLinkUiContext& link_ctx,
-                                  genesis::AudioLinkUiContext& audio_link_ctx) {
-        if (!n.particle_fluid.has_value()) {
-            return;
-        }
-        ImGui::Separator();
-        ImGui::TextDisabled("GPU Fluid");
-        ImGui::TextDisabled("3D volumetric sim — kept light for realtime.");
-        genesis::FluidVolume& f = *n.particle_fluid;
-        bool dirty = false;
-        dirty |= ImGui::Checkbox("Enabled", &f.enabled);
-        int grid = static_cast<int>(f.grid_resolution);
-        if (ImGui::SliderInt("Grid resolution", &grid, 24, 64)) {
-            f.grid_resolution = static_cast<std::uint32_t>(grid);
-            dirty = true;
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Cubic N³ voxels. 40 is the realtime default; 64 is the soft ceiling.");
-        }
-        dirty |= ImGui::DragFloat3("Extent (m)", &f.extent_meters.x, 0.05f, 0.1f, 32.0f);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Width × Height × Depth of the 3D fluid volume (meters).");
-        }
-        dirty |= ImGui::DragFloat("Velocity dissipation", &f.velocity_dissipation, 0.001f, 0.9f, 1.0f);
-        dirty |= ImGui::DragFloat("Density dissipation", &f.density_dissipation, 0.001f, 0.9f, 1.0f);
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::FluidDensityDissipation, node_path, 0,
-                                   "fld_dens_diss");
-        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::FluidDensityDissipation,
-                                     node_path, 0, "fld_dens_diss");
-        int pressure = static_cast<int>(f.pressure_iterations);
-        if (ImGui::SliderInt("Pressure iterations", &pressure, 4, 16)) {
-            f.pressure_iterations = static_cast<std::uint32_t>(pressure);
-            dirty = true;
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Jacobi projection passes. 8 is usually enough; each pass is a full N³ dispatch.");
-        }
-        dirty |= ImGui::Checkbox("Drive particles", &f.drive_particles);
-        ImGui::Separator();
-        ImGui::TextUnformatted("Ink source");
-        dirty |= ImGui::Checkbox("Source enabled", &f.source_enabled);
-        dirty |= ImGui::DragFloat3("Source UVW", &f.source_uvw.x, 0.01f, 0.0f, 1.0f);
-        dirty |= ImGui::DragFloat("Source radius", &f.source_radius, 0.005f, 0.001f, 0.5f);
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::FluidSourceRadius, node_path, 0,
-                                   "fld_src_r");
-        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::FluidSourceRadius, node_path, 0,
-                                     "fld_src_r");
-        dirty |= ImGui::DragFloat("Source density", &f.source_density, 0.05f, 0.0f, 8.0f);
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::FluidSourceDensity, node_path, 0,
-                                   "fld_src_d");
-        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::FluidSourceDensity, node_path, 0,
-                                     "fld_src_d");
-        dirty |= ImGui::DragFloat3("Source velocity", &f.source_velocity.x, 0.05f, -20.0f, 20.0f);
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::FluidSourceVelocityY, node_path, 0,
-                                   "fld_src_vy");
-        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::FluidSourceVelocityY, node_path,
-                                     0, "fld_src_vy");
-        ImGui::Separator();
-        ImGui::TextUnformatted("Secondary source");
-        dirty |= ImGui::Checkbox("Source 2 enabled", &f.source2_enabled);
-        dirty |= ImGui::DragFloat3("Source 2 UVW", &f.source2_uvw.x, 0.01f, 0.0f, 1.0f);
-        dirty |= ImGui::DragFloat("Source 2 radius", &f.source2_radius, 0.005f, 0.001f, 0.5f);
-        dirty |= ImGui::DragFloat("Source 2 density", &f.source2_density, 0.05f, 0.0f, 8.0f);
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::FluidSource2Density, node_path, 0,
-                                   "fld_src2_d");
-        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::FluidSource2Density, node_path,
-                                     0, "fld_src2_d");
-        dirty |= ImGui::DragFloat3("Source 2 velocity", &f.source2_velocity.x, 0.05f, -20.0f, 20.0f);
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::FluidSource2VelocityY, node_path, 0,
-                                   "fld_src2_vy");
-        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::FluidSource2VelocityY,
-                                     node_path, 0, "fld_src2_vy");
-        dirty |= ImGui::Checkbox("Animate sources", &f.animate_sources);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Gentle wobble so blobs rise, merge, and split like a lava lamp.");
-        }
-        dirty |= ImGui::ColorEdit4("Dye color", &f.dye_color.x);
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::FluidDyeColorR, node_path, 0,
-                                   "fld_dye_r");
-        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::FluidDyeColorR, node_path, 0,
-                                     "fld_dye_r");
         if (dirty) {
             markDirty();
         }
@@ -2496,9 +2477,9 @@ private:
         orientSceneOutputCameras(runtime_.scene());
         resetEditorCamera();
 
-        // Auto-frame the first Fluid Volume so lava-lamp / splash demos open usable.
+        // Auto-frame the first particle emitter so particle demos open usable.
         for (const genesis::Node& node : runtime_.scene().nodes) {
-            if (!node.particle_fluid.has_value()) {
+            if (!node.particle_emitter.has_value()) {
                 continue;
             }
             selectNode(node.id);

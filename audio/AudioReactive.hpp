@@ -65,6 +65,7 @@ public:
 
     // One-click: bass → fluid source density / velocity on a lava-lamp node.
     void addLavaLampBassPreset(const std::string& fluid_node_path);
+    void addParticleBassRatePreset(const std::string& particle_node_path);
 
     const std::string& lastError() const { return last_error_; }
     void setLastError(std::string error) { last_error_ = std::move(error); }

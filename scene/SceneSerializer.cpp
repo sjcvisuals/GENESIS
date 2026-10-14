@@ -293,6 +293,8 @@ const char* spawnShapeName(ParticleSpawnShape shape) {
         return "cone";
     case ParticleSpawnShape::Box:
         return "box";
+    case ParticleSpawnShape::Ring:
+        return "ring";
     default:
         return "point";
     }
@@ -302,6 +304,7 @@ ParticleSpawnShape spawnShapeFromName(const std::string& name) {
     if (name == "sphere") return ParticleSpawnShape::Sphere;
     if (name == "cone") return ParticleSpawnShape::Cone;
     if (name == "box") return ParticleSpawnShape::Box;
+    if (name == "ring" || name == "cylinder") return ParticleSpawnShape::Ring;
     return ParticleSpawnShape::Point;
 }
 

@@ -1,0 +1,20 @@
+{
+  "format": "gns",
+  "version": 1,
+  "name": "Bubble Ring + OSC Tracker",
+  "scene_ref": "bubble_ring_osc.scene.json",
+  "pixera": {
+    "streams": [
+      {
+        "handle": "main",
+        "resolution_x": 1920,
+        "resolution_y": 1080,
+        "use_scene_camera": true
+      }
+    ],
+    "bindings": {
+      "target_node": "Scene/OSC Tracker",
+      "light_node": "Scene/Directional Light"
+    }
+  }
+}

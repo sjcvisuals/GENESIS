@@ -141,6 +141,108 @@ bool applySceneParam(SceneRuntime& runtime, OscParamTarget target, float value,
         if (!node || !node->particle_emitter.has_value()) return false;
         node->particle_emitter->rate_per_second = std::max(value, 0.0f);
         return true;
+    case OscParamTarget::ParticleBurst:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->burst_count =
+            static_cast<std::uint32_t>(std::max(0.0f, std::round(value)));
+        return true;
+    case OscParamTarget::ParticleMax:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->max_particles =
+            static_cast<std::uint32_t>(std::max(1.0f, std::round(value)));
+        return true;
+    case OscParamTarget::ParticleLifetimeMin:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->lifetime_min = std::max(0.01f, value);
+        return true;
+    case OscParamTarget::ParticleLifetimeMax:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->lifetime_max = std::max(0.01f, value);
+        return true;
+    case OscParamTarget::ParticleSpeedMin:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->speed_min = std::max(0.0f, value);
+        return true;
+    case OscParamTarget::ParticleSpeedMax:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->speed_max = std::max(0.0f, value);
+        return true;
+    case OscParamTarget::ParticleSizeMin:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->size_min = std::max(0.001f, value);
+        return true;
+    case OscParamTarget::ParticleSizeMax:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->size_max = std::max(0.001f, value);
+        return true;
+    case OscParamTarget::ParticleSizeEndMul:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->size_end_multiplier = std::clamp(value, 0.0f, 4.0f);
+        return true;
+    case OscParamTarget::ParticleColorStartR:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->color_start.r = std::clamp(value, 0.0f, 1.0f);
+        return true;
+    case OscParamTarget::ParticleColorStartG:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->color_start.g = std::clamp(value, 0.0f, 1.0f);
+        return true;
+    case OscParamTarget::ParticleColorStartB:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->color_start.b = std::clamp(value, 0.0f, 1.0f);
+        return true;
+    case OscParamTarget::ParticleColorStartA:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->color_start.a = std::clamp(value, 0.0f, 1.0f);
+        return true;
+    case OscParamTarget::ParticleColorEndR:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->color_end.r = std::clamp(value, 0.0f, 1.0f);
+        return true;
+    case OscParamTarget::ParticleColorEndG:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->color_end.g = std::clamp(value, 0.0f, 1.0f);
+        return true;
+    case OscParamTarget::ParticleColorEndB:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->color_end.b = std::clamp(value, 0.0f, 1.0f);
+        return true;
+    case OscParamTarget::ParticleColorEndA:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->color_end.a = std::clamp(value, 0.0f, 1.0f);
+        return true;
+    case OscParamTarget::ParticleGravityX:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->gravity.x = value;
+        return true;
+    case OscParamTarget::ParticleGravityY:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->gravity.y = value;
+        return true;
+    case OscParamTarget::ParticleGravityZ:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->gravity.z = value;
+        return true;
+    case OscParamTarget::ParticleDrag:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->drag = std::max(0.0f, value);
+        return true;
+    case OscParamTarget::ParticleSpawnRadius:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->spawn_radius = std::max(0.0f, value);
+        return true;
+    case OscParamTarget::ParticleSpawnHeight:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->spawn_box_height = std::max(0.0f, value);
+        return true;
+    case OscParamTarget::ParticleConeAngle:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->cone_angle_degrees = std::clamp(value, 0.0f, 89.0f);
+        return true;
+    case OscParamTarget::ParticleEnabled:
+        if (!node || !node->particle_emitter.has_value()) return false;
+        node->particle_emitter->enabled = value > 0.5f;
+        return true;
     case OscParamTarget::CameraFov:
         if (!node || !node->camera.has_value()) return false;
         node->camera->fov_y_radians = glm::radians(std::clamp(value, 1.0f, 170.0f));

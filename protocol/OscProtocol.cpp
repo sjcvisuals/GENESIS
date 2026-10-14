@@ -42,7 +42,7 @@ NodeId ensureOscParticleEmitterNode(Scene& scene, const std::string& emitter_pat
         }
     }
 
-    return scene.createParticleEmitterNode(leaf.empty() ? "OSC Particles" : leaf, parent,
+    return scene.createParticleEmitterNode(leaf.empty() ? "OSC Tracker" : leaf, parent,
                                            makeOscParticleEmitter());
 }
 
@@ -206,11 +206,21 @@ std::uint32_t OscProtocol::applyParticleEmits(SceneRuntime& runtime, std::uint64
         if (event.sequence <= consumer_cursor) {
             continue;
         }
-        const NodeId emitter_id = ensureOscParticleEmitterNode(runtime.scene(), particle_emit_.emitter_path);
-        runtime.updateTransforms();
+        const NodeId emitter_id =
+            ensureOscParticleEmitterNode(runtime.scene(), particle_emit_.emitter_path);
         const glm::vec3 world = oscParticleWorldPosition(particle_emit_, event);
-        spawned_total += runtime.particleWorld().emitBurstAtWorld(runtime.scene(), emitter_id, world,
-                                                                 event.count);
+
+        if (particle_emit_.track_emitter_position) {
+            if (Node* node = runtime.scene().find(emitter_id)) {
+                node->local.position = world;
+            }
+        }
+        runtime.updateTransforms();
+
+        if (particle_emit_.burst_on_message) {
+            spawned_total += runtime.particleWorld().emitBurstAtWorld(runtime.scene(), emitter_id, world,
+                                                                     event.count);
+        }
         consumer_cursor = event.sequence;
         applied_any = true;
     }
