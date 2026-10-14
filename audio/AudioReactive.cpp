@@ -126,10 +126,16 @@ bool AudioReactive::completeLink(OscParamTarget target, const std::string& node_
         binding.max_value = 20.0f;
         break;
     case OscParamTarget::ParticleRate:
-        binding.bias = 8.0f;
-        binding.gain = 40.0f;
+        binding.bias = 20.0f;
+        binding.gain = 160.0f;
         binding.min_value = 0.0f;
-        binding.max_value = 120.0f;
+        binding.max_value = 800.0f;
+        break;
+    case OscParamTarget::ParticleGravityY:
+        binding.bias = 0.4f;
+        binding.gain = 1.5f;
+        binding.min_value = -2.0f;
+        binding.max_value = 3.0f;
         break;
     default:
         binding.bias = 0.0f;
