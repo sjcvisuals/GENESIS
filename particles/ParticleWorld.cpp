@@ -7,7 +7,6 @@
 #include <cmath>
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/quaternion.hpp>
 
 namespace genesis {
 
@@ -18,7 +17,6 @@ constexpr std::uint32_t kChanSpeed = 2;
 constexpr std::uint32_t kChanSize = 3;
 constexpr std::uint32_t kChanDirX = 4;
 constexpr std::uint32_t kChanDirY = 5;
-constexpr std::uint32_t kChanDirZ = 6;
 constexpr std::uint32_t kChanPosX = 7;
 constexpr std::uint32_t kChanPosY = 8;
 constexpr std::uint32_t kChanPosZ = 9;
@@ -42,8 +40,22 @@ glm::vec3 coneDirection(const glm::mat4& world, float angle_deg, std::uint64_t s
     const float sin_t = std::sqrt(std::max(0.0f, 1.0f - z * z));
     const float phi = v * glm::two_pi<float>();
     const glm::vec3 local(sin_t * std::cos(phi), z, sin_t * std::sin(phi));
-    const glm::vec3 world_dir = glm::normalize(glm::mat3(world) * local);
-    return world_dir;
+    return glm::normalize(glm::mat3(world) * local);
+}
+
+// Cheap deterministic value noise (not UE noise — public hash trick).
+float hashNoise3(const glm::vec3& p) {
+    const float n = std::sin(glm::dot(p, glm::vec3(12.9898f, 78.233f, 37.719f))) * 43758.5453f;
+    return n - std::floor(n);
+}
+
+glm::vec3 curlNoiseApprox(const glm::vec3& p, float freq) {
+    const glm::vec3 q = p * freq;
+    const float n0 = hashNoise3(q);
+    const float n1 = hashNoise3(q + glm::vec3(17.1f, 9.2f, 3.4f));
+    const float n2 = hashNoise3(q + glm::vec3(5.7f, 21.3f, 11.8f));
+    return glm::normalize(glm::vec3(n0 * 2.0f - 1.0f, n1 * 2.0f - 1.0f, n2 * 2.0f - 1.0f) +
+                          glm::vec3(1e-5f));
 }
 
 } // namespace
@@ -65,7 +77,12 @@ void ParticleWorld::reset() {
         emitter.emit_accumulator = 0.0;
         emitter.next_emit_index = 0;
         emitter.burst_fired = false;
+        emitter.timed_bursts_fired = 0;
         emitter.finished = false;
+        emitter.alive_count = 0;
+        emitter.has_last_pos = false;
+        emitter.velocity = glm::vec3(0.0f);
+        emitter.distance_spawn_accumulator = 0.0;
     }
     global_step_ = 0;
     sim_time_seconds_ = 0.0;
@@ -81,7 +98,6 @@ void ParticleWorld::syncEmitters(Scene& scene) {
 
     std::vector<EmitterRuntime> next;
     next.reserve(emitters_.size());
-
     for (const Node& node : scene.nodes) {
         if (!node.particle_emitter.has_value()) {
             continue;
@@ -96,6 +112,15 @@ void ParticleWorld::syncEmitters(Scene& scene) {
     emitters_ = std::move(next);
 }
 
+ParticleWorld::EmitterRuntime* ParticleWorld::findEmitterRuntime(NodeId id) {
+    for (EmitterRuntime& runtime : emitters_) {
+        if (runtime.node_id == id) {
+            return &runtime;
+        }
+    }
+    return nullptr;
+}
+
 std::size_t ParticleWorld::allocateParticle() {
     if (!free_list_.empty()) {
         const std::size_t index = free_list_.back();
@@ -104,6 +129,23 @@ std::size_t ParticleWorld::allocateParticle() {
     }
     particles_.push_back(Particle{});
     return particles_.size() - 1;
+}
+
+void ParticleWorld::recountAlive() {
+    std::uint32_t alive = 0;
+    for (EmitterRuntime& runtime : emitters_) {
+        runtime.alive_count = 0;
+    }
+    for (const Particle& p : particles_) {
+        if (!p.alive) {
+            continue;
+        }
+        ++alive;
+        if (EmitterRuntime* runtime = findEmitterRuntime(p.emitter_node)) {
+            ++runtime->alive_count;
+        }
+    }
+    stats_.alive = alive;
 }
 
 std::uint32_t ParticleWorld::emitBurstAtWorld(Scene& scene, NodeId emitter_node,
@@ -116,30 +158,14 @@ std::uint32_t ParticleWorld::emitBurstAtWorld(Scene& scene, NodeId emitter_node,
     if (!node || !node->particle_emitter.has_value()) {
         return 0;
     }
-
-    EmitterRuntime* runtime = nullptr;
-    for (EmitterRuntime& candidate : emitters_) {
-        if (candidate.node_id == emitter_node) {
-            runtime = &candidate;
-            break;
-        }
-    }
+    EmitterRuntime* runtime = findEmitterRuntime(emitter_node);
     if (!runtime) {
         return 0;
     }
-
     const std::uint64_t emit_before = runtime->next_emit_index;
     spawnFromEmitter(scene, *runtime, *node->particle_emitter, *node, count, &world_position);
-    const std::uint64_t emit_after = runtime->next_emit_index;
-
-    std::uint32_t alive = 0;
-    for (const Particle& p : particles_) {
-        if (p.alive) {
-            ++alive;
-        }
-    }
-    stats_.alive = alive;
-    return static_cast<std::uint32_t>(emit_after - emit_before);
+    recountAlive();
+    return static_cast<std::uint32_t>(runtime->next_emit_index - emit_before);
 }
 
 void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, const ParticleEmitter& desc,
@@ -150,20 +176,16 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
         return;
     }
 
-    std::uint32_t alive = 0;
-    for (const Particle& p : particles_) {
-        if (p.alive && p.emitter_node == runtime.node_id) {
-            ++alive;
-        }
-    }
-
     const std::uint64_t seed = desc.seed_override != 0 ? desc.seed_override : scene_seed_;
     const glm::mat4 world = node.world;
     const glm::vec3 origin = origin_override ? *origin_override : glm::vec3(world[3]);
 
+    ParticleEmitter authored = desc;
+    syncEmitterCurvesFromEndpoints(authored);
+
     for (std::uint32_t i = 0; i < count; ++i) {
-        if (alive >= desc.max_particles) {
-            break; // deterministic refuse-when-full
+        if (runtime.alive_count >= desc.max_particles) {
+            break;
         }
         const std::uint64_t emit_index = runtime.next_emit_index++;
         const std::size_t slot = allocateParticle();
@@ -177,18 +199,17 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
                                                           desc.lifetime_min, desc.lifetime_max));
         p.size0 = particleRandomRange(seed, runtime.node_id, emit_index, kChanSize, desc.size_min,
                                       desc.size_max);
-        p.size_end_mul = desc.size_end_multiplier;
-        p.color0 = desc.color_start;
-        p.color1 = desc.color_end;
+        p.sprite_aspect = desc.sprite_aspect;
         p.mesh = desc.render_mesh;
         p.unlit = desc.unlit;
         p.world_space = desc.world_space;
+        p.size_curve = authored.size_over_life;
+        p.color_curve = authored.color_over_life;
 
         glm::vec3 local_offset(0.0f);
-        glm::vec3 direction(0.0f, 1.0f, 0.0f);
+        glm::vec3 direction = glm::normalize(glm::mat3(world) * glm::vec3(0.0f, 1.0f, 0.0f));
         switch (desc.spawn_shape) {
         case ParticleSpawnShape::Point:
-            direction = glm::normalize(glm::mat3(world) * glm::vec3(0.0f, 1.0f, 0.0f));
             break;
         case ParticleSpawnShape::Sphere: {
             const glm::vec3 unit = randomUnitVector(seed, runtime.node_id, emit_index);
@@ -209,8 +230,6 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
             break;
         }
         case ParticleSpawnShape::Ring: {
-            // Cylinder ring in local XZ: angle around Y, radius ≈ spawn_radius,
-            // optional vertical jitter via spawn_box_height.
             constexpr float kTwoPi = 6.28318530718f;
             const float angle =
                 particleRandom01(seed, runtime.node_id, emit_index, kChanPosX) * kTwoPi;
@@ -227,21 +246,41 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
         case ParticleSpawnShape::Cone:
         default:
             direction = coneDirection(world, desc.cone_angle_degrees, seed, runtime.node_id, emit_index);
-            local_offset = glm::vec3(0.0f);
             break;
+        }
+
+        switch (desc.velocity_mode) {
+        case ParticleVelocityMode::FromPoint: {
+            const glm::vec3 world_pos = origin + glm::mat3(world) * local_offset;
+            const glm::vec3 radial = world_pos - origin;
+            if (glm::dot(radial, radial) > 1e-8f) {
+                direction = glm::normalize(radial);
+            }
+            break;
+        }
+        case ParticleVelocityMode::Random:
+            direction = randomUnitVector(seed, runtime.node_id, emit_index);
+            break;
+        case ParticleVelocityMode::Cone:
+        default:
+            break;
+        }
+
+        const float speed = particleRandomRange(seed, runtime.node_id, emit_index, kChanSpeed,
+                                                desc.speed_min, desc.speed_max);
+        glm::vec3 birth_vel = direction * speed;
+        if (desc.inherit_velocity > 0.0f) {
+            birth_vel += runtime.velocity * std::clamp(desc.inherit_velocity, 0.0f, 1.0f);
         }
 
         if (desc.world_space) {
             p.position = origin + glm::mat3(world) * local_offset;
-            p.velocity = direction * particleRandomRange(seed, runtime.node_id, emit_index, kChanSpeed,
-                                                         desc.speed_min, desc.speed_max);
+            p.velocity = birth_vel;
         } else {
             p.position = local_offset;
-            p.velocity = (glm::inverse(glm::mat3(world)) * direction) *
-                         particleRandomRange(seed, runtime.node_id, emit_index, kChanSpeed, desc.speed_min,
-                                             desc.speed_max);
+            p.velocity = (glm::inverse(glm::mat3(world)) * birth_vel);
         }
-        ++alive;
+        ++runtime.alive_count;
     }
 }
 
@@ -255,6 +294,16 @@ void ParticleWorld::stepOnce(Scene& scene, float dt) {
             continue;
         }
         const ParticleEmitter& desc = *node->particle_emitter;
+        const glm::vec3 world_pos = glm::vec3(node->world[3]);
+        float traveled = 0.0f;
+        if (runtime.has_last_pos && dt > 1e-8f) {
+            const glm::vec3 delta = world_pos - runtime.last_world_pos;
+            traveled = glm::length(delta);
+            runtime.velocity = delta / dt;
+        }
+        runtime.last_world_pos = world_pos;
+        runtime.has_last_pos = true;
+
         if (!desc.enabled || runtime.finished) {
             continue;
         }
@@ -264,9 +313,24 @@ void ParticleWorld::stepOnce(Scene& scene, float dt) {
             continue;
         }
 
+        const double local_age = runtime.age_seconds - static_cast<double>(desc.start_delay_seconds);
+
         if (!runtime.burst_fired && desc.burst_count > 0) {
             spawnFromEmitter(scene, runtime, desc, *node, desc.burst_count);
             runtime.burst_fired = true;
+        }
+
+        for (std::uint8_t bi = 0; bi < desc.burst_entries && bi < desc.bursts.size(); ++bi) {
+            const std::uint8_t bit = static_cast<std::uint8_t>(1u << bi);
+            if ((runtime.timed_bursts_fired & bit) != 0) {
+                continue;
+            }
+            if (local_age >= static_cast<double>(desc.bursts[bi].time_seconds) &&
+                desc.bursts[bi].count > 0) {
+                spawnFromEmitter(scene, runtime, desc, *node, desc.bursts[bi].count);
+                runtime.timed_bursts_fired =
+                    static_cast<std::uint8_t>(runtime.timed_bursts_fired | bit);
+            }
         }
 
         if (desc.duration_seconds > 0.0f &&
@@ -276,7 +340,9 @@ void ParticleWorld::stepOnce(Scene& scene, float dt) {
             } else {
                 runtime.age_seconds = static_cast<double>(desc.start_delay_seconds);
                 runtime.burst_fired = false;
+                runtime.timed_bursts_fired = 0;
                 runtime.emit_accumulator = 0.0;
+                runtime.distance_spawn_accumulator = 0.0;
             }
         }
 
@@ -288,9 +354,25 @@ void ParticleWorld::stepOnce(Scene& scene, float dt) {
                 spawnFromEmitter(scene, runtime, desc, *node, to_spawn);
             }
         }
+
+        // Niagara-style spawn-by-distance (Emitter Update).
+        if (!runtime.finished && desc.spawn_per_unit > 0.0f && traveled > 0.0f) {
+            runtime.distance_spawn_accumulator +=
+                static_cast<double>(traveled) * static_cast<double>(desc.spawn_per_unit);
+            const std::uint32_t to_spawn =
+                static_cast<std::uint32_t>(runtime.distance_spawn_accumulator);
+            if (to_spawn > 0) {
+                runtime.distance_spawn_accumulator -= static_cast<double>(to_spawn);
+                spawnFromEmitter(scene, runtime, desc, *node, to_spawn);
+            }
+        }
     }
 
     std::uint32_t alive = 0;
+    for (EmitterRuntime& runtime : emitters_) {
+        runtime.alive_count = 0;
+    }
+
     for (std::size_t i = 0; i < particles_.size(); ++i) {
         Particle& p = particles_[i];
         if (!p.alive) {
@@ -299,10 +381,8 @@ void ParticleWorld::stepOnce(Scene& scene, float dt) {
 
         Node* node = scene.find(p.emitter_node);
         ParticleEmitter desc = makeDefaultParticleEmitter();
-        glm::mat4 world(1.0f);
         if (node && node->particle_emitter.has_value()) {
             desc = *node->particle_emitter;
-            world = node->world;
         }
 
         p.age += dt;
@@ -312,10 +392,46 @@ void ParticleWorld::stepOnce(Scene& scene, float dt) {
             continue;
         }
 
-        p.velocity += desc.gravity * dt;
-        p.velocity *= std::max(0.0f, 1.0f - desc.drag * dt);
+        glm::vec3 world_pos = p.position;
+        if (!p.world_space && node) {
+            world_pos = glm::vec3(node->world * glm::vec4(p.position, 1.0f));
+        }
 
-        if (desc.fluid_coupled && fluid_world_) {
+        if (desc.force_gravity) {
+            p.velocity += desc.gravity * dt;
+        }
+        if (desc.force_accel) {
+            p.velocity += desc.acceleration * dt;
+        }
+        if (desc.force_drag) {
+            p.velocity *= std::max(0.0f, 1.0f - desc.drag * dt);
+        }
+        if (desc.force_point && std::fabs(desc.point_force_strength) > 1e-6f) {
+            glm::vec3 to_point = desc.point_force_position - world_pos;
+            const float dist = std::max(glm::length(to_point), desc.point_force_softness);
+            to_point /= dist;
+            p.velocity += to_point * (desc.point_force_strength / (dist * dist + 1e-4f)) * dt;
+        }
+        if (desc.force_vortex && std::fabs(desc.vortex_strength) > 1e-6f) {
+            const glm::vec3 axis = glm::length(desc.vortex_axis) > 1e-5f
+                                       ? glm::normalize(desc.vortex_axis)
+                                       : glm::vec3(0.0f, 1.0f, 0.0f);
+            const glm::vec3 radial = world_pos - glm::dot(world_pos, axis) * axis;
+            const float radial_len = glm::length(radial);
+            if (radial_len > 1e-4f && radial_len < desc.vortex_radius) {
+                const glm::vec3 tangent = glm::normalize(glm::cross(axis, radial));
+                const float falloff = 1.0f - (radial_len / std::max(desc.vortex_radius, 1e-4f));
+                p.velocity += tangent * (desc.vortex_strength * falloff) * dt;
+            }
+        }
+        if (desc.force_noise && desc.noise_strength > 1e-6f) {
+            const glm::vec3 n =
+                curlNoiseApprox(world_pos + glm::vec3(static_cast<float>(sim_time_seconds_)),
+                                desc.noise_frequency);
+            p.velocity += n * desc.noise_strength * dt;
+        }
+
+        if (desc.fluid_coupled && fluid_world_ && node) {
             NodeId fluid_node = 0;
             for (NodeId cur = p.emitter_node; cur != 0;) {
                 const Node* fluid_candidate = scene.find(cur);
@@ -332,26 +448,41 @@ void ParticleWorld::stepOnce(Scene& scene, float dt) {
                 }
                 cur = *fluid_candidate->parent;
             }
-            if (fluid_node != 0 && node) {
-                const glm::vec3 world_pos =
-                    p.world_space ? p.position
-                                  : glm::vec3(node->world * glm::vec4(p.position, 1.0f));
+            if (fluid_node != 0) {
                 const glm::vec3 fluid_vel =
                     fluid_world_->sampleFluidVelocity(scene, fluid_node, world_pos);
-                // Softly blend toward the fluid field so particles rise/fall with the lamp.
                 const float blend = std::min(1.0f, 3.5f * dt);
                 p.velocity = p.velocity * (1.0f - blend) + fluid_vel * blend;
             }
         }
 
-        if (desc.world_space || !node) {
-            p.position += p.velocity * dt;
+        p.position += p.velocity * dt;
+
+        if (!p.world_space && node) {
+            world_pos = glm::vec3(node->world * glm::vec4(p.position, 1.0f));
         } else {
-            p.position += p.velocity * dt;
-            // Keep local; rendered with emitter world matrix.
-            (void)world;
+            world_pos = p.position;
         }
+
+        if (desc.kill_plane && world_pos.y < desc.kill_plane_y) {
+            p.alive = false;
+            free_list_.push_back(i);
+            continue;
+        }
+        if (desc.kill_box) {
+            if (world_pos.x < desc.kill_box_min.x || world_pos.x > desc.kill_box_max.x ||
+                world_pos.y < desc.kill_box_min.y || world_pos.y > desc.kill_box_max.y ||
+                world_pos.z < desc.kill_box_min.z || world_pos.z > desc.kill_box_max.z) {
+                p.alive = false;
+                free_list_.push_back(i);
+                continue;
+            }
+        }
+
         ++alive;
+        if (EmitterRuntime* er = findEmitterRuntime(p.emitter_node)) {
+            ++er->alive_count;
+        }
     }
 
     stats_.alive = alive;
@@ -367,13 +498,7 @@ void ParticleWorld::simulate(Scene& scene, std::uint64_t steps, float dt) {
     if (steps == 0) {
         syncEmitters(scene);
         stats_.emitters = static_cast<std::uint32_t>(emitters_.size());
-        std::uint32_t alive = 0;
-        for (const Particle& p : particles_) {
-            if (p.alive) {
-                ++alive;
-            }
-        }
-        stats_.alive = alive;
+        recountAlive();
     }
 }
 
@@ -385,86 +510,119 @@ void ParticleWorld::rebuildToTime(Scene& scene, double production_time_seconds, 
     }
     const std::uint64_t steps =
         static_cast<std::uint64_t>(std::floor(production_time_seconds / static_cast<double>(fixed_dt)));
-    // Cap rebuild work for interactive seeks; production seeks can raise this later.
     const std::uint64_t capped = std::min(steps, static_cast<std::uint64_t>(60.0 / fixed_dt * 30.0));
     simulate(scene, capped, fixed_dt);
 }
 
-void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleInstanceBatch>& out) const {
+void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleInstanceBatch>& out,
+                                     const ParticleViewBasis& view) const {
     out.clear();
-    ParticleInstanceBatch cube_lit{};
-    cube_lit.mesh = ParticleRenderMesh::Cube;
-    cube_lit.unlit = false;
-    ParticleInstanceBatch cube_unlit{};
-    cube_unlit.mesh = ParticleRenderMesh::Cube;
-    cube_unlit.unlit = true;
-    ParticleInstanceBatch sphere_lit{};
-    sphere_lit.mesh = ParticleRenderMesh::Sphere;
-    sphere_lit.unlit = false;
-    ParticleInstanceBatch sphere_unlit{};
-    sphere_unlit.mesh = ParticleRenderMesh::Sphere;
-    sphere_unlit.unlit = true;
+    out.resize(6);
+    out[0] = {ParticleRenderMesh::Cube, false, {}};
+    out[1] = {ParticleRenderMesh::Cube, true, {}};
+    out[2] = {ParticleRenderMesh::Sphere, false, {}};
+    out[3] = {ParticleRenderMesh::Sphere, true, {}};
+    out[4] = {ParticleRenderMesh::Sprite, false, {}};
+    out[5] = {ParticleRenderMesh::Sprite, true, {}};
+
+    const glm::vec3 cam_right =
+        view.valid ? glm::normalize(view.right) : glm::vec3(1.0f, 0.0f, 0.0f);
+    const glm::vec3 cam_up = view.valid ? glm::normalize(view.up) : glm::vec3(0.0f, 1.0f, 0.0f);
 
     for (const Particle& p : particles_) {
         if (!p.alive) {
             continue;
         }
         const float t = std::clamp(p.age / std::max(p.lifetime, 1e-5f), 0.0f, 1.0f);
-        const float size = p.size0 * glm::mix(1.0f, p.size_end_mul, t);
-        const glm::vec4 color = glm::mix(p.color0, p.color1, t);
+        float size_mul = p.size_curve.count > 0 ? p.size_curve.evaluate(t)
+                                                 : glm::mix(1.0f, 0.25f, t);
+
+        // Scale by Speed — look up emitter flags (cheap; module data on node).
+        if (const Node* emitter_node = scene.find(p.emitter_node);
+            emitter_node && emitter_node->particle_emitter.has_value() &&
+            emitter_node->particle_emitter->scale_by_speed) {
+            const ParticleEmitter& pe = *emitter_node->particle_emitter;
+            const float speed = glm::length(p.velocity);
+            const float span = std::max(1e-4f, pe.scale_by_speed_range_max - pe.scale_by_speed_range_min);
+            const float u = std::clamp((speed - pe.scale_by_speed_range_min) / span, 0.0f, 1.0f);
+            size_mul *= glm::mix(pe.scale_by_speed_mul_min, pe.scale_by_speed_mul_max, u);
+        }
+
+        const float size = p.size0 * size_mul;
+        const glm::vec4 color =
+            p.color_curve.count > 0 ? p.color_curve.evaluate(t) : glm::vec4(1.0f, 1.0f, 1.0f, 1.0f - t);
+
+        glm::vec3 world_pos = p.position;
+        if (!p.world_space) {
+            if (const Node* node = scene.find(p.emitter_node)) {
+                world_pos = glm::vec3(node->world * glm::vec4(p.position, 1.0f));
+            }
+        }
 
         glm::mat4 model(1.0f);
-        if (p.world_space) {
-            model = glm::translate(glm::mat4(1.0f), p.position);
-        } else if (const Node* node = scene.find(p.emitter_node)) {
-            model = node->world * glm::translate(glm::mat4(1.0f), p.position);
+        if (p.mesh == ParticleRenderMesh::Sprite) {
+            // Camera-facing XY quad (Niagara SpriteRenderer camera-facing mode).
+            // Mesh local X/Y map to camera right/up; local Z is view-facing.
+            const float hx = size * 0.5f * std::max(p.sprite_aspect, 0.01f);
+            const float hy = size * 0.5f;
+            const glm::vec3 right = cam_right * (hx * 2.0f); // mesh half-extent 0.5 → full size
+            const glm::vec3 up = cam_up * (hy * 2.0f);
+            const glm::vec3 facing =
+                glm::normalize(glm::cross(cam_right, cam_up) + glm::vec3(1e-5f));
+            model[0] = glm::vec4(right, 0.0f);
+            model[1] = glm::vec4(up, 0.0f);
+            model[2] = glm::vec4(facing, 0.0f);
+            model[3] = glm::vec4(world_pos, 1.0f);
         } else {
-            model = glm::translate(glm::mat4(1.0f), p.position);
+            model = glm::translate(glm::mat4(1.0f), world_pos);
+            model = glm::scale(model, glm::vec3(size));
         }
-        model = glm::scale(model, glm::vec3(size));
 
         GpuMeshInstance instance{};
         fillGpuMeshInstance(instance, model, glm::vec3(-0.5f), glm::vec3(0.5f));
         instance.color = color;
 
-        if (p.mesh == ParticleRenderMesh::Sphere) {
-            (p.unlit ? sphere_unlit : sphere_lit).instances.push_back(instance);
-        } else {
-            (p.unlit ? cube_unlit : cube_lit).instances.push_back(instance);
+        std::size_t batch_index = 0;
+        switch (p.mesh) {
+        case ParticleRenderMesh::Cube:
+            batch_index = p.unlit ? 1 : 0;
+            break;
+        case ParticleRenderMesh::Sphere:
+            batch_index = p.unlit ? 3 : 2;
+            break;
+        case ParticleRenderMesh::Sprite:
+        default:
+            batch_index = p.unlit ? 5 : 4;
+            break;
         }
+        out[batch_index].instances.push_back(instance);
     }
 
-    auto push_if = [&](ParticleInstanceBatch& batch) {
-        if (!batch.instances.empty()) {
-            out.push_back(std::move(batch));
-        }
-    };
-    push_if(cube_unlit);
-    push_if(cube_lit);
-    push_if(sphere_unlit);
-    push_if(sphere_lit);
+    out.erase(std::remove_if(out.begin(), out.end(),
+                             [](const ParticleInstanceBatch& b) { return b.instances.empty(); }),
+              out.end());
 }
 
 std::uint64_t ParticleWorld::stateHash() const {
-    std::uint64_t hash = 14695981039346656037ull;
+    std::uint64_t h = 14695981039346656037ull;
     auto mix = [&](std::uint64_t v) {
-        hash ^= v;
-        hash *= 1099511628211ull;
+        h ^= v + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
     };
     mix(scene_seed_);
     mix(global_step_);
+    mix(stats_.alive);
     for (const Particle& p : particles_) {
         if (!p.alive) {
             continue;
         }
         mix(p.emitter_node);
         mix(p.emit_index);
-        mix(static_cast<std::uint64_t>(particleHashU32(
-            static_cast<std::uint64_t>(p.position.x * 1000.0f) ^
+        mix(static_cast<std::uint64_t>(p.age * 1000.0f));
+        mix(static_cast<std::uint64_t>(p.position.x * 1000.0f) ^
             (static_cast<std::uint64_t>(p.position.y * 1000.0f) << 20) ^
-            (static_cast<std::uint64_t>(p.position.z * 1000.0f) << 40))));
+            (static_cast<std::uint64_t>(p.position.z * 1000.0f) << 40));
     }
-    return hash;
+    return h;
 }
 
 } // namespace genesis

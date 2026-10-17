@@ -44,7 +44,7 @@
         "world_space": true,
         "duration": 0.0,
         "start_delay": 0.0,
-        "rate": 140.0,
+        "rate": 160.0,
         "burst": 0,
         "max_particles": 4096,
         "lifetime_min": 2.5,
@@ -56,13 +56,40 @@
         "size_end_multiplier": 0.35,
         "color_start": [0.55, 0.9, 1.0, 0.85],
         "color_end": [0.2, 0.45, 1.0, 0.0],
+        "velocity_mode": "cone",
+        "inherit_velocity": 0.0,
+        "force_gravity": true,
         "gravity": [0.0, 0.55, 0.0],
+        "force_drag": true,
         "drag": 0.35,
+        "force_point": false,
+        "force_vortex": false,
+        "force_noise": true,
+        "noise_strength": 0.15,
+        "noise_frequency": 0.8,
+        "kill_plane": true,
+        "kill_plane_y": -0.5,
+        "kill_box": false,
+        "size_over_life": {
+          "keys": [
+            {"t": 0.0, "v": 0.4},
+            {"t": 0.2, "v": 1.0},
+            {"t": 1.0, "v": 0.35}
+          ]
+        },
+        "color_over_life": {
+          "keys": [
+            {"t": 0.0, "v": [0.55, 0.9, 1.0, 0.0]},
+            {"t": 0.15, "v": [0.55, 0.9, 1.0, 0.9]},
+            {"t": 1.0, "v": [0.2, 0.45, 1.0, 0.0]}
+          ]
+        },
         "spawn_shape": "ring",
         "spawn_radius": 1.25,
         "spawn_box_height": 0.08,
         "cone_angle_degrees": 12.0,
-        "render_mesh": "sphere",
+        "render_mesh": "sprite",
+        "sprite_aspect": 1.0,
         "unlit": true,
         "seed_override": 0,
         "fluid_coupled": false
@@ -84,7 +111,7 @@
         "world_space": true,
         "duration": 0.0,
         "start_delay": 0.0,
-        "rate": 60.0,
+        "rate": 80.0,
         "burst": 0,
         "max_particles": 2048,
         "lifetime_min": 1.8,
@@ -96,13 +123,43 @@
         "size_end_multiplier": 0.2,
         "color_start": [1.0, 0.75, 0.35, 0.95],
         "color_end": [1.0, 0.25, 0.1, 0.0],
+        "velocity_mode": "cone",
+        "inherit_velocity": 0.35,
+        "force_gravity": true,
         "gravity": [0.0, 0.7, 0.0],
+        "force_drag": true,
         "drag": 0.4,
+        "force_noise": true,
+        "noise_strength": 0.25,
+        "noise_frequency": 1.2,
+        "spawn_per_unit": 48.0,
+        "scale_by_speed": true,
+        "scale_by_speed_range_min": 0.0,
+        "scale_by_speed_range_max": 3.0,
+        "scale_by_speed_mul_min": 0.7,
+        "scale_by_speed_mul_max": 1.6,
+        "kill_plane": false,
+        "kill_box": false,
+        "size_over_life": {
+          "keys": [
+            {"t": 0.0, "v": 0.5},
+            {"t": 0.15, "v": 1.0},
+            {"t": 1.0, "v": 0.2}
+          ]
+        },
+        "color_over_life": {
+          "keys": [
+            {"t": 0.0, "v": [1.0, 0.85, 0.4, 0.0]},
+            {"t": 0.12, "v": [1.0, 0.75, 0.35, 0.95]},
+            {"t": 1.0, "v": [1.0, 0.2, 0.05, 0.0]}
+          ]
+        },
         "spawn_shape": "point",
         "spawn_radius": 0.05,
         "spawn_box_height": 0.05,
         "cone_angle_degrees": 18.0,
-        "render_mesh": "sphere",
+        "render_mesh": "sprite",
+        "sprite_aspect": 1.0,
         "unlit": true,
         "seed_override": 0,
         "fluid_coupled": false
