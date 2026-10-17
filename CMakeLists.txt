@@ -364,6 +364,10 @@ if(GENESIS_BUILD_EXAMPLES)
     target_include_directories(genesis_particle_smoke PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(genesis_particle_smoke PRIVATE glm::glm)
 
+    # CPU ParticleWorld determinism + sprite batch smoke (links engine runtime).
+    add_executable(genesis_particle_world_smoke examples/particle_smoke/world_main.cpp)
+    target_link_libraries(genesis_particle_world_smoke PRIVATE genesis_engine_runtime)
+
     add_executable(genesis_multiview_player examples/multiview_player/main.cpp)
     target_link_libraries(genesis_multiview_player PRIVATE genesis_engine)
     add_dependencies(genesis_multiview_player genesis_shaders)
