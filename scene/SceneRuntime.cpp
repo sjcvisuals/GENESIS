@@ -347,16 +347,38 @@ void SceneRuntime::resetParticles() {
     particle_step_accumulator_ = 0.0;
 }
 
+void SceneRuntime::setParticleViewBasis(const glm::vec3& camera_right, const glm::vec3& camera_up) {
+    particle_view_basis_.right = camera_right;
+    particle_view_basis_.up = camera_up;
+    particle_view_basis_.valid = true;
+}
+
 void SceneRuntime::appendParticleDrawCommands(std::vector<SceneDrawCommand>& out) {
     if (!particle_cube_mesh_id_.has_value()) {
         particle_cube_mesh_id_ = addMesh("ParticleCube", createCubeMesh(context_));
     }
     if (!particle_sphere_mesh_id_.has_value()) {
-        particle_sphere_mesh_id_ = addMesh("ParticleSphere", createSphereMesh(context_, 0.5f, 12, 8));
+        // Low-poly sphere for mesh particles (efficiency vs 12×8).
+        particle_sphere_mesh_id_ = addMesh("ParticleSphere", createSphereMesh(context_, 0.5f, 8, 6));
+    }
+    if (!particle_sprite_mesh_id_.has_value()) {
+        // XY quad (normal +Z) — matches billboard basis in ParticleWorld::collectInstances.
+        // Floor/XZ planes render edge-on under that transform; do not use createPlaneMesh here.
+        particle_sprite_mesh_id_ =
+            addMesh("ParticleSprite", createFluidDisplayQuadMesh(context_, 0.5f));
+    }
+
+    if (!particle_view_basis_.valid) {
+        if (const Node* cam = scene_.activeOutputCameraNode()) {
+            const glm::mat3 rot = glm::mat3(cam->world);
+            particle_view_basis_.right = glm::normalize(glm::vec3(rot[0]));
+            particle_view_basis_.up = glm::normalize(glm::vec3(rot[1]));
+            particle_view_basis_.valid = true;
+        }
     }
 
     std::vector<ParticleWorld::ParticleInstanceBatch> batches;
-    particle_world_.collectInstances(scene_, batches);
+    particle_world_.collectInstances(scene_, batches, particle_view_basis_);
 
     SceneMaterial lit{};
     lit.base_color = glm::vec4(1.0f);
@@ -371,15 +393,24 @@ void SceneRuntime::appendParticleDrawCommands(std::vector<SceneDrawCommand>& out
 
     for (const ParticleWorld::ParticleInstanceBatch& batch : batches) {
         const Mesh* mesh = nullptr;
-        if (batch.mesh == ParticleRenderMesh::Sphere) {
+        switch (batch.mesh) {
+        case ParticleRenderMesh::Sphere:
             mesh = this->mesh(*particle_sphere_mesh_id_);
-        } else {
+            break;
+        case ParticleRenderMesh::Sprite:
+            mesh = this->mesh(*particle_sprite_mesh_id_);
+            break;
+        case ParticleRenderMesh::Cube:
+        default:
             mesh = this->mesh(*particle_cube_mesh_id_);
+            break;
         }
         if (!mesh) {
             continue;
         }
         const SceneMaterial& material = batch.unlit ? unlit : lit;
+        // One SceneDrawCommand per instance; buildDrawBatches GPU-instances them.
+        out.reserve(out.size() + batch.instances.size());
         for (const GpuMeshInstance& instance : batch.instances) {
             SceneDrawCommand cmd{};
             cmd.node_id = 0;

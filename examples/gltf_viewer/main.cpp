@@ -289,6 +289,13 @@ protected:
         collect_params.enable_cpu_culling = true;
         collect_params.enable_gpu_culling = false;
         runtime_.collectDrawCommands(draw_commands_, &render_stats, collect_params);
+        {
+            // Niagara-style sprite facing from the active view camera.
+            const glm::mat4 view = outputViewMatrix();
+            const glm::mat3 inv = glm::inverse(glm::mat3(view));
+            runtime_.setParticleViewBasis(glm::normalize(glm::vec3(inv[0])),
+                                         glm::normalize(glm::vec3(inv[1])));
+        }
         runtime_.appendParticleDrawCommands(draw_commands_);
         render_stats.draw_calls = static_cast<std::uint32_t>(draw_commands_.size());
         // Recount triangles roughly including particles.
@@ -1323,7 +1330,7 @@ private:
         }
         ImGui::Separator();
         ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.95f, 1.0f), "Particle Emitter");
-        ImGui::TextDisabled("Every control has OSC Link; Audio on rate / gravity.");
+        ImGui::TextDisabled("Niagara-style modules · OSC Link on params · Sprite = efficient default");
         genesis::ParticleEmitter& e = *n.particle_emitter;
         bool dirty = false;
 
@@ -1336,17 +1343,35 @@ private:
         dirty |= ImGui::Checkbox("World space", &e.world_space);
         dirty |= ImGui::Checkbox("Unlit", &e.unlit);
 
+        ImGui::SeparatorText("Spawn (Emitter Update)");
         dirty |= ImGui::DragFloat("Rate / s", &e.rate_per_second, 1.0f, 0.0f, 20000.0f);
         genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleRate, node_path, 0, "p_rate");
         genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::ParticleRate, node_path, 0,
                                      "p_rate");
+        dirty |= ImGui::DragFloat("Spawn / meter", &e.spawn_per_unit, 0.1f, 0.0f, 500.0f);
 
         int burst = static_cast<int>(e.burst_count);
-        if (ImGui::DragInt("Burst", &burst, 1, 0, 100000)) {
+        if (ImGui::DragInt("Burst @ t=0", &burst, 1, 0, 100000)) {
             e.burst_count = static_cast<std::uint32_t>(std::max(burst, 0));
             dirty = true;
         }
         genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleBurst, node_path, 0, "p_burst");
+
+        int burst_entries = static_cast<int>(e.burst_entries);
+        if (ImGui::DragInt("Timed bursts", &burst_entries, 1, 0, 4)) {
+            e.burst_entries = static_cast<std::uint8_t>(std::clamp(burst_entries, 0, 4));
+            dirty = true;
+        }
+        for (std::uint8_t bi = 0; bi < e.burst_entries; ++bi) {
+            ImGui::PushID(static_cast<int>(bi));
+            dirty |= ImGui::DragFloat("Burst time", &e.bursts[bi].time_seconds, 0.01f, 0.0f, 120.0f);
+            int bc = static_cast<int>(e.bursts[bi].count);
+            if (ImGui::DragInt("Burst count", &bc, 1, 0, 100000)) {
+                e.bursts[bi].count = static_cast<std::uint32_t>(std::max(bc, 0));
+                dirty = true;
+            }
+            ImGui::PopID();
+        }
 
         int max_p = static_cast<int>(e.max_particles);
         if (ImGui::DragInt("Max particles", &max_p, 1, 1, 65536)) {
@@ -1357,6 +1382,8 @@ private:
 
         dirty |= ImGui::DragFloat("Duration (0=∞)", &e.duration_seconds, 0.05f, 0.0f, 600.0f);
         dirty |= ImGui::DragFloat("Start delay", &e.start_delay_seconds, 0.01f, 0.0f, 60.0f);
+
+        ImGui::SeparatorText("Initialize (Particle Spawn)");
 
         dirty |= ImGui::DragFloatRange2("Lifetime", &e.lifetime_min, &e.lifetime_max, 0.01f, 0.01f, 60.0f);
         genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleLifetimeMin, node_path, 0,
@@ -1398,28 +1425,12 @@ private:
         genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleColorEndA, node_path, 0,
                                    "p_ce_a");
 
-        dirty |= ImGui::DragFloat3("Gravity / buoyancy", &e.gravity.x, 0.05f);
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleGravityX, node_path, 0,
-                                   "p_gx");
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleGravityY, node_path, 0,
-                                   "p_gy");
-        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::ParticleGravityY, node_path, 0,
-                                     "p_gy");
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleGravityZ, node_path, 0,
-                                   "p_gz");
-        dirty |= ImGui::DragFloat("Drag", &e.drag, 0.01f, 0.0f, 10.0f);
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleDrag, node_path, 0, "p_drag");
-
+        ImGui::SeparatorText("Location / Velocity");
         const char* shapes[] = {"Point", "Sphere", "Cone", "Box", "Ring (cylinder)"};
         int shape = static_cast<int>(e.spawn_shape);
         if (ImGui::Combo("Spawn shape", &shape, shapes, IM_ARRAYSIZE(shapes))) {
             e.spawn_shape = static_cast<genesis::ParticleSpawnShape>(shape);
             dirty = true;
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(
-                "Ring: spawn on a cylinder circle (radius + height jitter). "
-                "Use positive Gravity Y for rising bubbles.");
         }
         dirty |= ImGui::DragFloat("Spawn radius", &e.spawn_radius, 0.01f, 0.0f, 50.0f);
         genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleSpawnRadius, node_path, 0,
@@ -1427,21 +1438,126 @@ private:
         dirty |= ImGui::DragFloat("Spawn height / box Y", &e.spawn_box_height, 0.01f, 0.0f, 50.0f);
         genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleSpawnHeight, node_path, 0,
                                    "p_ht");
-        dirty |= ImGui::DragFloat("Cone / rise angle", &e.cone_angle_degrees, 0.5f, 0.0f, 89.0f);
+        dirty |= ImGui::DragFloat("Cone angle", &e.cone_angle_degrees, 0.5f, 0.0f, 89.0f);
         genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleConeAngle, node_path, 0,
                                    "p_cone");
+        const char* vel_modes[] = {"Cone", "From point", "Random"};
+        int vel_mode = static_cast<int>(e.velocity_mode);
+        if (ImGui::Combo("Velocity mode", &vel_mode, vel_modes, IM_ARRAYSIZE(vel_modes))) {
+            e.velocity_mode = static_cast<genesis::ParticleVelocityMode>(vel_mode);
+            dirty = true;
+        }
+        dirty |= ImGui::DragFloat("Inherit velocity", &e.inherit_velocity, 0.01f, 0.0f, 1.0f);
 
-        const char* meshes[] = {"Cube", "Sphere"};
+        ImGui::SeparatorText("Forces (Update modules)");
+        dirty |= ImGui::Checkbox("Gravity", &e.force_gravity);
+        if (e.force_gravity) {
+            dirty |= ImGui::DragFloat3("Gravity / buoyancy", &e.gravity.x, 0.05f);
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleGravityX, node_path, 0,
+                                       "p_gx");
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleGravityY, node_path, 0,
+                                       "p_gy");
+            genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::ParticleGravityY, node_path,
+                                         0, "p_gy");
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleGravityZ, node_path, 0,
+                                       "p_gz");
+        }
+        dirty |= ImGui::Checkbox("Drag", &e.force_drag);
+        if (e.force_drag) {
+            dirty |= ImGui::DragFloat("Drag amount", &e.drag, 0.01f, 0.0f, 10.0f);
+            genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleDrag, node_path, 0,
+                                       "p_drag");
+        }
+        dirty |= ImGui::Checkbox("Point force (attract/repel)", &e.force_point);
+        if (e.force_point) {
+            dirty |= ImGui::DragFloat3("Point position", &e.point_force_position.x, 0.05f);
+            dirty |= ImGui::DragFloat("Strength (+in/-out)", &e.point_force_strength, 0.1f, -200.0f, 200.0f);
+            dirty |= ImGui::DragFloat("Softness", &e.point_force_softness, 0.01f, 0.01f, 10.0f);
+        }
+        dirty |= ImGui::Checkbox("Vortex", &e.force_vortex);
+        if (e.force_vortex) {
+            dirty |= ImGui::DragFloat("Vortex strength", &e.vortex_strength, 0.05f, -50.0f, 50.0f);
+            dirty |= ImGui::DragFloat3("Vortex axis", &e.vortex_axis.x, 0.05f);
+            dirty |= ImGui::DragFloat("Vortex radius", &e.vortex_radius, 0.05f, 0.1f, 100.0f);
+        }
+        dirty |= ImGui::Checkbox("Noise", &e.force_noise);
+        if (e.force_noise) {
+            dirty |= ImGui::DragFloat("Noise strength", &e.noise_strength, 0.01f, 0.0f, 20.0f);
+            dirty |= ImGui::DragFloat("Noise frequency", &e.noise_frequency, 0.01f, 0.01f, 20.0f);
+        }
+        dirty |= ImGui::Checkbox("Acceleration", &e.force_accel);
+        if (e.force_accel) {
+            dirty |= ImGui::DragFloat3("Acceleration", &e.acceleration.x, 0.05f);
+        }
+
+        ImGui::SeparatorText("Kill");
+        dirty |= ImGui::Checkbox("Kill below plane Y", &e.kill_plane);
+        if (e.kill_plane) {
+            dirty |= ImGui::DragFloat("Kill plane Y", &e.kill_plane_y, 0.05f);
+        }
+        dirty |= ImGui::Checkbox("Kill outside box", &e.kill_box);
+        if (e.kill_box) {
+            dirty |= ImGui::DragFloat3("Kill box min", &e.kill_box_min.x, 0.05f);
+            dirty |= ImGui::DragFloat3("Kill box max", &e.kill_box_max.x, 0.05f);
+        }
+
+        ImGui::SeparatorText("Over Life (curves)");
+        if (ImGui::Button("Rebuild curves from endpoints")) {
+            genesis::rebuildEmitterCurvesFromEndpoints(e);
+            dirty = true;
+        }
+        int size_keys = static_cast<int>(e.size_over_life.count);
+        if (ImGui::DragInt("Size keys", &size_keys, 1, 0, 4)) {
+            e.size_over_life.count =
+                static_cast<std::uint8_t>(std::clamp(size_keys, 0, 4));
+            dirty = true;
+        }
+        for (std::uint8_t ki = 0; ki < e.size_over_life.count; ++ki) {
+            ImGui::PushID(100 + ki);
+            dirty |= ImGui::DragFloat("t", &e.size_over_life.keys[ki].t, 0.01f, 0.0f, 1.0f);
+            ImGui::SameLine();
+            dirty |= ImGui::DragFloat("size mul", &e.size_over_life.keys[ki].v, 0.01f, 0.0f, 8.0f);
+            ImGui::PopID();
+        }
+        int color_keys = static_cast<int>(e.color_over_life.count);
+        if (ImGui::DragInt("Color keys", &color_keys, 1, 0, 4)) {
+            e.color_over_life.count =
+                static_cast<std::uint8_t>(std::clamp(color_keys, 0, 4));
+            dirty = true;
+        }
+        for (std::uint8_t ki = 0; ki < e.color_over_life.count; ++ki) {
+            ImGui::PushID(200 + ki);
+            dirty |= ImGui::DragFloat("t##c", &e.color_over_life.keys[ki].t, 0.01f, 0.0f, 1.0f);
+            dirty |= ImGui::ColorEdit4("rgba", &e.color_over_life.keys[ki].v.x);
+            ImGui::PopID();
+        }
+        dirty |= ImGui::Checkbox("Scale by speed", &e.scale_by_speed);
+        if (e.scale_by_speed) {
+            dirty |= ImGui::DragFloatRange2("Speed range", &e.scale_by_speed_range_min,
+                                           &e.scale_by_speed_range_max, 0.05f, 0.0f, 100.0f);
+            dirty |= ImGui::DragFloatRange2("Size mul range", &e.scale_by_speed_mul_min,
+                                           &e.scale_by_speed_mul_max, 0.01f, 0.0f, 8.0f);
+        }
+
+        ImGui::SeparatorText("Renderer");
+        const char* meshes[] = {"Cube", "Sphere", "Sprite (billboard)"};
         int mesh = static_cast<int>(e.render_mesh);
-        if (ImGui::Combo("Render mesh", &mesh, meshes, 2)) {
+        if (ImGui::Combo("Renderer", &mesh, meshes, IM_ARRAYSIZE(meshes))) {
             e.render_mesh = static_cast<genesis::ParticleRenderMesh>(mesh);
             dirty = true;
+        }
+        if (e.render_mesh == genesis::ParticleRenderMesh::Sprite) {
+            dirty |= ImGui::DragFloat("Sprite aspect", &e.sprite_aspect, 0.01f, 0.1f, 8.0f);
         }
 
         int seed = static_cast<int>(e.seed_override);
         if (ImGui::DragInt("Seed override (0=scene)", &seed, 1, 0, 1000000)) {
             e.seed_override = static_cast<std::uint64_t>(std::max(seed, 0));
             dirty = true;
+        }
+
+        if (dirty) {
+            genesis::syncEmitterCurvesFromEndpoints(e);
         }
 
         const auto stats = runtime_.particleWorld().stats();

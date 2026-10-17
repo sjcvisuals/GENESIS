@@ -359,6 +359,11 @@ if(GENESIS_BUILD_EXAMPLES)
             "$<TARGET_FILE_DIR:genesis_remover_camera_debug>/assets/matting"
         COMMENT "Copying matting assets next to genesis_remover_camera_debug")
 
+    # Header-only particle-module authoring smoke (no Vulkan / GPU).
+    add_executable(genesis_particle_smoke examples/particle_smoke/main.cpp)
+    target_include_directories(genesis_particle_smoke PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(genesis_particle_smoke PRIVATE glm::glm)
+
     add_executable(genesis_multiview_player examples/multiview_player/main.cpp)
     target_link_libraries(genesis_multiview_player PRIVATE genesis_engine)
     add_dependencies(genesis_multiview_player genesis_shaders)

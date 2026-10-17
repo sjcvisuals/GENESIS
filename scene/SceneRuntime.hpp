@@ -143,6 +143,7 @@ public:
     void resetParticles();
     ParticleWorld& particleWorld() { return particle_world_; }
     const ParticleWorld& particleWorld() const { return particle_world_; }
+    void setParticleViewBasis(const glm::vec3& camera_right, const glm::vec3& camera_up);
     void appendParticleDrawCommands(std::vector<SceneDrawCommand>& out);
 
     FluidWorld& fluidWorld() { return fluid_world_; }
@@ -178,6 +179,8 @@ private:
     double particle_step_accumulator_ = 0.0;
     std::optional<std::uint32_t> particle_cube_mesh_id_;
     std::optional<std::uint32_t> particle_sphere_mesh_id_;
+    std::optional<std::uint32_t> particle_sprite_mesh_id_;
+    ParticleViewBasis particle_view_basis_{};
     std::optional<std::uint32_t> fluid_box_mesh_id_;
     std::optional<std::uint32_t> fluid_display_material_id_;
 };
