@@ -3,8 +3,11 @@
 #include "renderer/vulkan/Buffer.hpp"
 #include "renderer/vulkan/VulkanContext.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <stdexcept>
+#include <vector>
 
 namespace genesis {
 
@@ -242,6 +245,43 @@ GpuTexture GpuTexture::createSolid(const VulkanContext& context, const std::uint
                                    const std::uint8_t g, const std::uint8_t b, const std::uint8_t a) {
     const std::uint8_t pixel[4] = {r, g, b, a};
     return GpuTexture(context, pixel, 1, 1, TextureColorEncoding::Linear);
+}
+
+GpuTexture GpuTexture::createSoftCircleSprite(const VulkanContext& context, const std::uint32_t size) {
+    const std::uint32_t dim = std::max(size, 8u);
+    std::vector<std::uint8_t> rgba(static_cast<std::size_t>(dim) * dim * 4u);
+    // Slight edge feather (Unreal default-sprite feel): opaque core, soft rim, alpha outside.
+    constexpr float kFeatherStart = 0.78f;
+    constexpr float kFeatherEnd = 1.0f;
+    for (std::uint32_t y = 0; y < dim; ++y) {
+        for (std::uint32_t x = 0; x < dim; ++x) {
+            const float nx = (static_cast<float>(x) + 0.5f) / static_cast<float>(dim) * 2.0f - 1.0f;
+            const float ny = (static_cast<float>(y) + 0.5f) / static_cast<float>(dim) * 2.0f - 1.0f;
+            const float d = std::sqrt(nx * nx + ny * ny);
+            float alpha = 0.0f;
+            if (d <= kFeatherStart) {
+                alpha = 1.0f;
+            } else if (d < kFeatherEnd) {
+                const float t = (d - kFeatherStart) / (kFeatherEnd - kFeatherStart);
+                // Smoothstep falloff — soft rim without hard cutoff.
+                alpha = 1.0f - (t * t * (3.0f - 2.0f * t));
+            }
+            const std::size_t i = (static_cast<std::size_t>(y) * dim + x) * 4u;
+            rgba[i + 0] = 255;
+            rgba[i + 1] = 255;
+            rgba[i + 2] = 255;
+            rgba[i + 3] = static_cast<std::uint8_t>(std::clamp(alpha, 0.0f, 1.0f) * 255.0f + 0.5f);
+        }
+    }
+
+    GpuTexture texture(context, rgba.data(), dim, dim, TextureColorEncoding::Linear);
+    // Clamp so the transparent rim does not wrap at UV edges.
+    if (texture.sampler_ != VK_NULL_HANDLE) {
+        vkDestroySampler(texture.device_, texture.sampler_, nullptr);
+        texture.sampler_ = VK_NULL_HANDLE;
+    }
+    texture.sampler_ = createDefaultSampler(texture.device_, true);
+    return texture;
 }
 
 GpuTexture GpuTexture::createFluidDisplayTarget(const VulkanContext& context, const std::uint32_t width,

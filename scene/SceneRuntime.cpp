@@ -53,6 +53,8 @@ void SceneRuntime::clear() {
     particle_step_accumulator_ = 0.0;
     particle_cube_mesh_id_.reset();
     particle_sphere_mesh_id_.reset();
+    particle_sprite_mesh_id_.reset();
+    particle_sprite_texture_id_.reset();
     fluid_box_mesh_id_.reset();
     fluid_display_material_id_.reset();
 }
@@ -396,6 +398,11 @@ void SceneRuntime::appendParticleDrawCommands(std::vector<SceneDrawCommand>& out
         particle_sprite_mesh_id_ =
             addMesh("ParticleSprite", createFluidDisplayQuadMesh(context_, 0.5f));
     }
+    if (!particle_sprite_texture_id_.has_value()) {
+        // Soft white circle + feathered alpha (Unreal default sprite look).
+        particle_sprite_texture_id_ =
+            addTexture("ParticleSoftCircle", GpuTexture::createSoftCircleSprite(context_, 64));
+    }
 
     if (!particle_view_basis_.valid) {
         if (const Node* cam = scene_.activeOutputCameraNode()) {
@@ -417,11 +424,14 @@ void SceneRuntime::appendParticleDrawCommands(std::vector<SceneDrawCommand>& out
 
     SceneMaterial unlit = lit;
     unlit.emissive = glm::vec3(1.0f);
-    unlit.emissive_strength = 2.5f;
+    unlit.emissive_strength = 1.0f;
     unlit.roughness = 1.0f;
+
+    const GpuTexture* soft_circle = texture(*particle_sprite_texture_id_);
 
     for (const ParticleWorld::ParticleInstanceBatch& batch : batches) {
         const Mesh* mesh = nullptr;
+        const bool is_sprite = batch.mesh == ParticleRenderMesh::Sprite;
         switch (batch.mesh) {
         case ParticleRenderMesh::Sphere:
             mesh = this->mesh(*particle_sphere_mesh_id_);
@@ -447,6 +457,9 @@ void SceneRuntime::appendParticleDrawCommands(std::vector<SceneDrawCommand>& out
             cmd.model = instance.model;
             cmd.material = makeMeshMaterialPushConstants(material);
             cmd.instance_color = instance.color;
+            if (is_sprite) {
+                cmd.base_color_texture = soft_circle;
+            }
             out.push_back(cmd);
         }
     }
@@ -578,6 +591,12 @@ void SceneRuntime::loadGltfSource(const std::filesystem::path& path) {
     scene_ = GltfLoader::loadScene(path, &materials_);
     meshes_.clear();
     mesh_names_.clear();
+    particle_cube_mesh_id_.reset();
+    particle_sphere_mesh_id_.reset();
+    particle_sprite_mesh_id_.reset();
+    particle_sprite_texture_id_.reset();
+    fluid_box_mesh_id_.reset();
+    fluid_display_material_id_.reset();
 
     for (std::size_t i = 0; i < materials_.size(); ++i) {
         material_names_.push_back("Material " + std::to_string(i));
