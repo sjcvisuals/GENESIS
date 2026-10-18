@@ -39,6 +39,8 @@ public:
 
     static GpuTexture createSolid(const VulkanContext& context, std::uint8_t r, std::uint8_t g,
                                   std::uint8_t b, std::uint8_t a = 255);
+    // Niagara/Cascade-style default sprite: white disc, slight edge feather, transparent outside.
+    static GpuTexture createSoftCircleSprite(const VulkanContext& context, std::uint32_t size = 64);
     // RGBA8 target for GPU fluid dye presentation (storage + sampled).
     static GpuTexture createFluidDisplayTarget(const VulkanContext& context, std::uint32_t width,
                                                std::uint32_t height);
