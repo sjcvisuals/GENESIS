@@ -36,25 +36,26 @@ int main() {
         return 1;
     }
 
-    genesis::ParticleEmitter bubble = genesis::makeBubbleRingEmitter();
-    if (bubble.render_mesh != ParticleRenderMesh::Sprite || bubble.spawn_shape != genesis::ParticleSpawnShape::Ring ||
-        bubble.size_over_life.count < 2 || bubble.color_over_life.count < 2) {
-        std::fprintf(stderr, "particle_smoke: bubble preset missing Niagara modules\n");
+    genesis::ParticleEmitter soft = genesis::makeGentleSoftEmitter();
+    if (soft.render_mesh != ParticleRenderMesh::Sprite || soft.size_over_life.count < 2 ||
+        soft.color_over_life.count < 2 || !soft.trail_enabled || soft.trail_segments < 2) {
+        std::fprintf(stderr, "particle_smoke: gentle soft preset missing Niagara modules/trails\n");
         return 1;
     }
 
     genesis::ParticleEmitter tracker = genesis::makeOscTrackerBubbleEmitter();
-    if (tracker.render_mesh != ParticleRenderMesh::Sprite || !tracker.force_noise) {
+    if (tracker.render_mesh != ParticleRenderMesh::Sprite || !tracker.force_noise ||
+        !tracker.trail_enabled) {
         std::fprintf(stderr, "particle_smoke: OSC tracker preset incomplete\n");
         return 1;
     }
 
-    genesis::rebuildEmitterCurvesFromEndpoints(bubble);
-    if (bubble.size_over_life.count != 2 || bubble.color_over_life.count != 2) {
+    genesis::rebuildEmitterCurvesFromEndpoints(soft);
+    if (soft.size_over_life.count != 2 || soft.color_over_life.count != 2) {
         std::fprintf(stderr, "particle_smoke: rebuild curves failed\n");
         return 1;
     }
 
-    std::printf("particle_smoke: ok (sprite+curves+modules)\n");
+    std::printf("particle_smoke: ok (sprite+curves+trail modules)\n");
     return 0;
 }

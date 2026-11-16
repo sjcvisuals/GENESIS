@@ -1,7 +1,7 @@
 {
   "format": "gns",
   "version": 1,
-  "name": "Arc Energy + OSC Tracker",
+  "name": "Gentle Soft Circles + OSC Tracker",
   "scene_ref": "bubble_ring_osc.scene.json",
   "pixera": {
     "streams": [

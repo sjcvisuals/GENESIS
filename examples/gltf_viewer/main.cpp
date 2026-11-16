@@ -141,7 +141,8 @@ protected:
         osc_protocol_.applyParticleEmits(runtime_, osc_particle_cursor_);
         audio_reactive_.tick(runtime_, dt);
         runtime_.updateTransforms();
-        runtime_.tickParticles(dt);
+        // Allow catch-up on slow software GPUs so gentle rise/trails stay readable.
+        runtime_.tickParticles(dt, 0.01f, 24);
         last_frame_dt_ = dt;
         handleEditorShortcuts();
 
@@ -472,7 +473,7 @@ private:
             }
             ImGui::Separator();
             if (ImGui::BeginMenu("Examples")) {
-                if (ImGui::MenuItem("Arc Energy + OSC Tracker")) {
+                if (ImGui::MenuItem("Gentle Soft Circles + OSC Tracker")) {
                     const std::filesystem::path example =
                         genesis::resolveAssetPath("assets/scenes/bubble_ring_osc.scene.json");
                     try {
@@ -586,15 +587,15 @@ private:
             addLightNode("Directional Light", genesis::SceneLightType::Directional);
         });
         ImGui::SameLine();
-        createBtn("Arc Sparks", half, [&] {
-            selectNode(scene.createParticleEmitterNode("Arc Sparks", std::nullopt,
-                                                       genesis::makeArcCyanSparkEmitter()));
+        createBtn("Soft Circles", half, [&] {
+            selectNode(scene.createParticleEmitterNode("Soft Circles", std::nullopt,
+                                                       genesis::makeGentleCirclesEmitter()));
             markDirty();
         });
         ImGui::SameLine();
-        createBtn("Lime Streaks", half, [&] {
-            selectNode(scene.createParticleEmitterNode("Lime Streaks", std::nullopt,
-                                                       genesis::makeArcLimeStreakEmitter()));
+        createBtn("Soft + Trails", half, [&] {
+            selectNode(scene.createParticleEmitterNode("Soft + Trails", std::nullopt,
+                                                       genesis::makeGentleSoftEmitter()));
             markDirty();
         });
         createBtn("OSC Tracker", half, [&] {
@@ -1204,18 +1205,18 @@ private:
         }
         ImGui::Separator();
         ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.82f, 1.0f), "PARTICLE SYSTEM");
-        ImGui::TextDisabled("Niagara-style modules · soft additive · OSC / audio link");
+        ImGui::TextDisabled("Niagara modules · soft sprites · trail renderer · OSC / audio");
         genesis::ParticleEmitter& e = *n.particle_emitter;
         bool dirty = false;
 
         ImGui::BeginGroup();
-        if (ImGui::SmallButton("Preset: Arc Sparks")) {
-            e = genesis::makeArcCyanSparkEmitter();
+        if (ImGui::SmallButton("Preset: Soft Circles")) {
+            e = genesis::makeGentleCirclesEmitter();
             dirty = true;
         }
         ImGui::SameLine();
-        if (ImGui::SmallButton("Preset: Lime Streaks")) {
-            e = genesis::makeArcLimeStreakEmitter();
+        if (ImGui::SmallButton("Preset: Soft + Trails")) {
+            e = genesis::makeGentleSoftEmitter();
             dirty = true;
         }
         ImGui::SameLine();
@@ -1430,6 +1431,22 @@ private:
                                            &e.scale_by_speed_mul_max, 0.01f, 0.0f, 8.0f);
         }
 
+        ImGui::SeparatorText("Trail Renderer");
+        dirty |= ImGui::Checkbox("Enable trails", &e.trail_enabled);
+        if (e.trail_enabled) {
+            int segs = static_cast<int>(e.trail_segments);
+            if (ImGui::DragInt("Trail segments", &segs, 1, 2, 12)) {
+                e.trail_segments = static_cast<std::uint8_t>(std::clamp(segs, 2, 12));
+                dirty = true;
+            }
+            dirty |= ImGui::DragFloat("Sample distance", &e.trail_sample_distance, 0.001f, 0.005f, 0.5f);
+            dirty |= ImGui::DragFloat("Trail width (head)", &e.trail_width, 0.001f, 0.0f, 1.0f);
+            dirty |= ImGui::DragFloat("Trail width (tip)", &e.trail_width_end, 0.001f, 0.0f, 1.0f);
+            dirty |= ImGui::DragFloat("Trail alpha", &e.trail_alpha, 0.01f, 0.0f, 1.0f);
+            dirty |= ImGui::DragFloat("Trail lifetime feel", &e.trail_lifetime, 0.01f, 0.05f, 8.0f);
+            ImGui::TextDisabled("Tapers tip→point · history ribbons (Niagara Trail analogue)");
+        }
+
         ImGui::SeparatorText("Renderer");
         dirty |= ImGui::Checkbox("Unlit", &e.unlit);
         ImGui::SameLine();
@@ -1443,7 +1460,7 @@ private:
         if (e.render_mesh == genesis::ParticleRenderMesh::Sprite) {
             dirty |= ImGui::DragFloat("Sprite aspect", &e.sprite_aspect, 0.01f, 0.05f, 8.0f);
             dirty |= ImGui::DragFloat("Velocity stretch", &e.velocity_stretch, 0.01f, 0.0f, 4.0f);
-            ImGui::TextDisabled("0 = camera disc · >0 ≈ Niagara VelocityAligned streak");
+            ImGui::TextDisabled("Prefer Trail Renderer for ribbons; stretch is optional");
         }
 
         int seed = static_cast<int>(e.seed_override);
@@ -2417,9 +2434,9 @@ private:
     }
 
     void resetEditorCamera() {
-        // Low three-quarter view — reads the floor arc + rising streaks like the reference.
-        const glm::vec3 target(0.0f, 0.55f, 0.0f);
-        const glm::vec3 eye(3.15f, 1.65f, 4.05f);
+        // Calm three-quarter view for soft rising circles + trails.
+        const glm::vec3 target(0.0f, 0.85f, 0.0f);
+        const glm::vec3 eye(2.55f, 1.55f, 3.35f);
         editor_camera_.transform.position = eye;
         editor_camera_.setRotation(genesis::cameraRotationFromLookAt(eye, target));
         genesis::extractYawPitchFromForward(editor_camera_.forward(), editor_camera_.yaw_radians,

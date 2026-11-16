@@ -4,6 +4,7 @@
 #include "renderer/MeshInstance.hpp"
 #include "scene/Scene.hpp"
 
+#include <array>
 #include <cstdint>
 #include <glm/vec3.hpp>
 #include <unordered_map>
@@ -70,6 +71,8 @@ private:
         double distance_spawn_accumulator = 0.0; // meters × spawn_per_unit
     };
 
+    static constexpr std::uint8_t kMaxTrailPoints = 12;
+
     struct Particle {
         NodeId emitter_node = 0;
         std::uint64_t emit_index = 0;
@@ -85,10 +88,23 @@ private:
         bool additive = true;
         bool world_space = true;
         bool alive = false;
-        // Cached curve endpoints (evaluated from emitter curves at birth for determinism
-        // when emitter curves change mid-flight; over-life still uses stored keys snapshot).
+        // Cached curves snapshot at birth (deterministic over-life if emitter edits mid-flight).
         ParticleCurve1 size_curve{};
         ParticleCurveColor color_curve{};
+
+        // Trail Renderer history (oldest at [0], newest at [trail_count-1]).
+        bool trail_enabled = false;
+        std::uint8_t trail_max_segments = 10;
+        float trail_sample_distance = 0.035f;
+        float trail_width = 0.055f;
+        float trail_width_end = 0.0f;
+        float trail_alpha = 0.55f;
+        float trail_lifetime = 0.85f;
+        std::array<glm::vec3, kMaxTrailPoints> trail_pos{};
+        std::uint8_t trail_count = 0;
+        float trail_dist_accum = 0.0f;
+        glm::vec3 trail_last_sample{0.0f};
+        bool trail_has_sample = false;
     };
 
     void syncEmitters(Scene& scene);

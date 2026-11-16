@@ -2,6 +2,7 @@
 
 #include "particles/FluidVolume.hpp"
 #include "scene/ScenePath.hpp"
+#include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <glm/gtc/matrix_transform.hpp>
@@ -455,6 +456,13 @@ json particleEmitterToJson(const ParticleEmitter& e) {
         {"render_mesh", renderMeshName(e.render_mesh)},
         {"sprite_aspect", e.sprite_aspect},
         {"velocity_stretch", e.velocity_stretch},
+        {"trail_enabled", e.trail_enabled},
+        {"trail_segments", e.trail_segments},
+        {"trail_sample_distance", e.trail_sample_distance},
+        {"trail_width", e.trail_width},
+        {"trail_width_end", e.trail_width_end},
+        {"trail_alpha", e.trail_alpha},
+        {"trail_lifetime", e.trail_lifetime},
         {"unlit", e.unlit},
         {"additive", e.additive},
         {"seed_override", e.seed_override},
@@ -522,6 +530,14 @@ ParticleEmitter particleEmitterFromJson(const json& j) {
     }
     e.sprite_aspect = j.value("sprite_aspect", e.sprite_aspect);
     e.velocity_stretch = j.value("velocity_stretch", e.velocity_stretch);
+    e.trail_enabled = j.value("trail_enabled", e.trail_enabled);
+    e.trail_segments = static_cast<std::uint8_t>(
+        std::clamp(j.value("trail_segments", static_cast<int>(e.trail_segments)), 2, 12));
+    e.trail_sample_distance = j.value("trail_sample_distance", e.trail_sample_distance);
+    e.trail_width = j.value("trail_width", e.trail_width);
+    e.trail_width_end = j.value("trail_width_end", e.trail_width_end);
+    e.trail_alpha = j.value("trail_alpha", e.trail_alpha);
+    e.trail_lifetime = j.value("trail_lifetime", e.trail_lifetime);
     e.unlit = j.value("unlit", e.unlit);
     e.additive = j.value("additive", e.additive);
     e.seed_override = j.value("seed_override", e.seed_override);
