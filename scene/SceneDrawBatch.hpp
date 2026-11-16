@@ -21,6 +21,7 @@ struct SceneMeshBatch {
     MeshMaterialPushConstants material{};
     std::vector<GpuMeshInstance> instances;
     std::vector<NodeId> node_ids;
+    bool additive = false;
 };
 
 inline std::uint64_t materialKey(const MeshMaterialPushConstants& material) {
@@ -40,11 +41,13 @@ struct BatchKey {
     const GpuTexture* normal = nullptr;
     const GpuTexture* emissive = nullptr;
     std::uint64_t material_hash = 0;
+    bool additive = false;
 
     bool operator==(const BatchKey& other) const {
         return mesh == other.mesh && base_color == other.base_color &&
                metallic_roughness == other.metallic_roughness && normal == other.normal &&
-               emissive == other.emissive && material_hash == other.material_hash;
+               emissive == other.emissive && material_hash == other.material_hash &&
+               additive == other.additive;
     }
 };
 
@@ -56,6 +59,7 @@ struct BatchKeyHash {
         hash ^= std::hash<const void*>{}(key.normal) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
         hash ^= std::hash<const void*>{}(key.emissive) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
         hash ^= key.material_hash + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash ^= static_cast<std::size_t>(key.additive) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
         return hash;
     }
 };
@@ -67,6 +71,7 @@ inline std::uint64_t batchSortKey(const SceneMeshBatch& batch) {
     key = (key << 8) ^ reinterpret_cast<std::uint64_t>(batch.normal_texture);
     key = (key << 8) ^ reinterpret_cast<std::uint64_t>(batch.emissive_texture);
     key = (key << 32) ^ materialKey(batch.material);
+    key ^= batch.additive ? 0xA11D0001ull : 0ull;
     return key;
 }
 
@@ -95,7 +100,8 @@ inline void buildDrawBatches(const std::vector<SceneDrawCommand>& commands,
         MeshMaterialPushConstants material = command.material;
 
         const BatchKey key{command.mesh, command.base_color_texture, command.metallic_roughness_texture,
-                           command.normal_texture, command.emissive_texture, materialKey(material)};
+                           command.normal_texture, command.emissive_texture, materialKey(material),
+                           command.additive};
         auto [it, inserted] = batch_lookup.emplace(key, out_batches.size());
         if (inserted) {
             SceneMeshBatch batch{};
@@ -105,6 +111,7 @@ inline void buildDrawBatches(const std::vector<SceneDrawCommand>& commands,
             batch.normal_texture = command.normal_texture;
             batch.emissive_texture = command.emissive_texture;
             batch.material = material;
+            batch.additive = command.additive;
             out_batches.push_back(std::move(batch));
         }
 

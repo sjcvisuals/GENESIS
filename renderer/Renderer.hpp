@@ -100,6 +100,7 @@ private:
     std::unique_ptr<Swapchain> swapchain_;
     std::unique_ptr<GraphicsPipeline> triangle_pipeline_;
     std::unique_ptr<GraphicsPipeline> mesh_pipeline_;
+    std::unique_ptr<GraphicsPipeline> mesh_additive_pipeline_;
     std::unique_ptr<GraphicsPipeline> mesh_depth_pipeline_;
     std::unique_ptr<GraphicsPipeline> grid_pipeline_;
     std::unique_ptr<BindlessTextures> bindless_textures_;

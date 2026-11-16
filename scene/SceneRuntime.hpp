@@ -34,6 +34,7 @@ struct SceneDrawCommand {
     glm::mat4 model{1.0f};
     MeshMaterialPushConstants material{};
     glm::vec4 instance_color{1.0f};
+    bool additive = false; // particle soft-additive path (Renderbridge-safe CPU instances)
 };
 
 struct SceneDrawCollectParams {
