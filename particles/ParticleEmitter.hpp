@@ -2,7 +2,7 @@
 
 // Niagara-inspired particle emitter (public concepts only — not a UE source port).
 // Flat enabled "modules" instead of a graph VM: spawn shape, forces, over-life curves,
-// kill volumes, sprite/mesh renderer. Designed for many CPU particles + GPU instancing.
+// kill volumes, sprite renderer, and a Trail Renderer module (history ribbons that taper).
 
 #include "particles/ParticleCurve.hpp"
 
@@ -51,9 +51,9 @@ struct ParticleEmitter {
 
     // --- Spawn Rate / Burst (Spawn modules) ---
     float rate_per_second = 40.0f;
-    std::uint32_t burst_count = 0; // convenience: fires at t=0 (also mirrored in bursts[0] if set)
+    std::uint32_t burst_count = 0;
     std::array<ParticleBurst, 4> bursts{};
-    std::uint8_t burst_entries = 0; // additional timed bursts beyond burst_count
+    std::uint8_t burst_entries = 0;
     std::uint32_t max_particles = 4096;
 
     // --- Initialize (Lifetime / Size / Color / Velocity) ---
@@ -63,11 +63,11 @@ struct ParticleEmitter {
     float speed_max = 1.5f;
     float size_min = 0.05f;
     float size_max = 0.12f;
-    float size_end_multiplier = 0.25f; // used when size_over_life.count == 0
+    float size_end_multiplier = 0.25f;
     glm::vec4 color_start{1.0f, 0.55f, 0.15f, 1.0f};
     glm::vec4 color_end{1.0f, 0.15f, 0.02f, 0.0f};
     ParticleVelocityMode velocity_mode = ParticleVelocityMode::Cone;
-    float inherit_velocity = 0.0f; // 0..1 blend of emitter motion into birth velocity
+    float inherit_velocity = 0.0f;
 
     // --- Location (Shape Location module) ---
     ParticleSpawnShape spawn_shape = ParticleSpawnShape::Cone;
@@ -75,7 +75,7 @@ struct ParticleEmitter {
     float spawn_box_height = 0.1f;
     float cone_angle_degrees = 25.0f;
 
-    // --- Forces (Update modules, toggled like Niagara stack entries) ---
+    // --- Forces (Update modules) ---
     bool force_gravity = true;
     glm::vec3 gravity{0.0f, -2.0f, 0.0f};
 
@@ -83,9 +83,9 @@ struct ParticleEmitter {
     float drag = 0.15f;
 
     bool force_point = false;
-    glm::vec3 point_force_position{0.0f}; // world if world_space
-    float point_force_strength = 0.0f;    // +attract / -repel
-    float point_force_softness = 0.25f;   // meters, avoids singularity
+    glm::vec3 point_force_position{0.0f};
+    float point_force_strength = 0.0f;
+    float point_force_softness = 0.25f;
 
     bool force_vortex = false;
     float vortex_strength = 0.0f;
@@ -97,9 +97,9 @@ struct ParticleEmitter {
     float noise_frequency = 1.0f;
 
     bool force_accel = false;
-    glm::vec3 acceleration{0.0f}; // Niagara Acceleration Force (constant, separate from gravity)
+    glm::vec3 acceleration{0.0f};
 
-    // --- Kill (Kill particles in volume / below plane) ---
+    // --- Kill ---
     bool kill_plane = false;
     float kill_plane_y = -10.0f;
 
@@ -107,32 +107,40 @@ struct ParticleEmitter {
     glm::vec3 kill_box_min{-10.0f, -10.0f, -10.0f};
     glm::vec3 kill_box_max{10.0f, 10.0f, 10.0f};
 
-    // --- Scale / Color over Life (curve modules) ---
-    // If count==0, fall back to linear size_end_multiplier / color_start→end.
+    // --- Scale / Color over Life ---
     ParticleCurve1 size_over_life{};
     ParticleCurveColor color_over_life{};
 
-    // --- Scale by Speed (Particle Update) ---
+    // --- Scale by Speed ---
     bool scale_by_speed = false;
-    float scale_by_speed_range_min = 0.0f; // m/s → mul min
-    float scale_by_speed_range_max = 4.0f; // m/s → mul max
+    float scale_by_speed_range_min = 0.0f;
+    float scale_by_speed_range_max = 4.0f;
     float scale_by_speed_mul_min = 0.6f;
     float scale_by_speed_mul_max = 1.8f;
 
-    // --- Spawn by distance traveled (Emitter Update) ---
-    float spawn_per_unit = 0.0f; // particles per meter of emitter motion (0 = off)
+    // --- Spawn by distance ---
+    float spawn_per_unit = 0.0f;
 
-    // --- Renderer ---
+    // --- Sprite Renderer ---
     ParticleRenderMesh render_mesh = ParticleRenderMesh::Sprite;
     bool unlit = true;
-    bool additive = true; // SrcAlpha/One — Unreal soft-additive emissive look
+    bool additive = true; // SrcAlpha/One soft-emissive
     float sprite_aspect = 1.0f;
-    // Niagara VelocityAligned stretch: length = size * (1 + speed * velocity_stretch).
-    // 0 keeps camera-facing discs; >0 draws soft streaks without a ribbon mesh.
+    // Optional VelocityAligned stretch (kept for compatibility; prefer Trail for ribbons).
     float velocity_stretch = 0.0f;
 
+    // --- Trail Renderer (Niagara Ribbon/Trail analogue) ---
+    // Samples particle motion history and draws soft segments that taper to a point.
+    bool trail_enabled = false;
+    std::uint8_t trail_segments = 10;     // history points (2..12)
+    float trail_sample_distance = 0.035f; // meters between samples
+    float trail_width = 0.055f;           // width at the particle (head)
+    float trail_width_end = 0.0f;         // width at the tip (0 = taper to a point)
+    float trail_alpha = 0.55f;            // trail opacity multiplier vs particle color
+    float trail_lifetime = 0.85f;         // conceptual trail length in seconds (fade with age)
+
     std::uint64_t seed_override = 0;
-    bool fluid_coupled = false; // legacy
+    bool fluid_coupled = false;
 };
 
 inline void syncEmitterCurvesFromEndpoints(ParticleEmitter& e) {
@@ -144,7 +152,6 @@ inline void syncEmitterCurvesFromEndpoints(ParticleEmitter& e) {
     }
 }
 
-// Replace authored curves with linear endpoints (inspector "Rebuild curves").
 inline void rebuildEmitterCurvesFromEndpoints(ParticleEmitter& e) {
     e.size_over_life = ParticleCurve1::linear(1.0f, e.size_end_multiplier);
     e.color_over_life = ParticleCurveColor::linear(e.color_start, e.color_end);
@@ -156,124 +163,104 @@ inline ParticleEmitter makeDefaultParticleEmitter() {
     return e;
 }
 
-// Dense cyan/white spark bloom along a floor arc (reference base).
-inline ParticleEmitter makeArcCyanSparkEmitter() {
+// Gentle soft circles rising with a tapering trail (primary Niagara-like look).
+inline ParticleEmitter makeGentleSoftEmitter() {
     ParticleEmitter e = makeDefaultParticleEmitter();
-    e.rate_per_second = 1400.0f;
-    e.max_particles = 12000;
-    e.lifetime_min = 0.2f;
-    e.lifetime_max = 0.55f;
-    e.speed_min = 0.02f;
-    e.speed_max = 0.28f;
-    e.size_min = 0.05f;
-    e.size_max = 0.14f;
-    e.size_end_multiplier = 0.12f;
-    e.color_start = glm::vec4(0.45f, 0.95f, 1.0f, 1.0f);
-    e.color_end = glm::vec4(1.0f, 1.0f, 1.0f, 0.0f);
-    e.gravity = glm::vec3(0.0f, 0.12f, 0.0f);
-    e.drag = 0.65f;
-    e.spawn_shape = ParticleSpawnShape::Ring;
-    e.spawn_radius = 1.55f;
-    e.spawn_box_height = 0.05f;
-    e.cone_angle_degrees = 70.0f;
+    e.rate_per_second = 18.0f;
+    e.max_particles = 512;
+    e.lifetime_min = 3.0f;
+    e.lifetime_max = 5.0f;
+    e.speed_min = 0.25f;
+    e.speed_max = 0.45f;
+    e.size_min = 0.055f;
+    e.size_max = 0.09f;
+    e.size_end_multiplier = 0.2f;
+    e.color_start = glm::vec4(0.95f, 0.97f, 1.0f, 1.0f);
+    e.color_end = glm::vec4(0.7f, 0.85f, 1.0f, 0.0f);
+    e.gravity = glm::vec3(0.0f, 0.32f, 0.0f); // soft lift
+    e.drag = 0.25f;
+    e.spawn_shape = ParticleSpawnShape::Sphere;
+    e.spawn_radius = 0.55f;
+    e.spawn_box_height = 0.1f;
+    e.cone_angle_degrees = 12.0f;
     e.velocity_mode = ParticleVelocityMode::Cone;
     e.render_mesh = ParticleRenderMesh::Sprite;
     e.additive = true;
     e.unlit = true;
+    e.sprite_aspect = 1.0f;
+    e.velocity_stretch = 0.0f;
     e.force_noise = true;
-    e.noise_strength = 0.25f;
-    e.noise_frequency = 2.8f;
-    syncEmitterCurvesFromEndpoints(e);
-    e.color_over_life.count = 3;
-    e.color_over_life.keys[0] = {0.0f, glm::vec4(0.15f, 0.75f, 1.0f, 0.0f)};
-    e.color_over_life.keys[1] = {0.1f, glm::vec4(0.75f, 1.0f, 1.0f, 1.0f)};
-    e.color_over_life.keys[2] = {1.0f, glm::vec4(1.0f, 1.0f, 1.0f, 0.0f)};
-    e.size_over_life.count = 3;
-    e.size_over_life.keys[0] = {0.0f, 0.4f};
-    e.size_over_life.keys[1] = {0.18f, 1.25f};
-    e.size_over_life.keys[2] = {1.0f, 0.08f};
-    return e;
-}
-
-// Tall yellow→lime velocity streaks rising from the arc.
-// length ≈ size * (1 + speed * velocity_stretch) — stretch must be large for ribbon-like trails.
-inline ParticleEmitter makeArcLimeStreakEmitter() {
-    ParticleEmitter e = makeDefaultParticleEmitter();
-    e.rate_per_second = 360.0f;
-    e.max_particles = 4096;
-    e.lifetime_min = 1.6f;
-    e.lifetime_max = 3.0f;
-    e.speed_min = 2.8f;
-    e.speed_max = 5.5f;
-    e.size_min = 0.05f;
-    e.size_max = 0.095f;
-    e.size_end_multiplier = 0.25f;
-    e.color_start = glm::vec4(1.0f, 0.9f, 0.12f, 1.0f);
-    e.color_end = glm::vec4(0.4f, 1.0f, 0.18f, 0.0f);
-    e.gravity = glm::vec3(0.0f, 0.08f, 0.0f);
-    e.drag = 0.05f;
-    e.spawn_shape = ParticleSpawnShape::Ring;
-    e.spawn_radius = 1.55f;
-    e.spawn_box_height = 0.02f;
-    e.cone_angle_degrees = 4.0f;
-    e.velocity_mode = ParticleVelocityMode::Cone;
-    e.render_mesh = ParticleRenderMesh::Sprite;
-    e.additive = true;
-    e.unlit = true;
-    e.sprite_aspect = 0.55f;
-    e.velocity_stretch = 14.0f;
-    e.force_noise = true;
-    e.noise_strength = 0.35f;
+    e.noise_strength = 0.04f;
     e.noise_frequency = 0.4f;
+    e.trail_enabled = true;
+    e.trail_segments = 8;
+    e.trail_sample_distance = 0.04f;
+    e.trail_width = 0.045f;
+    e.trail_width_end = 0.0f;
+    e.trail_alpha = 0.45f;
+    e.trail_lifetime = 1.6f;
     syncEmitterCurvesFromEndpoints(e);
     e.color_over_life.count = 3;
-    e.color_over_life.keys[0] = {0.0f, glm::vec4(1.0f, 0.98f, 0.45f, 0.0f)};
-    e.color_over_life.keys[1] = {0.12f, glm::vec4(1.0f, 0.85f, 0.1f, 1.0f)};
-    e.color_over_life.keys[2] = {1.0f, glm::vec4(0.3f, 1.0f, 0.22f, 0.0f)};
+    e.color_over_life.keys[0] = {0.0f, glm::vec4(0.92f, 0.96f, 1.0f, 0.4f)};
+    e.color_over_life.keys[1] = {0.1f, glm::vec4(0.95f, 0.98f, 1.0f, 0.95f)};
+    e.color_over_life.keys[2] = {1.0f, glm::vec4(0.6f, 0.78f, 1.0f, 0.0f)};
     e.size_over_life.count = 3;
-    e.size_over_life.keys[0] = {0.0f, 0.55f};
-    e.size_over_life.keys[1] = {0.2f, 1.05f};
+    e.size_over_life.keys[0] = {0.0f, 0.7f};
+    e.size_over_life.keys[1] = {0.15f, 1.0f};
     e.size_over_life.keys[2] = {1.0f, 0.2f};
     return e;
 }
 
+// Soft circles without trails (module stack base).
+inline ParticleEmitter makeGentleCirclesEmitter() {
+    ParticleEmitter e = makeGentleSoftEmitter();
+    e.trail_enabled = false;
+    e.rate_per_second = 26.0f;
+    return e;
+}
+
 inline ParticleEmitter makeBubbleRingEmitter() {
-    return makeArcCyanSparkEmitter();
+    return makeGentleSoftEmitter();
 }
 
 inline ParticleEmitter makeOscTrackerBubbleEmitter() {
-    ParticleEmitter e = makeDefaultParticleEmitter();
-    e.rate_per_second = 140.0f;
-    e.max_particles = 3072;
-    e.lifetime_min = 0.8f;
-    e.lifetime_max = 1.6f;
-    e.speed_min = 1.2f;
-    e.speed_max = 2.8f;
-    e.size_min = 0.025f;
-    e.size_max = 0.055f;
-    e.size_end_multiplier = 0.15f;
-    e.color_start = glm::vec4(1.0f, 0.9f, 0.25f, 1.0f);
-    e.color_end = glm::vec4(0.3f, 1.0f, 0.35f, 0.0f);
-    e.gravity = glm::vec3(0.0f, 0.4f, 0.0f);
-    e.drag = 0.2f;
+    ParticleEmitter e = makeGentleSoftEmitter();
+    e.rate_per_second = 22.0f;
+    e.max_particles = 1536;
+    e.lifetime_min = 1.8f;
+    e.lifetime_max = 3.2f;
+    e.speed_min = 0.25f;
+    e.speed_max = 0.55f;
+    e.size_min = 0.04f;
+    e.size_max = 0.07f;
     e.spawn_shape = ParticleSpawnShape::Point;
-    e.cone_angle_degrees = 14.0f;
-    e.render_mesh = ParticleRenderMesh::Sprite;
-    e.additive = true;
-    e.unlit = true;
-    e.sprite_aspect = 0.28f;
-    e.velocity_stretch = 8.0f;
-    e.spawn_per_unit = 64.0f;
-    e.inherit_velocity = 0.45f;
-    e.force_noise = true;
-    e.noise_strength = 0.3f;
-    e.noise_frequency = 1.4f;
+    e.spawn_radius = 0.05f;
+    e.cone_angle_degrees = 12.0f;
+    e.spawn_per_unit = 28.0f;
+    e.inherit_velocity = 0.35f;
+    e.gravity = glm::vec3(0.0f, 0.28f, 0.0f);
+    e.drag = 0.4f;
+    e.noise_strength = 0.1f;
+    e.trail_enabled = true;
+    e.trail_segments = 8;
+    e.trail_sample_distance = 0.028f;
+    e.trail_width = 0.045f;
+    e.trail_width_end = 0.0f;
+    e.trail_alpha = 0.45f;
     syncEmitterCurvesFromEndpoints(e);
     e.color_over_life.count = 3;
-    e.color_over_life.keys[0] = {0.0f, glm::vec4(1.0f, 0.95f, 0.4f, 0.0f)};
-    e.color_over_life.keys[1] = {0.1f, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f)};
-    e.color_over_life.keys[2] = {1.0f, glm::vec4(0.25f, 1.0f, 0.3f, 0.0f)};
+    e.color_over_life.keys[0] = {0.0f, glm::vec4(0.8f, 0.9f, 1.0f, 0.0f)};
+    e.color_over_life.keys[1] = {0.15f, glm::vec4(0.9f, 0.96f, 1.0f, 0.85f)};
+    e.color_over_life.keys[2] = {1.0f, glm::vec4(0.5f, 0.7f, 0.95f, 0.0f)};
     return e;
+}
+
+// Compatibility aliases (old arc/lime names → gentle look).
+inline ParticleEmitter makeArcCyanSparkEmitter() {
+    return makeGentleSoftEmitter();
+}
+inline ParticleEmitter makeArcLimeStreakEmitter() {
+    return makeGentleCirclesEmitter();
 }
 
 } // namespace genesis

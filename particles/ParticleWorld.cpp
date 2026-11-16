@@ -207,6 +207,17 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
         p.world_space = desc.world_space;
         p.size_curve = authored.size_over_life;
         p.color_curve = authored.color_over_life;
+        p.trail_enabled = desc.trail_enabled;
+        p.trail_max_segments =
+            static_cast<std::uint8_t>(std::clamp(static_cast<int>(desc.trail_segments), 2, 12));
+        p.trail_sample_distance = std::max(0.005f, desc.trail_sample_distance);
+        p.trail_width = std::max(0.0f, desc.trail_width);
+        p.trail_width_end = std::max(0.0f, desc.trail_width_end);
+        p.trail_alpha = std::clamp(desc.trail_alpha, 0.0f, 1.0f);
+        p.trail_lifetime = std::max(0.05f, desc.trail_lifetime);
+        p.trail_count = 0;
+        p.trail_dist_accum = 0.0f;
+        p.trail_has_sample = false;
 
         glm::vec3 local_offset(0.0f);
         glm::vec3 direction = glm::normalize(glm::mat3(world) * glm::vec3(0.0f, 1.0f, 0.0f));
@@ -466,6 +477,38 @@ void ParticleWorld::stepOnce(Scene& scene, float dt) {
             world_pos = p.position;
         }
 
+        // Trail Renderer: sample motion history (deterministic; same on every GPU).
+        if (p.trail_enabled) {
+            if (!p.trail_has_sample) {
+                p.trail_last_sample = world_pos;
+                p.trail_has_sample = true;
+                p.trail_pos[0] = world_pos;
+                p.trail_count = 1;
+            } else {
+                const float moved = glm::length(world_pos - p.trail_last_sample);
+                p.trail_dist_accum += moved;
+                p.trail_last_sample = world_pos;
+                const float sample_dist = std::max(0.005f, p.trail_sample_distance);
+                while (p.trail_dist_accum >= sample_dist) {
+                    p.trail_dist_accum -= sample_dist;
+                    const std::uint8_t max_seg = std::min(p.trail_max_segments, kMaxTrailPoints);
+                    if (p.trail_count < max_seg) {
+                        p.trail_pos[p.trail_count++] = world_pos;
+                    } else {
+                        for (std::uint8_t ti = 1; ti < max_seg; ++ti) {
+                            p.trail_pos[ti - 1] = p.trail_pos[ti];
+                        }
+                        p.trail_pos[max_seg - 1] = world_pos;
+                        p.trail_count = max_seg;
+                    }
+                }
+                // Keep the newest sample pinned to the live particle position.
+                if (p.trail_count > 0) {
+                    p.trail_pos[p.trail_count - 1] = world_pos;
+                }
+            }
+        }
+
         if (desc.kill_plane && world_pos.y < desc.kill_plane_y) {
             p.alive = false;
             free_list_.push_back(i);
@@ -573,33 +616,6 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
             }
         }
 
-        glm::mat4 model(1.0f);
-        if (p.mesh == ParticleRenderMesh::Sprite) {
-            const float speed = glm::length(p.velocity);
-            // Camera-facing soft sprite. Velocity stretch elongates along camera-up so
-            // rising particles read as tall ribbons (Niagara VelocityAligned approx)
-            // without edge-on collapse when velocity aligns with the view plane.
-            float hx = size * 0.5f * std::max(p.sprite_aspect, 0.05f);
-            float hy = size * 0.5f;
-            if (p.velocity_stretch > 1e-4f && speed > 1e-4f) {
-                hy *= (1.0f + speed * p.velocity_stretch);
-                hx = std::max(hx, size * 0.2f);
-            }
-            const glm::vec3 right = cam_right * (hx * 2.0f);
-            const glm::vec3 up = cam_up * (hy * 2.0f);
-            model[0] = glm::vec4(right, 0.0f);
-            model[1] = glm::vec4(up, 0.0f);
-            model[2] = glm::vec4(cam_forward, 0.0f);
-            model[3] = glm::vec4(world_pos, 1.0f);
-        } else {
-            model = glm::translate(glm::mat4(1.0f), world_pos);
-            model = glm::scale(model, glm::vec3(size));
-        }
-
-        GpuMeshInstance instance{};
-        fillGpuMeshInstance(instance, model, glm::vec3(-0.5f), glm::vec3(0.5f));
-        instance.color = color;
-
         std::size_t mesh_base = 8;
         switch (p.mesh) {
         case ParticleRenderMesh::Cube:
@@ -614,7 +630,63 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
             break;
         }
         const std::size_t batch_index = mesh_base + (p.additive ? 2u : 0u) + (p.unlit ? 1u : 0u);
-        out[batch_index].instances.push_back(instance);
+
+        auto push_sprite = [&](const glm::mat4& model, const glm::vec4& tint) {
+            GpuMeshInstance instance{};
+            fillGpuMeshInstance(instance, model, glm::vec3(-0.5f), glm::vec3(0.5f));
+            instance.color = tint;
+            out[batch_index].instances.push_back(instance);
+        };
+
+        // Trail Renderer: soft discs along history that taper to a point at the tip
+        // (oldest sample). Avoids stretched-ribbon smear; reads as gentle Niagara trails.
+        if (p.trail_enabled && p.trail_count >= 2 && p.mesh == ParticleRenderMesh::Sprite) {
+            const float trail_age_fade =
+                std::clamp(1.0f - (p.age / std::max(p.trail_lifetime * 2.5f, 0.1f)) * 0.35f, 0.4f,
+                           1.0f);
+            const float denom = static_cast<float>(std::max<int>(p.trail_count - 1, 1));
+            // Skip the newest sample (drawn as the primary sprite head).
+            for (std::uint8_t si = 0; si + 1 < p.trail_count; ++si) {
+                const float t = static_cast<float>(si) / denom; // 0 = tip, 1 ≈ head
+                const float width =
+                    glm::mix(p.trail_width_end, p.trail_width, t) * std::max(size_mul, 0.2f);
+                if (width < 1e-4f) {
+                    continue;
+                }
+                const float tip_fade = 0.2f + 0.8f * t;
+                glm::vec4 trail_color = color;
+                trail_color.a *= p.trail_alpha * tip_fade * trail_age_fade;
+
+                const float hx = width;
+                const float hy = width;
+                glm::mat4 model(1.0f);
+                model[0] = glm::vec4(cam_right * hx, 0.0f);
+                model[1] = glm::vec4(cam_up * hy, 0.0f);
+                model[2] = glm::vec4(cam_forward, 0.0f);
+                model[3] = glm::vec4(p.trail_pos[si], 1.0f);
+                push_sprite(model, trail_color);
+            }
+        }
+
+        // Primary soft circle (SpriteRenderer).
+        glm::mat4 model(1.0f);
+        if (p.mesh == ParticleRenderMesh::Sprite) {
+            const float speed = glm::length(p.velocity);
+            float hx = size * 0.5f * std::max(p.sprite_aspect, 0.05f);
+            float hy = size * 0.5f;
+            if (p.velocity_stretch > 1e-4f && speed > 1e-4f) {
+                hy *= (1.0f + speed * p.velocity_stretch);
+                hx = std::max(hx, size * 0.15f);
+            }
+            model[0] = glm::vec4(cam_right * (hx * 2.0f), 0.0f);
+            model[1] = glm::vec4(cam_up * (hy * 2.0f), 0.0f);
+            model[2] = glm::vec4(cam_forward, 0.0f);
+            model[3] = glm::vec4(world_pos, 1.0f);
+        } else {
+            model = glm::translate(glm::mat4(1.0f), world_pos);
+            model = glm::scale(model, glm::vec3(size));
+        }
+        push_sprite(model, color);
     }
 
     out.erase(std::remove_if(out.begin(), out.end(),

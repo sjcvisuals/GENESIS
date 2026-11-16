@@ -8,9 +8,22 @@
       "parent": null,
       "visible": true,
       "transform": {
-        "position": [0.0, 0.0, 0.0],
-        "rotation": [0.0, 0.0, 0.0, 1.0],
-        "scale": [1.0, 1.0, 1.0]
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
       }
     },
     {
@@ -20,36 +33,66 @@
       "visible": true,
       "light": {
         "type": "directional",
-        "color": [0.45, 0.6, 0.9],
-        "intensity": 0.22,
+        "color": [
+          0.55,
+          0.65,
+          0.85
+        ],
+        "intensity": 0.28,
         "enabled": true,
         "range": 10.0,
         "inner_cone_degrees": 20.0,
         "outer_cone_degrees": 30.0
       },
       "transform": {
-        "position": [0.0, 0.0, 0.0],
-        "rotation": [-0.38, 0.3, 0.13, 0.86],
-        "scale": [1.0, 1.0, 1.0]
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          -0.38,
+          0.3,
+          0.13,
+          0.86
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
       }
     },
     {
-      "path": "Scene/Dark Floor",
-      "name": "Dark Floor",
+      "path": "Scene/Ground",
+      "name": "Ground",
       "parent": "Scene",
       "visible": true,
       "pickable": true,
       "mesh": "GroundPlane",
-      "material": "Dark Mirror Floor",
+      "material": "Dark Soft Floor",
       "transform": {
-        "position": [0.0, 0.0, 0.0],
-        "rotation": [0.0, 0.0, 0.0, 1.0],
-        "scale": [1.35, 1.0, 1.35]
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.2,
+          1.0,
+          1.2
+        ]
       }
     },
     {
-      "path": "Scene/Arc Sparks",
-      "name": "Arc Sparks",
+      "path": "Scene/Soft Circles",
+      "name": "Soft Circles",
       "parent": "Scene",
       "visible": true,
       "particle_emitter": {
@@ -58,125 +101,126 @@
         "world_space": true,
         "duration": 0.0,
         "start_delay": 0.0,
-        "rate": 1400.0,
+        "rate": 18.0,
         "burst": 0,
-        "max_particles": 12000,
-        "lifetime_min": 0.2,
-        "lifetime_max": 0.55,
-        "speed_min": 0.02,
-        "speed_max": 0.28,
-        "size_min": 0.05,
-        "size_max": 0.14,
-        "size_end_multiplier": 0.12,
-        "color_start": [0.45, 0.95, 1.0, 1.0],
-        "color_end": [1.0, 1.0, 1.0, 0.0],
+        "max_particles": 512,
+        "lifetime_min": 3.0,
+        "lifetime_max": 5.0,
+        "speed_min": 0.25,
+        "speed_max": 0.45,
+        "size_min": 0.055,
+        "size_max": 0.09,
+        "size_end_multiplier": 0.2,
+        "color_start": [
+          0.92,
+          0.96,
+          1.0,
+          1.0
+        ],
+        "color_end": [
+          0.65,
+          0.8,
+          1.0,
+          0.0
+        ],
         "velocity_mode": "cone",
         "inherit_velocity": 0.0,
         "force_gravity": true,
-        "gravity": [0.0, 0.12, 0.0],
+        "gravity": [
+          0.0,
+          0.32,
+          0.0
+        ],
         "force_drag": true,
-        "drag": 0.65,
+        "drag": 0.25,
         "force_noise": true,
-        "noise_strength": 0.25,
-        "noise_frequency": 2.8,
+        "noise_strength": 0.04,
+        "noise_frequency": 0.45,
         "kill_plane": false,
         "kill_box": false,
         "size_over_life": {
           "keys": [
-            {"t": 0.0, "v": 0.4},
-            {"t": 0.18, "v": 1.25},
-            {"t": 1.0, "v": 0.08}
+            {
+              "t": 0.0,
+              "v": 0.7
+            },
+            {
+              "t": 0.15,
+              "v": 1.0
+            },
+            {
+              "t": 1.0,
+              "v": 0.2
+            }
           ]
         },
         "color_over_life": {
           "keys": [
-            {"t": 0.0, "v": [0.15, 0.75, 1.0, 0.0]},
-            {"t": 0.1, "v": [0.75, 1.0, 1.0, 1.0]},
-            {"t": 1.0, "v": [1.0, 1.0, 1.0, 0.0]}
+            {
+              "t": 0.0,
+              "v": [
+                0.92,
+                0.96,
+                1.0,
+                0.4
+              ]
+            },
+            {
+              "t": 0.1,
+              "v": [
+                0.95,
+                0.98,
+                1.0,
+                0.95
+              ]
+            },
+            {
+              "t": 1.0,
+              "v": [
+                0.6,
+                0.78,
+                1.0,
+                0.0
+              ]
+            }
           ]
         },
-        "spawn_shape": "ring",
-        "spawn_radius": 1.55,
-        "spawn_box_height": 0.05,
-        "cone_angle_degrees": 70.0,
+        "spawn_shape": "sphere",
+        "spawn_radius": 0.55,
+        "spawn_box_height": 0.1,
+        "cone_angle_degrees": 12.0,
         "render_mesh": "sprite",
         "sprite_aspect": 1.0,
         "velocity_stretch": 0.0,
+        "trail_enabled": true,
+        "trail_segments": 8,
+        "trail_sample_distance": 0.04,
+        "trail_width": 0.045,
+        "trail_width_end": 0.0,
+        "trail_alpha": 0.45,
+        "trail_lifetime": 1.6,
         "unlit": true,
         "additive": true,
         "seed_override": 0,
         "fluid_coupled": false
       },
       "transform": {
-        "position": [0.0, 0.02, 0.0],
-        "rotation": [0.0, 0.0, 0.0, 1.0],
-        "scale": [1.0, 1.0, 1.0]
-      }
-    },
-    {
-      "path": "Scene/Lime Streaks",
-      "name": "Lime Streaks",
-      "parent": "Scene",
-      "visible": true,
-      "particle_emitter": {
-        "enabled": true,
-        "looping": true,
-        "world_space": true,
-        "duration": 0.0,
-        "start_delay": 0.0,
-        "rate": 360.0,
-        "burst": 0,
-        "max_particles": 4096,
-        "lifetime_min": 1.6,
-        "lifetime_max": 3.0,
-        "speed_min": 2.8,
-        "speed_max": 5.5,
-        "size_min": 0.05,
-        "size_max": 0.095,
-        "size_end_multiplier": 0.25,
-        "color_start": [1.0, 0.9, 0.12, 1.0],
-        "color_end": [0.4, 1.0, 0.18, 0.0],
-        "velocity_mode": "cone",
-        "inherit_velocity": 0.0,
-        "force_gravity": true,
-        "gravity": [0.0, 0.08, 0.0],
-        "force_drag": true,
-        "drag": 0.05,
-        "force_noise": true,
-        "noise_strength": 0.35,
-        "noise_frequency": 0.4,
-        "kill_plane": false,
-        "kill_box": false,
-        "size_over_life": {
-          "keys": [
-            {"t": 0.0, "v": 0.55},
-            {"t": 0.2, "v": 1.05},
-            {"t": 1.0, "v": 0.2}
-          ]
-        },
-        "color_over_life": {
-          "keys": [
-            {"t": 0.0, "v": [1.0, 0.98, 0.45, 0.0]},
-            {"t": 0.12, "v": [1.0, 0.85, 0.1, 1.0]},
-            {"t": 1.0, "v": [0.3, 1.0, 0.22, 0.0]}
-          ]
-        },
-        "spawn_shape": "ring",
-        "spawn_radius": 1.55,
-        "spawn_box_height": 0.02,
-        "cone_angle_degrees": 4.0,
-        "render_mesh": "sprite",
-        "sprite_aspect": 0.55,
-        "velocity_stretch": 14.0,
-        "unlit": true,
-        "additive": true,
-        "seed_override": 0,
-        "fluid_coupled": false
-      },
-      "transform": {
-        "position": [0.0, 0.02, 0.0],
-        "rotation": [0.0, 0.0, 0.0, 1.0],
-        "scale": [1.0, 1.0, 1.0]
+        "position": [
+          0.0,
+          0.25,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
       }
     },
     {
@@ -190,60 +234,127 @@
         "world_space": true,
         "duration": 0.0,
         "start_delay": 0.0,
-        "rate": 140.0,
+        "rate": 28.0,
         "burst": 0,
-        "max_particles": 3072,
-        "lifetime_min": 0.8,
-        "lifetime_max": 1.6,
-        "speed_min": 1.2,
-        "speed_max": 2.8,
-        "size_min": 0.025,
-        "size_max": 0.055,
-        "size_end_multiplier": 0.15,
-        "color_start": [1.0, 0.9, 0.25, 1.0],
-        "color_end": [0.3, 1.0, 0.35, 0.0],
+        "max_particles": 1536,
+        "lifetime_min": 2.0,
+        "lifetime_max": 3.4,
+        "speed_min": 0.28,
+        "speed_max": 0.55,
+        "size_min": 0.06,
+        "size_max": 0.1,
+        "size_end_multiplier": 0.18,
+        "color_start": [
+          0.92,
+          0.96,
+          1.0,
+          1.0
+        ],
+        "color_end": [
+          0.65,
+          0.8,
+          1.0,
+          0.0
+        ],
         "velocity_mode": "cone",
-        "inherit_velocity": 0.45,
+        "inherit_velocity": 0.35,
         "force_gravity": true,
-        "gravity": [0.0, 0.4, 0.0],
+        "gravity": [
+          0.0,
+          0.3,
+          0.0
+        ],
         "force_drag": true,
-        "drag": 0.2,
+        "drag": 0.32,
         "force_noise": true,
-        "noise_strength": 0.3,
-        "noise_frequency": 1.4,
-        "spawn_per_unit": 64.0,
+        "noise_strength": 0.08,
+        "noise_frequency": 0.5,
+        "spawn_per_unit": 32.0,
         "kill_plane": false,
         "kill_box": false,
         "size_over_life": {
           "keys": [
-            {"t": 0.0, "v": 0.5},
-            {"t": 0.15, "v": 1.0},
-            {"t": 1.0, "v": 0.15}
+            {
+              "t": 0.0,
+              "v": 0.75
+            },
+            {
+              "t": 0.2,
+              "v": 1.05
+            },
+            {
+              "t": 1.0,
+              "v": 0.12
+            }
           ]
         },
         "color_over_life": {
           "keys": [
-            {"t": 0.0, "v": [1.0, 0.95, 0.4, 0.0]},
-            {"t": 0.1, "v": [1.0, 0.85, 0.2, 1.0]},
-            {"t": 1.0, "v": [0.25, 1.0, 0.3, 0.0]}
+            {
+              "t": 0.0,
+              "v": [
+                0.9,
+                0.95,
+                1.0,
+                0.35
+              ]
+            },
+            {
+              "t": 0.12,
+              "v": [
+                0.95,
+                0.98,
+                1.0,
+                1.0
+              ]
+            },
+            {
+              "t": 1.0,
+              "v": [
+                0.55,
+                0.72,
+                1.0,
+                0.0
+              ]
+            }
           ]
         },
         "spawn_shape": "point",
         "spawn_radius": 0.05,
         "spawn_box_height": 0.05,
-        "cone_angle_degrees": 14.0,
+        "cone_angle_degrees": 12.0,
         "render_mesh": "sprite",
-        "sprite_aspect": 0.28,
-        "velocity_stretch": 8.0,
+        "sprite_aspect": 1.0,
+        "velocity_stretch": 0.0,
+        "trail_enabled": true,
+        "trail_segments": 10,
+        "trail_sample_distance": 0.02,
+        "trail_width": 0.06,
+        "trail_width_end": 0.0,
+        "trail_alpha": 0.65,
+        "trail_lifetime": 1.2,
         "unlit": true,
         "additive": true,
         "seed_override": 0,
         "fluid_coupled": false
       },
       "transform": {
-        "position": [0.0, 0.15, 0.0],
-        "rotation": [0.0, 0.0, 0.0, 1.0],
-        "scale": [1.0, 1.0, 1.0]
+        "position": [
+          0.7,
+          0.25,
+          0.15
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
       }
     },
     {
@@ -257,21 +368,43 @@
         "far": 200.0
       },
       "transform": {
-        "position": [3.4, 1.85, 3.9],
-        "rotation": [-0.12, 0.32, 0.04, 0.94],
-        "scale": [1.0, 1.0, 1.0]
+        "position": [
+          2.6,
+          1.45,
+          3.4
+        ],
+        "rotation": [
+          -0.1,
+          0.28,
+          0.03,
+          0.95
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
       }
     }
   ],
   "materials": [
     {
-      "name": "Dark Mirror Floor",
+      "name": "Dark Soft Floor",
       "base_weight": 1.0,
-      "base_color": [0.015, 0.018, 0.022, 1.0],
-      "metallic": 0.95,
-      "roughness": 0.12,
+      "base_color": [
+        0.03,
+        0.035,
+        0.045,
+        1.0
+      ],
+      "metallic": 0.35,
+      "roughness": 0.55,
       "specular_weight": 1.0,
-      "specular_color": [0.85, 0.92, 1.0],
+      "specular_color": [
+        0.7,
+        0.78,
+        0.9
+      ],
       "alpha_mode": "opaque"
     }
   ],
