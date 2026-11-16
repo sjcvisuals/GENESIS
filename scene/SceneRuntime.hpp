@@ -182,6 +182,7 @@ private:
     std::optional<std::uint32_t> particle_sphere_mesh_id_;
     std::optional<std::uint32_t> particle_sprite_mesh_id_;
     std::optional<std::uint32_t> particle_sprite_texture_id_;
+    std::optional<std::uint32_t> particle_ribbon_texture_id_;
     ParticleViewBasis particle_view_basis_{};
     std::optional<std::uint32_t> fluid_box_mesh_id_;
     std::optional<std::uint32_t> fluid_display_material_id_;

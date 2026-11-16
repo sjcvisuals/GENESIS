@@ -287,6 +287,55 @@ GpuTexture GpuTexture::createSoftCircleSprite(const VulkanContext& context, cons
     return texture;
 }
 
+GpuTexture GpuTexture::createSoftRibbonSprite(const VulkanContext& context, const std::uint32_t size) {
+    // Soft comet/wedge ribbon: tip at bottom (V≈0), wide neck at top (V≈1).
+    // One path-aligned quad from trail tip→head reads as a continuous tapering silhouette
+    // (not disc beads or segmented capsules). Soft sides keep the gentle look.
+    const std::uint32_t dim = std::max(size, 64u);
+    std::vector<std::uint8_t> rgba(static_cast<std::size_t>(dim) * dim * 4u);
+    constexpr float kPeak = 0.82f;
+    constexpr float kTipHalf = 0.09f;   // soft readable tip (above sparkle floor)
+    constexpr float kNeckHalf = 0.95f;  // fills most of the quad at the head end
+    for (std::uint32_t y = 0; y < dim; ++y) {
+        for (std::uint32_t x = 0; x < dim; ++x) {
+            const float nx = (static_cast<float>(x) + 0.5f) / static_cast<float>(dim) * 2.0f - 1.0f;
+            const float ny = (static_cast<float>(y) + 0.5f) / static_cast<float>(dim) * 2.0f - 1.0f;
+            // Mesh UV: local -Y → V=0, local +Y → V=1. Trail places +Y toward the neck
+            // (head). Tip of the wedge at V=0 (bottom of wake), neck at V=1 (under head).
+            // u=0 tip (ny=-1), u=1 neck (ny=+1).
+            const float u = std::clamp((ny + 1.0f) * 0.5f, 0.0f, 1.0f);
+            // Quadratic widen: tip stays pointed, flares into the neck.
+            const float half_w = kTipHalf + (kNeckHalf - kTipHalf) * (u * u);
+            const float ax = std::abs(nx);
+            float falloff = 0.0f;
+            if (ax < half_w) {
+                const float edge = 1.0f - (ax / half_w);
+                const float soft = edge * edge * (3.0f - 2.0f * edge); // smoothstep
+                // Mild length fade at the very tip so the point reads soft, not clipped.
+                const float tip_fade = u < 0.06f ? (u / 0.06f) : 1.0f;
+                // Keep the body bright so the silhouette reads as a ribbon, not fog.
+                const float along = 0.7f + 0.3f * u;
+                falloff = soft * tip_fade * along * kPeak;
+            }
+            falloff = std::clamp(falloff, 0.0f, 1.0f);
+            const std::uint8_t v = static_cast<std::uint8_t>(falloff * 255.0f + 0.5f);
+            const std::size_t i = (static_cast<std::size_t>(y) * dim + x) * 4u;
+            rgba[i + 0] = v;
+            rgba[i + 1] = v;
+            rgba[i + 2] = v;
+            rgba[i + 3] = v;
+        }
+    }
+
+    GpuTexture texture(context, rgba.data(), dim, dim, TextureColorEncoding::Linear);
+    if (texture.sampler_ != VK_NULL_HANDLE) {
+        vkDestroySampler(texture.device_, texture.sampler_, nullptr);
+        texture.sampler_ = VK_NULL_HANDLE;
+    }
+    texture.sampler_ = createDefaultSampler(texture.device_, true);
+    return texture;
+}
+
 GpuTexture GpuTexture::createFluidDisplayTarget(const VulkanContext& context, const std::uint32_t width,
                                                 const std::uint32_t height) {
     GpuTexture texture{};

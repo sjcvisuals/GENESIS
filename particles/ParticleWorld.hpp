@@ -46,6 +46,7 @@ public:
         ParticleRenderMesh mesh = ParticleRenderMesh::Sprite;
         bool unlit = true;
         bool additive = true;
+        bool ribbon = false; // soft capsule strip texture (Trail Renderer)
         std::vector<GpuMeshInstance> instances;
     };
     void collectInstances(const Scene& scene, std::vector<ParticleInstanceBatch>& out,

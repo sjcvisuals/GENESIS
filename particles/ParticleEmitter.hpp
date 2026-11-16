@@ -194,12 +194,12 @@ inline ParticleEmitter makeGentleSoftEmitter() {
     e.velocity_stretch = 0.0f;
     e.force_noise = false;
     e.trail_enabled = true;
-    e.trail_segments = 24;            // long wake; dense discs merge into a ribbon
-    e.trail_sample_distance = 0.016f; // spacing << neck width so discs overlap continuously
-    e.trail_width = 0.58f;            // neck under head so circle reads
-    e.trail_width_end = 0.08f;        // soft point tip (above sparkle floor)
-    e.trail_alpha = 0.95f;
-    e.trail_lifetime = 3.2f;
+    e.trail_segments = 14;            // history length for tip→neck wedge ribbon
+    e.trail_sample_distance = 0.04f;  // ~0.5m wake behind rising head
+    e.trail_width = 0.95f;            // soft comet neck under the circle head
+    e.trail_width_end = 0.1f;         // authored tip feel (wedge texture owns silhouette)
+    e.trail_alpha = 0.9f;
+    e.trail_lifetime = 3.0f;
     syncEmitterCurvesFromEndpoints(e);
     e.color_over_life.count = 3;
     e.color_over_life.keys[0] = {0.0f, glm::vec4(0.92f, 0.95f, 1.0f, 0.3f)};
@@ -245,12 +245,12 @@ inline ParticleEmitter makeOscTrackerBubbleEmitter() {
     e.additive = false;
     e.velocity_stretch = 0.0f;
     e.trail_enabled = true;
-    e.trail_segments = 16;
-    e.trail_sample_distance = 0.03f;
-    e.trail_width = 0.7f;
+    e.trail_segments = 10;
+    e.trail_sample_distance = 0.04f;
+    e.trail_width = 0.6f;
     e.trail_width_end = 0.12f;
     e.trail_alpha = 0.85f;
-    e.trail_lifetime = 2.8f;
+    e.trail_lifetime = 2.6f;
     syncEmitterCurvesFromEndpoints(e);
     e.color_over_life.count = 3;
     e.color_over_life.keys[0] = {0.0f, glm::vec4(0.9f, 0.94f, 1.0f, 0.22f)};

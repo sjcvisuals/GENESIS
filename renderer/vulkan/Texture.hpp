@@ -41,6 +41,8 @@ public:
                                   std::uint8_t b, std::uint8_t a = 255);
     // Niagara/Cascade-style default sprite: white disc, slight edge feather, transparent outside.
     static GpuTexture createSoftCircleSprite(const VulkanContext& context, std::uint32_t size = 64);
+    // Soft capsule/stadium strip for Trail Renderer ribbons (U=across, V=along).
+    static GpuTexture createSoftRibbonSprite(const VulkanContext& context, std::uint32_t size = 256);
     // RGBA8 target for GPU fluid dye presentation (storage + sampled).
     static GpuTexture createFluidDisplayTarget(const VulkanContext& context, std::uint32_t width,
                                                std::uint32_t height);
