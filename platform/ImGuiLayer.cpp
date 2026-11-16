@@ -10,6 +10,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 
@@ -36,6 +37,27 @@ ImGuiLayer::ImGuiLayer(SDL_Window* window, const VulkanContext& context, Swapcha
     io.IniFilename = nullptr;
 
     ImGui::StyleColorsDark();
+
+    // Prefer Inter for modern DCC chrome (atlas built on first NewFrame).
+    auto try_font = [&](const char* path, float size_px) -> bool {
+        if (!path || !std::filesystem::exists(path)) {
+            return false;
+        }
+        return io.Fonts->AddFontFromFileTTF(path, size_px) != nullptr;
+    };
+    io.Fonts->Clear();
+    constexpr float kUiPx = 16.0f;
+    if (!try_font("/usr/share/fonts/truetype/macos/Inter-Regular.ttf", kUiPx) &&
+        !try_font("/usr/share/fonts/truetype/noto/NotoSansDisplay-Regular.ttf", kUiPx)) {
+        io.Fonts->AddFontDefault();
+    } else {
+        // Medium/SemiBold kept in atlas for editor PushFont use.
+        try_font("/usr/share/fonts/truetype/macos/Inter-Medium.ttf", kUiPx);
+        try_font("/usr/share/fonts/truetype/macos/Inter-SemiBold.ttf", kUiPx);
+    }
+    if (!io.Fonts->Fonts.empty()) {
+        io.FontDefault = io.Fonts->Fonts[0];
+    }
 
     if (!ImGui_ImplSDL3_InitForVulkan(window)) {
         throw std::runtime_error("Failed to initialize ImGui SDL3 backend");
