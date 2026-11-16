@@ -576,31 +576,21 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
         glm::mat4 model(1.0f);
         if (p.mesh == ParticleRenderMesh::Sprite) {
             const float speed = glm::length(p.velocity);
+            // Camera-facing soft sprite. Velocity stretch elongates along camera-up so
+            // rising particles read as tall ribbons (Niagara VelocityAligned approx)
+            // without edge-on collapse when velocity aligns with the view plane.
+            float hx = size * 0.5f * std::max(p.sprite_aspect, 0.05f);
+            float hy = size * 0.5f;
             if (p.velocity_stretch > 1e-4f && speed > 1e-4f) {
-                // Niagara-style velocity-aligned stretch (streaks / ribbons without mesh trails).
-                const glm::vec3 along = p.velocity / speed;
-                glm::vec3 across = glm::cross(along, cam_forward);
-                if (glm::dot(across, across) < 1e-8f) {
-                    across = glm::cross(along, cam_right);
-                }
-                across = glm::normalize(across + glm::vec3(1e-5f));
-                const float width = size * std::max(p.sprite_aspect, 0.05f);
-                const float length = size * (1.0f + speed * p.velocity_stretch);
-                model[0] = glm::vec4(across * width, 0.0f);
-                model[1] = glm::vec4(along * length, 0.0f);
-                model[2] = glm::vec4(glm::normalize(glm::cross(across, along) + glm::vec3(1e-5f)), 0.0f);
-                model[3] = glm::vec4(world_pos, 1.0f);
-            } else {
-                // Camera-facing XY quad (SpriteRenderer camera-facing mode).
-                const float hx = size * 0.5f * std::max(p.sprite_aspect, 0.01f);
-                const float hy = size * 0.5f;
-                const glm::vec3 right = cam_right * (hx * 2.0f);
-                const glm::vec3 up = cam_up * (hy * 2.0f);
-                model[0] = glm::vec4(right, 0.0f);
-                model[1] = glm::vec4(up, 0.0f);
-                model[2] = glm::vec4(cam_forward, 0.0f);
-                model[3] = glm::vec4(world_pos, 1.0f);
+                hy *= (1.0f + speed * p.velocity_stretch);
+                hx = std::max(hx, size * 0.2f);
             }
+            const glm::vec3 right = cam_right * (hx * 2.0f);
+            const glm::vec3 up = cam_up * (hy * 2.0f);
+            model[0] = glm::vec4(right, 0.0f);
+            model[1] = glm::vec4(up, 0.0f);
+            model[2] = glm::vec4(cam_forward, 0.0f);
+            model[3] = glm::vec4(world_pos, 1.0f);
         } else {
             model = glm::translate(glm::mat4(1.0f), world_pos);
             model = glm::scale(model, glm::vec3(size));

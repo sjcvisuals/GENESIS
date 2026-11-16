@@ -199,14 +199,14 @@ inline ParticleEmitter makeArcCyanSparkEmitter() {
 // length ≈ size * (1 + speed * velocity_stretch) — stretch must be large for ribbon-like trails.
 inline ParticleEmitter makeArcLimeStreakEmitter() {
     ParticleEmitter e = makeDefaultParticleEmitter();
-    e.rate_per_second = 280.0f;
+    e.rate_per_second = 360.0f;
     e.max_particles = 4096;
     e.lifetime_min = 1.6f;
     e.lifetime_max = 3.0f;
     e.speed_min = 2.8f;
     e.speed_max = 5.5f;
-    e.size_min = 0.035f;
-    e.size_max = 0.07f;
+    e.size_min = 0.05f;
+    e.size_max = 0.095f;
     e.size_end_multiplier = 0.25f;
     e.color_start = glm::vec4(1.0f, 0.9f, 0.12f, 1.0f);
     e.color_end = glm::vec4(0.4f, 1.0f, 0.18f, 0.0f);
@@ -220,8 +220,8 @@ inline ParticleEmitter makeArcLimeStreakEmitter() {
     e.render_mesh = ParticleRenderMesh::Sprite;
     e.additive = true;
     e.unlit = true;
-    e.sprite_aspect = 0.12f;
-    e.velocity_stretch = 18.0f;
+    e.sprite_aspect = 0.55f;
+    e.velocity_stretch = 14.0f;
     e.force_noise = true;
     e.noise_strength = 0.35f;
     e.noise_frequency = 0.4f;
