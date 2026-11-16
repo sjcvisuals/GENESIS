@@ -44,8 +44,9 @@ int main() {
     }
 
     genesis::ParticleEmitter tracker = genesis::makeOscTrackerBubbleEmitter();
-    if (tracker.render_mesh != ParticleRenderMesh::Sprite || !tracker.force_noise ||
-        !tracker.trail_enabled) {
+    // Noise stays off by default — soft additive + noise reads as firefly sparkle.
+    if (tracker.render_mesh != ParticleRenderMesh::Sprite || tracker.force_noise ||
+        !tracker.trail_enabled || tracker.trail_width_end > tracker.trail_width) {
         std::fprintf(stderr, "particle_smoke: OSC tracker preset incomplete\n");
         return 1;
     }

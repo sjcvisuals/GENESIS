@@ -1,7 +1,7 @@
 {
   "format": "gns",
   "version": 1,
-  "name": "Gentle Soft Circles + OSC Tracker",
+  "name": "Niagara Soft Circles + OSC",
   "scene_ref": "bubble_ring_osc.scene.json",
   "pixera": {
     "streams": [
@@ -13,7 +13,7 @@
       }
     ],
     "bindings": {
-      "target_node": "Scene/OSC Tracker",
+      "target_node": "Scene/Particle System/OSC Tracker",
       "light_node": "Scene/Key Light"
     }
   }

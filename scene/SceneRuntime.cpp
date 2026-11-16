@@ -401,7 +401,7 @@ void SceneRuntime::appendParticleDrawCommands(std::vector<SceneDrawCommand>& out
     if (!particle_sprite_texture_id_.has_value()) {
         // Soft white circle + feathered alpha (Unreal default sprite look).
         particle_sprite_texture_id_ =
-            addTexture("ParticleSoftCircle", GpuTexture::createSoftCircleSprite(context_, 64));
+            addTexture("ParticleSoftCircle", GpuTexture::createSoftCircleSprite(context_, 128));
     }
 
     if (!particle_view_basis_.valid) {

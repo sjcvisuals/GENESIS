@@ -34,11 +34,11 @@
       "light": {
         "type": "directional",
         "color": [
-          0.55,
-          0.65,
-          0.85
+          0.85,
+          0.9,
+          1.0
         ],
-        "intensity": 0.28,
+        "intensity": 1.1,
         "enabled": true,
         "range": 10.0,
         "inner_cone_degrees": 20.0,
@@ -64,13 +64,50 @@
       }
     },
     {
+      "path": "Scene/Fill Light",
+      "name": "Fill Light",
+      "parent": "Scene",
+      "visible": true,
+      "light": {
+        "type": "directional",
+        "color": [
+          0.65,
+          0.7,
+          0.85
+        ],
+        "intensity": 0.55,
+        "enabled": true,
+        "range": 10.0,
+        "inner_cone_degrees": 20.0,
+        "outer_cone_degrees": 30.0
+      },
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.2,
+          -0.55,
+          -0.1,
+          0.8
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
       "path": "Scene/Ground",
       "name": "Ground",
       "parent": "Scene",
       "visible": true,
       "pickable": true,
       "mesh": "GroundPlane",
-      "material": "Dark Soft Floor",
+      "material": "Soft Stage Floor",
       "transform": {
         "position": [
           0.0,
@@ -84,16 +121,40 @@
           1.0
         ],
         "scale": [
-          1.2,
+          1.15,
           1.0,
-          1.2
+          1.15
         ]
       }
     },
     {
-      "path": "Scene/Soft Circles",
-      "name": "Soft Circles",
+      "path": "Scene/Particle System",
+      "name": "Particle System",
       "parent": "Scene",
+      "visible": true,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "path": "Scene/Particle System/Soft Circles",
+      "name": "Soft Circles",
+      "parent": "Scene/Particle System",
       "visible": true,
       "particle_emitter": {
         "enabled": true,
@@ -101,21 +162,21 @@
         "world_space": true,
         "duration": 0.0,
         "start_delay": 0.0,
-        "rate": 18.0,
+        "rate": 22.0,
         "burst": 0,
-        "max_particles": 512,
-        "lifetime_min": 3.0,
-        "lifetime_max": 5.0,
-        "speed_min": 0.25,
-        "speed_max": 0.45,
-        "size_min": 0.055,
-        "size_max": 0.09,
-        "size_end_multiplier": 0.2,
+        "max_particles": 384,
+        "lifetime_min": 3.2,
+        "lifetime_max": 5.2,
+        "speed_min": 0.22,
+        "speed_max": 0.4,
+        "size_min": 0.085,
+        "size_max": 0.13,
+        "size_end_multiplier": 0.25,
         "color_start": [
-          0.92,
-          0.96,
+          0.88,
+          0.93,
           1.0,
-          1.0
+          0.85
         ],
         "color_end": [
           0.65,
@@ -128,29 +189,27 @@
         "force_gravity": true,
         "gravity": [
           0.0,
-          0.32,
+          0.3,
           0.0
         ],
         "force_drag": true,
-        "drag": 0.25,
-        "force_noise": true,
-        "noise_strength": 0.04,
-        "noise_frequency": 0.45,
+        "drag": 0.28,
+        "force_noise": false,
         "kill_plane": false,
         "kill_box": false,
         "size_over_life": {
           "keys": [
             {
               "t": 0.0,
-              "v": 0.7
+              "v": 0.75
             },
             {
-              "t": 0.15,
+              "t": 0.2,
               "v": 1.0
             },
             {
               "t": 1.0,
-              "v": 0.2
+              "v": 0.25
             }
           ]
         },
@@ -159,45 +218,45 @@
             {
               "t": 0.0,
               "v": [
+                0.85,
                 0.92,
-                0.96,
                 1.0,
-                0.4
+                0.35
               ]
             },
             {
-              "t": 0.1,
+              "t": 0.12,
               "v": [
+                0.9,
                 0.95,
-                0.98,
                 1.0,
-                0.95
+                0.82
               ]
             },
             {
               "t": 1.0,
               "v": [
-                0.6,
-                0.78,
-                1.0,
+                0.55,
+                0.72,
+                0.95,
                 0.0
               ]
             }
           ]
         },
         "spawn_shape": "sphere",
-        "spawn_radius": 0.55,
+        "spawn_radius": 0.5,
         "spawn_box_height": 0.1,
-        "cone_angle_degrees": 12.0,
+        "cone_angle_degrees": 10.0,
         "render_mesh": "sprite",
         "sprite_aspect": 1.0,
         "velocity_stretch": 0.0,
         "trail_enabled": true,
-        "trail_segments": 8,
-        "trail_sample_distance": 0.04,
-        "trail_width": 0.045,
-        "trail_width_end": 0.0,
-        "trail_alpha": 0.45,
+        "trail_segments": 7,
+        "trail_sample_distance": 0.05,
+        "trail_width": 0.07,
+        "trail_width_end": 0.012,
+        "trail_alpha": 0.48,
         "trail_lifetime": 1.6,
         "unlit": true,
         "additive": true,
@@ -207,7 +266,7 @@
       "transform": {
         "position": [
           0.0,
-          0.25,
+          0.3,
           0.0
         ],
         "rotation": [
@@ -224,9 +283,9 @@
       }
     },
     {
-      "path": "Scene/OSC Tracker",
+      "path": "Scene/Particle System/OSC Tracker",
       "name": "OSC Tracker",
-      "parent": "Scene",
+      "parent": "Scene/Particle System",
       "visible": true,
       "particle_emitter": {
         "enabled": true,
@@ -234,21 +293,21 @@
         "world_space": true,
         "duration": 0.0,
         "start_delay": 0.0,
-        "rate": 28.0,
+        "rate": 18.0,
         "burst": 0,
-        "max_particles": 1536,
-        "lifetime_min": 2.0,
-        "lifetime_max": 3.4,
-        "speed_min": 0.28,
-        "speed_max": 0.55,
-        "size_min": 0.06,
-        "size_max": 0.1,
-        "size_end_multiplier": 0.18,
+        "max_particles": 512,
+        "lifetime_min": 2.4,
+        "lifetime_max": 4.0,
+        "speed_min": 0.22,
+        "speed_max": 0.42,
+        "size_min": 0.08,
+        "size_max": 0.12,
+        "size_end_multiplier": 0.25,
         "color_start": [
-          0.92,
-          0.96,
+          0.88,
+          0.93,
           1.0,
-          1.0
+          0.85
         ],
         "color_end": [
           0.65,
@@ -257,19 +316,17 @@
           0.0
         ],
         "velocity_mode": "cone",
-        "inherit_velocity": 0.35,
+        "inherit_velocity": 0.3,
         "force_gravity": true,
         "gravity": [
           0.0,
-          0.3,
+          0.28,
           0.0
         ],
         "force_drag": true,
         "drag": 0.32,
-        "force_noise": true,
-        "noise_strength": 0.08,
-        "noise_frequency": 0.5,
-        "spawn_per_unit": 32.0,
+        "force_noise": false,
+        "spawn_per_unit": 20.0,
         "kill_plane": false,
         "kill_box": false,
         "size_over_life": {
@@ -280,11 +337,11 @@
             },
             {
               "t": 0.2,
-              "v": 1.05
+              "v": 1.0
             },
             {
               "t": 1.0,
-              "v": 0.12
+              "v": 0.25
             }
           ]
         },
@@ -293,19 +350,19 @@
             {
               "t": 0.0,
               "v": [
-                0.9,
-                0.95,
+                0.85,
+                0.92,
                 1.0,
-                0.35
+                0.3
               ]
             },
             {
               "t": 0.12,
               "v": [
+                0.9,
                 0.95,
-                0.98,
                 1.0,
-                1.0
+                0.8
               ]
             },
             {
@@ -313,7 +370,7 @@
               "v": [
                 0.55,
                 0.72,
-                1.0,
+                0.95,
                 0.0
               ]
             }
@@ -322,17 +379,17 @@
         "spawn_shape": "point",
         "spawn_radius": 0.05,
         "spawn_box_height": 0.05,
-        "cone_angle_degrees": 12.0,
+        "cone_angle_degrees": 10.0,
         "render_mesh": "sprite",
         "sprite_aspect": 1.0,
         "velocity_stretch": 0.0,
         "trail_enabled": true,
-        "trail_segments": 10,
-        "trail_sample_distance": 0.02,
-        "trail_width": 0.06,
-        "trail_width_end": 0.0,
-        "trail_alpha": 0.65,
-        "trail_lifetime": 1.2,
+        "trail_segments": 6,
+        "trail_sample_distance": 0.045,
+        "trail_width": 0.05,
+        "trail_width_end": 0.012,
+        "trail_alpha": 0.38,
+        "trail_lifetime": 1.6,
         "unlit": true,
         "additive": true,
         "seed_override": 0,
@@ -340,9 +397,9 @@
       },
       "transform": {
         "position": [
-          0.7,
-          0.25,
-          0.15
+          0.65,
+          0.35,
+          0.1
         ],
         "rotation": [
           0.0,
@@ -369,9 +426,9 @@
       },
       "transform": {
         "position": [
-          2.6,
-          1.45,
-          3.4
+          2.4,
+          1.5,
+          3.2
         ],
         "rotation": [
           -0.1,
@@ -389,21 +446,21 @@
   ],
   "materials": [
     {
-      "name": "Dark Soft Floor",
+      "name": "Soft Stage Floor",
       "base_weight": 1.0,
       "base_color": [
-        0.03,
-        0.035,
-        0.045,
+        0.14,
+        0.155,
+        0.18,
         1.0
       ],
-      "metallic": 0.35,
-      "roughness": 0.55,
+      "metallic": 0.05,
+      "roughness": 0.78,
       "specular_weight": 1.0,
       "specular_color": [
+        0.65,
         0.7,
-        0.78,
-        0.9
+        0.8
       ],
       "alpha_mode": "opaque"
     }

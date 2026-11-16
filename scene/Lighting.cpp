@@ -63,16 +63,17 @@ FrameUniforms buildFrameUniforms(const Scene& scene, const float* view_proj_col_
     u.camera_pos[2] = camera_position.z;
     u.camera_pos[3] = color ? std::max(color->exposure, 0.01f) : 1.0f;
 
-    // Studio + window ambient: cooler sky, warmer ground bounce.
-    u.ibl_intensity = 1.05f;
-    writeVec4(u.ambient_sky, 0.20f, 0.24f, 0.32f, 1.0f);
-    writeVec4(u.ambient_ground, 0.065f, 0.055f, 0.048f, 1.0f);
+    // Brighter studio ambient so soft additive particles read against the stage
+    // (crushed black + grain was reading as firefly sparkle).
+    u.ibl_intensity = 1.2f;
+    writeVec4(u.ambient_sky, 0.34f, 0.38f, 0.46f, 1.0f);
+    writeVec4(u.ambient_ground, 0.12f, 0.13f, 0.145f, 1.0f);
 
-    u.fog_density = 0.0032f;
-    u.fog_height = 0.04f;
+    u.fog_density = 0.0018f;
+    u.fog_height = 0.02f;
     // fog_color.a carries film-grain strength (keeps FrameUniforms at 672 bytes).
-    const float grain = color ? std::clamp(color->grain_strength, 0.0f, 0.2f) : 0.028f;
-    writeVec4(u.fog_color, 0.18f, 0.20f, 0.24f, grain);
+    const float grain = color ? std::clamp(color->grain_strength, 0.0f, 0.2f) : 0.0f;
+    writeVec4(u.fog_color, 0.28f, 0.30f, 0.34f, grain);
 
     u.display_params[0] = color ? static_cast<float>(static_cast<int>(color->display)) : 0.0f;
     u.display_params[1] = color ? std::clamp(color->bloom_strength, 0.0f, 2.0f) : 0.55f;
