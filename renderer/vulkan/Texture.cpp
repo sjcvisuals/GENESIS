@@ -248,11 +248,12 @@ GpuTexture GpuTexture::createSolid(const VulkanContext& context, const std::uint
 }
 
 GpuTexture GpuTexture::createSoftCircleSprite(const VulkanContext& context, const std::uint32_t size) {
-    // Wider gaussian soft disc — avoids hard opaque cores that strobe as "fireflies"
-    // under SrcAlpha/One additive when sprites are small.
-    const std::uint32_t dim = std::max(size, 16u);
+    // Broad soft disc for gentle particles — no hard core, no hot additive spike.
+    // Peak energy is intentionally <1 so overlaps stay calm (anti-firefly).
+    const std::uint32_t dim = std::max(size, 32u);
     std::vector<std::uint8_t> rgba(static_cast<std::size_t>(dim) * dim * 4u);
-    constexpr float kSigma = 0.38f; // relative to unit radius
+    constexpr float kSigma = 0.48f; // wider = softer circle
+    constexpr float kPeak = 0.78f;  // leave headroom under additive / bloom
     for (std::uint32_t y = 0; y < dim; ++y) {
         for (std::uint32_t x = 0; x < dim; ++x) {
             const float nx = (static_cast<float>(x) + 0.5f) / static_cast<float>(dim) * 2.0f - 1.0f;
@@ -260,15 +261,13 @@ GpuTexture GpuTexture::createSoftCircleSprite(const VulkanContext& context, cons
             const float d2 = nx * nx + ny * ny;
             float falloff = 0.0f;
             if (d2 < 1.0f) {
-                // Gaussian soft core + outer smooth cutoff so edges never hard-clip.
                 const float g = std::exp(-d2 / (2.0f * kSigma * kSigma));
                 const float edge = 1.0f - d2;
-                const float soft_edge = edge * edge * (3.0f - 2.0f * edge); // smoothstep(0,1,1-d²)
-                falloff = g * soft_edge;
+                const float soft_edge = edge * edge * (3.0f - 2.0f * edge); // smoothstep
+                falloff = g * soft_edge * kPeak;
             }
             falloff = std::clamp(falloff, 0.0f, 1.0f);
-            // Premultiplied-style soft glow: RGB tracks falloff so additive never spikes
-            // a flat white disc core (bloom-safe soft particle).
+            // RGB=A soft particle — works for both alpha-blend and bloom-safe additive.
             const std::uint8_t v = static_cast<std::uint8_t>(falloff * 255.0f + 0.5f);
             const std::size_t i = (static_cast<std::size_t>(y) * dim + x) * 4u;
             rgba[i + 0] = v;

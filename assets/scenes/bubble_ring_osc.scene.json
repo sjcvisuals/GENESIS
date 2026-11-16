@@ -34,11 +34,11 @@
       "light": {
         "type": "directional",
         "color": [
-          0.85,
-          0.9,
+          0.82,
+          0.88,
           1.0
         ],
-        "intensity": 1.1,
+        "intensity": 1.0,
         "enabled": true,
         "range": 10.0,
         "inner_cone_degrees": 20.0,
@@ -71,11 +71,11 @@
       "light": {
         "type": "directional",
         "color": [
-          0.65,
-          0.7,
-          0.85
+          0.6,
+          0.66,
+          0.8
         ],
-        "intensity": 0.55,
+        "intensity": 0.5,
         "enabled": true,
         "range": 10.0,
         "inner_cone_degrees": 20.0,
@@ -162,26 +162,26 @@
         "world_space": true,
         "duration": 0.0,
         "start_delay": 0.0,
-        "rate": 22.0,
+        "rate": 9.0,
         "burst": 0,
-        "max_particles": 384,
-        "lifetime_min": 3.2,
-        "lifetime_max": 5.2,
-        "speed_min": 0.22,
-        "speed_max": 0.4,
-        "size_min": 0.085,
-        "size_max": 0.13,
-        "size_end_multiplier": 0.25,
+        "max_particles": 220,
+        "lifetime_min": 3.8,
+        "lifetime_max": 5.8,
+        "speed_min": 0.28,
+        "speed_max": 0.42,
+        "size_min": 0.07,
+        "size_max": 0.095,
+        "size_end_multiplier": 0.4,
         "color_start": [
-          0.88,
-          0.93,
+          0.95,
+          0.97,
           1.0,
-          0.85
+          0.78
         ],
         "color_end": [
-          0.65,
-          0.8,
-          1.0,
+          0.72,
+          0.84,
+          0.96,
           0.0
         ],
         "velocity_mode": "cone",
@@ -189,11 +189,11 @@
         "force_gravity": true,
         "gravity": [
           0.0,
-          0.3,
+          0.48,
           0.0
         ],
         "force_drag": true,
-        "drag": 0.28,
+        "drag": 0.18,
         "force_noise": false,
         "kill_plane": false,
         "kill_box": false,
@@ -201,7 +201,7 @@
           "keys": [
             {
               "t": 0.0,
-              "v": 0.75
+              "v": 0.9
             },
             {
               "t": 0.2,
@@ -209,7 +209,7 @@
             },
             {
               "t": 1.0,
-              "v": 0.25
+              "v": 0.4
             }
           ]
         },
@@ -218,55 +218,55 @@
             {
               "t": 0.0,
               "v": [
-                0.85,
                 0.92,
+                0.95,
                 1.0,
-                0.35
+                0.3
               ]
             },
             {
               "t": 0.12,
               "v": [
-                0.9,
                 0.95,
+                0.97,
                 1.0,
-                0.82
+                0.75
               ]
             },
             {
               "t": 1.0,
               "v": [
-                0.55,
-                0.72,
-                0.95,
+                0.68,
+                0.8,
+                0.94,
                 0.0
               ]
             }
           ]
         },
         "spawn_shape": "sphere",
-        "spawn_radius": 0.5,
-        "spawn_box_height": 0.1,
-        "cone_angle_degrees": 10.0,
+        "spawn_radius": 0.18,
+        "spawn_box_height": 0.06,
+        "cone_angle_degrees": 5.0,
         "render_mesh": "sprite",
         "sprite_aspect": 1.0,
         "velocity_stretch": 0.0,
         "trail_enabled": true,
-        "trail_segments": 7,
-        "trail_sample_distance": 0.05,
-        "trail_width": 0.07,
-        "trail_width_end": 0.012,
-        "trail_alpha": 0.48,
-        "trail_lifetime": 1.6,
+        "trail_segments": 10,
+        "trail_sample_distance": 0.032,
+        "trail_width": 0.8,
+        "trail_width_end": 0.18,
+        "trail_alpha": 0.62,
+        "trail_lifetime": 2.2,
         "unlit": true,
-        "additive": true,
+        "additive": false,
         "seed_override": 0,
         "fluid_coupled": false
       },
       "transform": {
         "position": [
           0.0,
-          0.3,
+          0.12,
           0.0
         ],
         "rotation": [
@@ -288,52 +288,51 @@
       "parent": "Scene/Particle System",
       "visible": true,
       "particle_emitter": {
-        "enabled": true,
+        "enabled": false,
         "looping": true,
         "world_space": true,
         "duration": 0.0,
         "start_delay": 0.0,
-        "rate": 18.0,
+        "rate": 6.0,
         "burst": 0,
-        "max_particles": 512,
-        "lifetime_min": 2.4,
-        "lifetime_max": 4.0,
-        "speed_min": 0.22,
-        "speed_max": 0.42,
-        "size_min": 0.08,
-        "size_max": 0.12,
-        "size_end_multiplier": 0.25,
+        "max_particles": 180,
+        "lifetime_min": 3.0,
+        "lifetime_max": 4.5,
+        "speed_min": 0.26,
+        "speed_max": 0.4,
+        "size_min": 0.065,
+        "size_max": 0.088,
+        "size_end_multiplier": 0.4,
         "color_start": [
-          0.88,
-          0.93,
+          0.95,
+          0.97,
           1.0,
-          0.85
+          0.78
         ],
         "color_end": [
-          0.65,
-          0.8,
-          1.0,
+          0.72,
+          0.84,
+          0.96,
           0.0
         ],
         "velocity_mode": "cone",
-        "inherit_velocity": 0.3,
+        "inherit_velocity": 0.1,
         "force_gravity": true,
         "gravity": [
           0.0,
-          0.28,
+          0.45,
           0.0
         ],
         "force_drag": true,
-        "drag": 0.32,
+        "drag": 0.2,
         "force_noise": false,
-        "spawn_per_unit": 20.0,
         "kill_plane": false,
         "kill_box": false,
         "size_over_life": {
           "keys": [
             {
               "t": 0.0,
-              "v": 0.75
+              "v": 0.9
             },
             {
               "t": 0.2,
@@ -341,7 +340,7 @@
             },
             {
               "t": 1.0,
-              "v": 0.25
+              "v": 0.4
             }
           ]
         },
@@ -350,8 +349,8 @@
             {
               "t": 0.0,
               "v": [
-                0.85,
                 0.92,
+                0.95,
                 1.0,
                 0.3
               ]
@@ -359,47 +358,48 @@
             {
               "t": 0.12,
               "v": [
-                0.9,
                 0.95,
+                0.97,
                 1.0,
-                0.8
+                0.75
               ]
             },
             {
               "t": 1.0,
               "v": [
-                0.55,
-                0.72,
-                0.95,
+                0.68,
+                0.8,
+                0.94,
                 0.0
               ]
             }
           ]
         },
         "spawn_shape": "point",
-        "spawn_radius": 0.05,
-        "spawn_box_height": 0.05,
-        "cone_angle_degrees": 10.0,
+        "spawn_radius": 0.04,
+        "spawn_box_height": 0.06,
+        "cone_angle_degrees": 6.0,
         "render_mesh": "sprite",
         "sprite_aspect": 1.0,
         "velocity_stretch": 0.0,
         "trail_enabled": true,
-        "trail_segments": 6,
-        "trail_sample_distance": 0.045,
-        "trail_width": 0.05,
-        "trail_width_end": 0.012,
-        "trail_alpha": 0.38,
-        "trail_lifetime": 1.6,
+        "trail_segments": 9,
+        "trail_sample_distance": 0.03,
+        "trail_width": 0.75,
+        "trail_width_end": 0.18,
+        "trail_alpha": 0.58,
+        "trail_lifetime": 2.0,
         "unlit": true,
-        "additive": true,
+        "additive": false,
         "seed_override": 0,
-        "fluid_coupled": false
+        "fluid_coupled": false,
+        "spawn_per_unit": 8.0
       },
       "transform": {
         "position": [
-          0.65,
-          0.35,
-          0.1
+          0.9,
+          0.15,
+          0.2
         ],
         "rotation": [
           0.0,
@@ -426,20 +426,20 @@
       },
       "transform": {
         "position": [
-          2.4,
-          1.5,
-          3.2
+          2.1,
+          1.35,
+          3.0
         ],
         "rotation": [
-          -0.1,
-          0.28,
-          0.03,
-          0.95
+          -0.08,
+          0.26,
+          0.02,
+          0.96
         ],
         "scale": [
-          1.0,
-          1.0,
-          1.0
+          1,
+          1,
+          1
         ]
       }
     }
@@ -449,13 +449,13 @@
       "name": "Soft Stage Floor",
       "base_weight": 1.0,
       "base_color": [
-        0.14,
-        0.155,
-        0.18,
+        0.16,
+        0.17,
+        0.19,
         1.0
       ],
-      "metallic": 0.05,
-      "roughness": 0.78,
+      "metallic": 0.04,
+      "roughness": 0.8,
       "specular_weight": 1.0,
       "specular_color": [
         0.65,

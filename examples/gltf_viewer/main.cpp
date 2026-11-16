@@ -67,12 +67,12 @@ public:
         setRenderStatsEnabled(true);
         genesis::ensureEditorDataDirs();
         session_.loadRecentList();
-        // Readable soft-particle backdrop — crushed black + film grain reads as fireflies.
-        renderer().setClearColor(0.13f, 0.145f, 0.17f, 1.0f);
-        color_mgmt_.settings().exposure = 1.45f;
-        color_mgmt_.settings().bloom_strength = 0.22f;
+        // Readable stage for soft discs — keep midtones (QA brightness PASS); grain off.
+        renderer().setClearColor(0.14f, 0.155f, 0.175f, 1.0f);
+        color_mgmt_.settings().exposure = 1.25f;
+        color_mgmt_.settings().bloom_strength = 0.08f; // low — bloom stretches discs into streaks
         color_mgmt_.settings().grain_strength = 0.0f;
-        color_mgmt_.settings().vignette_strength = 0.08f;
+        color_mgmt_.settings().vignette_strength = 0.06f;
 
         grid_mesh_ = genesis::createEditorGridMesh(renderer().context(), kGridHalfExtentM, kGridDivisions);
         if (color_mgmt_.lutDirty()) {
