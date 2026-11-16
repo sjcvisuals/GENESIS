@@ -457,6 +457,7 @@ void SceneRuntime::appendParticleDrawCommands(std::vector<SceneDrawCommand>& out
             cmd.model = instance.model;
             cmd.material = makeMeshMaterialPushConstants(material);
             cmd.instance_color = instance.color;
+            cmd.additive = batch.additive;
             if (is_sprite) {
                 cmd.base_color_texture = soft_circle;
             }

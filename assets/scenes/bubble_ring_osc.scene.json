@@ -14,14 +14,14 @@
       }
     },
     {
-      "path": "Scene/Directional Light",
-      "name": "Directional Light",
+      "path": "Scene/Key Light",
+      "name": "Key Light",
       "parent": "Scene",
       "visible": true,
       "light": {
         "type": "directional",
-        "color": [1.0, 0.98, 0.94],
-        "intensity": 1.15,
+        "color": [0.45, 0.6, 0.9],
+        "intensity": 0.22,
         "enabled": true,
         "range": 10.0,
         "inner_cone_degrees": 20.0,
@@ -29,13 +29,27 @@
       },
       "transform": {
         "position": [0.0, 0.0, 0.0],
-        "rotation": [-0.383493, 0.30204, 0.131901, 0.864788],
+        "rotation": [-0.38, 0.3, 0.13, 0.86],
         "scale": [1.0, 1.0, 1.0]
       }
     },
     {
-      "path": "Scene/Bubble Ring",
-      "name": "Bubble Ring",
+      "path": "Scene/Dark Floor",
+      "name": "Dark Floor",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "GroundPlane",
+      "material": "Dark Mirror Floor",
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.35, 1.0, 1.35]
+      }
+    },
+    {
+      "path": "Scene/Arc Sparks",
+      "name": "Arc Sparks",
       "parent": "Scene",
       "visible": true,
       "particle_emitter": {
@@ -44,58 +58,123 @@
         "world_space": true,
         "duration": 0.0,
         "start_delay": 0.0,
-        "rate": 160.0,
+        "rate": 1400.0,
         "burst": 0,
-        "max_particles": 4096,
-        "lifetime_min": 2.5,
-        "lifetime_max": 4.5,
-        "speed_min": 0.35,
-        "speed_max": 0.75,
-        "size_min": 0.04,
-        "size_max": 0.09,
-        "size_end_multiplier": 0.35,
-        "color_start": [0.55, 0.9, 1.0, 0.85],
-        "color_end": [0.2, 0.45, 1.0, 0.0],
+        "max_particles": 12000,
+        "lifetime_min": 0.2,
+        "lifetime_max": 0.55,
+        "speed_min": 0.02,
+        "speed_max": 0.28,
+        "size_min": 0.05,
+        "size_max": 0.14,
+        "size_end_multiplier": 0.12,
+        "color_start": [0.45, 0.95, 1.0, 1.0],
+        "color_end": [1.0, 1.0, 1.0, 0.0],
         "velocity_mode": "cone",
         "inherit_velocity": 0.0,
         "force_gravity": true,
-        "gravity": [0.0, 0.55, 0.0],
+        "gravity": [0.0, 0.12, 0.0],
         "force_drag": true,
-        "drag": 0.35,
-        "force_point": false,
-        "force_vortex": false,
+        "drag": 0.65,
         "force_noise": true,
-        "noise_strength": 0.15,
-        "noise_frequency": 0.8,
-        "kill_plane": true,
-        "kill_plane_y": -0.5,
+        "noise_strength": 0.25,
+        "noise_frequency": 2.8,
+        "kill_plane": false,
         "kill_box": false,
         "size_over_life": {
           "keys": [
             {"t": 0.0, "v": 0.4},
-            {"t": 0.2, "v": 1.0},
-            {"t": 1.0, "v": 0.35}
+            {"t": 0.18, "v": 1.25},
+            {"t": 1.0, "v": 0.08}
           ]
         },
         "color_over_life": {
           "keys": [
-            {"t": 0.0, "v": [0.55, 0.9, 1.0, 0.0]},
-            {"t": 0.15, "v": [0.55, 0.9, 1.0, 0.9]},
-            {"t": 1.0, "v": [0.2, 0.45, 1.0, 0.0]}
+            {"t": 0.0, "v": [0.15, 0.75, 1.0, 0.0]},
+            {"t": 0.1, "v": [0.75, 1.0, 1.0, 1.0]},
+            {"t": 1.0, "v": [1.0, 1.0, 1.0, 0.0]}
           ]
         },
         "spawn_shape": "ring",
-        "spawn_radius": 1.25,
-        "spawn_box_height": 0.08,
-        "cone_angle_degrees": 12.0,
+        "spawn_radius": 1.55,
+        "spawn_box_height": 0.05,
+        "cone_angle_degrees": 70.0,
         "render_mesh": "sprite",
         "sprite_aspect": 1.0,
+        "velocity_stretch": 0.0,
         "unlit": true,
+        "additive": true,
         "seed_override": 0,
         "fluid_coupled": false
       },
       "transform": {
-        "position": [0.0, 0.05, 0.0],
+        "position": [0.0, 0.02, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "path": "Scene/Lime Streaks",
+      "name": "Lime Streaks",
+      "parent": "Scene",
+      "visible": true,
+      "particle_emitter": {
+        "enabled": true,
+        "looping": true,
+        "world_space": true,
+        "duration": 0.0,
+        "start_delay": 0.0,
+        "rate": 280.0,
+        "burst": 0,
+        "max_particles": 4096,
+        "lifetime_min": 1.6,
+        "lifetime_max": 3.0,
+        "speed_min": 2.8,
+        "speed_max": 5.5,
+        "size_min": 0.035,
+        "size_max": 0.07,
+        "size_end_multiplier": 0.25,
+        "color_start": [1.0, 0.9, 0.12, 1.0],
+        "color_end": [0.4, 1.0, 0.18, 0.0],
+        "velocity_mode": "cone",
+        "inherit_velocity": 0.0,
+        "force_gravity": true,
+        "gravity": [0.0, 0.08, 0.0],
+        "force_drag": true,
+        "drag": 0.05,
+        "force_noise": true,
+        "noise_strength": 0.35,
+        "noise_frequency": 0.4,
+        "kill_plane": false,
+        "kill_box": false,
+        "size_over_life": {
+          "keys": [
+            {"t": 0.0, "v": 0.55},
+            {"t": 0.2, "v": 1.05},
+            {"t": 1.0, "v": 0.2}
+          ]
+        },
+        "color_over_life": {
+          "keys": [
+            {"t": 0.0, "v": [1.0, 0.98, 0.45, 0.0]},
+            {"t": 0.12, "v": [1.0, 0.85, 0.1, 1.0]},
+            {"t": 1.0, "v": [0.3, 1.0, 0.22, 0.0]}
+          ]
+        },
+        "spawn_shape": "ring",
+        "spawn_radius": 1.55,
+        "spawn_box_height": 0.02,
+        "cone_angle_degrees": 4.0,
+        "render_mesh": "sprite",
+        "sprite_aspect": 0.12,
+        "velocity_stretch": 18.0,
+        "unlit": true,
+        "additive": true,
+        "seed_override": 0,
+        "fluid_coupled": false
+      },
+      "transform": {
+        "position": [0.0, 0.02, 0.0],
         "rotation": [0.0, 0.0, 0.0, 1.0],
         "scale": [1.0, 1.0, 1.0]
       }
@@ -111,56 +190,53 @@
         "world_space": true,
         "duration": 0.0,
         "start_delay": 0.0,
-        "rate": 80.0,
+        "rate": 140.0,
         "burst": 0,
-        "max_particles": 2048,
-        "lifetime_min": 1.8,
-        "lifetime_max": 3.2,
-        "speed_min": 0.45,
-        "speed_max": 0.95,
-        "size_min": 0.035,
-        "size_max": 0.08,
-        "size_end_multiplier": 0.2,
-        "color_start": [1.0, 0.75, 0.35, 0.95],
-        "color_end": [1.0, 0.25, 0.1, 0.0],
+        "max_particles": 3072,
+        "lifetime_min": 0.8,
+        "lifetime_max": 1.6,
+        "speed_min": 1.2,
+        "speed_max": 2.8,
+        "size_min": 0.025,
+        "size_max": 0.055,
+        "size_end_multiplier": 0.15,
+        "color_start": [1.0, 0.9, 0.25, 1.0],
+        "color_end": [0.3, 1.0, 0.35, 0.0],
         "velocity_mode": "cone",
-        "inherit_velocity": 0.35,
+        "inherit_velocity": 0.45,
         "force_gravity": true,
-        "gravity": [0.0, 0.7, 0.0],
+        "gravity": [0.0, 0.4, 0.0],
         "force_drag": true,
-        "drag": 0.4,
+        "drag": 0.2,
         "force_noise": true,
-        "noise_strength": 0.25,
-        "noise_frequency": 1.2,
-        "spawn_per_unit": 48.0,
-        "scale_by_speed": true,
-        "scale_by_speed_range_min": 0.0,
-        "scale_by_speed_range_max": 3.0,
-        "scale_by_speed_mul_min": 0.7,
-        "scale_by_speed_mul_max": 1.6,
+        "noise_strength": 0.3,
+        "noise_frequency": 1.4,
+        "spawn_per_unit": 64.0,
         "kill_plane": false,
         "kill_box": false,
         "size_over_life": {
           "keys": [
             {"t": 0.0, "v": 0.5},
             {"t": 0.15, "v": 1.0},
-            {"t": 1.0, "v": 0.2}
+            {"t": 1.0, "v": 0.15}
           ]
         },
         "color_over_life": {
           "keys": [
-            {"t": 0.0, "v": [1.0, 0.85, 0.4, 0.0]},
-            {"t": 0.12, "v": [1.0, 0.75, 0.35, 0.95]},
-            {"t": 1.0, "v": [1.0, 0.2, 0.05, 0.0]}
+            {"t": 0.0, "v": [1.0, 0.95, 0.4, 0.0]},
+            {"t": 0.1, "v": [1.0, 0.85, 0.2, 1.0]},
+            {"t": 1.0, "v": [0.25, 1.0, 0.3, 0.0]}
           ]
         },
         "spawn_shape": "point",
         "spawn_radius": 0.05,
         "spawn_box_height": 0.05,
-        "cone_angle_degrees": 18.0,
+        "cone_angle_degrees": 14.0,
         "render_mesh": "sprite",
-        "sprite_aspect": 1.0,
+        "sprite_aspect": 0.28,
+        "velocity_stretch": 8.0,
         "unlit": true,
+        "additive": true,
         "seed_override": 0,
         "fluid_coupled": false
       },
@@ -176,17 +252,28 @@
       "parent": "Scene",
       "visible": true,
       "camera": {
-        "fov_y_degrees": 45.0,
+        "fov_y_degrees": 40.0,
         "near": 0.05,
         "far": 200.0
       },
       "transform": {
-        "position": [0.0, 1.6, 4.2],
-        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "position": [3.4, 1.85, 3.9],
+        "rotation": [-0.12, 0.32, 0.04, 0.94],
         "scale": [1.0, 1.0, 1.0]
       }
     }
   ],
-  "materials": [],
+  "materials": [
+    {
+      "name": "Dark Mirror Floor",
+      "base_weight": 1.0,
+      "base_color": [0.015, 0.018, 0.022, 1.0],
+      "metallic": 0.95,
+      "roughness": 0.12,
+      "specular_weight": 1.0,
+      "specular_color": [0.85, 0.92, 1.0],
+      "alpha_mode": "opaque"
+    }
+  ],
   "active_output_camera": "Scene/Camera"
 }

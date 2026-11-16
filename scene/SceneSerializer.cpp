@@ -454,7 +454,9 @@ json particleEmitterToJson(const ParticleEmitter& e) {
         {"cone_angle_degrees", e.cone_angle_degrees},
         {"render_mesh", renderMeshName(e.render_mesh)},
         {"sprite_aspect", e.sprite_aspect},
+        {"velocity_stretch", e.velocity_stretch},
         {"unlit", e.unlit},
+        {"additive", e.additive},
         {"seed_override", e.seed_override},
         {"fluid_coupled", e.fluid_coupled},
     };
@@ -519,7 +521,9 @@ ParticleEmitter particleEmitterFromJson(const json& j) {
         e.render_mesh = renderMeshFromName(j["render_mesh"].get<std::string>());
     }
     e.sprite_aspect = j.value("sprite_aspect", e.sprite_aspect);
+    e.velocity_stretch = j.value("velocity_stretch", e.velocity_stretch);
     e.unlit = j.value("unlit", e.unlit);
+    e.additive = j.value("additive", e.additive);
     e.seed_override = j.value("seed_override", e.seed_override);
     e.fluid_coupled = j.value("fluid_coupled", e.fluid_coupled);
     if (j.contains("bursts") && j["bursts"].is_array()) {

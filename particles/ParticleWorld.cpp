@@ -200,8 +200,10 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
         p.size0 = particleRandomRange(seed, runtime.node_id, emit_index, kChanSize, desc.size_min,
                                       desc.size_max);
         p.sprite_aspect = desc.sprite_aspect;
+        p.velocity_stretch = desc.velocity_stretch;
         p.mesh = desc.render_mesh;
         p.unlit = desc.unlit;
+        p.additive = desc.additive;
         p.world_space = desc.world_space;
         p.size_curve = authored.size_over_life;
         p.color_curve = authored.color_over_life;
@@ -516,18 +518,30 @@ void ParticleWorld::rebuildToTime(Scene& scene, double production_time_seconds, 
 
 void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleInstanceBatch>& out,
                                      const ParticleViewBasis& view) const {
+    // Batches: mesh × unlit × additive (12 slots). Keeps GPU instancing cheap.
     out.clear();
-    out.resize(6);
-    out[0] = {ParticleRenderMesh::Cube, false, {}};
-    out[1] = {ParticleRenderMesh::Cube, true, {}};
-    out[2] = {ParticleRenderMesh::Sphere, false, {}};
-    out[3] = {ParticleRenderMesh::Sphere, true, {}};
-    out[4] = {ParticleRenderMesh::Sprite, false, {}};
-    out[5] = {ParticleRenderMesh::Sprite, true, {}};
+    out.resize(12);
+    auto set_batch = [&](std::size_t i, ParticleRenderMesh mesh, bool unlit, bool additive) {
+        out[i] = {mesh, unlit, additive, {}};
+    };
+    set_batch(0, ParticleRenderMesh::Cube, false, false);
+    set_batch(1, ParticleRenderMesh::Cube, true, false);
+    set_batch(2, ParticleRenderMesh::Cube, false, true);
+    set_batch(3, ParticleRenderMesh::Cube, true, true);
+    set_batch(4, ParticleRenderMesh::Sphere, false, false);
+    set_batch(5, ParticleRenderMesh::Sphere, true, false);
+    set_batch(6, ParticleRenderMesh::Sphere, false, true);
+    set_batch(7, ParticleRenderMesh::Sphere, true, true);
+    set_batch(8, ParticleRenderMesh::Sprite, false, false);
+    set_batch(9, ParticleRenderMesh::Sprite, true, false);
+    set_batch(10, ParticleRenderMesh::Sprite, false, true);
+    set_batch(11, ParticleRenderMesh::Sprite, true, true);
 
     const glm::vec3 cam_right =
         view.valid ? glm::normalize(view.right) : glm::vec3(1.0f, 0.0f, 0.0f);
     const glm::vec3 cam_up = view.valid ? glm::normalize(view.up) : glm::vec3(0.0f, 1.0f, 0.0f);
+    const glm::vec3 cam_forward =
+        glm::normalize(glm::cross(cam_right, cam_up) + glm::vec3(1e-5f));
 
     for (const Particle& p : particles_) {
         if (!p.alive) {
@@ -561,18 +575,32 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
 
         glm::mat4 model(1.0f);
         if (p.mesh == ParticleRenderMesh::Sprite) {
-            // Camera-facing XY quad (Niagara SpriteRenderer camera-facing mode).
-            // Mesh local X/Y map to camera right/up; local Z is view-facing.
-            const float hx = size * 0.5f * std::max(p.sprite_aspect, 0.01f);
-            const float hy = size * 0.5f;
-            const glm::vec3 right = cam_right * (hx * 2.0f); // mesh half-extent 0.5 → full size
-            const glm::vec3 up = cam_up * (hy * 2.0f);
-            const glm::vec3 facing =
-                glm::normalize(glm::cross(cam_right, cam_up) + glm::vec3(1e-5f));
-            model[0] = glm::vec4(right, 0.0f);
-            model[1] = glm::vec4(up, 0.0f);
-            model[2] = glm::vec4(facing, 0.0f);
-            model[3] = glm::vec4(world_pos, 1.0f);
+            const float speed = glm::length(p.velocity);
+            if (p.velocity_stretch > 1e-4f && speed > 1e-4f) {
+                // Niagara-style velocity-aligned stretch (streaks / ribbons without mesh trails).
+                const glm::vec3 along = p.velocity / speed;
+                glm::vec3 across = glm::cross(along, cam_forward);
+                if (glm::dot(across, across) < 1e-8f) {
+                    across = glm::cross(along, cam_right);
+                }
+                across = glm::normalize(across + glm::vec3(1e-5f));
+                const float width = size * std::max(p.sprite_aspect, 0.05f);
+                const float length = size * (1.0f + speed * p.velocity_stretch);
+                model[0] = glm::vec4(across * width, 0.0f);
+                model[1] = glm::vec4(along * length, 0.0f);
+                model[2] = glm::vec4(glm::normalize(glm::cross(across, along) + glm::vec3(1e-5f)), 0.0f);
+                model[3] = glm::vec4(world_pos, 1.0f);
+            } else {
+                // Camera-facing XY quad (SpriteRenderer camera-facing mode).
+                const float hx = size * 0.5f * std::max(p.sprite_aspect, 0.01f);
+                const float hy = size * 0.5f;
+                const glm::vec3 right = cam_right * (hx * 2.0f);
+                const glm::vec3 up = cam_up * (hy * 2.0f);
+                model[0] = glm::vec4(right, 0.0f);
+                model[1] = glm::vec4(up, 0.0f);
+                model[2] = glm::vec4(cam_forward, 0.0f);
+                model[3] = glm::vec4(world_pos, 1.0f);
+            }
         } else {
             model = glm::translate(glm::mat4(1.0f), world_pos);
             model = glm::scale(model, glm::vec3(size));
@@ -582,19 +610,20 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
         fillGpuMeshInstance(instance, model, glm::vec3(-0.5f), glm::vec3(0.5f));
         instance.color = color;
 
-        std::size_t batch_index = 0;
+        std::size_t mesh_base = 8;
         switch (p.mesh) {
         case ParticleRenderMesh::Cube:
-            batch_index = p.unlit ? 1 : 0;
+            mesh_base = 0;
             break;
         case ParticleRenderMesh::Sphere:
-            batch_index = p.unlit ? 3 : 2;
+            mesh_base = 4;
             break;
         case ParticleRenderMesh::Sprite:
         default:
-            batch_index = p.unlit ? 5 : 4;
+            mesh_base = 8;
             break;
         }
+        const std::size_t batch_index = mesh_base + (p.additive ? 2u : 0u) + (p.unlit ? 1u : 0u);
         out[batch_index].instances.push_back(instance);
     }
 

@@ -92,6 +92,7 @@ Renderer::~Renderer() {
     vertex_buffer_.reset();
     triangle_pipeline_.reset();
     mesh_pipeline_.reset();
+    mesh_additive_pipeline_.reset();
     mesh_depth_pipeline_.reset();
     grid_pipeline_.reset();
     mesh_batch_drawer_.reset();
@@ -382,6 +383,7 @@ void Renderer::createMeshResources() {
 
 void Renderer::createMeshPipelines() {
     mesh_pipeline_.reset();
+    mesh_additive_pipeline_.reset();
     mesh_depth_pipeline_.reset();
     if (!bindless_textures_ || !display_lut_) {
         return;
@@ -405,6 +407,9 @@ void Renderer::createMeshPipelines() {
     pipeline_config.push_constant_stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     if (std::filesystem::exists(pipeline_config.vert_shader) && std::filesystem::exists(pipeline_config.frag_shader)) {
         mesh_pipeline_ = std::make_unique<GraphicsPipeline>(*context_, pipeline_config);
+        GraphicsPipelineConfig additive_config = pipeline_config;
+        additive_config.additive_blend = true;
+        mesh_additive_pipeline_ = std::make_unique<GraphicsPipeline>(*context_, additive_config);
     }
 
     GraphicsPipelineConfig depth_config = pipeline_config;
@@ -629,22 +634,47 @@ void Renderer::drawMeshBatches(const std::vector<SceneMeshBatch>& batches, const
         draw_options.view_proj_col_major = frame_uniforms_.view_proj;
     }
 
-    if (!mesh_batch_drawer_->prepareDraw(batches, *bindless_textures_, draw_options)) {
-        return;
+    std::vector<SceneMeshBatch> alpha_batches;
+    std::vector<SceneMeshBatch> additive_batches;
+    alpha_batches.reserve(batches.size());
+    additive_batches.reserve(batches.size());
+    for (const SceneMeshBatch& batch : batches) {
+        if (batch.additive) {
+            additive_batches.push_back(batch);
+        } else {
+            alpha_batches.push_back(batch);
+        }
     }
 
-    mesh_batch_drawer_->dispatchGpuCull(cmd);
-    mesh_batch_drawer_->bindDrawInstanceBuffer(context_->device(), frame_descriptor_sets_[current_frame_]);
-    ensureRenderPass();
-    applyDrawRegion(cmd);
+    auto draw_group = [&](const std::vector<SceneMeshBatch>& group, GraphicsPipeline& pipeline,
+                          bool depth_prepass) {
+        if (group.empty()) {
+            return;
+        }
+        if (!mesh_batch_drawer_->prepareDraw(group, *bindless_textures_, draw_options)) {
+            return;
+        }
+        mesh_batch_drawer_->dispatchGpuCull(cmd);
+        mesh_batch_drawer_->bindDrawInstanceBuffer(context_->device(),
+                                                   frame_descriptor_sets_[current_frame_]);
+        ensureRenderPass();
+        applyDrawRegion(cmd);
+        if (depth_prepass && draw_options.enable_depth_prepass && mesh_depth_pipeline_) {
+            mesh_batch_drawer_->drawDepthPrepass(cmd, *mesh_depth_pipeline_,
+                                                 frame_descriptor_sets_[current_frame_], *bindless_textures_);
+        }
+        mesh_batch_drawer_->drawColorPass(cmd, pipeline, frame_descriptor_sets_[current_frame_],
+                                          *bindless_textures_,
+                                          display_lut_ ? display_lut_->descriptorSet() : VK_NULL_HANDLE);
+    };
 
-    if (draw_options.enable_depth_prepass && mesh_depth_pipeline_) {
-        mesh_batch_drawer_->drawDepthPrepass(cmd, *mesh_depth_pipeline_, frame_descriptor_sets_[current_frame_],
-                                             *bindless_textures_);
+    draw_group(alpha_batches, *mesh_pipeline_, true);
+    if (mesh_additive_pipeline_) {
+        // Additive particles skip depth-prepass writes (already depth-tested, no write).
+        draw_group(additive_batches, *mesh_additive_pipeline_, false);
+    } else {
+        draw_group(additive_batches, *mesh_pipeline_, false);
     }
-    mesh_batch_drawer_->drawColorPass(cmd, *mesh_pipeline_, frame_descriptor_sets_[current_frame_],
-                                      *bindless_textures_,
-                                      display_lut_ ? display_lut_->descriptorSet() : VK_NULL_HANDLE);
 }
 
 void Renderer::drawGrid(const Mesh& mesh, const GridDrawPushConstants& draw_constants) {

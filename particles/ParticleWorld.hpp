@@ -44,6 +44,7 @@ public:
     struct ParticleInstanceBatch {
         ParticleRenderMesh mesh = ParticleRenderMesh::Sprite;
         bool unlit = true;
+        bool additive = true;
         std::vector<GpuMeshInstance> instances;
     };
     void collectInstances(const Scene& scene, std::vector<ParticleInstanceBatch>& out,
@@ -78,8 +79,10 @@ private:
         glm::vec3 velocity{0.0f};
         float size0 = 0.1f;
         float sprite_aspect = 1.0f;
+        float velocity_stretch = 0.0f;
         ParticleRenderMesh mesh = ParticleRenderMesh::Sprite;
         bool unlit = true;
+        bool additive = true;
         bool world_space = true;
         bool alive = false;
         // Cached curve endpoints (evaluated from emitter curves at birth for determinism

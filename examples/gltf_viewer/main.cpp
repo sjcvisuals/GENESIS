@@ -67,7 +67,7 @@ public:
         setRenderStatsEnabled(true);
         genesis::ensureEditorDataDirs();
         session_.loadRecentList();
-        renderer().setClearColor(0.035f, 0.038f, 0.045f, 1.0f);
+        renderer().setClearColor(0.012f, 0.013f, 0.016f, 1.0f);
 
         grid_mesh_ = genesis::createEditorGridMesh(renderer().context(), kGridHalfExtentM, kGridDivisions);
         if (color_mgmt_.lutDirty()) {
@@ -350,26 +350,26 @@ private:
     void initEditorStyle() {
         ImGuiStyle& style = ImGui::GetStyle();
 
-        // Quiet, dense chrome — more Linear/Figma than classic DCC toolbars.
-        style.WindowRounding = 10.0f;
-        style.ChildRounding = 8.0f;
-        style.FrameRounding = 6.0f;
-        style.GrabRounding = 6.0f;
-        style.PopupRounding = 8.0f;
-        style.ScrollbarRounding = 8.0f;
-        style.TabRounding = 6.0f;
-        style.WindowBorderSize = 0.0f;
+        // Dense realtime DCC chrome — tight panels, hairline borders, teal accent.
+        style.WindowRounding = 4.0f;
+        style.ChildRounding = 3.0f;
+        style.FrameRounding = 3.0f;
+        style.GrabRounding = 3.0f;
+        style.PopupRounding = 4.0f;
+        style.ScrollbarRounding = 4.0f;
+        style.TabRounding = 3.0f;
+        style.WindowBorderSize = 1.0f;
         style.ChildBorderSize = 0.0f;
-        style.PopupBorderSize = 0.0f;
+        style.PopupBorderSize = 1.0f;
         style.FrameBorderSize = 0.0f;
         style.TabBorderSize = 0.0f;
-        style.WindowPadding = ImVec2(14.0f, 12.0f);
-        style.FramePadding = ImVec2(10.0f, 6.0f);
-        style.ItemSpacing = ImVec2(10.0f, 8.0f);
-        style.ItemInnerSpacing = ImVec2(8.0f, 5.0f);
-        style.IndentSpacing = 16.0f;
-        style.ScrollbarSize = 10.0f;
-        style.GrabMinSize = 10.0f;
+        style.WindowPadding = ImVec2(10.0f, 8.0f);
+        style.FramePadding = ImVec2(8.0f, 4.0f);
+        style.ItemSpacing = ImVec2(8.0f, 5.0f);
+        style.ItemInnerSpacing = ImVec2(6.0f, 4.0f);
+        style.IndentSpacing = 14.0f;
+        style.ScrollbarSize = 9.0f;
+        style.GrabMinSize = 9.0f;
         style.WindowTitleAlign = ImVec2(0.0f, 0.5f);
         style.ButtonTextAlign = ImVec2(0.5f, 0.5f);
 
@@ -472,7 +472,7 @@ private:
             }
             ImGui::Separator();
             if (ImGui::BeginMenu("Examples")) {
-                if (ImGui::MenuItem("Bubble Ring + OSC Tracker")) {
+                if (ImGui::MenuItem("Arc Energy + OSC Tracker")) {
                     const std::filesystem::path example =
                         genesis::resolveAssetPath("assets/scenes/bubble_ring_osc.scene.json");
                     try {
@@ -586,19 +586,21 @@ private:
             addLightNode("Directional Light", genesis::SceneLightType::Directional);
         });
         ImGui::SameLine();
-        createBtn("Particles", half, [&] {
-            genesis::ParticleEmitter emitter = genesis::makeBubbleRingEmitter();
-            emitter.rate_per_second = 80.0f;
-            emitter.spawn_radius = 0.6f;
-            selectNode(scene.createParticleEmitterNode("Particle Emitter", std::nullopt, emitter));
+        createBtn("Arc Sparks", half, [&] {
+            selectNode(scene.createParticleEmitterNode("Arc Sparks", std::nullopt,
+                                                       genesis::makeArcCyanSparkEmitter()));
             markDirty();
         });
         ImGui::SameLine();
+        createBtn("Lime Streaks", half, [&] {
+            selectNode(scene.createParticleEmitterNode("Lime Streaks", std::nullopt,
+                                                       genesis::makeArcLimeStreakEmitter()));
+            markDirty();
+        });
         createBtn("OSC Tracker", half, [&] {
             selectNode(scene.createParticleEmitterNode("OSC Tracker", std::nullopt,
                                                        genesis::makeOscTrackerBubbleEmitter()));
             markDirty();
-            // Align Protocol panel defaults with the new tracker node.
             genesis::OscParticleEmitSettings emit = osc_protocol_.particleEmitSettings();
             emit.emitter_path = "Scene/OSC Tracker";
             emit.track_emitter_position = true;
@@ -1201,10 +1203,28 @@ private:
             return;
         }
         ImGui::Separator();
-        ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.95f, 1.0f), "Particle Emitter");
-        ImGui::TextDisabled("Niagara-style modules · OSC Link on params · Sprite = efficient default");
+        ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.82f, 1.0f), "PARTICLE SYSTEM");
+        ImGui::TextDisabled("Niagara-style modules · soft additive · OSC / audio link");
         genesis::ParticleEmitter& e = *n.particle_emitter;
         bool dirty = false;
+
+        ImGui::BeginGroup();
+        if (ImGui::SmallButton("Preset: Arc Sparks")) {
+            e = genesis::makeArcCyanSparkEmitter();
+            dirty = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Preset: Lime Streaks")) {
+            e = genesis::makeArcLimeStreakEmitter();
+            dirty = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Preset: OSC Tracker")) {
+            e = genesis::makeOscTrackerBubbleEmitter();
+            dirty = true;
+        }
+        ImGui::EndGroup();
+        ImGui::Spacing();
 
         dirty |= ImGui::Checkbox("Enabled", &e.enabled);
         genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleEnabled, node_path, 0,
@@ -1213,7 +1233,6 @@ private:
         dirty |= ImGui::Checkbox("Looping", &e.looping);
         ImGui::SameLine();
         dirty |= ImGui::Checkbox("World space", &e.world_space);
-        dirty |= ImGui::Checkbox("Unlit", &e.unlit);
 
         ImGui::SeparatorText("Spawn (Emitter Update)");
         dirty |= ImGui::DragFloat("Rate / s", &e.rate_per_second, 1.0f, 0.0f, 20000.0f);
@@ -1412,14 +1431,19 @@ private:
         }
 
         ImGui::SeparatorText("Renderer");
-        const char* meshes[] = {"Cube", "Sphere", "Sprite (billboard)"};
+        dirty |= ImGui::Checkbox("Unlit", &e.unlit);
+        ImGui::SameLine();
+        dirty |= ImGui::Checkbox("Additive (SrcAlpha/One)", &e.additive);
+        const char* meshes[] = {"Cube", "Sphere", "Sprite (soft circle)"};
         int mesh = static_cast<int>(e.render_mesh);
-        if (ImGui::Combo("Renderer", &mesh, meshes, IM_ARRAYSIZE(meshes))) {
+        if (ImGui::Combo("Mesh", &mesh, meshes, IM_ARRAYSIZE(meshes))) {
             e.render_mesh = static_cast<genesis::ParticleRenderMesh>(mesh);
             dirty = true;
         }
         if (e.render_mesh == genesis::ParticleRenderMesh::Sprite) {
-            dirty |= ImGui::DragFloat("Sprite aspect", &e.sprite_aspect, 0.01f, 0.1f, 8.0f);
+            dirty |= ImGui::DragFloat("Sprite aspect", &e.sprite_aspect, 0.01f, 0.05f, 8.0f);
+            dirty |= ImGui::DragFloat("Velocity stretch", &e.velocity_stretch, 0.01f, 0.0f, 4.0f);
+            ImGui::TextDisabled("0 = camera disc · >0 ≈ Niagara VelocityAligned streak");
         }
 
         int seed = static_cast<int>(e.seed_override);
@@ -2393,13 +2417,14 @@ private:
     }
 
     void resetEditorCamera() {
-        const glm::vec3 target(0.0f, 0.7f, 0.0f);
-        const glm::vec3 eye(4.2f, 2.55f, 5.4f);
+        // Low three-quarter view — reads the floor arc + rising streaks like the reference.
+        const glm::vec3 target(0.0f, 0.55f, 0.0f);
+        const glm::vec3 eye(3.15f, 1.65f, 4.05f);
         editor_camera_.transform.position = eye;
         editor_camera_.setRotation(genesis::cameraRotationFromLookAt(eye, target));
         genesis::extractYawPitchFromForward(editor_camera_.forward(), editor_camera_.yaw_radians,
                                             editor_camera_.pitch_radians);
-        editor_camera_.fov_y_radians = glm::radians(42.0f);
+        editor_camera_.fov_y_radians = glm::radians(40.0f);
         editor_camera_.near_plane = 0.1f;
         editor_camera_.far_plane = 250.0f;
     }

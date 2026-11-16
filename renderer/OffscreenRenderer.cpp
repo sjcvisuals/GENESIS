@@ -75,6 +75,7 @@ OffscreenRenderer::~OffscreenRenderer() {
     }
 
     mesh_pipeline_.reset();
+    mesh_additive_pipeline_.reset();
     mesh_depth_pipeline_.reset();
     bindless_textures_.reset();
     frame_ubo_.reset();
@@ -230,6 +231,7 @@ void OffscreenRenderer::createMeshPipeline() {
 
 void OffscreenRenderer::createMeshPipelines() {
     mesh_pipeline_.reset();
+    mesh_additive_pipeline_.reset();
     mesh_depth_pipeline_.reset();
     if (!bindless_textures_ || !display_lut_) {
         return;
@@ -255,6 +257,9 @@ void OffscreenRenderer::createMeshPipelines() {
     if (std::filesystem::exists(pipeline_config.vert_shader) &&
         std::filesystem::exists(pipeline_config.frag_shader)) {
         mesh_pipeline_ = std::make_unique<GraphicsPipeline>(*context_, pipeline_config);
+        GraphicsPipelineConfig additive_config = pipeline_config;
+        additive_config.additive_blend = true;
+        mesh_additive_pipeline_ = std::make_unique<GraphicsPipeline>(*context_, additive_config);
     }
 
     GraphicsPipelineConfig depth_config = pipeline_config;
@@ -369,30 +374,55 @@ void OffscreenRenderer::drawMeshBatches(const std::vector<SceneMeshBatch>& batch
         draw_options.view_proj_col_major = frame_uniforms_.view_proj;
     }
 
-    if (!mesh_batch_drawer_->prepareDraw(batches, *bindless_textures_, draw_options)) {
-        return;
+    std::vector<SceneMeshBatch> alpha_batches;
+    std::vector<SceneMeshBatch> additive_batches;
+    alpha_batches.reserve(batches.size());
+    additive_batches.reserve(batches.size());
+    for (const SceneMeshBatch& batch : batches) {
+        if (batch.additive) {
+            additive_batches.push_back(batch);
+        } else {
+            alpha_batches.push_back(batch);
+        }
     }
 
-    mesh_batch_drawer_->dispatchGpuCull(cmd);
-    mesh_batch_drawer_->bindDrawInstanceBuffer(context_->device(), frame_descriptor_sets_[current_frame_]);
-    ensureRenderPass();
+    auto draw_group = [&](const std::vector<SceneMeshBatch>& group, GraphicsPipeline& pipeline,
+                          bool depth_prepass) {
+        if (group.empty()) {
+            return;
+        }
+        if (!mesh_batch_drawer_->prepareDraw(group, *bindless_textures_, draw_options)) {
+            return;
+        }
+        mesh_batch_drawer_->dispatchGpuCull(cmd);
+        mesh_batch_drawer_->bindDrawInstanceBuffer(context_->device(),
+                                                   frame_descriptor_sets_[current_frame_]);
+        ensureRenderPass();
 
-    VkViewport viewport{};
-    viewport.width = static_cast<float>(target_->extent().width);
-    viewport.height = static_cast<float>(target_->extent().height);
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
+        VkViewport viewport{};
+        viewport.width = static_cast<float>(target_->extent().width);
+        viewport.height = static_cast<float>(target_->extent().height);
+        viewport.maxDepth = 1.0f;
+        vkCmdSetViewport(cmd, 0, 1, &viewport);
 
-    VkRect2D scissor{{0, 0}, target_->extent()};
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
+        VkRect2D scissor{{0, 0}, target_->extent()};
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    if (draw_options.enable_depth_prepass && mesh_depth_pipeline_) {
-        mesh_batch_drawer_->drawDepthPrepass(cmd, *mesh_depth_pipeline_, frame_descriptor_sets_[current_frame_],
-                                             *bindless_textures_);
+        if (depth_prepass && draw_options.enable_depth_prepass && mesh_depth_pipeline_) {
+            mesh_batch_drawer_->drawDepthPrepass(cmd, *mesh_depth_pipeline_,
+                                                 frame_descriptor_sets_[current_frame_], *bindless_textures_);
+        }
+        mesh_batch_drawer_->drawColorPass(cmd, pipeline, frame_descriptor_sets_[current_frame_],
+                                          *bindless_textures_,
+                                          display_lut_ ? display_lut_->descriptorSet() : VK_NULL_HANDLE);
+    };
+
+    draw_group(alpha_batches, *mesh_pipeline_, true);
+    if (mesh_additive_pipeline_) {
+        draw_group(additive_batches, *mesh_additive_pipeline_, false);
+    } else {
+        draw_group(additive_batches, *mesh_pipeline_, false);
     }
-    mesh_batch_drawer_->drawColorPass(cmd, *mesh_pipeline_, frame_descriptor_sets_[current_frame_],
-                                      *bindless_textures_,
-                                      display_lut_ ? display_lut_->descriptorSet() : VK_NULL_HANDLE);
 }
 
 void OffscreenRenderer::endFrame(VkSemaphore wait_host_finished) {

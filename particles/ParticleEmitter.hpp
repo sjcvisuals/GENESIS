@@ -125,7 +125,11 @@ struct ParticleEmitter {
     // --- Renderer ---
     ParticleRenderMesh render_mesh = ParticleRenderMesh::Sprite;
     bool unlit = true;
+    bool additive = true; // SrcAlpha/One — Unreal soft-additive emissive look
     float sprite_aspect = 1.0f;
+    // Niagara VelocityAligned stretch: length = size * (1 + speed * velocity_stretch).
+    // 0 keeps camera-facing discs; >0 draws soft streaks without a ribbon mesh.
+    float velocity_stretch = 0.0f;
 
     std::uint64_t seed_override = 0;
     bool fluid_coupled = false; // legacy
@@ -152,70 +156,123 @@ inline ParticleEmitter makeDefaultParticleEmitter() {
     return e;
 }
 
-inline ParticleEmitter makeBubbleRingEmitter() {
+// Dense cyan/white spark bloom along a floor arc (reference base).
+inline ParticleEmitter makeArcCyanSparkEmitter() {
     ParticleEmitter e = makeDefaultParticleEmitter();
-    e.rate_per_second = 120.0f;
-    e.max_particles = 4096;
-    e.lifetime_min = 2.5f;
-    e.lifetime_max = 4.5f;
-    e.speed_min = 0.35f;
-    e.speed_max = 0.75f;
-    e.size_min = 0.04f;
-    e.size_max = 0.09f;
-    e.size_end_multiplier = 0.35f;
-    e.color_start = glm::vec4(0.55f, 0.9f, 1.0f, 0.85f);
-    e.color_end = glm::vec4(0.2f, 0.45f, 1.0f, 0.0f);
-    e.gravity = glm::vec3(0.0f, 0.55f, 0.0f);
-    e.drag = 0.35f;
+    e.rate_per_second = 1400.0f;
+    e.max_particles = 12000;
+    e.lifetime_min = 0.2f;
+    e.lifetime_max = 0.55f;
+    e.speed_min = 0.02f;
+    e.speed_max = 0.28f;
+    e.size_min = 0.05f;
+    e.size_max = 0.14f;
+    e.size_end_multiplier = 0.12f;
+    e.color_start = glm::vec4(0.45f, 0.95f, 1.0f, 1.0f);
+    e.color_end = glm::vec4(1.0f, 1.0f, 1.0f, 0.0f);
+    e.gravity = glm::vec3(0.0f, 0.12f, 0.0f);
+    e.drag = 0.65f;
     e.spawn_shape = ParticleSpawnShape::Ring;
-    e.spawn_radius = 1.25f;
-    e.spawn_box_height = 0.08f;
-    e.cone_angle_degrees = 12.0f;
+    e.spawn_radius = 1.55f;
+    e.spawn_box_height = 0.05f;
+    e.cone_angle_degrees = 70.0f;
+    e.velocity_mode = ParticleVelocityMode::Cone;
     e.render_mesh = ParticleRenderMesh::Sprite;
+    e.additive = true;
+    e.unlit = true;
     e.force_noise = true;
-    e.noise_strength = 0.15f;
-    e.noise_frequency = 0.8f;
-    e.kill_plane = true;
-    e.kill_plane_y = -0.5f;
+    e.noise_strength = 0.25f;
+    e.noise_frequency = 2.8f;
     syncEmitterCurvesFromEndpoints(e);
-    // Soft fade-in then fade-out (Niagara Color over Life feel).
     e.color_over_life.count = 3;
-    e.color_over_life.keys[0] = {0.0f, glm::vec4(0.55f, 0.9f, 1.0f, 0.0f)};
-    e.color_over_life.keys[1] = {0.15f, glm::vec4(0.55f, 0.9f, 1.0f, 0.9f)};
-    e.color_over_life.keys[2] = {1.0f, glm::vec4(0.2f, 0.45f, 1.0f, 0.0f)};
+    e.color_over_life.keys[0] = {0.0f, glm::vec4(0.15f, 0.75f, 1.0f, 0.0f)};
+    e.color_over_life.keys[1] = {0.1f, glm::vec4(0.75f, 1.0f, 1.0f, 1.0f)};
+    e.color_over_life.keys[2] = {1.0f, glm::vec4(1.0f, 1.0f, 1.0f, 0.0f)};
     e.size_over_life.count = 3;
     e.size_over_life.keys[0] = {0.0f, 0.4f};
-    e.size_over_life.keys[1] = {0.2f, 1.0f};
-    e.size_over_life.keys[2] = {1.0f, 0.35f};
+    e.size_over_life.keys[1] = {0.18f, 1.25f};
+    e.size_over_life.keys[2] = {1.0f, 0.08f};
     return e;
+}
+
+// Tall yellow→lime velocity streaks rising from the arc.
+// length ≈ size * (1 + speed * velocity_stretch) — stretch must be large for ribbon-like trails.
+inline ParticleEmitter makeArcLimeStreakEmitter() {
+    ParticleEmitter e = makeDefaultParticleEmitter();
+    e.rate_per_second = 280.0f;
+    e.max_particles = 4096;
+    e.lifetime_min = 1.6f;
+    e.lifetime_max = 3.0f;
+    e.speed_min = 2.8f;
+    e.speed_max = 5.5f;
+    e.size_min = 0.035f;
+    e.size_max = 0.07f;
+    e.size_end_multiplier = 0.25f;
+    e.color_start = glm::vec4(1.0f, 0.9f, 0.12f, 1.0f);
+    e.color_end = glm::vec4(0.4f, 1.0f, 0.18f, 0.0f);
+    e.gravity = glm::vec3(0.0f, 0.08f, 0.0f);
+    e.drag = 0.05f;
+    e.spawn_shape = ParticleSpawnShape::Ring;
+    e.spawn_radius = 1.55f;
+    e.spawn_box_height = 0.02f;
+    e.cone_angle_degrees = 4.0f;
+    e.velocity_mode = ParticleVelocityMode::Cone;
+    e.render_mesh = ParticleRenderMesh::Sprite;
+    e.additive = true;
+    e.unlit = true;
+    e.sprite_aspect = 0.12f;
+    e.velocity_stretch = 18.0f;
+    e.force_noise = true;
+    e.noise_strength = 0.35f;
+    e.noise_frequency = 0.4f;
+    syncEmitterCurvesFromEndpoints(e);
+    e.color_over_life.count = 3;
+    e.color_over_life.keys[0] = {0.0f, glm::vec4(1.0f, 0.98f, 0.45f, 0.0f)};
+    e.color_over_life.keys[1] = {0.12f, glm::vec4(1.0f, 0.85f, 0.1f, 1.0f)};
+    e.color_over_life.keys[2] = {1.0f, glm::vec4(0.3f, 1.0f, 0.22f, 0.0f)};
+    e.size_over_life.count = 3;
+    e.size_over_life.keys[0] = {0.0f, 0.55f};
+    e.size_over_life.keys[1] = {0.2f, 1.05f};
+    e.size_over_life.keys[2] = {1.0f, 0.2f};
+    return e;
+}
+
+inline ParticleEmitter makeBubbleRingEmitter() {
+    return makeArcCyanSparkEmitter();
 }
 
 inline ParticleEmitter makeOscTrackerBubbleEmitter() {
     ParticleEmitter e = makeDefaultParticleEmitter();
-    e.rate_per_second = 60.0f;
-    e.max_particles = 2048;
-    e.lifetime_min = 1.8f;
-    e.lifetime_max = 3.2f;
-    e.speed_min = 0.45f;
-    e.speed_max = 0.95f;
-    e.size_min = 0.035f;
-    e.size_max = 0.08f;
-    e.size_end_multiplier = 0.2f;
-    e.color_start = glm::vec4(1.0f, 0.75f, 0.35f, 0.95f);
-    e.color_end = glm::vec4(1.0f, 0.25f, 0.1f, 0.0f);
-    e.gravity = glm::vec3(0.0f, 0.7f, 0.0f);
-    e.drag = 0.4f;
+    e.rate_per_second = 140.0f;
+    e.max_particles = 3072;
+    e.lifetime_min = 0.8f;
+    e.lifetime_max = 1.6f;
+    e.speed_min = 1.2f;
+    e.speed_max = 2.8f;
+    e.size_min = 0.025f;
+    e.size_max = 0.055f;
+    e.size_end_multiplier = 0.15f;
+    e.color_start = glm::vec4(1.0f, 0.9f, 0.25f, 1.0f);
+    e.color_end = glm::vec4(0.3f, 1.0f, 0.35f, 0.0f);
+    e.gravity = glm::vec3(0.0f, 0.4f, 0.0f);
+    e.drag = 0.2f;
     e.spawn_shape = ParticleSpawnShape::Point;
-    e.cone_angle_degrees = 18.0f;
+    e.cone_angle_degrees = 14.0f;
     e.render_mesh = ParticleRenderMesh::Sprite;
+    e.additive = true;
+    e.unlit = true;
+    e.sprite_aspect = 0.28f;
+    e.velocity_stretch = 8.0f;
+    e.spawn_per_unit = 64.0f;
+    e.inherit_velocity = 0.45f;
     e.force_noise = true;
-    e.noise_strength = 0.25f;
-    e.noise_frequency = 1.2f;
+    e.noise_strength = 0.3f;
+    e.noise_frequency = 1.4f;
     syncEmitterCurvesFromEndpoints(e);
     e.color_over_life.count = 3;
-    e.color_over_life.keys[0] = {0.0f, glm::vec4(1.0f, 0.85f, 0.4f, 0.0f)};
-    e.color_over_life.keys[1] = {0.12f, glm::vec4(1.0f, 0.75f, 0.35f, 0.95f)};
-    e.color_over_life.keys[2] = {1.0f, glm::vec4(1.0f, 0.2f, 0.05f, 0.0f)};
+    e.color_over_life.keys[0] = {0.0f, glm::vec4(1.0f, 0.95f, 0.4f, 0.0f)};
+    e.color_over_life.keys[1] = {0.1f, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f)};
+    e.color_over_life.keys[2] = {1.0f, glm::vec4(0.25f, 1.0f, 0.3f, 0.0f)};
     return e;
 }
 

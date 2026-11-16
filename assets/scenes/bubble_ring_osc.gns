@@ -1,7 +1,7 @@
 {
   "format": "gns",
   "version": 1,
-  "name": "Bubble Ring + OSC Tracker",
+  "name": "Arc Energy + OSC Tracker",
   "scene_ref": "bubble_ring_osc.scene.json",
   "pixera": {
     "streams": [
@@ -14,7 +14,7 @@
     ],
     "bindings": {
       "target_node": "Scene/OSC Tracker",
-      "light_node": "Scene/Directional Light"
+      "light_node": "Scene/Key Light"
     }
   }
 }
