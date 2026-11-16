@@ -71,7 +71,7 @@ private:
         double distance_spawn_accumulator = 0.0; // meters × spawn_per_unit
     };
 
-    static constexpr std::uint8_t kMaxTrailPoints = 12;
+    static constexpr std::uint8_t kMaxTrailPoints = 24;
 
     struct Particle {
         NodeId emitter_node = 0;

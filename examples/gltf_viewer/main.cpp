@@ -1441,8 +1441,8 @@ private:
             dirty |= ImGui::Checkbox("Enable trails", &e.trail_enabled);
             if (e.trail_enabled) {
                 int segs = static_cast<int>(e.trail_segments);
-                if (ImGui::DragInt("Segments", &segs, 1, 2, 12)) {
-                    e.trail_segments = static_cast<std::uint8_t>(std::clamp(segs, 2, 12));
+                if (ImGui::DragInt("Segments", &segs, 1, 2, 24)) {
+                    e.trail_segments = static_cast<std::uint8_t>(std::clamp(segs, 2, 24));
                     dirty = true;
                 }
                 dirty |= ImGui::DragFloat("Sample distance", &e.trail_sample_distance, 0.001f, 0.01f, 0.5f);

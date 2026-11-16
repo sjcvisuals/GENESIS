@@ -132,7 +132,7 @@ struct ParticleEmitter {
     // --- Trail Renderer (Niagara Ribbon/Trail analogue) ---
     // Soft disc chain along motion history; widths are fractions of the head size.
     bool trail_enabled = false;
-    std::uint8_t trail_segments = 10;     // history points (2..12)
+    std::uint8_t trail_segments = 10;     // history points (2..24)
     float trail_sample_distance = 0.035f; // meters between samples
     float trail_width = 0.75f;            // width at head as fraction of particle size
     float trail_width_end = 0.1f;         // width at tip (small = taper toward a point)
@@ -166,41 +166,40 @@ inline ParticleEmitter makeDefaultParticleEmitter() {
 // Gentle soft circles rising with a tapering trail (default Niagara-like demo).
 inline ParticleEmitter makeGentleSoftEmitter() {
     ParticleEmitter e = makeDefaultParticleEmitter();
-    // Sparse soft discs — big enough to read as circles in stills, not streak cores.
-    e.rate_per_second = 9.0f;
-    e.max_particles = 220;
-    e.lifetime_min = 3.8f;
-    e.lifetime_max = 5.8f;
-    e.speed_min = 0.28f; // calm rise (stills + video)
-    e.speed_max = 0.42f;
-    e.size_min = 0.07f;
-    e.size_max = 0.095f;
-    e.size_end_multiplier = 0.4f;
-    e.color_start = glm::vec4(0.95f, 0.97f, 1.0f, 0.78f);
+    // Sparse soft discs — round head + quieter tapering trail (stay in frame).
+    e.rate_per_second = 8.0f;
+    e.max_particles = 200;
+    e.lifetime_min = 4.0f;
+    e.lifetime_max = 6.0f;
+    e.speed_min = 0.18f; // slow rise so trails + heads stay on camera
+    e.speed_max = 0.3f;
+    e.size_min = 0.075f;
+    e.size_max = 0.1f;
+    e.size_end_multiplier = 0.45f;
+    e.color_start = glm::vec4(0.95f, 0.97f, 1.0f, 0.8f);
     e.color_end = glm::vec4(0.72f, 0.84f, 0.96f, 0.0f);
     e.force_gravity = true;
-    e.gravity = glm::vec3(0.0f, 0.48f, 0.0f); // +Y lift only (never negative)
+    e.gravity = glm::vec3(0.0f, 0.28f, 0.0f); // gentle +Y lift only
     e.force_drag = true;
-    e.drag = 0.18f;
+    e.drag = 0.22f;
     e.spawn_shape = ParticleSpawnShape::Sphere;
-    e.spawn_radius = 0.18f; // tight column so rise reads clearly
-    e.spawn_box_height = 0.06f;
-    e.cone_angle_degrees = 5.0f; // nearly vertical
+    e.spawn_radius = 0.16f;
+    e.spawn_box_height = 0.05f;
+    e.cone_angle_degrees = 5.0f;
     e.velocity_mode = ParticleVelocityMode::Cone;
     e.render_mesh = ParticleRenderMesh::Sprite;
-    // Soft alpha blend — calmer than additive (keeps brightness wins, kills streak cores).
     e.additive = false;
     e.unlit = true;
     e.sprite_aspect = 1.0f;
-    e.velocity_stretch = 0.0f; // round discs only
+    e.velocity_stretch = 0.0f;
     e.force_noise = false;
     e.trail_enabled = true;
-    e.trail_segments = 10;
-    e.trail_sample_distance = 0.032f;
-    e.trail_width = 0.8f;      // fraction of head
-    e.trail_width_end = 0.18f; // tapers toward a point, still still-readable
-    e.trail_alpha = 0.62f;
-    e.trail_lifetime = 2.2f;
+    e.trail_segments = 24;            // long wake; dense discs merge into a ribbon
+    e.trail_sample_distance = 0.016f; // spacing << neck width so discs overlap continuously
+    e.trail_width = 0.58f;            // neck under head so circle reads
+    e.trail_width_end = 0.08f;        // soft point tip (above sparkle floor)
+    e.trail_alpha = 0.95f;
+    e.trail_lifetime = 3.2f;
     syncEmitterCurvesFromEndpoints(e);
     e.color_over_life.count = 3;
     e.color_over_life.keys[0] = {0.0f, glm::vec4(0.92f, 0.95f, 1.0f, 0.3f)};
@@ -246,12 +245,12 @@ inline ParticleEmitter makeOscTrackerBubbleEmitter() {
     e.additive = false;
     e.velocity_stretch = 0.0f;
     e.trail_enabled = true;
-    e.trail_segments = 9;
+    e.trail_segments = 16;
     e.trail_sample_distance = 0.03f;
-    e.trail_width = 0.75f;
-    e.trail_width_end = 0.18f;
-    e.trail_alpha = 0.58f;
-    e.trail_lifetime = 2.0f;
+    e.trail_width = 0.7f;
+    e.trail_width_end = 0.12f;
+    e.trail_alpha = 0.85f;
+    e.trail_lifetime = 2.8f;
     syncEmitterCurvesFromEndpoints(e);
     e.color_over_life.count = 3;
     e.color_over_life.keys[0] = {0.0f, glm::vec4(0.9f, 0.94f, 1.0f, 0.22f)};
