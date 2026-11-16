@@ -101,33 +101,6 @@
       }
     },
     {
-      "path": "Scene/Ground",
-      "name": "Ground",
-      "parent": "Scene",
-      "visible": true,
-      "pickable": true,
-      "mesh": "GroundPlane",
-      "material": "Soft Stage Floor",
-      "transform": {
-        "position": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "rotation": [
-          0.0,
-          0.0,
-          0.0,
-          1.0
-        ],
-        "scale": [
-          1.15,
-          1.0,
-          1.15
-        ]
-      }
-    },
-    {
       "path": "Scene/Particle System",
       "name": "Particle System",
       "parent": "Scene",
@@ -444,26 +417,6 @@
       }
     }
   ],
-  "materials": [
-    {
-      "name": "Soft Stage Floor",
-      "base_weight": 1.0,
-      "base_color": [
-        0.16,
-        0.17,
-        0.19,
-        1.0
-      ],
-      "metallic": 0.04,
-      "roughness": 0.8,
-      "specular_weight": 1.0,
-      "specular_color": [
-        0.65,
-        0.7,
-        0.8
-      ],
-      "alpha_mode": "opaque"
-    }
-  ],
+  "materials": [],
   "active_output_camera": "Scene/Camera"
 }
