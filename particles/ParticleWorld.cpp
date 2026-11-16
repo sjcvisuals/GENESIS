@@ -225,10 +225,11 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
         case ParticleSpawnShape::Point:
             break;
         case ParticleSpawnShape::Sphere: {
+            // Offset only — do NOT steal velocity direction (that sprayed sideways and
+            // turned soft discs + trails into horizontal streaks).
             const glm::vec3 unit = randomUnitVector(seed, runtime.node_id, emit_index);
             local_offset = unit * (desc.spawn_radius *
                                    particleRandom01(seed, runtime.node_id, emit_index, kChanPosX));
-            direction = unit;
             break;
         }
         case ParticleSpawnShape::Box: {
@@ -276,6 +277,9 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
             break;
         case ParticleVelocityMode::Cone:
         default:
+            // Always apply cone (spawn shapes must not leave a non-up direction).
+            direction =
+                coneDirection(world, desc.cone_angle_degrees, seed, runtime.node_id, emit_index);
             break;
         }
 
@@ -580,11 +584,17 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
     set_batch(10, ParticleRenderMesh::Sprite, false, true);
     set_batch(11, ParticleRenderMesh::Sprite, true, true);
 
-    const glm::vec3 cam_right =
+    // Billboard basis from the view camera. Gram–Schmidt so soft discs stay round
+    // (sheared right/up collapses quads into horizontal/vertical streaks).
+    glm::vec3 cam_right =
         view.valid ? glm::normalize(view.right) : glm::vec3(1.0f, 0.0f, 0.0f);
-    const glm::vec3 cam_up = view.valid ? glm::normalize(view.up) : glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::vec3 cam_up_in = view.valid ? glm::normalize(view.up) : glm::vec3(0.0f, 1.0f, 0.0f);
+    // Remove look-axis shear from up, then rebuild a true orthonormal frame.
     const glm::vec3 cam_forward =
-        glm::normalize(glm::cross(cam_right, cam_up) + glm::vec3(1e-5f));
+        glm::normalize(glm::cross(cam_right, cam_up_in) + glm::vec3(1e-5f));
+    const glm::vec3 cam_up =
+        glm::normalize(glm::cross(cam_forward, cam_right) + glm::vec3(1e-5f));
+    cam_right = glm::normalize(glm::cross(cam_up, cam_forward) + glm::vec3(1e-5f));
 
     for (const Particle& p : particles_) {
         if (!p.alive) {
@@ -605,15 +615,15 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
             size_mul *= glm::mix(pe.scale_by_speed_mul_min, pe.scale_by_speed_mul_max, u);
         }
 
-        // Soft floor on world size — tiny additive discs strobe as fireflies.
-        const float size = std::max(0.035f, p.size0 * size_mul);
+        // Soft floor — tiny sprites strobe as fireflies; keep a readable circle.
+        const float size = std::max(0.04f, p.size0 * size_mul);
         glm::vec4 color =
             p.color_curve.count > 0 ? p.color_curve.evaluate(t) : glm::vec4(1.0f, 1.0f, 1.0f, 1.0f - t);
-        // Bloom-safe soft particle: keep peak energy moderate under SrcAlpha/One.
-        color.r = std::min(color.r, 0.92f);
-        color.g = std::min(color.g, 0.94f);
-        color.b = std::min(color.b, 1.0f);
-        color.a = std::clamp(color.a, 0.0f, 0.88f);
+        // Gentle energy budget (alpha blend or soft additive — never hot cores).
+        color.r = std::min(color.r, 0.9f);
+        color.g = std::min(color.g, 0.92f);
+        color.b = std::min(color.b, 0.96f);
+        color.a = std::clamp(color.a, 0.0f, 0.72f);
 
         glm::vec3 world_pos = p.position;
         if (!p.world_space) {
@@ -644,50 +654,52 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
             out[batch_index].instances.push_back(instance);
         };
 
-        // Trail Renderer: soft discs along history that taper to a point at the tip
-        // (oldest sample). Avoids stretched-ribbon smear; reads as gentle Niagara trails.
+        // Trail Renderer: soft disc chain along history, width head→tip (point).
+        // trail_width / trail_width_end are fractions of the particle head size.
         if (p.trail_enabled && p.trail_count >= 2 && p.mesh == ParticleRenderMesh::Sprite) {
             const float trail_age_fade =
-                std::clamp(1.0f - (p.age / std::max(p.trail_lifetime * 2.5f, 0.1f)) * 0.35f, 0.4f,
+                std::clamp(1.0f - (p.age / std::max(p.trail_lifetime * 2.5f, 0.1f)) * 0.25f, 0.5f,
                            1.0f);
             const float denom = static_cast<float>(std::max<int>(p.trail_count - 1, 1));
-            // Skip the newest sample (drawn as the primary sprite head).
+            const float head_w = std::max(size, 0.04f);
+            // Skip newest sample — drawn as the round head below.
             for (std::uint8_t si = 0; si + 1 < p.trail_count; ++si) {
-                const float t = static_cast<float>(si) / denom; // 0 = tip, 1 ≈ head
-                const float width =
-                    glm::mix(p.trail_width_end, p.trail_width, t) * std::max(size_mul, 0.35f);
-                // Skip sub-pixel tip samples — they read as sparkle/fireflies.
-                if (width < 0.018f) {
+                const float u = static_cast<float>(si) / denom; // 0 = tip, 1 ≈ head
+                const float width_frac =
+                    glm::mix(std::max(p.trail_width_end, 0.0f), std::max(p.trail_width, 0.05f), u);
+                const float width = head_w * width_frac;
+                // Keep tip readable in stills but never a sub-pixel spark.
+                if (width < std::max(0.012f, head_w * 0.1f)) {
                     continue;
                 }
-                const float tip_fade = 0.25f + 0.75f * t;
+                const float tip_fade = 0.2f + 0.8f * u;
                 glm::vec4 trail_color = color;
                 trail_color.a *= p.trail_alpha * tip_fade * trail_age_fade;
-                trail_color.a = std::min(trail_color.a, 0.7f);
+                trail_color.a = std::min(trail_color.a, 0.5f);
 
-                const float hx = width;
-                const float hy = width;
                 glm::mat4 model(1.0f);
-                model[0] = glm::vec4(cam_right * hx, 0.0f);
-                model[1] = glm::vec4(cam_up * hy, 0.0f);
+                model[0] = glm::vec4(cam_right * width, 0.0f);
+                model[1] = glm::vec4(cam_up * width, 0.0f);
                 model[2] = glm::vec4(cam_forward, 0.0f);
                 model[3] = glm::vec4(p.trail_pos[si], 1.0f);
                 push_sprite(model, trail_color);
             }
         }
 
-        // Primary soft circle (SpriteRenderer).
+        // Primary soft circle head — round disc (aspect locked to 1 unless stretch requested).
         glm::mat4 model(1.0f);
         if (p.mesh == ParticleRenderMesh::Sprite) {
             const float speed = glm::length(p.velocity);
-            float hx = size * 0.5f * std::max(p.sprite_aspect, 0.05f);
-            float hy = size * 0.5f;
+            // Round head by default; velocity_stretch is opt-in (off for gentle look).
+            float hx = size;
+            float hy = size;
             if (p.velocity_stretch > 1e-4f && speed > 1e-4f) {
-                hy *= (1.0f + speed * p.velocity_stretch);
-                hx = std::max(hx, size * 0.15f);
+                const float aspect = std::max(p.sprite_aspect, 0.05f);
+                hx = size * aspect;
+                hy = size * (1.0f + speed * p.velocity_stretch);
             }
-            model[0] = glm::vec4(cam_right * (hx * 2.0f), 0.0f);
-            model[1] = glm::vec4(cam_up * (hy * 2.0f), 0.0f);
+            model[0] = glm::vec4(cam_right * hx, 0.0f);
+            model[1] = glm::vec4(cam_up * hy, 0.0f);
             model[2] = glm::vec4(cam_forward, 0.0f);
             model[3] = glm::vec4(world_pos, 1.0f);
         } else {

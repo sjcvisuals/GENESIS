@@ -372,7 +372,7 @@ void SceneRuntime::appendParticleDrawCommands(std::vector<SceneDrawCommand>& out
     if (!particle_sprite_texture_id_.has_value()) {
         // Soft white circle + feathered alpha (Unreal default sprite look).
         particle_sprite_texture_id_ =
-            addTexture("ParticleSoftCircle", GpuTexture::createSoftCircleSprite(context_, 128));
+            addTexture("ParticleSoftCircle", GpuTexture::createSoftCircleSprite(context_, 256));
     }
 
     if (!particle_view_basis_.valid) {
@@ -393,10 +393,12 @@ void SceneRuntime::appendParticleDrawCommands(std::vector<SceneDrawCommand>& out
     lit.metallic = 0.0f;
     lit.alpha_mode = AlphaMode::Blend;
 
+    // Soft particles must NOT hit mesh.frag's roughness>0.98 early-out (skips tonemap /
+    // exposure) — that paints hard pre-tonemapped slabs/streaks against the stage.
     SceneMaterial unlit = lit;
-    unlit.emissive = glm::vec3(1.0f);
-    unlit.emissive_strength = 1.0f;
-    unlit.roughness = 1.0f;
+    unlit.emissive = glm::vec3(0.0f);
+    unlit.emissive_strength = 0.0f;
+    unlit.roughness = 0.97f;
 
     const GpuTexture* soft_circle = texture(*particle_sprite_texture_id_);
 
