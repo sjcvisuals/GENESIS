@@ -9,9 +9,9 @@ namespace genesis {
 
 namespace {
 
-constexpr ImVec4 kAccent{0.38f, 0.82f, 0.78f, 1.0f};
-constexpr ImVec4 kMuted{0.55f, 0.58f, 0.62f, 1.0f};
-constexpr ImVec4 kModuleTitle{0.78f, 0.84f, 0.88f, 1.0f};
+constexpr ImVec4 kAccent{0.32f, 0.78f, 0.82f, 1.0f};
+constexpr ImVec4 kMuted{0.52f, 0.545f, 0.585f, 1.0f};
+constexpr ImVec4 kModuleTitle{0.88f, 0.91f, 0.94f, 1.0f};
 
 void mark(ParticleEmitterUiContext& ctx) {
     if (ctx.mark_dirty) {
@@ -24,23 +24,27 @@ bool moduleHeader(const char* label, bool default_open = true) {
         ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_AllowOverlap |
         ImGuiTreeNodeFlags_SpanAvailWidth |
         (default_open ? ImGuiTreeNodeFlags_DefaultOpen : 0);
-    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.14f, 0.17f, 0.20f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.18f, 0.22f, 0.26f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.16f, 0.22f, 0.24f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.118f, 0.132f, 0.148f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.145f, 0.175f, 0.190f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.135f, 0.195f, 0.205f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_Text, kModuleTitle);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 5.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, 6.0f));
     const bool open = ImGui::CollapsingHeader(label, flags);
+    ImGui::PopStyleVar(2);
     ImGui::PopStyleColor(4);
     return open;
 }
 
 void moduleIndentBegin() {
-    ImGui::Indent(8.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 5.0f));
+    ImGui::Indent(10.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 6.0f));
+    ImGui::Spacing();
 }
 
 void moduleIndentEnd() {
     ImGui::PopStyleVar();
-    ImGui::Unindent(8.0f);
+    ImGui::Unindent(10.0f);
     ImGui::Spacing();
 }
 
@@ -82,8 +86,8 @@ void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ct
     }
     Scene& scene = *ctx.scene;
 
-    ImGui::Separator();
-    ImGui::TextColored(kAccent, "NIAGARA SYSTEM");
+    ImGui::Spacing();
+    ImGui::TextColored(kAccent, "Niagara System");
     ImGui::TextColored(kMuted, "System → Emitter hierarchy · lean basics");
     ImGui::Spacing();
 
@@ -161,7 +165,7 @@ void drawParticleEmitterInspector(Node& emitter_node, const std::string& node_pa
     bool dirty = false;
 
     ImGui::Separator();
-    ImGui::TextColored(kAccent, "NIAGARA EMITTER");
+    ImGui::TextColored(kAccent, "Niagara Emitter");
     ImGui::TextColored(kMuted, "Module stack · Spawn → Initialize → Update → Render");
 
     if (ctx.scene && emitter_node.parent.has_value()) {

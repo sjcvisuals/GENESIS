@@ -9,6 +9,7 @@
 #include "editor/EditorSession.hpp"
 #include "editor/OscProtocolUi.hpp"
 #include "editor/AudioReactiveUi.hpp"
+#include "editor/EditorTheme.hpp"
 #include "editor/ParticleEmitterUi.hpp"
 #include "editor/SceneViewport.hpp"
 #include "engine/Application.hpp"
@@ -440,99 +441,7 @@ private:
     }
 
     void initEditorStyle() {
-        ImGuiStyle& style = ImGui::GetStyle();
-
-        // Dense realtime DCC chrome — tight panels, hairline borders, teal accent.
-        style.WindowRounding = 4.0f;
-        style.ChildRounding = 3.0f;
-        style.FrameRounding = 3.0f;
-        style.GrabRounding = 3.0f;
-        style.PopupRounding = 4.0f;
-        style.ScrollbarRounding = 4.0f;
-        style.TabRounding = 3.0f;
-        style.WindowBorderSize = 1.0f;
-        style.ChildBorderSize = 0.0f;
-        style.PopupBorderSize = 1.0f;
-        style.FrameBorderSize = 0.0f;
-        style.TabBorderSize = 0.0f;
-        style.WindowPadding = ImVec2(10.0f, 8.0f);
-        style.FramePadding = ImVec2(8.0f, 4.0f);
-        style.ItemSpacing = ImVec2(8.0f, 5.0f);
-        style.ItemInnerSpacing = ImVec2(6.0f, 4.0f);
-        style.IndentSpacing = 14.0f;
-        style.ScrollbarSize = 9.0f;
-        style.GrabMinSize = 9.0f;
-        style.WindowTitleAlign = ImVec2(0.0f, 0.5f);
-        style.ButtonTextAlign = ImVec2(0.5f, 0.5f);
-
-        ImVec4* colors = style.Colors;
-
-        // Near-black canvas with cool charcoal panels and a single teal accent.
-        const ImVec4 bg_app(0.055f, 0.057f, 0.062f, 1.0f);
-        const ImVec4 bg_panel(0.090f, 0.094f, 0.102f, 0.97f);
-        const ImVec4 bg_elevated(0.118f, 0.124f, 0.134f, 1.0f);
-        const ImVec4 bg_input(0.070f, 0.074f, 0.082f, 1.0f);
-        const ImVec4 border(0.160f, 0.168f, 0.180f, 1.0f);
-        const ImVec4 text(0.920f, 0.930f, 0.945f, 1.0f);
-        const ImVec4 text_muted(0.480f, 0.500f, 0.540f, 1.0f);
-        const ImVec4 accent(0.220f, 0.760f, 0.700f, 1.0f);       // teal
-        const ImVec4 accent_hover(0.280f, 0.820f, 0.760f, 1.0f);
-        const ImVec4 accent_dim(0.140f, 0.420f, 0.400f, 1.0f);
-        const ImVec4 accent_soft(0.220f, 0.760f, 0.700f, 0.18f);
-
-        colors[ImGuiCol_Text] = text;
-        colors[ImGuiCol_TextDisabled] = text_muted;
-        colors[ImGuiCol_WindowBg] = bg_panel;
-        colors[ImGuiCol_ChildBg] = bg_app;
-        colors[ImGuiCol_PopupBg] = bg_elevated;
-        colors[ImGuiCol_Border] = border;
-        colors[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-        colors[ImGuiCol_FrameBg] = bg_input;
-        colors[ImGuiCol_FrameBgHovered] = ImVec4(0.100f, 0.110f, 0.120f, 1.0f);
-        colors[ImGuiCol_FrameBgActive] = ImVec4(0.120f, 0.135f, 0.145f, 1.0f);
-        colors[ImGuiCol_TitleBg] = bg_app;
-        colors[ImGuiCol_TitleBgActive] = bg_app;
-        colors[ImGuiCol_TitleBgCollapsed] = bg_app;
-        colors[ImGuiCol_MenuBarBg] = bg_app;
-        colors[ImGuiCol_ScrollbarBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-        colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.22f, 0.24f, 0.26f, 1.0f);
-        colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.30f, 0.33f, 0.36f, 1.0f);
-        colors[ImGuiCol_ScrollbarGrabActive] = accent_dim;
-        colors[ImGuiCol_CheckMark] = accent;
-        colors[ImGuiCol_SliderGrab] = accent;
-        colors[ImGuiCol_SliderGrabActive] = accent_hover;
-        colors[ImGuiCol_Button] = bg_elevated;
-        colors[ImGuiCol_ButtonHovered] = ImVec4(0.160f, 0.175f, 0.190f, 1.0f);
-        colors[ImGuiCol_ButtonActive] = accent_dim;
-        colors[ImGuiCol_Header] = accent_soft;
-        colors[ImGuiCol_HeaderHovered] = ImVec4(0.220f, 0.760f, 0.700f, 0.28f);
-        colors[ImGuiCol_HeaderActive] = ImVec4(0.220f, 0.760f, 0.700f, 0.40f);
-        colors[ImGuiCol_Separator] = ImVec4(0.140f, 0.148f, 0.160f, 1.0f);
-        colors[ImGuiCol_SeparatorHovered] = accent_dim;
-        colors[ImGuiCol_SeparatorActive] = accent;
-        colors[ImGuiCol_ResizeGrip] = ImVec4(0.22f, 0.24f, 0.26f, 0.4f);
-        colors[ImGuiCol_ResizeGripHovered] = accent_dim;
-        colors[ImGuiCol_ResizeGripActive] = accent;
-        colors[ImGuiCol_Tab] = bg_app;
-        colors[ImGuiCol_TabHovered] = bg_elevated;
-        colors[ImGuiCol_TabSelected] = bg_panel;
-        colors[ImGuiCol_TabSelectedOverline] = accent;
-        colors[ImGuiCol_TabDimmed] = bg_app;
-        colors[ImGuiCol_TabDimmedSelected] = bg_panel;
-        colors[ImGuiCol_DockingPreview] = ImVec4(0.220f, 0.760f, 0.700f, 0.35f);
-        colors[ImGuiCol_DockingEmptyBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-        colors[ImGuiCol_PlotLines] = accent;
-        colors[ImGuiCol_PlotHistogram] = accent;
-        colors[ImGuiCol_TableHeaderBg] = bg_elevated;
-        colors[ImGuiCol_TableBorderStrong] = border;
-        colors[ImGuiCol_TableBorderLight] = ImVec4(0.120f, 0.128f, 0.140f, 1.0f);
-        colors[ImGuiCol_TableRowBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-        colors[ImGuiCol_TableRowBgAlt] = ImVec4(1.0f, 1.0f, 1.0f, 0.02f);
-        colors[ImGuiCol_TextSelectedBg] = accent_soft;
-        colors[ImGuiCol_DragDropTarget] = accent;
-        colors[ImGuiCol_NavCursor] = accent;
-        colors[ImGuiCol_NavWindowingHighlight] = accent;
-        colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.02f, 0.02f, 0.03f, 0.55f);
+        genesis::applyGenesisEditorTheme();
     }
 
     void drawMenuBar(genesis::Scene& scene) {
@@ -663,17 +572,18 @@ private:
     void drawHierarchyPanel(genesis::Scene& scene) {
         ImGui::Begin("Hierarchy", &show_hierarchy_);
 
-        ImGui::TextDisabled("CREATE");
-        ImGui::Spacing();
+        genesis::drawEditorSectionLabel("Create");
 
         const float full = ImGui::GetContentRegionAvail().x;
         const float gap = ImGui::GetStyle().ItemSpacing.x;
         const float half = (full - gap) * 0.5f;
 
         auto createBtn = [&](const char* label, float width, auto&& fn) {
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 5.0f);
             if (ImGui::Button(label, ImVec2(width, 0))) {
                 fn();
             }
+            ImGui::PopStyleVar();
         };
 
         createBtn("Empty", half, [&] {
@@ -710,9 +620,7 @@ private:
             addLightNode("Spot Light", genesis::SceneLightType::Spot);
         });
 
-        ImGui::Spacing();
-        ImGui::TextDisabled("PARTICLES  ·  Niagara");
-        ImGui::Spacing();
+        genesis::drawEditorSectionLabel("Particles · Niagara");
         createBtn("Particle System", half, [&] {
             std::optional<genesis::NodeId> scene_root =
                 genesis::findNodeByPath(scene, "Scene");
@@ -751,11 +659,7 @@ private:
             osc_protocol_.setParticleEmitSettings(emit);
         });
 
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-        ImGui::TextDisabled("ACTIONS");
-        ImGui::Spacing();
+        genesis::drawEditorSectionLabel("Actions");
 
         ImGui::BeginDisabled(selection_.empty());
         if (ImGui::Button("Duplicate", ImVec2(half, 0))) {
@@ -777,32 +681,31 @@ private:
         }
         ImGui::EndDisabled();
 
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-        ImGui::TextDisabled("OUTLINER");
-        ImGui::Spacing();
+        genesis::drawEditorSectionLabel("Outliner");
 
         auto drawNode = [&](auto&& self, genesis::NodeId id) -> void {
             const genesis::Node* n = scene.find(id);
             if (!n) return;
 
-            ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanFullWidth |
+            ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth |
+                                       ImGuiTreeNodeFlags_FramePadding |
                                        ImGuiTreeNodeFlags_DefaultOpen;
-            if (n->children.empty()) flags |= ImGuiTreeNodeFlags_Leaf;
+            if (n->children.empty()) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet;
             if (isSelected(id)) flags |= ImGuiTreeNodeFlags_Selected;
 
             std::string label = n->name;
-            if (n->mesh_resource.has_value()) label += "   M";
-            if (n->camera.has_value()) label += "   C";
-            if (n->light.has_value()) label += "   L";
+            if (n->mesh_resource.has_value()) label += "  · M";
+            if (n->camera.has_value()) label += "  · C";
+            if (n->light.has_value()) label += "  · L";
             if (const char* badge = genesis::particleHierarchyBadge(scene, *n);
                 badge[0] != '\0') {
-                label += "   ";
+                label += "  · ";
                 label += badge;
             }
 
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 3.0f));
             const bool open = ImGui::TreeNodeEx((void*)(uintptr_t)n->id, flags, "%s", label.c_str());
+            ImGui::PopStyleVar();
             if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) {
                 const bool additive = ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift;
                 if (additive) {
@@ -895,15 +798,14 @@ private:
     void drawInspectorPanel(genesis::Scene& scene) {
         ImGui::Begin("Inspector", &show_inspector_);
 
-        ImGui::TextColored(ImVec4(0.55f, 0.70f, 0.95f, 1.0f), "INSPECTOR");
-        ImGui::Separator();
-
         if (selection_.empty()) {
+            genesis::drawEditorSectionLabel("Inspector");
             ImGui::TextWrapped("Select an actor in the viewport or outliner.");
             ImGui::Spacing();
             ImGui::TextDisabled("LMB pick / drag marquee");
-            ImGui::TextDisabled("Shift/Ctrl multi  |  RMB+WASD fly  |  W/E/R gizmo");
+            ImGui::TextDisabled("Shift/Ctrl multi  ·  RMB+WASD fly  ·  W/E/R gizmo");
         } else if (genesis::Node* n = scene.find(primarySelected())) {
+            genesis::drawEditorSectionLabel(n->name.c_str());
             const std::string node_path = genesis::nodePath(scene, n->id);
             genesis::OscLinkUiContext link_ctx{&osc_protocol_};
             genesis::AudioLinkUiContext audio_link_ctx{&audio_reactive_};
@@ -925,8 +827,8 @@ private:
                 n->name = name_buf;
                 markDirty();
             }
-            ImGui::Separator();
-            ImGui::TextUnformatted("Transform");
+            ImGui::TextDisabled("Transform");
+            ImGui::Spacing();
 
             bool changed = false;
             if (ImGui::Checkbox("Visible", &n->visible)) changed = true;

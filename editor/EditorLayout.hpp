@@ -45,11 +45,12 @@ inline void beginEditorDockSpace(ImGuiID dockspace_id, bool& first_time_setup) {
         ImGui::DockBuilderSetNodeSize(dockspace_id, main_viewport->WorkSize);
 
         ImGuiID dock_main = dockspace_id;
-        const ImGuiID dock_left = ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Left, 0.20f, nullptr, &dock_main);
+        // Slightly roomier side panels for modern DCC density (hierarchy + inspector).
+        const ImGuiID dock_left = ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Left, 0.21f, nullptr, &dock_main);
         const ImGuiID dock_right =
-            ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Right, 0.24f, nullptr, &dock_main);
+            ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Right, 0.26f, nullptr, &dock_main);
         const ImGuiID dock_bottom =
-            ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Down, 0.08f, nullptr, &dock_main);
+            ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Down, 0.07f, nullptr, &dock_main);
 
         ImGui::DockBuilderDockWindow("Hierarchy", dock_left);
         ImGui::DockBuilderDockWindow("Inspector", dock_right);

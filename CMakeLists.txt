@@ -276,6 +276,7 @@ if(GENESIS_BUILD_EXAMPLES)
     add_executable(genesis_gltf_viewer
         examples/gltf_viewer/main.cpp
         editor/EditorSession.cpp
+        editor/EditorTheme.cpp
         editor/ParticleEmitterUi.cpp
     )
     target_link_libraries(genesis_gltf_viewer PRIVATE genesis_engine genesis_protocol genesis_protocol_ui genesis_audio imguizmo_lib)
