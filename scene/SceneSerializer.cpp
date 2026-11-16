@@ -532,7 +532,7 @@ ParticleEmitter particleEmitterFromJson(const json& j) {
     e.velocity_stretch = j.value("velocity_stretch", e.velocity_stretch);
     e.trail_enabled = j.value("trail_enabled", e.trail_enabled);
     e.trail_segments = static_cast<std::uint8_t>(
-        std::clamp(j.value("trail_segments", static_cast<int>(e.trail_segments)), 2, 12));
+        std::clamp(j.value("trail_segments", static_cast<int>(e.trail_segments)), 2, 24));
     e.trail_sample_distance = j.value("trail_sample_distance", e.trail_sample_distance);
     e.trail_width = j.value("trail_width", e.trail_width);
     e.trail_width_end = j.value("trail_width_end", e.trail_width_end);
