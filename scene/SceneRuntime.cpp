@@ -55,6 +55,7 @@ void SceneRuntime::clear() {
     particle_sphere_mesh_id_.reset();
     particle_sprite_mesh_id_.reset();
     particle_sprite_texture_id_.reset();
+    particle_ribbon_texture_id_.reset();
     fluid_box_mesh_id_.reset();
     fluid_display_material_id_.reset();
 }
@@ -403,6 +404,11 @@ void SceneRuntime::appendParticleDrawCommands(std::vector<SceneDrawCommand>& out
         particle_sprite_texture_id_ =
             addTexture("ParticleSoftCircle", GpuTexture::createSoftCircleSprite(context_, 256));
     }
+    if (!particle_ribbon_texture_id_.has_value()) {
+        // Soft capsule strip for Trail Renderer — continuous ribbon silhouette.
+        particle_ribbon_texture_id_ =
+            addTexture("ParticleSoftRibbon", GpuTexture::createSoftRibbonSprite(context_, 256));
+    }
 
     if (!particle_view_basis_.valid) {
         if (const Node* cam = scene_.activeOutputCameraNode()) {
@@ -430,6 +436,7 @@ void SceneRuntime::appendParticleDrawCommands(std::vector<SceneDrawCommand>& out
     unlit.roughness = 0.97f;
 
     const GpuTexture* soft_circle = texture(*particle_sprite_texture_id_);
+    const GpuTexture* soft_ribbon = texture(*particle_ribbon_texture_id_);
 
     for (const ParticleWorld::ParticleInstanceBatch& batch : batches) {
         const Mesh* mesh = nullptr;
@@ -461,7 +468,7 @@ void SceneRuntime::appendParticleDrawCommands(std::vector<SceneDrawCommand>& out
             cmd.instance_color = instance.color;
             cmd.additive = batch.additive;
             if (is_sprite) {
-                cmd.base_color_texture = soft_circle;
+                cmd.base_color_texture = batch.ribbon ? soft_ribbon : soft_circle;
             }
             out.push_back(cmd);
         }
@@ -598,6 +605,7 @@ void SceneRuntime::loadGltfSource(const std::filesystem::path& path) {
     particle_sphere_mesh_id_.reset();
     particle_sprite_mesh_id_.reset();
     particle_sprite_texture_id_.reset();
+    particle_ribbon_texture_id_.reset();
     fluid_box_mesh_id_.reset();
     fluid_display_material_id_.reset();
 

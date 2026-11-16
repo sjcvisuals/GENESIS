@@ -505,11 +505,11 @@ void ParticleWorld::stepOnce(Scene& scene, float dt) {
                 const float moved = glm::length(world_pos - p.trail_last_sample);
                 p.trail_dist_accum += moved;
                 p.trail_last_sample = world_pos;
-                // Dense samples + subdiv discs → continuous ribbon (spacing << local width).
-                const float sample_dist = std::max(0.008f, p.trail_sample_distance);
+                // Sample spacing sets ribbon segment length; soft capsule ends overlap.
+                const float sample_dist = std::max(0.015f, p.trail_sample_distance);
                 // Seed history quickly so young particles already show tip→head taper.
                 const float early_dist =
-                    p.trail_count < 8 ? std::min(sample_dist, 0.01f) : sample_dist;
+                    p.trail_count < 5 ? std::min(sample_dist, 0.02f) : sample_dist;
                 while (p.trail_dist_accum >= early_dist) {
                     p.trail_dist_accum -= early_dist;
                     push_trail_sample(world_pos);
@@ -573,11 +573,12 @@ void ParticleWorld::rebuildToTime(Scene& scene, double production_time_seconds, 
 
 void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleInstanceBatch>& out,
                                      const ParticleViewBasis& view) const {
-    // Batches: mesh × unlit × additive (12 slots). Keeps GPU instancing cheap.
+    // Batches: mesh × unlit × additive (12) + sprite ribbon trails (4). Keeps GPU instancing cheap.
     out.clear();
-    out.resize(12);
-    auto set_batch = [&](std::size_t i, ParticleRenderMesh mesh, bool unlit, bool additive) {
-        out[i] = {mesh, unlit, additive, {}};
+    out.resize(16);
+    auto set_batch = [&](std::size_t i, ParticleRenderMesh mesh, bool unlit, bool additive,
+                         bool ribbon = false) {
+        out[i] = {mesh, unlit, additive, ribbon, {}};
     };
     set_batch(0, ParticleRenderMesh::Cube, false, false);
     set_batch(1, ParticleRenderMesh::Cube, true, false);
@@ -591,6 +592,11 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
     set_batch(9, ParticleRenderMesh::Sprite, true, false);
     set_batch(10, ParticleRenderMesh::Sprite, false, true);
     set_batch(11, ParticleRenderMesh::Sprite, true, true);
+    // Soft-ribbon trail strips (same mesh, ribbon texture in SceneRuntime).
+    set_batch(12, ParticleRenderMesh::Sprite, false, false, true);
+    set_batch(13, ParticleRenderMesh::Sprite, true, false, true);
+    set_batch(14, ParticleRenderMesh::Sprite, false, true, true);
+    set_batch(15, ParticleRenderMesh::Sprite, true, true, true);
 
     // Billboard basis from the view camera. Gram–Schmidt so soft discs stay round
     // (sheared right/up collapses quads into horizontal/vertical streaks).
@@ -655,65 +661,64 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
         }
         const std::size_t batch_index = mesh_base + (p.additive ? 2u : 0u) + (p.unlit ? 1u : 0u);
 
-        auto push_sprite = [&](const glm::mat4& model, const glm::vec4& tint) {
+        auto push_sprite = [&](const glm::mat4& model, const glm::vec4& tint,
+                               std::size_t dest_batch) {
             GpuMeshInstance instance{};
             fillGpuMeshInstance(instance, model, glm::vec3(-0.5f), glm::vec3(0.5f));
             instance.color = tint;
-            out[batch_index].instances.push_back(instance);
+            out[dest_batch].instances.push_back(instance);
         };
 
-        // Trail Renderer: dense overlapping soft discs → continuous tapering ribbon.
-        // Soft radial sprites only merge into a ribbon when centers sit well inside each disc;
-        // path-stretched ellipses still look beaded. Keep spacing << local width.
+        // Trail Renderer: one soft wedge ribbon tip→neck (comet silhouette in stills).
+        // Texture itself tapers tip→head; avoids disc beads / segmented capsule columns.
         if (p.trail_enabled && p.trail_count >= 2 && p.mesh == ParticleRenderMesh::Sprite) {
             const float trail_age_fade =
                 std::clamp(1.0f - (p.age / std::max(p.trail_lifetime * 2.5f, 0.1f)) * 0.12f, 0.75f,
                            1.0f);
-            const float denom = static_cast<float>(std::max<int>(p.trail_count - 1, 1));
             const float head_w = std::max(size, 0.04f);
-            const float width_tip_frac = std::clamp(p.trail_width_end, 0.05f, 0.35f);
-            const float width_head_frac = std::clamp(p.trail_width, 0.3f, 0.8f);
+            const float width_head_frac = std::clamp(p.trail_width, 0.35f, 1.0f);
+            const std::size_t trail_batch =
+                12u + (p.additive ? 2u : 0u) + (p.unlit ? 1u : 0u);
 
-            auto width_at = [&](float u) {
-                const float t = std::clamp(u, 0.0f, 1.0f);
-                // Cubic: tip stays pointed for most of the wake, flares into the neck.
-                const float s = t * t * t;
-                return head_w * glm::mix(width_tip_frac, width_head_frac, s);
-            };
-
-            auto push_disc = [&](const glm::vec3& pos, float width, float alpha_mul) {
-                if (width < head_w * 0.05f) {
-                    return;
+            const glm::vec3 tip = p.trail_pos[0];
+            // Stop short of the live particle so the round soft circle owns the head.
+            const glm::vec3 neck = glm::mix(p.trail_pos[p.trail_count - 2], world_pos, 0.28f);
+            glm::vec3 seg = neck - tip;
+            float seg_len = glm::length(seg);
+            // Wait for a readable wake length so short stubs don't read as vapor blobs.
+            if (p.trail_count >= 4 && seg_len > head_w * 1.15f) {
+                glm::vec3 along = seg / seg_len;
+                along = along - cam_forward * glm::dot(along, cam_forward);
+                const float along_len = glm::length(along);
+                if (along_len < 1e-4f) {
+                    along = cam_up;
+                } else {
+                    along /= along_len;
                 }
+                glm::vec3 across = glm::cross(cam_forward, along);
+                const float across_len = glm::length(across);
+                if (across_len < 1e-4f) {
+                    across = cam_right;
+                } else {
+                    across /= across_len;
+                }
+
+                // Quad width = neck; wedge texture paints tip→point inside that width.
+                const float ribbon_w = head_w * width_head_frac;
+                const float half_len = seg_len * 0.5f;
+                const glm::vec3 mid = (tip + neck) * 0.5f;
+
                 glm::vec4 trail_color = color;
-                trail_color.a *= p.trail_alpha * alpha_mul * trail_age_fade;
-                // Keep below head so the round circle still pops; avoid opaque fat columns.
-                trail_color.a = std::clamp(trail_color.a, 0.0f, 0.48f);
-                glm::mat4 model(1.0f);
-                model[0] = glm::vec4(cam_right * width, 0.0f);
-                model[1] = glm::vec4(cam_up * width, 0.0f);
-                model[2] = glm::vec4(cam_forward, 0.0f);
-                model[3] = glm::vec4(pos, 1.0f);
-                push_sprite(model, trail_color);
-            };
+                trail_color.a *= p.trail_alpha * trail_age_fade;
+                // Solid enough to read as a comet ribbon in stills; below the head alpha.
+                trail_color.a = std::clamp(std::max(trail_color.a, 0.42f), 0.0f, 0.72f);
 
-            // Dense discs per segment: center spacing ~ sample/kSubdiv << local width.
-            constexpr int kSubdiv = 6;
-            for (std::uint8_t si = 0; si + 1 < p.trail_count; ++si) {
-                const glm::vec3 p0 = p.trail_pos[si];
-                const glm::vec3 p1 = p.trail_pos[si + 1];
-                const float u0 = static_cast<float>(si) / denom;
-                const float u1 = static_cast<float>(si + 1) / denom;
-                for (int k = 0; k < kSubdiv; ++k) {
-                    const float t = static_cast<float>(k) / static_cast<float>(kSubdiv);
-                    const float u = glm::mix(u0, u1, t);
-                    if (si + 1 == p.trail_count - 1 && k >= kSubdiv - 1) {
-                        continue; // head sprite owns the live particle
-                    }
-                    const float width = width_at(u);
-                    const float alpha_mul = 0.28f + 0.72f * (u * u);
-                    push_disc(glm::mix(p0, p1, t), width, alpha_mul);
-                }
+                glm::mat4 model(1.0f);
+                model[0] = glm::vec4(across * ribbon_w, 0.0f);
+                model[1] = glm::vec4(along * half_len, 0.0f);
+                model[2] = glm::vec4(cam_forward, 0.0f);
+                model[3] = glm::vec4(mid, 1.0f);
+                push_sprite(model, trail_color, trail_batch);
             }
         }
 
@@ -734,11 +739,11 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
             model[1] = glm::vec4(cam_up * hy, 0.0f);
             model[2] = glm::vec4(cam_forward, 0.0f);
             model[3] = glm::vec4(world_pos, 1.0f);
-            push_sprite(model, head_color);
+            push_sprite(model, head_color, batch_index);
         } else {
             model = glm::translate(glm::mat4(1.0f), world_pos);
             model = glm::scale(model, glm::vec3(size));
-            push_sprite(model, color);
+            push_sprite(model, color, batch_index);
         }
     }
 
