@@ -605,9 +605,15 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
             size_mul *= glm::mix(pe.scale_by_speed_mul_min, pe.scale_by_speed_mul_max, u);
         }
 
-        const float size = p.size0 * size_mul;
-        const glm::vec4 color =
+        // Soft floor on world size — tiny additive discs strobe as fireflies.
+        const float size = std::max(0.035f, p.size0 * size_mul);
+        glm::vec4 color =
             p.color_curve.count > 0 ? p.color_curve.evaluate(t) : glm::vec4(1.0f, 1.0f, 1.0f, 1.0f - t);
+        // Bloom-safe soft particle: keep peak energy moderate under SrcAlpha/One.
+        color.r = std::min(color.r, 0.92f);
+        color.g = std::min(color.g, 0.94f);
+        color.b = std::min(color.b, 1.0f);
+        color.a = std::clamp(color.a, 0.0f, 0.88f);
 
         glm::vec3 world_pos = p.position;
         if (!p.world_space) {
@@ -649,13 +655,15 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
             for (std::uint8_t si = 0; si + 1 < p.trail_count; ++si) {
                 const float t = static_cast<float>(si) / denom; // 0 = tip, 1 ≈ head
                 const float width =
-                    glm::mix(p.trail_width_end, p.trail_width, t) * std::max(size_mul, 0.2f);
-                if (width < 1e-4f) {
+                    glm::mix(p.trail_width_end, p.trail_width, t) * std::max(size_mul, 0.35f);
+                // Skip sub-pixel tip samples — they read as sparkle/fireflies.
+                if (width < 0.018f) {
                     continue;
                 }
-                const float tip_fade = 0.2f + 0.8f * t;
+                const float tip_fade = 0.25f + 0.75f * t;
                 glm::vec4 trail_color = color;
                 trail_color.a *= p.trail_alpha * tip_fade * trail_age_fade;
+                trail_color.a = std::min(trail_color.a, 0.7f);
 
                 const float hx = width;
                 const float hy = width;

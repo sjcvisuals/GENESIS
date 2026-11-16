@@ -63,7 +63,10 @@ FrameUniforms buildFrameUniforms(const Scene& scene, const float* view_proj_col_
     u.camera_pos[2] = camera_position.z;
     u.camera_pos[3] = color ? std::max(color->exposure, 0.01f) : 1.0f;
 
-    const float grain = color ? std::clamp(color->grain_strength, 0.0f, 0.2f) : 0.018f;
+    // fog_color.a carries film-grain strength. Default 0 — grain reads as fireflies on soft additive.
+    // Ambient/fog filled below based on whether the scene has analytic lights (main Remover path).
+    const float grain = color ? std::clamp(color->grain_strength, 0.0f, 0.2f) : 0.0f;
+
     u.display_params[0] = color ? static_cast<float>(static_cast<int>(color->display)) : 0.0f;
     u.display_params[1] = color ? std::clamp(color->bloom_strength, 0.0f, 2.0f) : 0.18f;
     u.display_params[2] = color ? std::clamp(color->vignette_strength, 0.0f, 1.0f) : 0.22f;

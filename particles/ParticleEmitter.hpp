@@ -163,51 +163,49 @@ inline ParticleEmitter makeDefaultParticleEmitter() {
     return e;
 }
 
-// Gentle soft circles rising with a tapering trail (primary Niagara-like look).
+// Gentle soft circles rising with a tapering trail (default Niagara-like demo).
 inline ParticleEmitter makeGentleSoftEmitter() {
     ParticleEmitter e = makeDefaultParticleEmitter();
-    e.rate_per_second = 18.0f;
-    e.max_particles = 512;
-    e.lifetime_min = 3.0f;
-    e.lifetime_max = 5.0f;
-    e.speed_min = 0.25f;
-    e.speed_max = 0.45f;
-    e.size_min = 0.055f;
-    e.size_max = 0.09f;
-    e.size_end_multiplier = 0.2f;
-    e.color_start = glm::vec4(0.95f, 0.97f, 1.0f, 1.0f);
-    e.color_end = glm::vec4(0.7f, 0.85f, 1.0f, 0.0f);
-    e.gravity = glm::vec3(0.0f, 0.32f, 0.0f); // soft lift
-    e.drag = 0.25f;
+    e.rate_per_second = 22.0f;
+    e.max_particles = 384;
+    e.lifetime_min = 3.2f;
+    e.lifetime_max = 5.2f;
+    e.speed_min = 0.22f;
+    e.speed_max = 0.4f;
+    e.size_min = 0.085f;
+    e.size_max = 0.13f;
+    e.size_end_multiplier = 0.25f;
+    e.color_start = glm::vec4(0.88f, 0.93f, 1.0f, 0.85f);
+    e.color_end = glm::vec4(0.65f, 0.8f, 1.0f, 0.0f);
+    e.gravity = glm::vec3(0.0f, 0.3f, 0.0f); // soft lift
+    e.drag = 0.28f;
     e.spawn_shape = ParticleSpawnShape::Sphere;
-    e.spawn_radius = 0.55f;
+    e.spawn_radius = 0.5f;
     e.spawn_box_height = 0.1f;
-    e.cone_angle_degrees = 12.0f;
+    e.cone_angle_degrees = 10.0f;
     e.velocity_mode = ParticleVelocityMode::Cone;
     e.render_mesh = ParticleRenderMesh::Sprite;
     e.additive = true;
     e.unlit = true;
     e.sprite_aspect = 1.0f;
     e.velocity_stretch = 0.0f;
-    e.force_noise = true;
-    e.noise_strength = 0.04f;
-    e.noise_frequency = 0.4f;
+    e.force_noise = false; // noise → sparkle/fireflies on soft additive
     e.trail_enabled = true;
-    e.trail_segments = 8;
-    e.trail_sample_distance = 0.04f;
-    e.trail_width = 0.045f;
-    e.trail_width_end = 0.0f;
-    e.trail_alpha = 0.45f;
+    e.trail_segments = 7;
+    e.trail_sample_distance = 0.05f;
+    e.trail_width = 0.07f;
+    e.trail_width_end = 0.014f; // taper to a point, not a sub-pixel spark
+    e.trail_alpha = 0.48f;
     e.trail_lifetime = 1.6f;
     syncEmitterCurvesFromEndpoints(e);
     e.color_over_life.count = 3;
-    e.color_over_life.keys[0] = {0.0f, glm::vec4(0.92f, 0.96f, 1.0f, 0.4f)};
-    e.color_over_life.keys[1] = {0.1f, glm::vec4(0.95f, 0.98f, 1.0f, 0.95f)};
-    e.color_over_life.keys[2] = {1.0f, glm::vec4(0.6f, 0.78f, 1.0f, 0.0f)};
+    e.color_over_life.keys[0] = {0.0f, glm::vec4(0.85f, 0.92f, 1.0f, 0.35f)};
+    e.color_over_life.keys[1] = {0.12f, glm::vec4(0.9f, 0.95f, 1.0f, 0.82f)};
+    e.color_over_life.keys[2] = {1.0f, glm::vec4(0.55f, 0.72f, 0.95f, 0.0f)};
     e.size_over_life.count = 3;
-    e.size_over_life.keys[0] = {0.0f, 0.7f};
-    e.size_over_life.keys[1] = {0.15f, 1.0f};
-    e.size_over_life.keys[2] = {1.0f, 0.2f};
+    e.size_over_life.keys[0] = {0.0f, 0.75f};
+    e.size_over_life.keys[1] = {0.2f, 1.0f};
+    e.size_over_life.keys[2] = {1.0f, 0.25f};
     return e;
 }
 
@@ -215,7 +213,7 @@ inline ParticleEmitter makeGentleSoftEmitter() {
 inline ParticleEmitter makeGentleCirclesEmitter() {
     ParticleEmitter e = makeGentleSoftEmitter();
     e.trail_enabled = false;
-    e.rate_per_second = 26.0f;
+    e.rate_per_second = 22.0f;
     return e;
 }
 
@@ -225,33 +223,33 @@ inline ParticleEmitter makeBubbleRingEmitter() {
 
 inline ParticleEmitter makeOscTrackerBubbleEmitter() {
     ParticleEmitter e = makeGentleSoftEmitter();
-    e.rate_per_second = 22.0f;
-    e.max_particles = 1536;
-    e.lifetime_min = 1.8f;
-    e.lifetime_max = 3.2f;
-    e.speed_min = 0.25f;
-    e.speed_max = 0.55f;
-    e.size_min = 0.04f;
-    e.size_max = 0.07f;
+    e.rate_per_second = 14.0f;
+    e.max_particles = 512;
+    e.lifetime_min = 2.4f;
+    e.lifetime_max = 4.0f;
+    e.speed_min = 0.22f;
+    e.speed_max = 0.42f;
+    e.size_min = 0.065f;
+    e.size_max = 0.1f;
     e.spawn_shape = ParticleSpawnShape::Point;
     e.spawn_radius = 0.05f;
-    e.cone_angle_degrees = 12.0f;
-    e.spawn_per_unit = 28.0f;
-    e.inherit_velocity = 0.35f;
+    e.cone_angle_degrees = 10.0f;
+    e.spawn_per_unit = 20.0f;
+    e.inherit_velocity = 0.3f;
     e.gravity = glm::vec3(0.0f, 0.28f, 0.0f);
-    e.drag = 0.4f;
-    e.noise_strength = 0.1f;
+    e.drag = 0.32f;
+    e.force_noise = false;
     e.trail_enabled = true;
-    e.trail_segments = 8;
-    e.trail_sample_distance = 0.028f;
-    e.trail_width = 0.045f;
-    e.trail_width_end = 0.0f;
-    e.trail_alpha = 0.45f;
+    e.trail_segments = 6;
+    e.trail_sample_distance = 0.045f;
+    e.trail_width = 0.05f;
+    e.trail_width_end = 0.012f;
+    e.trail_alpha = 0.38f;
     syncEmitterCurvesFromEndpoints(e);
     e.color_over_life.count = 3;
-    e.color_over_life.keys[0] = {0.0f, glm::vec4(0.8f, 0.9f, 1.0f, 0.0f)};
-    e.color_over_life.keys[1] = {0.15f, glm::vec4(0.9f, 0.96f, 1.0f, 0.85f)};
-    e.color_over_life.keys[2] = {1.0f, glm::vec4(0.5f, 0.7f, 0.95f, 0.0f)};
+    e.color_over_life.keys[0] = {0.0f, glm::vec4(0.85f, 0.92f, 1.0f, 0.3f)};
+    e.color_over_life.keys[1] = {0.12f, glm::vec4(0.9f, 0.95f, 1.0f, 0.8f)};
+    e.color_over_life.keys[2] = {1.0f, glm::vec4(0.55f, 0.72f, 0.95f, 0.0f)};
     return e;
 }
 
