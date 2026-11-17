@@ -244,19 +244,11 @@ void Input::configureRoomOscIfNeeded(const std::string& resource_path) {
     }
     ::genesis::OscProtocol& osc = ::genesis::sharedOscProtocol();
     ::genesis::OscRoomPersonSettings room = osc.roomPersonSettings();
-    room.enabled = true;
-    room.address = "/genesis/room/person";
-    room.feet_emitter_path = "Scene/Particle System/Person Feet";
-    room.wall_emitter_path = "Scene/Particle System/Wall Trace";
-    room.ray_emitter_path = "Scene/Particle System/Center Ray";
-    room.room_radius = 3.0f;
-    room.tank_radius = 1.0f;
-    room.room_half_x = room.room_radius;
-    room.room_half_z = room.room_radius;
+    ::genesis::configureRoomOscInstallSettings(room);
     osc.setRoomPersonSettings(room);
 
     ::genesis::OscParticleEmitSettings emit = osc.particleEmitSettings();
-    emit.emitter_path = "Scene/Particle System/Person Feet";
+    emit.emitter_path = "Scene/Person Pool/Feet 00";
     emit.track_emitter_position = true;
     emit.burst_on_message = false;
     osc.setParticleEmitSettings(emit);

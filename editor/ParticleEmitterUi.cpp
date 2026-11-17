@@ -300,7 +300,7 @@ void drawParticleEmitterInspector(Node& emitter_node, const std::string& node_pa
         dirty |= ImGui::DragFloat("Spawn radius", &e.spawn_radius, 0.01f, 0.0f, 50.0f);
         dirty |= ImGui::DragFloat("Spawn height / box Y", &e.spawn_box_height, 0.01f, 0.0f, 50.0f);
         dirty |= ImGui::DragFloat("Cone angle", &e.cone_angle_degrees, 0.5f, 0.0f, 89.0f);
-        const char* vel_modes[] = {"Cone", "From point", "Random"};
+        const char* vel_modes[] = {"Cone", "From point", "Random", "Horizontal plane"};
         int vel_mode = static_cast<int>(e.velocity_mode);
         if (ImGui::Combo("Velocity mode", &vel_mode, vel_modes, IM_ARRAYSIZE(vel_modes))) {
             e.velocity_mode = static_cast<ParticleVelocityMode>(vel_mode);

@@ -302,6 +302,29 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
             }
             break;
         }
+        case ParticleVelocityMode::HorizontalPlane: {
+            // Drift on the floor plane (cylinder footprint) — never birth with +Y.
+            const float u = particleRandom01(seed, runtime.node_id, emit_index, kChanDirX);
+            const float v = particleRandom01(seed, runtime.node_id, emit_index, kChanDirY);
+            const float phi = v * glm::two_pi<float>();
+            const float radial_mix = 0.35f + 0.65f * u;
+            glm::vec3 planar(std::cos(phi) * radial_mix, 0.0f, std::sin(phi) * radial_mix);
+            // Prefer tangential swirl around the emitter so the ring reads as a cylinder.
+            const glm::vec3 world_pos = origin + glm::mat3(world) * local_offset;
+            glm::vec3 radial = world_pos - origin;
+            radial.y = 0.0f;
+            if (glm::dot(radial, radial) > 1e-8f) {
+                radial = glm::normalize(radial);
+                const glm::vec3 tangent = glm::normalize(glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), radial));
+                planar = glm::normalize(tangent * (0.75f + 0.25f * u) + radial * (0.35f * (1.0f - u)));
+            } else if (glm::dot(planar, planar) > 1e-8f) {
+                planar = glm::normalize(planar);
+            } else {
+                planar = glm::vec3(1.0f, 0.0f, 0.0f);
+            }
+            direction = planar;
+            break;
+        }
         case ParticleVelocityMode::Random:
             direction = randomUnitVector(seed, runtime.node_id, emit_index);
             break;
