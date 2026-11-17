@@ -325,13 +325,15 @@ GpuTexture GpuTexture::createSoftRibbonSprite(const VulkanContext& context, cons
                 const float soft = edge * edge * (3.0f - 2.0f * edge); // smoothstep
                 // Mild length fade at the very tip so the point reads soft, not clipped.
                 const float tip_fade = u < 0.06f ? (u / 0.06f) : 1.0f;
-                // Soft dissolve at the neck end so the mesh edge never cuts a flat seam under the ball.
+                // Minimal neck fade — only the last ~8% — so the wide neck stays opaque
+                // under the soft circle. Geometry overshoot in ParticleWorld scales with
+                // wake length to cover this fraction (fixed overshoot left long-trail gaps).
                 float neck_dissolve = 1.0f;
-                if (ny > 0.62f) {
-                    const float nd = 1.0f - (ny - 0.62f) / 0.38f;
+                if (ny > 0.84f) {
+                    const float nd = 1.0f - (ny - 0.84f) / 0.16f;
                     neck_dissolve = nd * nd * (3.0f - 2.0f * nd);
                 }
-                const float along = 0.74f + 0.26f * u;
+                const float along = 0.82f + 0.18f * u;
                 falloff = soft * tip_fade * neck_dissolve * along * kPeak;
             }
             falloff = std::clamp(falloff, 0.0f, 1.0f);
