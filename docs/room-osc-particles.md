@@ -73,6 +73,8 @@ Store: `/cursor/stores/bc-bfd4a606-4e38-4cd5-93d8-8ae247b97bf2/media/dual_ring_r
 
 ## Renderbridge notes
 
-- Same OSC stream + same scene + same `scene_seed` → matching particle sequences on dual GPU.
-- Room person events are queued with sequences (like particle emit) so each GPU session can apply them via its own cursor.
+- ExtGenesis (`Input::render`) applies both `applyParticleEmits` and **`applyRoomPerson`** with per-stream cursors; loading `room_osc_particles` configures feet/wall/ray paths + 6 m/2 m radii.
+- Soft Circles **motion updates run on GPU compute** (`particle_update.comp`); spawn/OSC bursts stay CPU-authored into the shared particle buffer. Trails sample after GPU readback.
+- Same OSC stream + same scene + same `scene_seed` → matching sequences on dual GPU (shared OSC hub, per-consumer cursors).
 - Prefer `/genesis/room/person` at a modest rate (e.g. 10–30 Hz) for smooth feet tracking without flooding bursts.
+- Host dual-GPU visual parity still wants a Pixera box check when available.

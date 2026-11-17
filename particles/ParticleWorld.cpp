@@ -1,5 +1,7 @@
 #include "particles/ParticleWorld.hpp"
 
+#include "renderer/vulkan/VulkanContext.hpp"
+
 #include "particles/FluidWorld.hpp"
 #include "particles/ParticleRng.hpp"
 
@@ -61,12 +63,25 @@ glm::vec3 curlNoiseApprox(const glm::vec3& p, float freq) {
 
 } // namespace
 
+void ParticleWorld::enableGpuCompute(const VulkanContext& context) {
+    try {
+        gpu_sim_ = std::make_unique<ParticleGpuSim>(context);
+        if (!gpu_sim_->ready()) {
+            gpu_sim_.reset();
+        }
+    } catch (...) {
+        gpu_sim_.reset();
+    }
+}
+
 void ParticleWorld::clear() {
     emitters_.clear();
     particles_.clear();
     free_list_.clear();
     global_step_ = 0;
     sim_time_seconds_ = 0.0;
+    pending_gpu_steps_ = 0;
+    pending_gpu_dt_ = 0.0f;
     stats_ = {};
 }
 
@@ -316,7 +331,7 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
     }
 }
 
-void ParticleWorld::stepOnce(Scene& scene, float dt) {
+void ParticleWorld::stepOnce(Scene& scene, float dt, bool update_particles) {
     syncEmitters(scene);
     stats_.emitters = static_cast<std::uint32_t>(emitters_.size());
 
@@ -400,6 +415,15 @@ void ParticleWorld::stepOnce(Scene& scene, float dt) {
         }
     }
 
+    if (update_particles) {
+        updateParticlesCpu(scene, dt);
+    }
+
+    ++global_step_;
+    sim_time_seconds_ += static_cast<double>(dt);
+}
+
+void ParticleWorld::updateParticlesCpu(Scene& scene, float dt) {
     std::uint32_t alive = 0;
     for (EmitterRuntime& runtime : emitters_) {
         runtime.alive_count = 0;
@@ -496,7 +520,6 @@ void ParticleWorld::stepOnce(Scene& scene, float dt) {
             world_pos = p.position;
         }
 
-        // Trail Renderer: sample motion history (deterministic; same on every GPU).
         if (p.trail_enabled) {
             auto push_trail_sample = [&](const glm::vec3& sample_pos) {
                 const std::uint8_t max_seg = std::min(p.trail_max_segments, kMaxTrailPoints);
@@ -520,13 +543,9 @@ void ParticleWorld::stepOnce(Scene& scene, float dt) {
                 const glm::vec3 prev = p.trail_last_sample;
                 const float moved = glm::length(world_pos - prev);
                 p.trail_dist_accum += moved;
-                // Sample spacing sets ribbon segment length; soft capsule ends overlap.
                 const float sample_dist = std::max(0.015f, p.trail_sample_distance);
-                // Seed history quickly so young particles already show tip→head taper.
                 const float early_dist =
                     p.trail_count < 6 ? std::min(sample_dist, 0.012f) : sample_dist;
-                // Place samples along prev→current so [0]=oldest stays behind travel
-                // (pushing world_pos repeatedly collapsed history onto the head).
                 float sampled = 0.0f;
                 while (p.trail_dist_accum >= early_dist) {
                     p.trail_dist_accum -= early_dist;
@@ -536,7 +555,6 @@ void ParticleWorld::stepOnce(Scene& scene, float dt) {
                     push_trail_sample(glm::mix(prev, world_pos, u));
                 }
                 p.trail_last_sample = world_pos;
-                // Keep the newest sample pinned to the live particle position.
                 if (p.trail_count > 0) {
                     p.trail_pos[p.trail_count - 1] = world_pos;
                 }
@@ -565,19 +583,156 @@ void ParticleWorld::stepOnce(Scene& scene, float dt) {
     }
 
     stats_.alive = alive;
-    ++global_step_;
-    sim_time_seconds_ += static_cast<double>(dt);
 }
 
 void ParticleWorld::simulate(Scene& scene, std::uint64_t steps, float dt) {
     stats_.steps = static_cast<std::uint32_t>(steps);
+    const bool defer_update = gpuComputeEnabled();
     for (std::uint64_t i = 0; i < steps; ++i) {
-        stepOnce(scene, dt);
+        stepOnce(scene, dt, !defer_update);
+    }
+    if (defer_update && steps > 0) {
+        pending_gpu_steps_ += static_cast<std::uint32_t>(steps);
+        pending_gpu_dt_ = dt;
     }
     if (steps == 0) {
         syncEmitters(scene);
         stats_.emitters = static_cast<std::uint32_t>(emitters_.size());
         recountAlive();
+    }
+}
+
+void ParticleWorld::flushGpuUpdates(VkCommandBuffer cmd, Scene& scene) {
+    // cmd may be null — motion uses VulkanContext::immediateSubmit for host readback.
+    if (!gpuComputeEnabled() || pending_gpu_steps_ == 0) {
+        return;
+    }
+
+    std::vector<GpuParticle> gpu = packGpuParticles(scene);
+    if (gpu.empty()) {
+        pending_gpu_steps_ = 0;
+        recountAlive();
+        return;
+    }
+
+    const float start_time = static_cast<float>(sim_time_seconds_) -
+                             static_cast<float>(pending_gpu_steps_) * pending_gpu_dt_;
+    const std::uint32_t count = static_cast<std::uint32_t>(gpu.size());
+    const std::uint32_t steps = pending_gpu_steps_;
+    const float dt = pending_gpu_dt_;
+    gpu_sim_->upload(gpu.data(), count);
+    // One-shot submit so compute finishes before host readback (hybrid CPU trail path).
+    gpu_sim_->context().immediateSubmit([&](VkCommandBuffer submit_cmd) {
+        gpu_sim_->dispatchUpdates(submit_cmd, count, steps, dt, start_time);
+    });
+    gpu_sim_->download(gpu.data(), count);
+    unpackGpuParticles(gpu);
+    updateTrailsAfterGpu(scene, dt * static_cast<float>(steps));
+    pending_gpu_steps_ = 0;
+    recountAlive();
+    (void)cmd;
+}
+
+std::vector<GpuParticle> ParticleWorld::packGpuParticles(Scene& scene) const {
+    std::vector<GpuParticle> out;
+    out.reserve(particles_.size());
+    for (const Particle& p : particles_) {
+        GpuParticle g{};
+        g.pos_age = glm::vec4(p.position, p.age);
+        g.vel_life = glm::vec4(p.velocity, p.lifetime);
+        g.size_params = glm::vec4(p.size0, p.sprite_aspect, p.velocity_stretch, 0.0f);
+        std::uint32_t flags = p.alive ? kGpuParticleAlive : 0u;
+
+        ParticleEmitter desc = makeDefaultParticleEmitter();
+        if (const Node* node = scene.find(p.emitter_node);
+            node && node->particle_emitter.has_value()) {
+            desc = *node->particle_emitter;
+        }
+        if (desc.force_gravity) {
+            flags |= kGpuParticleGravity;
+            g.gravity = glm::vec4(desc.gravity, 0.0f);
+        }
+        if (desc.force_accel) {
+            flags |= kGpuParticleAccel;
+            g.accel_drag = glm::vec4(desc.acceleration, desc.drag);
+        }
+        if (desc.force_drag) {
+            flags |= kGpuParticleDrag;
+            g.accel_drag.w = desc.drag;
+        }
+        if (desc.kill_plane) {
+            flags |= kGpuParticleKillPlane;
+            g.kill_plane = glm::vec4(desc.kill_plane_y, 0.0f, 0.0f, 0.0f);
+        }
+        g.meta = glm::uvec4(flags, static_cast<std::uint32_t>(p.emitter_node),
+                            static_cast<std::uint32_t>(p.emit_index & 0xffffffffu), 0u);
+        out.push_back(g);
+    }
+    return out;
+}
+
+void ParticleWorld::unpackGpuParticles(const std::vector<GpuParticle>& gpu) {
+    const std::size_t n = std::min(gpu.size(), particles_.size());
+    free_list_.clear();
+    for (std::size_t i = 0; i < n; ++i) {
+        Particle& p = particles_[i];
+        const GpuParticle& g = gpu[i];
+        p.position = glm::vec3(g.pos_age);
+        p.age = g.pos_age.w;
+        p.velocity = glm::vec3(g.vel_life);
+        p.lifetime = g.vel_life.w;
+        p.alive = (g.meta.x & kGpuParticleAlive) != 0u;
+        if (!p.alive) {
+            free_list_.push_back(i);
+        }
+    }
+}
+
+void ParticleWorld::updateTrailsAfterGpu(Scene& scene, float /*total_dt*/) {
+    for (Particle& p : particles_) {
+        if (!p.alive || !p.trail_enabled) {
+            continue;
+        }
+        glm::vec3 world_pos = p.position;
+        if (!p.world_space) {
+            if (const Node* node = scene.find(p.emitter_node)) {
+                world_pos = glm::vec3(node->world * glm::vec4(p.position, 1.0f));
+            }
+        }
+        auto push_trail_sample = [&](const glm::vec3& sample_pos) {
+            const std::uint8_t max_seg = std::min(p.trail_max_segments, kMaxTrailPoints);
+            if (p.trail_count < max_seg) {
+                p.trail_pos[p.trail_count++] = sample_pos;
+            } else {
+                for (std::uint8_t ti = 1; ti < max_seg; ++ti) {
+                    p.trail_pos[ti - 1] = p.trail_pos[ti];
+                }
+                p.trail_pos[max_seg - 1] = sample_pos;
+                p.trail_count = max_seg;
+            }
+        };
+        if (!p.trail_has_sample) {
+            p.trail_last_sample = world_pos;
+            p.trail_has_sample = true;
+            p.trail_pos[0] = world_pos;
+            p.trail_count = 1;
+        } else {
+            const glm::vec3 prev = p.trail_last_sample;
+            const float moved = glm::length(world_pos - prev);
+            p.trail_dist_accum += moved;
+            const float sample_dist = std::max(0.015f, p.trail_sample_distance);
+            float sampled = 0.0f;
+            while (p.trail_dist_accum >= sample_dist) {
+                p.trail_dist_accum -= sample_dist;
+                sampled += sample_dist;
+                const float u = (moved > 1e-6f) ? std::clamp(sampled / moved, 0.0f, 1.0f) : 1.0f;
+                push_trail_sample(glm::mix(prev, world_pos, u));
+            }
+            p.trail_last_sample = world_pos;
+            if (p.trail_count > 0) {
+                p.trail_pos[p.trail_count - 1] = world_pos;
+            }
+        }
     }
 }
 

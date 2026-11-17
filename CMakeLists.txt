@@ -39,6 +39,7 @@ genesis_compile_shaders(genesis_shaders
     shaders/fluid_gradient.comp
     shaders/fluid_splat.comp
     shaders/fluid_present.comp
+    shaders/particle_update.comp
 )
 
 # -----------------------------------------------------------------------------
@@ -146,6 +147,7 @@ add_library(genesis_engine_runtime STATIC
     animation/AnimationGraph.cpp
     animation/AnimationEvaluator.cpp
     particles/ParticleWorld.cpp
+    particles/ParticleGpuSim.cpp
     particles/FluidGpuGrid.cpp
     particles/FluidWorld.cpp
     assets/GltfLoader.cpp

@@ -1,16 +1,21 @@
 #pragma once
 
 #include "particles/ParticleEmitter.hpp"
+#include "particles/ParticleGpuSim.hpp"
 #include "renderer/MeshInstance.hpp"
 #include "scene/Scene.hpp"
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <glm/vec3.hpp>
 #include <unordered_map>
 #include <vector>
+#include <volk.h>
 
 namespace genesis {
+
+class VulkanContext;
 
 struct ParticleSimStats {
     std::uint32_t alive = 0;
@@ -24,16 +29,25 @@ struct ParticleViewBasis {
     bool valid = false;
 };
 
-// Deterministic CPU particle world (Niagara-like modules, GPU-instanced draw).
+// Niagara-like particle world: CPU spawn + GPU compute motion (with CPU fallback).
 class ParticleWorld {
 public:
     void setSceneSeed(std::uint64_t seed) { scene_seed_ = seed; }
     std::uint64_t sceneSeed() const { return scene_seed_; }
 
+    // Enable GPU compute updates (Soft Circles motion). No-op if shaders missing.
+    void enableGpuCompute(const VulkanContext& context);
+    bool gpuComputeEnabled() const { return gpu_sim_ != nullptr && gpu_sim_->ready(); }
+
     void clear();
     void reset();
 
+    // Fixed-step sim. When GPU is enabled this only advances emitters/spawns and queues
+    // GPU motion updates for flushGpuUpdates().
     void simulate(Scene& scene, std::uint64_t steps, float dt);
+
+    // Dispatch queued GPU motion updates into cmd (call after beginFrame, before draw collect).
+    void flushGpuUpdates(VkCommandBuffer cmd, Scene& scene);
 
     std::uint32_t emitBurstAtWorld(Scene& scene, NodeId emitter_node, const glm::vec3& world_position,
                                    std::uint32_t count);
@@ -111,11 +125,15 @@ private:
     };
 
     void syncEmitters(Scene& scene);
-    void stepOnce(Scene& scene, float dt);
+    void stepOnce(Scene& scene, float dt, bool update_particles);
+    void updateParticlesCpu(Scene& scene, float dt);
     void spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, const ParticleEmitter& desc,
                           const Node& node, std::uint32_t count,
                           const glm::vec3* origin_override = nullptr);
     void recountAlive();
+    void updateTrailsAfterGpu(Scene& scene, float dt);
+    std::vector<GpuParticle> packGpuParticles(Scene& scene) const;
+    void unpackGpuParticles(const std::vector<GpuParticle>& gpu);
     std::size_t allocateParticle();
     EmitterRuntime* findEmitterRuntime(NodeId id);
 
@@ -127,6 +145,9 @@ private:
     std::vector<std::size_t> free_list_;
     ParticleSimStats stats_{};
     class FluidWorld* fluid_world_ = nullptr;
+    std::unique_ptr<ParticleGpuSim> gpu_sim_;
+    std::uint32_t pending_gpu_steps_ = 0;
+    float pending_gpu_dt_ = 0.0f;
 };
 
 } // namespace genesis

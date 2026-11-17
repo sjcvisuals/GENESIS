@@ -64,7 +64,10 @@ private:
     std::uint32_t width_ = 1920;
     std::uint32_t height_ = 1080;
     std::uint64_t osc_particle_cursor_ = 0;
+    std::uint64_t osc_room_person_cursor_ = 0;
     double osc_time_seconds_ = 0.0;
+
+    void configureRoomOscIfNeeded(const std::string& resource_path);
 };
 
 } // namespace rxext::genesis_ext

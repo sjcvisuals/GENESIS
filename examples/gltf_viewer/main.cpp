@@ -271,6 +271,8 @@ protected:
             runtime_.setParticleViewBasis(glm::normalize(glm::vec3(inv[0])),
                                          glm::normalize(glm::vec3(inv[1])));
         }
+        // GPU particle motion flush (immediate compute submit) before collecting sprites.
+        runtime_.flushParticleGpuUpdates(VK_NULL_HANDLE);
         runtime_.appendParticleDrawCommands(draw_commands_);
         render_stats.draw_calls = static_cast<std::uint32_t>(draw_commands_.size());
         // Recount triangles roughly including particles.
