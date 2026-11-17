@@ -702,39 +702,56 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
             const std::size_t trail_batch =
                 12u + (p.additive ? 2u : 0u) + (p.unlit ? 1u : 0u);
 
-            // History: [0]=oldest … [count-1]=newest (pinned). Niagara wake must lag BEHIND
-            // the ball along velocity — never lead. Build along from velocity first so a
-            // misplaced oldest sample cannot flip the ribbon ahead of the head.
+            // History: [0]=oldest … [count-1]=newest (pinned).
+            // Round H: place tip in WORLD space opposite velocity, then billboard tip→head.
+            // Soft-ribbon texture: V=0 tip at local -Y, V=1 neck at local +Y.
+            // model[1] = +along*(tip→head) ⇒ neck under soft circle, tip behind travel.
             const glm::vec3 head = world_pos;
             const glm::vec3 oldest = p.trail_pos[0];
             auto project_plane = [&](glm::vec3 v) {
-                v = v - cam_forward * glm::dot(v, cam_forward);
-                return v;
+                return v - cam_forward * glm::dot(v, cam_forward);
             };
-            glm::vec3 along(0.0f);
-            float wake_len = 0.0f;
-            {
-                // +along = toward head from behind = velocity direction (path of travel).
-                glm::vec3 vel_along = project_plane(p.velocity);
-                const float vl = glm::length(vel_along);
-                glm::vec3 hist = project_plane(head - oldest); // oldest→head
-                const float hl = glm::length(hist);
-                if (vl > 1e-4f) {
-                    along = vel_along / vl;
-                    // Wake length from history projected onto -velocity (behind).
-                    wake_len = (hl > 1e-4f) ? std::max(0.0f, glm::dot(hist, along)) : 0.0f;
-                    if (wake_len < head_w * 0.25f) {
-                        wake_len = std::max(hl, head_w * 0.5f);
-                    }
-                } else if (hl > 1e-4f) {
-                    along = hist / hl;
-                    wake_len = hl;
-                } else {
-                    along = cam_up;
-                    wake_len = head_w * 0.5f;
-                }
+
+            glm::vec3 travel = p.velocity;
+            if (glm::dot(travel, travel) < 1e-8f) {
+                travel = head - oldest;
             }
-            if (wake_len > head_w * 0.2f) {
+            if (glm::dot(travel, travel) < 1e-8f) {
+                travel = glm::vec3(0.0f, 1.0f, 0.0f);
+            }
+            travel = glm::normalize(travel);
+
+            float wake_len = glm::length(head - oldest);
+            if (wake_len < head_w * 0.25f) {
+                wake_len = head_w * 0.75f;
+            }
+            const float tip_pad = head_w * 0.1f;
+            const float ribbon_len = wake_len + tip_pad;
+
+            if (ribbon_len > head_w * 0.2f) {
+                // World tip strictly behind travel (Rising Soft Circles ⇒ tip below head).
+                const glm::vec3 tip = head - travel * ribbon_len;
+                // Billboard: along = tip→head in the camera plane; across ⊥ along.
+                glm::vec3 along = project_plane(head - tip);
+                float along_len = glm::length(along);
+                if (along_len < 1e-4f) {
+                    along = project_plane(travel);
+                    along_len = glm::length(along);
+                    along = (along_len > 1e-4f) ? (along / along_len) : cam_up;
+                } else {
+                    along /= along_len;
+                }
+                // Screen-space polarity: tip must appear opposite travel on screen.
+                // project(travel) points the way the head moves on the camera plane; the tip
+                // belongs on the opposite side of the head from that motion.
+                const glm::vec3 move_proj = project_plane(travel);
+                const float move_len = glm::length(move_proj);
+                if (move_len > 1e-4f) {
+                    const glm::vec3 move_dir = move_proj / move_len;
+                    // along should equal move_dir (tip→head = travel). Force it.
+                    along = move_dir;
+                }
+
                 glm::vec3 across = glm::cross(cam_forward, along);
                 const float across_len = glm::length(across);
                 if (across_len < 1e-4f) {
@@ -743,17 +760,10 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
                     across /= across_len;
                 }
 
-                // Quad mesh local Y ∈ [-0.5,+0.5] → model[1] magnitude = full world length.
                 const float ribbon_w = head_w * std::clamp(width_head_frac, 0.65f, 0.92f);
-                const float tip_pad = head_w * 0.1f;
-                // ahead-of-head bug: neck_end = head + along*(~1.35*head_w) with along=tip→head
-                // put the wide neck past the leading rim. Keep neck at/under the disc only.
-                const float into_core = head_w * 0.18f;
-                const glm::vec3 neck_end = head + along * into_core;
-                // Tip strictly behind: head - along * wake (opposite velocity / past path).
-                const glm::vec3 tip_end = head - along * (wake_len + tip_pad);
-                const float span = wake_len + tip_pad + into_core;
-                const glm::vec3 mid = tip_end + along * (span * 0.5f);
+                // Tip opposite move_dir from head; neck at head.
+                const glm::vec3 tip_end = head - along * ribbon_len;
+                const glm::vec3 mid = tip_end + along * (ribbon_len * 0.5f);
 
                 glm::vec4 trail_color = color;
                 trail_color.a *= p.trail_alpha * trail_age_fade * 0.92f;
@@ -761,7 +771,7 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
 
                 glm::mat4 model(1.0f);
                 model[0] = glm::vec4(across * ribbon_w, 0.0f);
-                model[1] = glm::vec4(along * span, 0.0f); // +Y → head (neck UV under ball)
+                model[1] = glm::vec4(along * ribbon_len, 0.0f); // +Y → head (neck UV)
                 model[2] = glm::vec4(cam_forward, 0.0f);
                 model[3] = glm::vec4(mid, 1.0f);
                 push_sprite(model, trail_color, trail_batch);
