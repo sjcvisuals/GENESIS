@@ -73,12 +73,13 @@ public:
         setRenderStatsEnabled(true);
         genesis::ensureEditorDataDirs();
         session_.loadRecentList();
-        // Readable stage for soft discs — keep midtones (QA brightness PASS); grain off.
-        renderer().setClearColor(0.14f, 0.155f, 0.175f, 1.0f);
-        color_mgmt_.settings().exposure = 1.22f;
-        color_mgmt_.settings().bloom_strength = 0.2f; // soft emissive glow — still below firefly
+        // Black unlit stage — only self-illuminated particles read as glow (prefs).
+        renderer().setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        color_mgmt_.settings().exposure = 1.15f;
+        color_mgmt_.settings().bloom_strength = 0.04f; // not bloom-as-blur; additive sprites carry glow
         color_mgmt_.settings().grain_strength = 0.0f;
-        color_mgmt_.settings().vignette_strength = 0.06f;
+        color_mgmt_.settings().vignette_strength = 0.0f;
+        show_grid_ = false;
 
         grid_mesh_ = genesis::createEditorGridMesh(renderer().context(), kGridHalfExtentM, kGridDivisions);
         if (color_mgmt_.lutDirty()) {
@@ -272,9 +273,21 @@ protected:
 
         const float aspect = refreshOutputAspect();
         const glm::mat4 vp = outputViewProjection(renderAspect());
-        const genesis::FrameUniforms frame =
+        genesis::FrameUniforms frame =
             genesis::buildFrameUniforms(runtime_.scene(), &vp[0][0], outputCameraPosition(),
                                         &color_mgmt_.settings(), look_time_seconds_);
+        // Particle look demos: pure black unlit stage (no ambient wash / fog fill).
+        frame.ibl_intensity = 0.0f;
+        frame.ambient_sky[0] = 0.0f;
+        frame.ambient_sky[1] = 0.0f;
+        frame.ambient_sky[2] = 0.0f;
+        frame.ambient_ground[0] = 0.0f;
+        frame.ambient_ground[1] = 0.0f;
+        frame.ambient_ground[2] = 0.0f;
+        frame.fog_density = 0.0f;
+        frame.fog_color[0] = 0.0f;
+        frame.fog_color[1] = 0.0f;
+        frame.fog_color[2] = 0.0f;
         renderer().setFrameUniforms(frame);
         look_time_seconds_ += last_frame_dt_;
     }
