@@ -209,6 +209,7 @@ add_library(genesis_protocol STATIC
     protocol/OscUdpReceiver.cpp
     protocol/OscProtocol.cpp
     protocol/OscParticleEmit.cpp
+    protocol/OscRoomPerson.cpp
 )
 target_include_directories(genesis_protocol PUBLIC ${CMAKE_SOURCE_DIR})
 target_link_libraries(genesis_protocol PUBLIC genesis_runtime)

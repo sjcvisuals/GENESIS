@@ -1,0 +1,919 @@
+{
+  "version": 1,
+  "source": "builtin",
+  "nodes": [
+    {
+      "path": "Scene",
+      "name": "Scene",
+      "parent": null,
+      "visible": true,
+      "transform": {
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "path": "Scene/Outer Room Wall",
+      "name": "Outer Room Wall",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "CylinderShell",
+      "material": "Room Wall",
+      "transform": {
+        "position": [
+          0.0,
+          1.6,
+          0.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          6.1,
+          3.2,
+          6.1
+        ]
+      }
+    },
+    {
+      "path": "Scene/Fish Tank Base",
+      "name": "Fish Tank Base",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "Cylinder",
+      "material": "Tank Base",
+      "transform": {
+        "position": [
+          0.0,
+          0.06,
+          0.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          2.05,
+          0.12,
+          2.05
+        ]
+      }
+    },
+    {
+      "path": "Scene/Fish Tank",
+      "name": "Fish Tank",
+      "parent": "Scene",
+      "visible": true,
+      "pickable": true,
+      "mesh": "Cylinder",
+      "material": "Tank Glass",
+      "transform": {
+        "position": [
+          0.0,
+          1.25,
+          0.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          2.0,
+          2.4,
+          2.0
+        ]
+      }
+    },
+    {
+      "path": "Scene/Particle System",
+      "name": "Particle System",
+      "parent": "Scene",
+      "visible": true,
+      "transform": {
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "path": "Scene/Particle System/Outer Ring",
+      "name": "Outer Ring",
+      "parent": "Scene/Particle System",
+      "visible": true,
+      "particle_emitter": {
+        "enabled": true,
+        "looping": true,
+        "world_space": true,
+        "duration": 0.0,
+        "start_delay": 0.0,
+        "rate": 5.0,
+        "burst": 0,
+        "max_particles": 180,
+        "lifetime_min": 5.0,
+        "lifetime_max": 7.5,
+        "speed_min": 0.12,
+        "speed_max": 0.22,
+        "size_min": 0.06,
+        "size_max": 0.085,
+        "size_end_multiplier": 0.45,
+        "color_start": [
+          1.0,
+          0.96,
+          0.78,
+          0.82
+        ],
+        "color_end": [
+          0.55,
+          0.75,
+          1.0,
+          0.0
+        ],
+        "velocity_mode": "cone",
+        "inherit_velocity": 0.0,
+        "force_gravity": true,
+        "gravity": [
+          0.0,
+          0.22,
+          0.0
+        ],
+        "force_drag": true,
+        "drag": 0.25,
+        "force_noise": false,
+        "kill_plane": false,
+        "kill_box": false,
+        "size_over_life": {
+          "keys": [
+            {
+              "t": 0.0,
+              "v": 0.9
+            },
+            {
+              "t": 0.2,
+              "v": 1.0
+            },
+            {
+              "t": 1.0,
+              "v": 0.4
+            }
+          ]
+        },
+        "color_over_life": {
+          "keys": [
+            {
+              "t": 0.0,
+              "v": [
+                1.0,
+                0.94,
+                0.7,
+                0.35
+              ]
+            },
+            {
+              "t": 0.2,
+              "v": [
+                0.9,
+                0.98,
+                0.85,
+                0.8
+              ]
+            },
+            {
+              "t": 1.0,
+              "v": [
+                0.5,
+                0.72,
+                1.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        "spawn_shape": "ring",
+        "spawn_radius": 3.0,
+        "spawn_box_height": 0.06,
+        "cone_angle_degrees": 6.0,
+        "render_mesh": "sprite",
+        "sprite_aspect": 1.0,
+        "velocity_stretch": 0.0,
+        "trail_enabled": true,
+        "trail_segments": 12,
+        "trail_sample_distance": 0.045,
+        "trail_width": 0.85,
+        "trail_width_end": 0.1,
+        "trail_alpha": 0.75,
+        "trail_lifetime": 3.0,
+        "unlit": true,
+        "additive": true,
+        "seed_override": 0,
+        "fluid_coupled": false,
+        "spawn_per_unit": 0.0
+      },
+      "transform": {
+        "position": [
+          0.0,
+          0.05,
+          0.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "path": "Scene/Particle System/Inner Tank Ring",
+      "name": "Inner Tank Ring",
+      "parent": "Scene/Particle System",
+      "visible": true,
+      "particle_emitter": {
+        "enabled": true,
+        "looping": true,
+        "world_space": true,
+        "duration": 0.0,
+        "start_delay": 0.0,
+        "rate": 4.0,
+        "burst": 0,
+        "max_particles": 120,
+        "lifetime_min": 4.5,
+        "lifetime_max": 6.5,
+        "speed_min": 0.14,
+        "speed_max": 0.24,
+        "size_min": 0.055,
+        "size_max": 0.08,
+        "size_end_multiplier": 0.45,
+        "color_start": [
+          1.0,
+          0.96,
+          0.78,
+          0.82
+        ],
+        "color_end": [
+          0.55,
+          0.75,
+          1.0,
+          0.0
+        ],
+        "velocity_mode": "cone",
+        "inherit_velocity": 0.0,
+        "force_gravity": true,
+        "gravity": [
+          0.0,
+          0.24,
+          0.0
+        ],
+        "force_drag": true,
+        "drag": 0.24,
+        "force_noise": false,
+        "kill_plane": false,
+        "kill_box": false,
+        "size_over_life": {
+          "keys": [
+            {
+              "t": 0.0,
+              "v": 0.9
+            },
+            {
+              "t": 0.2,
+              "v": 1.0
+            },
+            {
+              "t": 1.0,
+              "v": 0.4
+            }
+          ]
+        },
+        "color_over_life": {
+          "keys": [
+            {
+              "t": 0.0,
+              "v": [
+                1.0,
+                0.94,
+                0.7,
+                0.35
+              ]
+            },
+            {
+              "t": 0.2,
+              "v": [
+                0.9,
+                0.98,
+                0.85,
+                0.8
+              ]
+            },
+            {
+              "t": 1.0,
+              "v": [
+                0.5,
+                0.72,
+                1.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        "spawn_shape": "ring",
+        "spawn_radius": 1.0,
+        "spawn_box_height": 0.05,
+        "cone_angle_degrees": 6.0,
+        "render_mesh": "sprite",
+        "sprite_aspect": 1.0,
+        "velocity_stretch": 0.0,
+        "trail_enabled": true,
+        "trail_segments": 11,
+        "trail_sample_distance": 0.042,
+        "trail_width": 0.82,
+        "trail_width_end": 0.1,
+        "trail_alpha": 0.78,
+        "trail_lifetime": 3.0,
+        "unlit": true,
+        "additive": true,
+        "seed_override": 0,
+        "fluid_coupled": false,
+        "spawn_per_unit": 0.0
+      },
+      "transform": {
+        "position": [
+          0.0,
+          0.05,
+          0.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "path": "Scene/Particle System/Person Feet",
+      "name": "Person Feet",
+      "parent": "Scene/Particle System",
+      "visible": true,
+      "particle_emitter": {
+        "enabled": true,
+        "looping": true,
+        "world_space": true,
+        "duration": 0.0,
+        "start_delay": 0.0,
+        "rate": 14.0,
+        "burst": 0,
+        "max_particles": 220,
+        "lifetime_min": 2.8,
+        "lifetime_max": 4.2,
+        "speed_min": 0.2,
+        "speed_max": 0.35,
+        "size_min": 0.055,
+        "size_max": 0.08,
+        "size_end_multiplier": 0.45,
+        "color_start": [
+          1.0,
+          0.96,
+          0.78,
+          0.82
+        ],
+        "color_end": [
+          0.55,
+          0.75,
+          1.0,
+          0.0
+        ],
+        "velocity_mode": "cone",
+        "inherit_velocity": 0.1,
+        "force_gravity": true,
+        "gravity": [
+          0.0,
+          0.4,
+          0.0
+        ],
+        "force_drag": true,
+        "drag": 0.25,
+        "force_noise": false,
+        "kill_plane": false,
+        "kill_box": false,
+        "size_over_life": {
+          "keys": [
+            {
+              "t": 0.0,
+              "v": 0.9
+            },
+            {
+              "t": 0.2,
+              "v": 1.0
+            },
+            {
+              "t": 1.0,
+              "v": 0.4
+            }
+          ]
+        },
+        "color_over_life": {
+          "keys": [
+            {
+              "t": 0.0,
+              "v": [
+                1.0,
+                0.94,
+                0.7,
+                0.35
+              ]
+            },
+            {
+              "t": 0.2,
+              "v": [
+                0.9,
+                0.98,
+                0.85,
+                0.8
+              ]
+            },
+            {
+              "t": 1.0,
+              "v": [
+                0.5,
+                0.72,
+                1.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        "spawn_shape": "sphere",
+        "spawn_radius": 0.22,
+        "spawn_box_height": 0.04,
+        "cone_angle_degrees": 10.0,
+        "render_mesh": "sprite",
+        "sprite_aspect": 1.0,
+        "velocity_stretch": 0.0,
+        "trail_enabled": true,
+        "trail_segments": 10,
+        "trail_sample_distance": 0.045,
+        "trail_width": 0.9,
+        "trail_width_end": 0.1,
+        "trail_alpha": 0.88,
+        "trail_lifetime": 3.0,
+        "unlit": true,
+        "additive": true,
+        "seed_override": 0,
+        "fluid_coupled": false,
+        "spawn_per_unit": 14.0
+      },
+      "transform": {
+        "position": [
+          2.0,
+          0.05,
+          0.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "path": "Scene/Particle System/Wall Trace",
+      "name": "Wall Trace",
+      "parent": "Scene/Particle System",
+      "visible": true,
+      "particle_emitter": {
+        "enabled": true,
+        "looping": true,
+        "world_space": true,
+        "duration": 0.0,
+        "start_delay": 0.0,
+        "rate": 10.0,
+        "burst": 0,
+        "max_particles": 180,
+        "lifetime_min": 2.8,
+        "lifetime_max": 4.2,
+        "speed_min": 0.2,
+        "speed_max": 0.35,
+        "size_min": 0.05,
+        "size_max": 0.075,
+        "size_end_multiplier": 0.45,
+        "color_start": [
+          1.0,
+          0.96,
+          0.78,
+          0.82
+        ],
+        "color_end": [
+          0.55,
+          0.75,
+          1.0,
+          0.0
+        ],
+        "velocity_mode": "cone",
+        "inherit_velocity": 0.1,
+        "force_gravity": true,
+        "gravity": [
+          0.0,
+          0.35,
+          0.0
+        ],
+        "force_drag": true,
+        "drag": 0.25,
+        "force_noise": false,
+        "kill_plane": false,
+        "kill_box": false,
+        "size_over_life": {
+          "keys": [
+            {
+              "t": 0.0,
+              "v": 0.9
+            },
+            {
+              "t": 0.2,
+              "v": 1.0
+            },
+            {
+              "t": 1.0,
+              "v": 0.4
+            }
+          ]
+        },
+        "color_over_life": {
+          "keys": [
+            {
+              "t": 0.0,
+              "v": [
+                1.0,
+                0.94,
+                0.7,
+                0.35
+              ]
+            },
+            {
+              "t": 0.2,
+              "v": [
+                0.9,
+                0.98,
+                0.85,
+                0.8
+              ]
+            },
+            {
+              "t": 1.0,
+              "v": [
+                0.5,
+                0.72,
+                1.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        "spawn_shape": "sphere",
+        "spawn_radius": 0.18,
+        "spawn_box_height": 0.04,
+        "cone_angle_degrees": 10.0,
+        "render_mesh": "sprite",
+        "sprite_aspect": 1.0,
+        "velocity_stretch": 0.0,
+        "trail_enabled": true,
+        "trail_segments": 10,
+        "trail_sample_distance": 0.045,
+        "trail_width": 0.9,
+        "trail_width_end": 0.1,
+        "trail_alpha": 0.88,
+        "trail_lifetime": 3.0,
+        "unlit": true,
+        "additive": true,
+        "seed_override": 0,
+        "fluid_coupled": false,
+        "spawn_per_unit": 10.0
+      },
+      "transform": {
+        "position": [
+          3.0,
+          0.12,
+          0.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "path": "Scene/Particle System/Center Ray",
+      "name": "Center Ray",
+      "parent": "Scene/Particle System",
+      "visible": true,
+      "particle_emitter": {
+        "enabled": true,
+        "looping": true,
+        "world_space": true,
+        "duration": 0.0,
+        "start_delay": 0.0,
+        "rate": 0.0,
+        "burst": 0,
+        "max_particles": 240,
+        "lifetime_min": 2.5,
+        "lifetime_max": 4.0,
+        "speed_min": 0.16,
+        "speed_max": 0.28,
+        "size_min": 0.045,
+        "size_max": 0.07,
+        "size_end_multiplier": 0.45,
+        "color_start": [
+          1.0,
+          0.96,
+          0.78,
+          0.82
+        ],
+        "color_end": [
+          0.55,
+          0.75,
+          1.0,
+          0.0
+        ],
+        "velocity_mode": "cone",
+        "inherit_velocity": 0.0,
+        "force_gravity": true,
+        "gravity": [
+          0.0,
+          0.32,
+          0.0
+        ],
+        "force_drag": true,
+        "drag": 0.25,
+        "force_noise": false,
+        "kill_plane": false,
+        "kill_box": false,
+        "size_over_life": {
+          "keys": [
+            {
+              "t": 0.0,
+              "v": 0.9
+            },
+            {
+              "t": 0.2,
+              "v": 1.0
+            },
+            {
+              "t": 1.0,
+              "v": 0.4
+            }
+          ]
+        },
+        "color_over_life": {
+          "keys": [
+            {
+              "t": 0.0,
+              "v": [
+                1.0,
+                0.94,
+                0.7,
+                0.35
+              ]
+            },
+            {
+              "t": 0.2,
+              "v": [
+                0.9,
+                0.98,
+                0.85,
+                0.8
+              ]
+            },
+            {
+              "t": 1.0,
+              "v": [
+                0.5,
+                0.72,
+                1.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        "spawn_shape": "point",
+        "spawn_radius": 0.03,
+        "spawn_box_height": 0.04,
+        "cone_angle_degrees": 7.0,
+        "render_mesh": "sprite",
+        "sprite_aspect": 1.0,
+        "velocity_stretch": 0.0,
+        "trail_enabled": true,
+        "trail_segments": 10,
+        "trail_sample_distance": 0.04,
+        "trail_width": 0.8,
+        "trail_width_end": 0.1,
+        "trail_alpha": 0.8,
+        "trail_lifetime": 3.0,
+        "unlit": true,
+        "additive": true,
+        "seed_override": 0,
+        "fluid_coupled": false,
+        "spawn_per_unit": 0.0
+      },
+      "transform": {
+        "position": [
+          0.0,
+          0.1,
+          0.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "path": "Scene/Camera",
+      "name": "Camera",
+      "parent": "Scene",
+      "visible": true,
+      "camera": {
+        "fov_y_degrees": 42.0,
+        "near": 0.05,
+        "far": 200.0
+      },
+      "transform": {
+        "position": [
+          8.5,
+          5.2,
+          9.8
+        ],
+        "rotation": [
+          -0.12,
+          0.35,
+          0.045,
+          0.925
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    }
+  ],
+  "materials": [
+    {
+      "name": "Room Wall",
+      "shading_model": "OpenPBR",
+      "base_weight": 0.7,
+      "base_color": [
+        0.22,
+        0.26,
+        0.32,
+        0.55
+      ],
+      "base_metalness": 0.0,
+      "specular_weight": 0.35,
+      "specular_color": [
+        0.55,
+        0.6,
+        0.65
+      ],
+      "specular_roughness": 0.55,
+      "specular_ior": 1.45,
+      "transmission_weight": 0.0,
+      "emissive": [
+        0.35,
+        0.42,
+        0.55
+      ],
+      "emissive_strength": 0.55,
+      "alpha_mode": "blend",
+      "alpha_cutoff": 0.05
+    },
+    {
+      "name": "Tank Base",
+      "shading_model": "OpenPBR",
+      "base_weight": 1.0,
+      "base_color": [
+        0.1,
+        0.11,
+        0.13,
+        1.0
+      ],
+      "base_metalness": 0.15,
+      "specular_weight": 0.6,
+      "specular_color": [
+        0.4,
+        0.42,
+        0.45
+      ],
+      "specular_roughness": 0.55,
+      "specular_ior": 1.45,
+      "transmission_weight": 0.0,
+      "emissive": [
+        0.08,
+        0.1,
+        0.12
+      ],
+      "emissive_strength": 0.25,
+      "alpha_mode": "opaque",
+      "alpha_cutoff": 0.5
+    },
+    {
+      "name": "Tank Glass",
+      "shading_model": "OpenPBR",
+      "base_weight": 0.06,
+      "base_color": [
+        0.12,
+        0.18,
+        0.22,
+        0.4
+      ],
+      "base_metalness": 0.0,
+      "specular_weight": 1.0,
+      "specular_color": [
+        0.9,
+        0.95,
+        1.0
+      ],
+      "specular_roughness": 0.06,
+      "specular_ior": 1.5,
+      "transmission_weight": 0.9,
+      "transmission_color": [
+        0.75,
+        0.9,
+        0.95
+      ],
+      "emissive": [
+        0.2,
+        0.35,
+        0.42
+      ],
+      "emissive_strength": 0.18,
+      "alpha_mode": "blend",
+      "alpha_cutoff": 0.05
+    }
+  ],
+  "active_output_camera": "Scene/Camera"
+}

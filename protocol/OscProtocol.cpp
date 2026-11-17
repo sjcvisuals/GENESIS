@@ -5,6 +5,8 @@
 #include "scene/ScenePath.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <functional>
 #include <memory>
 
 namespace genesis {
@@ -12,13 +14,16 @@ namespace genesis {
 namespace {
 
 constexpr std::size_t kMaxQueuedParticleEmits = 4096;
+constexpr std::size_t kMaxQueuedRoomPerson = 2048;
 
-NodeId ensureOscParticleEmitterNode(Scene& scene, const std::string& emitter_path) {
+NodeId ensureOscEmitterNode(Scene& scene, const std::string& emitter_path,
+                            const std::function<ParticleEmitter()>& make_emitter,
+                            const char* default_leaf) {
     if (std::optional<NodeId> existing = findNodeByPath(scene, emitter_path)) {
         if (Node* node = scene.find(*existing)) {
             if (!node->particle_emitter.has_value()) {
                 node->has_particle_emitter = true;
-                node->particle_emitter = makeOscParticleEmitter();
+                node->particle_emitter = make_emitter();
             }
             return *existing;
         }
@@ -32,7 +37,6 @@ NodeId ensureOscParticleEmitterNode(Scene& scene, const std::string& emitter_pat
         leaf = emitter_path.substr(slash + 1);
         parent = findNodeByPath(scene, parent_path);
         if (!parent.has_value() && parent_path == "Scene" && !scene.roots.empty()) {
-            // Prefer an existing root named Scene when present.
             for (NodeId root_id : scene.roots) {
                 if (const Node* root = scene.find(root_id); root && root->name == "Scene") {
                     parent = root_id;
@@ -42,8 +46,12 @@ NodeId ensureOscParticleEmitterNode(Scene& scene, const std::string& emitter_pat
         }
     }
 
-    return scene.createParticleEmitterNode(leaf.empty() ? "OSC Tracker" : leaf, parent,
-                                           makeOscParticleEmitter());
+    return scene.createParticleEmitterNode(leaf.empty() ? default_leaf : leaf, parent, make_emitter());
+}
+
+NodeId ensureOscParticleEmitterNode(Scene& scene, const std::string& emitter_path) {
+    return ensureOscEmitterNode(scene, emitter_path, [] { return makeOscParticleEmitter(); },
+                                "OSC Tracker");
 }
 
 } // namespace
@@ -121,6 +129,7 @@ void OscProtocol::ingestDecodedMessage(const OscMessage& message, double now_sec
 void OscProtocol::ingestMessage(const OscMessage& message, double now_seconds) {
     storeLastValues(message);
     ingestParticleEmit(message);
+    ingestRoomPerson(message);
     if (settings_.learn_enabled) {
         updateLearned(message, now_seconds);
     }
@@ -138,6 +147,21 @@ void OscProtocol::ingestParticleEmit(const OscMessage& message) {
         const std::size_t drop = particle_events_.size() - kMaxQueuedParticleEmits;
         particle_events_.erase(particle_events_.begin(),
                                particle_events_.begin() + static_cast<std::ptrdiff_t>(drop));
+    }
+}
+
+void OscProtocol::ingestRoomPerson(const OscMessage& message) {
+    OscRoomPersonEvent event{};
+    if (!tryParseOscRoomPerson(message, room_person_, event)) {
+        return;
+    }
+    event.sequence = next_room_person_sequence_++;
+    room_person_events_.push_back(event);
+    ++total_room_person_updates_;
+    if (room_person_events_.size() > kMaxQueuedRoomPerson) {
+        const std::size_t drop = room_person_events_.size() - kMaxQueuedRoomPerson;
+        room_person_events_.erase(room_person_events_.begin(),
+                                  room_person_events_.begin() + static_cast<std::ptrdiff_t>(drop));
     }
 }
 
@@ -233,6 +257,91 @@ std::uint32_t OscProtocol::applyParticleEmits(SceneRuntime& runtime, std::uint64
 
 void OscProtocol::clearParticleEmits() {
     particle_events_.clear();
+}
+
+void OscProtocol::clearRoomPersonEvents() {
+    room_person_events_.clear();
+}
+
+std::uint32_t OscProtocol::applyRoomPerson(SceneRuntime& runtime, std::uint64_t& consumer_cursor) {
+    if (!room_person_.enabled || room_person_events_.empty()) {
+        return 0;
+    }
+
+    std::uint32_t spawned_total = 0;
+    bool applied_any = false;
+    for (const OscRoomPersonEvent& event : room_person_events_) {
+        if (event.sequence <= consumer_cursor) {
+            continue;
+        }
+
+        const OscRoomPersonPose pose = oscRoomPersonPose(room_person_, event);
+        const std::uint32_t scale =
+            event.count > 0 ? event.count
+                            : std::max(room_person_.feet_burst, room_person_.wall_burst);
+        const float scale_mul =
+            event.count > 0
+                ? static_cast<float>(scale) /
+                      static_cast<float>(std::max(1u, room_person_.feet_burst))
+                : 1.0f;
+
+        const NodeId feet_id = ensureOscEmitterNode(
+            runtime.scene(), room_person_.feet_emitter_path,
+            [] { return makeRoomPersonFeetEmitter(); }, "Person Feet");
+        const NodeId wall_id = ensureOscEmitterNode(
+            runtime.scene(), room_person_.wall_emitter_path,
+            [] { return makeRoomWallTraceEmitter(); }, "Wall Trace");
+        const NodeId ray_id = ensureOscEmitterNode(
+            runtime.scene(), room_person_.ray_emitter_path,
+            [] { return makeRoomCenterRayEmitter(); }, "Center Ray");
+
+        if (room_person_.track_feet_emitter) {
+            if (Node* node = runtime.scene().find(feet_id)) {
+                node->local.position = pose.feet;
+            }
+        }
+        if (room_person_.track_wall_emitter) {
+            if (Node* node = runtime.scene().find(wall_id)) {
+                node->local.position = pose.wall;
+            }
+        }
+        runtime.updateTransforms();
+
+        auto scaled_count = [&](std::uint32_t base) {
+            const float c = static_cast<float>(base) * scale_mul;
+            return static_cast<std::uint32_t>(
+                std::clamp(std::lround(c), 0L, static_cast<long>(room_person_.max_burst)));
+        };
+
+        if (room_person_.burst_at_feet) {
+            spawned_total += runtime.particleWorld().emitBurstAtWorld(
+                runtime.scene(), feet_id, pose.feet, scaled_count(room_person_.feet_burst));
+        }
+        if (room_person_.burst_at_wall) {
+            spawned_total += runtime.particleWorld().emitBurstAtWorld(
+                runtime.scene(), wall_id, pose.wall, scaled_count(room_person_.wall_burst));
+        }
+        if (room_person_.burst_along_ray && room_person_.ray_samples > 0) {
+            const std::uint32_t each = scaled_count(room_person_.ray_burst_each);
+            for (std::uint32_t i = 1; i <= room_person_.ray_samples; ++i) {
+                const float u =
+                    static_cast<float>(i) / static_cast<float>(room_person_.ray_samples + 1);
+                const glm::vec3 p = glm::mix(pose.center, pose.wall, u);
+                // Lift slightly so the line reads above the floor.
+                const glm::vec3 sample(p.x, glm::mix(pose.feet.y, pose.wall.y, u), p.z);
+                spawned_total +=
+                    runtime.particleWorld().emitBurstAtWorld(runtime.scene(), ray_id, sample, each);
+            }
+        }
+
+        consumer_cursor = event.sequence;
+        applied_any = true;
+    }
+
+    if (applied_any) {
+        runtime.updateTransforms();
+    }
+    return spawned_total;
 }
 
 void OscProtocol::clearLearned() {

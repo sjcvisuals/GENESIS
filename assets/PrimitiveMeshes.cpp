@@ -210,6 +210,73 @@ Mesh createCylinderMesh(const VulkanContext& context, float radius, float height
     return uploadMesh(context, vertices, indices);
 }
 
+Mesh createCylinderShellMesh(const VulkanContext& context, float radius, float height, int segments) {
+    std::vector<MeshVertexPNU> vertices;
+    std::vector<std::uint32_t> indices;
+
+    segments = std::max(segments, 3);
+    const float half_height = height * 0.5f;
+    // Two faces (outward + inward) × (segments+1) columns × 2 verts.
+    vertices.reserve(static_cast<std::size_t>((segments + 1) * 4));
+    indices.reserve(static_cast<std::size_t>(segments * 12));
+
+    auto push_ring_column = [&](float u, float nx, float nz, float px, float pz, float sign) {
+        const float snx = nx * sign;
+        const float snz = nz * sign;
+        vertices.push_back(vtx(px, -half_height, pz, snx, 0.0f, snz, u, 1.0f));
+        vertices.push_back(vtx(px, half_height, pz, snx, 0.0f, snz, u, 0.0f));
+    };
+
+    // Outward wall (front faces when viewed from outside the room).
+    for (int seg = 0; seg <= segments; ++seg) {
+        const float u = static_cast<float>(seg) / static_cast<float>(segments);
+        const float theta = u * 2.0f * kPi;
+        const float nx = std::cos(theta);
+        const float nz = std::sin(theta);
+        push_ring_column(u, nx, nz, nx * radius, nz * radius, 1.0f);
+    }
+    // Inward wall (front faces from the donut / tank).
+    for (int seg = 0; seg <= segments; ++seg) {
+        const float u = static_cast<float>(seg) / static_cast<float>(segments);
+        const float theta = u * 2.0f * kPi;
+        const float nx = std::cos(theta);
+        const float nz = std::sin(theta);
+        push_ring_column(u, nx, nz, nx * radius, nz * radius, -1.0f);
+    }
+
+    auto emit_side_quads = [&](std::uint32_t base, bool flip_winding) {
+        for (int seg = 0; seg < segments; ++seg) {
+            const std::uint32_t bottom0 = base + static_cast<std::uint32_t>(seg * 2);
+            const std::uint32_t top0 = bottom0 + 1;
+            const std::uint32_t bottom1 = bottom0 + 2;
+            const std::uint32_t top1 = bottom0 + 3;
+            if (!flip_winding) {
+                indices.push_back(bottom0);
+                indices.push_back(top0);
+                indices.push_back(bottom1);
+                indices.push_back(bottom1);
+                indices.push_back(top0);
+                indices.push_back(top1);
+            } else {
+                // Inward verts already have flipped normals; keep CCW from inside.
+                indices.push_back(bottom0);
+                indices.push_back(bottom1);
+                indices.push_back(top0);
+                indices.push_back(bottom1);
+                indices.push_back(top1);
+                indices.push_back(top0);
+            }
+        }
+    };
+
+    const std::uint32_t outward_base = 0;
+    const std::uint32_t inward_base = static_cast<std::uint32_t>((segments + 1) * 2);
+    emit_side_quads(outward_base, false);
+    emit_side_quads(inward_base, true);
+
+    return uploadMesh(context, vertices, indices);
+}
+
 Mesh createPlaneMesh(const VulkanContext& context, float half_extent, float uv_tiles) {
     const float h = half_extent;
     const float uv = std::max(uv_tiles, 0.01f);
