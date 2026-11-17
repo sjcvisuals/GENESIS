@@ -20,6 +20,7 @@ constexpr std::uint32_t kChanDirY = 5;
 constexpr std::uint32_t kChanPosX = 7;
 constexpr std::uint32_t kChanPosY = 8;
 constexpr std::uint32_t kChanPosZ = 9;
+constexpr std::uint32_t kChanColor = 10;
 
 glm::vec3 randomUnitVector(std::uint64_t seed, std::uint64_t emitter_id, std::uint64_t emit_index) {
     const float u = particleRandom01(seed, emitter_id, emit_index, kChanDirX);
@@ -207,6 +208,20 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
         p.world_space = desc.world_space;
         p.size_curve = authored.size_over_life;
         p.color_curve = authored.color_over_life;
+        // Gentle palette: yellow → green → blue, with the odd soft red mixed in.
+        {
+            const float u =
+                particleRandom01(seed, runtime.node_id, emit_index, kChanColor);
+            if (u < 0.30f) {
+                p.color_tint = glm::vec3(1.0f, 0.78f, 0.18f); // soft yellow
+            } else if (u < 0.55f) {
+                p.color_tint = glm::vec3(0.32f, 1.0f, 0.4f); // soft green
+            } else if (u < 0.85f) {
+                p.color_tint = glm::vec3(0.3f, 0.68f, 1.0f); // soft blue/cyan
+            } else {
+                p.color_tint = glm::vec3(1.0f, 0.32f, 0.3f); // odd soft red (~15%)
+            }
+        }
         p.trail_enabled = desc.trail_enabled;
         p.trail_max_segments =
             static_cast<std::uint8_t>(std::clamp(static_cast<int>(desc.trail_segments), 2, 24));
@@ -633,11 +648,15 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
         const float size = std::max(0.04f, p.size0 * size_mul);
         glm::vec4 color =
             p.color_curve.count > 0 ? p.color_curve.evaluate(t) : glm::vec4(1.0f, 1.0f, 1.0f, 1.0f - t);
-        // Gentle energy budget (alpha blend or soft additive — never hot cores).
-        color.r = std::min(color.r, 0.9f);
-        color.g = std::min(color.g, 0.92f);
-        color.b = std::min(color.b, 0.96f);
-        color.a = std::clamp(color.a, 0.0f, 0.72f);
+        // Tint owns hue; curve owns energy/alpha. Mild HDR headroom for bloom-safe glow.
+        {
+            const float energy =
+                std::max(0.15f, (color.r + color.g + color.b) * (1.0f / 3.0f));
+            color.r = std::min(p.color_tint.r * energy * 1.35f, 1.35f);
+            color.g = std::min(p.color_tint.g * energy * 1.35f, 1.35f);
+            color.b = std::min(p.color_tint.b * energy * 1.35f, 1.35f);
+            color.a = std::clamp(color.a, 0.0f, 0.8f);
+        }
 
         glm::vec3 world_pos = p.position;
         if (!p.world_space) {
@@ -669,24 +688,24 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
             out[dest_batch].instances.push_back(instance);
         };
 
-        // Trail Renderer: one soft wedge ribbon tip→neck (comet silhouette in stills).
-        // Texture itself tapers tip→head; avoids disc beads / segmented capsule columns.
+        // Trail Renderer: one soft wedge ribbon tip→head (comet silhouette in stills).
+        // Wide neck meets the soft-circle head with overlap — no alpha/texture hole at the join.
         if (p.trail_enabled && p.trail_count >= 2 && p.mesh == ParticleRenderMesh::Sprite) {
             const float trail_age_fade =
                 std::clamp(1.0f - (p.age / std::max(p.trail_lifetime * 2.5f, 0.1f)) * 0.12f, 0.75f,
                            1.0f);
             const float head_w = std::max(size, 0.04f);
-            const float width_head_frac = std::clamp(p.trail_width, 0.35f, 1.0f);
+            const float width_head_frac = std::clamp(p.trail_width, 0.35f, 1.15f);
             const std::size_t trail_batch =
                 12u + (p.additive ? 2u : 0u) + (p.unlit ? 1u : 0u);
 
             const glm::vec3 tip = p.trail_pos[0];
-            // Stop short of the live particle so the round soft circle owns the head.
-            const glm::vec3 neck = glm::mix(p.trail_pos[p.trail_count - 2], world_pos, 0.28f);
+            // Run the wedge into the head center so the soft circle sits on a continuous neck.
+            const glm::vec3 neck = world_pos;
             glm::vec3 seg = neck - tip;
             float seg_len = glm::length(seg);
             // Wait for a readable wake length so short stubs don't read as vapor blobs.
-            if (p.trail_count >= 4 && seg_len > head_w * 1.15f) {
+            if (p.trail_count >= 4 && seg_len > head_w * 1.0f) {
                 glm::vec3 along = seg / seg_len;
                 along = along - cam_forward * glm::dot(along, cam_forward);
                 const float along_len = glm::length(along);
@@ -703,15 +722,16 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
                     across /= across_len;
                 }
 
-                // Quad width = neck; wedge texture paints tip→point inside that width.
-                const float ribbon_w = head_w * width_head_frac;
-                const float half_len = seg_len * 0.5f;
-                const glm::vec3 mid = (tip + neck) * 0.5f;
+                // Neck sits inside the soft-circle core so flat corners don't poke past the ball.
+                const float ribbon_w = head_w * std::clamp(width_head_frac, 0.55f, 0.82f);
+                // Overshoot into the ball so the neck dissolve lands under the soft circle.
+                const float half_len = seg_len * 0.5f + head_w * 0.55f;
+                const glm::vec3 mid = tip + along * (seg_len * 0.5f + head_w * 0.08f);
 
                 glm::vec4 trail_color = color;
                 trail_color.a *= p.trail_alpha * trail_age_fade;
-                // Solid enough to read as a comet ribbon in stills; below the head alpha.
-                trail_color.a = std::clamp(std::max(trail_color.a, 0.42f), 0.0f, 0.72f);
+                // Match head energy at the neck; tip stays quieter via wedge texture.
+                trail_color.a = std::clamp(std::max(trail_color.a, 0.48f), 0.0f, 0.78f);
 
                 glm::mat4 model(1.0f);
                 model[0] = glm::vec4(across * ribbon_w, 0.0f);
@@ -722,7 +742,7 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
             }
         }
 
-        // Primary soft circle head — round, brighter than the trail neck.
+        // Primary soft circle head — round, drawn after the ribbon so it seals the join.
         glm::mat4 model(1.0f);
         if (p.mesh == ParticleRenderMesh::Sprite) {
             const float speed = glm::length(p.velocity);
@@ -733,8 +753,22 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
                 hx = size * aspect;
                 hy = size * (1.0f + speed * p.velocity_stretch);
             }
+            // Soft outer glow halo (bloom-safe, same tint — seals trail join + emissive feel).
+            {
+                glm::vec4 glow = color;
+                glow.a = std::clamp(glow.a * 0.42f, 0.16f, 0.38f);
+                glm::mat4 glow_model(1.0f);
+                glow_model[0] = glm::vec4(cam_right * hx * 1.7f, 0.0f);
+                glow_model[1] = glm::vec4(cam_up * hy * 1.7f, 0.0f);
+                glow_model[2] = glm::vec4(cam_forward, 0.0f);
+                glow_model[3] = glm::vec4(world_pos, 1.0f);
+                push_sprite(glow_model, glow, batch_index);
+            }
             glm::vec4 head_color = color;
-            head_color.a = std::min(std::max(head_color.a, 0.55f), 0.85f);
+            head_color.a = std::min(std::max(head_color.a, 0.62f), 0.9f);
+            // Slightly larger head so it covers the ribbon neck completely.
+            hx *= 1.12f;
+            hy *= 1.12f;
             model[0] = glm::vec4(cam_right * hx, 0.0f);
             model[1] = glm::vec4(cam_up * hy, 0.0f);
             model[2] = glm::vec4(cam_forward, 0.0f);

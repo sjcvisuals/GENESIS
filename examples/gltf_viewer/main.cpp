@@ -69,8 +69,8 @@ public:
         session_.loadRecentList();
         // Readable stage for soft discs — keep midtones (QA brightness PASS); grain off.
         renderer().setClearColor(0.14f, 0.155f, 0.175f, 1.0f);
-        color_mgmt_.settings().exposure = 1.25f;
-        color_mgmt_.settings().bloom_strength = 0.08f; // low — bloom stretches discs into streaks
+        color_mgmt_.settings().exposure = 1.22f;
+        color_mgmt_.settings().bloom_strength = 0.2f; // soft emissive glow — still below firefly
         color_mgmt_.settings().grain_strength = 0.0f;
         color_mgmt_.settings().vignette_strength = 0.06f;
 

@@ -293,9 +293,9 @@ GpuTexture GpuTexture::createSoftRibbonSprite(const VulkanContext& context, cons
     // (not disc beads or segmented capsules). Soft sides keep the gentle look.
     const std::uint32_t dim = std::max(size, 64u);
     std::vector<std::uint8_t> rgba(static_cast<std::size_t>(dim) * dim * 4u);
-    constexpr float kPeak = 0.82f;
+            constexpr float kPeak = 0.9f;
     constexpr float kTipHalf = 0.09f;   // soft readable tip (above sparkle floor)
-    constexpr float kNeckHalf = 0.95f;  // fills most of the quad at the head end
+    constexpr float kNeckHalf = 0.92f;  // under soft-circle core (avoids flat corners past the ball)
     for (std::uint32_t y = 0; y < dim; ++y) {
         for (std::uint32_t x = 0; x < dim; ++x) {
             const float nx = (static_cast<float>(x) + 0.5f) / static_cast<float>(dim) * 2.0f - 1.0f;
@@ -305,17 +305,33 @@ GpuTexture GpuTexture::createSoftRibbonSprite(const VulkanContext& context, cons
             // u=0 tip (ny=-1), u=1 neck (ny=+1).
             const float u = std::clamp((ny + 1.0f) * 0.5f, 0.0f, 1.0f);
             // Quadratic widen: tip stays pointed, flares into the neck.
-            const float half_w = kTipHalf + (kNeckHalf - kTipHalf) * (u * u);
+            float half_w = kTipHalf + (kNeckHalf - kTipHalf) * (u * u);
+            // Round the neck end into a soft disc so the join under the ball isn't a flat cut.
+            if (ny > 0.55f) {
+                const float cy = 0.55f;
+                const float round_r = kNeckHalf;
+                const float d_round = std::sqrt(nx * nx + (ny - cy) * (ny - cy));
+                const float circle_half = std::max(0.0f, round_r - (ny - cy) * 0.15f);
+                half_w = std::min(half_w, circle_half);
+                if (d_round > round_r) {
+                    half_w = 0.0f;
+                }
+            }
             const float ax = std::abs(nx);
             float falloff = 0.0f;
-            if (ax < half_w) {
+            if (half_w > 1e-4f && ax < half_w) {
                 const float edge = 1.0f - (ax / half_w);
                 const float soft = edge * edge * (3.0f - 2.0f * edge); // smoothstep
                 // Mild length fade at the very tip so the point reads soft, not clipped.
                 const float tip_fade = u < 0.06f ? (u / 0.06f) : 1.0f;
-                // Keep the body bright so the silhouette reads as a ribbon, not fog.
-                const float along = 0.7f + 0.3f * u;
-                falloff = soft * tip_fade * along * kPeak;
+                // Soft dissolve at the neck end so the mesh edge never cuts a flat seam under the ball.
+                float neck_dissolve = 1.0f;
+                if (ny > 0.62f) {
+                    const float nd = 1.0f - (ny - 0.62f) / 0.38f;
+                    neck_dissolve = nd * nd * (3.0f - 2.0f * nd);
+                }
+                const float along = 0.74f + 0.26f * u;
+                falloff = soft * tip_fade * neck_dissolve * along * kPeak;
             }
             falloff = std::clamp(falloff, 0.0f, 1.0f);
             const std::uint8_t v = static_cast<std::uint8_t>(falloff * 255.0f + 0.5f);
