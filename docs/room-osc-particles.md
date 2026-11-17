@@ -1,6 +1,6 @@
 # Room OSC Particles
 
-Room-scale soft-particle demo driven by OSC person tracking. Stacked on the Niagara Soft Circles / Trail look work (`#38`).
+Dual-ring cylindrical room soft-particle demo driven by OSC person tracking. Stacked on the Niagara Soft Circles / Trail look work (`#38`).
 
 ## Scene
 
@@ -8,17 +8,27 @@ Room-scale soft-particle demo driven by OSC person tracking. Stacked on the Niag
 - Document: `assets/scenes/room_osc_particles.scene.json`
 - Editor: **File → Examples → Room OSC Particles**
 
+### Geometry (install scale)
+
+| Element | Size | Notes |
+|---------|------|--------|
+| **Outer ring** | **~6 m diameter** (radius 3 m) | Ambient Soft Circles on the cylindrical room perimeter |
+| **Inner tank ring** | **~2 m diameter** (radius 1 m) | Ambient Soft Circles at the base of the central fish tank |
+| **Fish tank** | Cylinder placeholder, 2 m dia × ~2.2 m tall | Scale reference only — dark glass, not a hero prop |
+| **Walk donut** | Between ~1 m and ~3 m radius | People track in this annulus |
+
+Black unlit stage (no scene lights); particles read as additive emissive glow with trail-behind wakes from the look tip.
+
 ### Niagara-like hierarchy
 
 ```
 Particle System
-├── Ambient Field     # sparse soft circles rising across the room
-├── Person Feet       # denser spawn at the tracked person
-├── Wall Trace        # denser spawn at the wall hit in front of them
-└── Center Ray        # burst samples along center → wall (OSC-driven)
+├── Outer Ring         # ambient Soft Circles on 6 m diameter ring
+├── Inner Tank Ring    # ambient Soft Circles on 2 m diameter tank base
+├── Person Feet        # denser spawn at the tracked person (donut)
+├── Wall Trace         # denser spawn at outer cylindrical wall hit
+└── Center Ray         # burst samples along center → wall (OSC-driven)
 ```
-
-Room AABB defaults to **±4 m** on X and Z (8×8 m), centered at the origin. No ground mesh — dark/neutral stage + grid.
 
 ## OSC addresses
 
@@ -26,7 +36,7 @@ Listen defaults: **UDP `0.0.0.0:9000`** (Protocol panel).
 
 ### `/genesis/room/person` (primary)
 
-Floor person pose for the room effect.
+Floor person pose for the room effect. Keep the person in the **donut** (radius between tank and outer wall).
 
 | Args | Meaning |
 |------|---------|
@@ -38,7 +48,7 @@ Floor person pose for the room effect.
 **Behavior on each message (deterministic with shared `scene_seed`):**
 
 1. Move **Person Feet** emitter to the person (continuous rate + optional burst).
-2. Cast a ray from **room center** through the person to the XZ wall AABB.
+2. Cast a ray from **room center** through the person to the **cylindrical outer wall** (`room_radius`, default 3 m).
 3. Burst soft particles along that ray (**Center Ray**).
 4. Move **Wall Trace** to the wall hit and burst there.
 
@@ -50,9 +60,14 @@ Generic XY tracker emit (see Protocol panel). On the room example it defaults to
 
 `OscRoomPersonSettings` (Protocol UI → **Room person**):
 
-- `room_half_x` / `room_half_z` — AABB half-extents (meters)
+- `room_radius` — outer cylindrical wall / outer ring radius (meters), default **3** (6 m diameter)
+- `tank_radius` — inner tank ring radius (meters), default **1** (2 m diameter); authoring/docs
 - `feet_burst` / `wall_burst` / `ray_samples` / `ray_burst_each`
 - toggles: track feet/wall, burst feet/ray/wall
+
+## Demo media
+
+Store: `/cursor/stores/bc-bfd4a606-4e38-4cd5-93d8-8ae247b97bf2/media/dual_ring_room_*`
 
 ## Renderbridge notes
 

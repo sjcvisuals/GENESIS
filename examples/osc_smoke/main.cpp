@@ -207,12 +207,14 @@ int main() {
             ++failures;
         } else {
             const genesis::OscRoomPersonPose pose = genesis::oscRoomPersonPose(settings, event);
-            // Person at (2,1) → direction toward +X/+Z; wall should be outside the person.
+            // Person at (2,1) → cylindrical outer wall at room_radius (default 3 m).
             const float person_r = std::sqrt(event.x * event.x + event.z * event.z);
             const float wall_r = std::sqrt(pose.wall.x * pose.wall.x + pose.wall.z * pose.wall.z);
-            if (wall_r <= person_r + 1e-3f || std::abs(pose.feet.x - 2.0f) > 1e-5f) {
+            const float expected_r = settings.room_radius > 0.1f ? settings.room_radius : 3.0f;
+            if (wall_r <= person_r + 1e-3f || std::abs(wall_r - expected_r) > 1e-3f ||
+                std::abs(pose.feet.x - 2.0f) > 1e-5f) {
                 std::cerr << "room person wall ray failed (person_r=" << person_r
-                          << " wall_r=" << wall_r << ")\n";
+                          << " wall_r=" << wall_r << " expected=" << expected_r << ")\n";
                 ++failures;
             } else {
                 std::cout << "OSC room person xz OK → feet(" << pose.feet.x << "," << pose.feet.y

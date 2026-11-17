@@ -1,15 +1,20 @@
 #pragma once
 
-// Room-scale OSC person → particle mapping.
+// Room-scale OSC person → particle mapping (dual-ring cylindrical room).
 // Default address: /genesis/room/person
 //   ,ff     x z          (XZ floor meters, room-centered)
 //   ,fff    x y z        (optional feet height on Y)
 //   ,ffff   x z count    (count scales feet/ray/wall bursts)
 //
+// Layout (prefs):
+//   Outer ring ~6 m diameter (radius 3 m) — ambient Soft Circles on perimeter
+//   Inner tank ring ~2 m diameter (radius 1 m) — ambient at fish-tank base
+//   People walk the donut between rings
+//
 // On each message:
 //   1) denser soft particles at the person's feet
-//   2) particles along the ray room-center → person → wall
-//   3) denser particles at the wall hit in front of them
+//   2) particles along the ray room-center → person → outer wall
+//   3) denser particles at the outer-wall hit in front of them
 //
 // Deterministic with shared scene_seed + identical OSC streams (Renderbridge).
 
@@ -29,9 +34,13 @@ struct OscRoomPersonSettings {
     std::string wall_emitter_path = "Scene/Particle System/Wall Trace";
     std::string ray_emitter_path = "Scene/Particle System/Center Ray";
 
-    // Axis-aligned room on XZ (meters). Center defaults to origin.
-    float room_half_x = 4.0f;
-    float room_half_z = 4.0f;
+    // Cylindrical outer wall / outer particle ring (meters). Diameter ≈ 6 m.
+    float room_radius = 3.0f;
+    // Inner tank-base ring (meters). Diameter ≈ 2 m. Authoring/docs; emitters use Ring spawn.
+    float tank_radius = 1.0f;
+    // Legacy AABB half-extents kept in sync with room_radius for older UI/bindings.
+    float room_half_x = 3.0f;
+    float room_half_z = 3.0f;
     glm::vec3 room_center{0.0f, 0.0f, 0.0f};
     float feet_height = 0.05f;
     float wall_spawn_height = 0.12f;
@@ -67,33 +76,67 @@ struct OscRoomPersonPose {
 bool tryParseOscRoomPerson(const OscMessage& message, const OscRoomPersonSettings& settings,
                            OscRoomPersonEvent& out_event);
 
-// Ray from room center through the person to the XZ AABB wall.
+// Ray from room center through the person to the cylindrical outer wall.
 OscRoomPersonPose oscRoomPersonPose(const OscRoomPersonSettings& settings,
                                     const OscRoomPersonEvent& event);
 
-inline ParticleEmitter makeRoomAmbientEmitter() {
+inline ParticleEmitter makeRoomOuterRingEmitter() {
     ParticleEmitter e = makeGentleSoftEmitter();
-    // Sparse room-scale field — gentle rise, large footprint.
-    e.rate_per_second = 4.0f;
-    e.max_particles = 160;
+    // Ambient Soft Circles on ~6 m diameter outer perimeter.
+    e.rate_per_second = 5.0f;
+    e.max_particles = 180;
     e.lifetime_min = 5.0f;
     e.lifetime_max = 7.5f;
     e.speed_min = 0.12f;
     e.speed_max = 0.22f;
     e.size_min = 0.06f;
     e.size_max = 0.085f;
-    e.spawn_shape = ParticleSpawnShape::Sphere;
-    e.spawn_radius = 3.2f;
-    e.spawn_box_height = 0.08f;
-    e.cone_angle_degrees = 8.0f;
+    e.spawn_shape = ParticleSpawnShape::Ring;
+    e.spawn_radius = 3.0f; // 6 m diameter
+    e.spawn_box_height = 0.06f;
+    e.cone_angle_degrees = 6.0f;
     e.gravity = glm::vec3(0.0f, 0.22f, 0.0f);
     e.drag = 0.25f;
+    e.additive = true;
     e.trail_enabled = true;
     e.trail_segments = 12;
     e.trail_sample_distance = 0.045f;
     e.trail_width = 0.85f;
     e.trail_width_end = 0.1f;
     e.trail_alpha = 0.75f;
+    syncEmitterCurvesFromEndpoints(e);
+    return e;
+}
+
+// Back-compat alias used by older call sites / docs.
+inline ParticleEmitter makeRoomAmbientEmitter() {
+    return makeRoomOuterRingEmitter();
+}
+
+inline ParticleEmitter makeRoomInnerTankRingEmitter() {
+    ParticleEmitter e = makeGentleSoftEmitter();
+    // Ambient Soft Circles on ~2 m diameter tank-base ring.
+    e.rate_per_second = 4.0f;
+    e.max_particles = 120;
+    e.lifetime_min = 4.5f;
+    e.lifetime_max = 6.5f;
+    e.speed_min = 0.14f;
+    e.speed_max = 0.24f;
+    e.size_min = 0.055f;
+    e.size_max = 0.08f;
+    e.spawn_shape = ParticleSpawnShape::Ring;
+    e.spawn_radius = 1.0f; // 2 m diameter
+    e.spawn_box_height = 0.05f;
+    e.cone_angle_degrees = 6.0f;
+    e.gravity = glm::vec3(0.0f, 0.24f, 0.0f);
+    e.drag = 0.24f;
+    e.additive = true;
+    e.trail_enabled = true;
+    e.trail_segments = 11;
+    e.trail_sample_distance = 0.042f;
+    e.trail_width = 0.82f;
+    e.trail_width_end = 0.1f;
+    e.trail_alpha = 0.78f;
     syncEmitterCurvesFromEndpoints(e);
     return e;
 }
@@ -114,6 +157,7 @@ inline ParticleEmitter makeRoomPersonFeetEmitter() {
     e.cone_angle_degrees = 10.0f;
     e.spawn_per_unit = 14.0f;
     e.gravity = glm::vec3(0.0f, 0.4f, 0.0f);
+    e.additive = true;
     e.trail_width = 0.9f;
     e.trail_alpha = 0.88f;
     syncEmitterCurvesFromEndpoints(e);
@@ -129,6 +173,7 @@ inline ParticleEmitter makeRoomWallTraceEmitter() {
     e.size_min = 0.05f;
     e.size_max = 0.075f;
     e.gravity = glm::vec3(0.0f, 0.35f, 0.0f);
+    e.additive = true;
     syncEmitterCurvesFromEndpoints(e);
     return e;
 }
@@ -147,6 +192,7 @@ inline ParticleEmitter makeRoomCenterRayEmitter() {
     e.spawn_radius = 0.03f;
     e.cone_angle_degrees = 7.0f;
     e.gravity = glm::vec3(0.0f, 0.32f, 0.0f);
+    e.additive = true;
     e.trail_enabled = true;
     e.trail_segments = 10;
     e.trail_sample_distance = 0.04f;
