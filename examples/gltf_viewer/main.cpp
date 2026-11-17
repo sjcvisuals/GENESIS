@@ -11,6 +11,7 @@
 #include "editor/AudioReactiveUi.hpp"
 #include "editor/EditorTheme.hpp"
 #include "editor/ParticleEmitterUi.hpp"
+#include "editor/TugelaEditor.hpp"
 #include "editor/SceneViewport.hpp"
 #include "engine/Application.hpp"
 #include "platform/EditorPaths.hpp"
@@ -206,7 +207,31 @@ public:
     }
 
 protected:
+    void maybeRunTugelaEditorDemoHook() {
+        const char* mode = std::getenv("GENESIS_TUGELA_EDITOR");
+        if (!mode || mode[0] == '\0') {
+            return;
+        }
+        ++tugela_demo_frames_;
+        if (tugela_demo_frames_ != 40) {
+            return;
+        }
+        tugela_editor_.open = true;
+        if (std::optional<genesis::NodeId> id =
+                genesis::findNodeByPath(runtime_.scene(), "Scene/Particle System/Outer Ring")) {
+            selectNode(*id);
+            tugela_editor_.open = true;
+            genesis::tugelaEditorFocusSelection(tugela_editor_, runtime_.scene(), *id);
+        } else if (std::optional<genesis::NodeId> sys =
+                       genesis::findNodeByPath(runtime_.scene(), "Scene/Particle System")) {
+            selectNode(*sys);
+            tugela_editor_.open = true;
+            genesis::tugelaEditorFocusSelection(tugela_editor_, runtime_.scene(), *sys);
+        }
+    }
+
     void maybeRunEdgeDemoHook() {
+        maybeRunTugelaEditorDemoHook();
         const char* mode = std::getenv("GENESIS_EDGE_DEMO");
         if (!mode || mode[0] == '\0') {
             return;
@@ -403,6 +428,7 @@ protected:
         drawMenuBar(scene);
         if (show_hierarchy_) drawHierarchyPanel(scene);
         if (show_inspector_) drawInspectorPanel(scene);
+        drawTugelaEditor(scene);
         if (show_toolbar_) drawToolbarPanel(scene);
         if (show_viewport_help_) drawViewportHelpPanel();
         if (show_timeline_) drawTimelinePanel();
@@ -467,6 +493,15 @@ private:
         // Unreal-like G: toggle game view (hides actor icons / editor helpers).
         if (input().keyPressed(SDL_SCANCODE_G) && !ctrl) {
             game_view_mode_ = !game_view_mode_;
+        }
+        // T: toggle lean Tugela Editor pop-out (systems / emitters / curves).
+        if (input().keyPressed(SDL_SCANCODE_T) && !ctrl) {
+            tugela_editor_.open = !tugela_editor_.open;
+            if (tugela_editor_.open) {
+                if (const genesis::NodeId id = primarySelected()) {
+                    genesis::tugelaEditorFocusSelection(tugela_editor_, runtime_.scene(), id);
+                }
+            }
         }
         // Demo / QA hotkeys for edge-selection screenshots (black-stage visible cube).
         if (input().keyPressed(SDL_SCANCODE_F6)) {
@@ -629,6 +664,10 @@ private:
         if (ImGui::BeginMenu("View")) {
             ImGui::MenuItem("Hierarchy", nullptr, &show_hierarchy_);
             ImGui::MenuItem("Inspector", nullptr, &show_inspector_);
+            ImGui::MenuItem("Tugela Editor", "T", &tugela_editor_.open);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Particle System → Emitter modules, timings, lean curves.");
+            }
             ImGui::MenuItem("Viewport", nullptr, &show_viewport_);
             ImGui::MenuItem("Toolbar", nullptr, &show_toolbar_);
             ImGui::MenuItem("Shortcuts", nullptr, &show_viewport_help_);
@@ -895,6 +934,23 @@ private:
             }
         }
         genesis::drawAudioReactivePanel(audio_reactive_, &show_audio_, particle_path);
+    }
+
+    void drawTugelaEditor(genesis::Scene& scene) {
+        genesis::OscLinkUiContext link_ctx{&osc_protocol_};
+        genesis::AudioLinkUiContext audio_link_ctx{&audio_reactive_};
+        genesis::ParticleEmitterUiContext particle_ui{};
+        particle_ui.scene = &scene;
+        particle_ui.osc = &link_ctx;
+        particle_ui.audio = &audio_link_ctx;
+        particle_ui.mark_dirty = [this]() { markDirty(); };
+        particle_ui.reset_particles = [this]() { runtime_.resetParticles(); };
+        particle_ui.select_node = [this](genesis::NodeId id) { selectNode(id); };
+        particle_ui.stats = [this]() {
+            const auto s = runtime_.particleWorld().stats();
+            return genesis::ParticleWorldStatsLite{s.alive, s.emitters, s.steps};
+        };
+        genesis::drawTugelaEditorWindow(tugela_editor_, particle_ui);
     }
 
     void drawInspectorPanel(genesis::Scene& scene) {
@@ -2251,6 +2307,7 @@ private:
         if (id != 0) {
             selection_.push_back(id);
             syncReparentFromSelection(id);
+            genesis::tugelaEditorFocusSelection(tugela_editor_, runtime_.scene(), id);
         }
         rot_edit_node_ = 0;
     }
@@ -2794,12 +2851,14 @@ private:
     bool show_protocol_ = false;
     bool show_audio_ = false;
     bool show_animation_graph_ = false;
+    genesis::TugelaEditorState tugela_editor_{};
     bool auto_key_ = false;
     bool show_debug_window_ = false;
     bool show_grid_ = true;
     bool show_actor_icons_ = true;
     bool game_view_mode_ = false; // Unreal-like: hide actor icons when true
     int edge_demo_frames_ = 0;
+    int tugela_demo_frames_ = 0;
 
     bool show_new_scene_confirm_ = false;
     bool show_open_confirm_ = false;

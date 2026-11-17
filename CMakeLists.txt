@@ -283,6 +283,7 @@ if(GENESIS_BUILD_EXAMPLES)
         editor/EditorSession.cpp
         editor/EditorTheme.cpp
         editor/ParticleEmitterUi.cpp
+        editor/TugelaEditor.cpp
     )
     target_link_libraries(genesis_gltf_viewer PRIVATE genesis_engine genesis_protocol genesis_protocol_ui genesis_audio imguizmo_lib)
     add_dependencies(genesis_gltf_viewer genesis_shaders)

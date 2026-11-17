@@ -49,16 +49,16 @@ ImFont* loadGenesisEditorFonts() {
 void applyGenesisEditorTheme() {
     ImGuiStyle& style = ImGui::GetStyle();
 
-    // Soft-rounded DCC shell — denser than stock ImGui, quieter than neon dashboards.
-    style.WindowRounding = 6.0f;
-    style.ChildRounding = 5.0f;
+    // Premium dark DCC shell — quiet, dense, hairline structure (UE/Blender-adjacent).
+    style.WindowRounding = 7.0f;
+    style.ChildRounding = 6.0f;
     style.FrameRounding = 4.0f;
     style.GrabRounding = 3.0f;
-    style.PopupRounding = 6.0f;
-    style.ScrollbarRounding = 8.0f;
+    style.PopupRounding = 7.0f;
+    style.ScrollbarRounding = 9.0f;
     style.TabRounding = 4.0f;
-    style.WindowBorderSize = 0.0f;
-    style.ChildBorderSize = 0.0f;
+    style.WindowBorderSize = 1.0f;
+    style.ChildBorderSize = 1.0f;
     style.PopupBorderSize = 1.0f;
     style.FrameBorderSize = 0.0f;
     style.TabBorderSize = 0.0f;
@@ -68,7 +68,7 @@ void applyGenesisEditorTheme() {
     style.ItemSpacing = ImVec2(8.0f, 6.0f);
     style.ItemInnerSpacing = ImVec2(6.0f, 4.0f);
     style.IndentSpacing = 16.0f;
-    style.ScrollbarSize = 10.0f;
+    style.ScrollbarSize = 11.0f;
     style.GrabMinSize = 10.0f;
     style.WindowTitleAlign = ImVec2(0.02f, 0.5f);
     style.ButtonTextAlign = ImVec2(0.5f, 0.5f);
@@ -77,27 +77,27 @@ void applyGenesisEditorTheme() {
     style.SeparatorTextPadding = ImVec2(12.0f, 3.0f);
     style.DockingSeparatorSize = 2.0f;
     style.TabBarBorderSize = 0.0f;
-    style.TabBarOverlineSize = 2.0f;
+    style.TabBarOverlineSize = 2.5f;
     style.HoverStationaryDelay = 0.12f;
     style.HoverDelayNormal = 0.35f;
 
     ImVec4* c = style.Colors;
 
-    // Deep charcoal DCC shell (UE/Blender-adjacent) — darker panels/menus than mid-graphite.
-    const ImVec4 bg0(0.028f, 0.029f, 0.032f, 1.00f); // dock empty / menu / title
-    const ImVec4 bg1(0.045f, 0.047f, 0.052f, 1.00f); // panel (Hierarchy / Inspector)
-    const ImVec4 bg2(0.068f, 0.072f, 0.080f, 1.00f); // elevated / buttons
-    const ImVec4 bg3(0.095f, 0.100f, 0.112f, 1.00f); // hover surfaces
-    const ImVec4 input(0.022f, 0.023f, 0.026f, 1.00f);
-    const ImVec4 border(0.110f, 0.118f, 0.130f, 0.90f);
-    const ImVec4 text(0.910f, 0.920f, 0.935f, 1.00f);
-    const ImVec4 muted(0.480f, 0.505f, 0.545f, 1.00f);
-    // Cool cyan-teal accent — readable on deep charcoal, not neon.
-    const ImVec4 accent(0.30f, 0.74f, 0.78f, 1.00f);
-    const ImVec4 accent_hi(0.40f, 0.82f, 0.86f, 1.00f);
-    const ImVec4 accent_lo(0.14f, 0.36f, 0.40f, 1.00f);
-    const ImVec4 accent_soft(0.30f, 0.74f, 0.78f, 0.14f);
-    const ImVec4 select(0.30f, 0.74f, 0.78f, 0.26f);
+    // Deeper charcoal + cooler accent for premium Tugela chrome.
+    const ImVec4 bg0(0.022f, 0.023f, 0.026f, 1.00f); // dock empty / menu / title
+    const ImVec4 bg1(0.038f, 0.040f, 0.046f, 1.00f); // panel (Hierarchy / Inspector)
+    const ImVec4 bg2(0.058f, 0.062f, 0.070f, 1.00f); // elevated / buttons
+    const ImVec4 bg3(0.086f, 0.092f, 0.104f, 1.00f); // hover surfaces
+    const ImVec4 input(0.018f, 0.019f, 0.022f, 1.00f);
+    const ImVec4 border(0.095f, 0.102f, 0.115f, 0.85f);
+    const ImVec4 text(0.920f, 0.930f, 0.945f, 1.00f);
+    const ImVec4 muted(0.470f, 0.500f, 0.540f, 1.00f);
+    // Soft cyan-teal — premium, not neon.
+    const ImVec4 accent(0.34f, 0.78f, 0.82f, 1.00f);
+    const ImVec4 accent_hi(0.44f, 0.86f, 0.90f, 1.00f);
+    const ImVec4 accent_lo(0.16f, 0.40f, 0.44f, 1.00f);
+    const ImVec4 accent_soft(0.34f, 0.78f, 0.82f, 0.12f);
+    const ImVec4 select(0.34f, 0.78f, 0.82f, 0.24f);
 
     c[ImGuiCol_Text] = text;
     c[ImGuiCol_TextDisabled] = muted;
@@ -156,10 +156,10 @@ void applyGenesisEditorTheme() {
 
 void drawEditorSectionLabel(const char* label) {
     ImGui::Spacing();
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.48f, 0.68f, 0.74f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.52f, 0.74f, 0.78f, 1.0f));
     ImGui::TextUnformatted(label);
     ImGui::PopStyleColor();
-    ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4(0.12f, 0.20f, 0.22f, 0.90f));
+    ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4(0.14f, 0.24f, 0.26f, 0.85f));
     ImGui::Separator();
     ImGui::PopStyleColor();
     ImGui::Spacing();
