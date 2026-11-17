@@ -62,16 +62,12 @@ OscRoomPersonPose oscRoomPersonPose(const OscRoomPersonSettings& settings,
         d /= len;
     }
 
-    const float half_x = std::max(0.1f, settings.room_half_x);
-    const float half_z = std::max(0.1f, settings.room_half_z);
-    const float tx = (std::fabs(d.x) > 1e-6f) ? (half_x / std::fabs(d.x)) : 1.0e9f;
-    const float tz = (std::fabs(d.y) > 1e-6f) ? (half_z / std::fabs(d.y)) : 1.0e9f;
-    const float t = std::min(tx, tz);
-
-    pose.wall = glm::vec3(c.x + d.x * t, settings.wall_spawn_height, c.y + d.y * t);
-    // Keep wall hit on the inward face of the AABB.
-    pose.wall.x = std::clamp(pose.wall.x, -half_x + 0.02f, half_x - 0.02f);
-    pose.wall.z = std::clamp(pose.wall.z, -half_z + 0.02f, half_z - 0.02f);
+    // Prefer explicit cylindrical radius; fall back to legacy AABB half-extents.
+    float radius = settings.room_radius;
+    if (radius < 0.1f) {
+        radius = std::max(0.1f, std::min(settings.room_half_x, settings.room_half_z));
+    }
+    pose.wall = glm::vec3(c.x + d.x * radius, settings.wall_spawn_height, c.y + d.y * radius);
     return pose;
 }
 

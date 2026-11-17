@@ -150,8 +150,9 @@ void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
     ImGui::Separator();
     ImGui::TextColored(ImVec4(0.75f, 0.85f, 0.55f, 1.0f), "Room person (feet + center→wall)");
     ImGui::TextWrapped(
-        "Send /genesis/room/person x,z (floor meters). Spawns denser particles at feet, along "
-        "the room-center→person→wall ray, and at the wall hit in front of them.");
+        "Send /genesis/room/person x,z (floor meters, donut between ~2 m tank and ~6 m outer ring). "
+        "Spawns denser particles at feet, along the room-center→person→outer-wall ray, and at the "
+        "cylindrical wall hit.");
     OscRoomPersonSettings room = protocol.roomPersonSettings();
     bool room_dirty = false;
     room_dirty |= ImGui::Checkbox("Enable room person", &room.enabled);
@@ -161,8 +162,11 @@ void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
         room.address = room_addr;
         room_dirty = true;
     }
-    room_dirty |= ImGui::DragFloat("Room half X", &room.room_half_x, 0.05f, 0.5f, 40.0f);
-    room_dirty |= ImGui::DragFloat("Room half Z", &room.room_half_z, 0.05f, 0.5f, 40.0f);
+    room_dirty |= ImGui::DragFloat("Outer room radius (m)", &room.room_radius, 0.05f, 0.5f, 40.0f);
+    room_dirty |= ImGui::DragFloat("Tank radius (m)", &room.tank_radius, 0.05f, 0.25f, 20.0f);
+    // Keep legacy AABB fields aligned with the cylindrical outer radius.
+    room.room_half_x = room.room_radius;
+    room.room_half_z = room.room_radius;
     room_dirty |= ImGui::Checkbox("Burst at feet", &room.burst_at_feet);
     room_dirty |= ImGui::Checkbox("Burst along ray", &room.burst_along_ray);
     room_dirty |= ImGui::Checkbox("Burst at wall", &room.burst_at_wall);
