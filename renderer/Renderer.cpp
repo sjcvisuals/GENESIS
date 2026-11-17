@@ -431,12 +431,13 @@ void Renderer::createMeshPipelines() {
     outline_config.set0_layout = frame_set_layout_;
     // Layout matches MeshBatchDrawer binds (set0 + bindless); frag does not sample.
     outline_config.set1_layout = bindless_textures_->layout();
-    // Depth-test off: rim draws on top of the actor (lavapipe equal-depth is flaky).
-    outline_config.depth_test = false;
+    // Inverted hull silhouette: cull the faces that face the camera so only the
+    // expanded shell rim survives the depth test against the shaded mesh.
+    // With Vulkan Y-flip we use CLOCKWISE front; BACK cull keeps the rim thin.
+    outline_config.depth_test = true;
     outline_config.depth_write = false;
-    outline_config.alpha_blend = true;
-    // Fresnel rim on both faces — readable silhouette without inverted-hull winding issues.
-    outline_config.cull_mode = VK_CULL_MODE_NONE;
+    outline_config.alpha_blend = false; // opaque white rim, no soft wash
+    outline_config.cull_mode = VK_CULL_MODE_BACK_BIT;
     outline_config.push_constant_size = sizeof(MeshMaterialPushConstants);
     outline_config.push_constant_stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     if (std::filesystem::exists(outline_config.vert_shader) &&

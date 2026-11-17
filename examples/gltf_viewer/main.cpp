@@ -86,8 +86,6 @@ public:
         show_grid_ = true;
 
         grid_mesh_ = genesis::createEditorGridMesh(renderer().context(), kGridHalfExtentM, kGridDivisions);
-        // Soft sphere for meshless actor selection (emitters / lights / cameras).
-        selection_helper_mesh_ = genesis::createSphereMesh(renderer().context(), 0.5f, 20, 12);
         if (color_mgmt_.lutDirty()) {
             renderer().uploadDisplayLut(color_mgmt_.rebuildDisplayLut());
         }
@@ -98,7 +96,6 @@ public:
         draw_commands_.clear();
         draw_batches_.clear();
         grid_mesh_ = {};
-        selection_helper_mesh_ = {};
         runtime_.clear();
         if (renderer().context().device() != VK_NULL_HANDLE) {
             vkDeviceWaitIdle(renderer().context().device());
@@ -209,7 +206,70 @@ public:
     }
 
 protected:
+    void maybeRunEdgeDemoHook() {
+        const char* mode = std::getenv("GENESIS_EDGE_DEMO");
+        if (!mode || mode[0] == '\0') {
+            return;
+        }
+        ++edge_demo_frames_;
+        if (edge_demo_frames_ != 45) {
+            return;
+        }
+        const std::string m(mode);
+        if (m == "mesh") {
+            game_view_mode_ = false;
+            show_actor_icons_ = true;
+            addPrimitiveMesh("Cube", genesis::createCubeMesh(renderer().context()));
+            if (genesis::Node* node = runtime_.scene().find(primarySelected())) {
+                if (node->material_resource.has_value()) {
+                    if (genesis::SceneMaterial* mat = runtime_.material(*node->material_resource)) {
+                        // Mid-gray body so the thin white silhouette rim contrasts.
+                        mat->base_color = glm::vec4(0.28f, 0.30f, 0.34f, 1.0f);
+                        mat->emissive = glm::vec3(0.12f, 0.13f, 0.15f);
+                        mat->emissive_strength = 1.0f;
+                        mat->roughness = 0.65f;
+                        mat->metallic = 0.0f;
+                    }
+                }
+                node->local.position = glm::vec3(0.0f, 0.55f, 0.0f);
+                node->local.scale = glm::vec3(0.9f);
+            }
+            runtime_.updateTransforms();
+            focusEditorCameraOnSelection();
+            // Pull camera out so the white silhouette rim reads clearly.
+            placeEditorCameraAt(glm::vec3(2.4f, 1.6f, 2.8f), glm::vec3(0.0f, 0.55f, 0.0f));
+        } else if (m == "emitter") {
+            game_view_mode_ = false;
+            show_actor_icons_ = true;
+            std::optional<genesis::NodeId> id =
+                genesis::findNodeByPath(runtime_.scene(), "Scene/Particle System/Soft Circles");
+            if (!id) {
+                for (const genesis::Node& n : runtime_.scene().nodes) {
+                    if (n.particle_emitter.has_value()) {
+                        id = n.id;
+                        break;
+                    }
+                }
+            }
+            if (id) {
+                selectNode(*id);
+                focusEditorCameraOnSelection();
+                placeEditorCameraAt(glm::vec3(1.8f, 1.4f, 2.2f), glm::vec3(0.0f, 0.2f, 0.0f));
+            }
+        } else if (m == "game") {
+            show_actor_icons_ = true;
+            game_view_mode_ = true;
+            std::optional<genesis::NodeId> id =
+                genesis::findNodeByPath(runtime_.scene(), "Scene/Particle System/Soft Circles");
+            if (id) {
+                selectNode(*id);
+            }
+            placeEditorCameraAt(glm::vec3(1.8f, 1.4f, 2.2f), glm::vec3(0.0f, 0.2f, 0.0f));
+        }
+    }
+
     void onUpdate(float dt) override {
+        maybeRunEdgeDemoHook();
         if (smoke_exit_frames_ >= 0) {
             if (--smoke_exit_frames_ < 0) {
                 exit_confirmed_ = true;
@@ -365,6 +425,7 @@ protected:
 
             handleViewportSelection(scene);
             drawSelectionOverlays(scene);
+            drawActorIcons(scene);
         } else {
             viewport_.w = 0.0f;
             viewport_.h = 0.0f;
@@ -400,6 +461,10 @@ private:
         if (input().keyPressed(SDL_SCANCODE_F)) {
             focusEditorCameraOnSelection();
         }
+        // Unreal-like G: toggle game view (hides actor icons / editor helpers).
+        if (input().keyPressed(SDL_SCANCODE_G) && !ctrl) {
+            game_view_mode_ = !game_view_mode_;
+        }
         // Demo / QA hotkeys for edge-selection screenshots (black-stage visible cube).
         if (input().keyPressed(SDL_SCANCODE_F6)) {
             addPrimitiveMesh("Cube", genesis::createCubeMesh(renderer().context()));
@@ -423,7 +488,8 @@ private:
                 genesis::findNodeByPath(runtime_.scene(), "Scene/Particle System/Soft Circles");
             if (!id) {
                 for (const genesis::Node& n : runtime_.scene().nodes) {
-                    if (n.particle_emitter.has_value() && n.name.find("Soft Circles") != std::string::npos) {
+                    if (n.particle_emitter.has_value() &&
+                        n.name.find("Soft Circles") != std::string::npos) {
                         id = n.id;
                         break;
                     }
@@ -548,6 +614,13 @@ private:
             ImGui::MenuItem("Audio", nullptr, &show_audio_);
             ImGui::MenuItem("Animation Graph", nullptr, &show_animation_graph_);
             ImGui::MenuItem("Show Grid", nullptr, &show_grid_);
+            ImGui::BeginDisabled(game_view_mode_);
+            ImGui::MenuItem("Actor Icons", nullptr, &show_actor_icons_);
+            ImGui::EndDisabled();
+            ImGui::MenuItem("Game View", "G", &game_view_mode_);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Hide actor icons (Unreal-style game / show-flags).");
+            }
             ImGui::Separator();
             ImGui::MenuItem("Performance / Debug", nullptr, &show_debug_window_);
             ImGui::Separator();
@@ -1313,6 +1386,11 @@ private:
 
         ImGui::SameLine(0.0f, 16.0f);
         ImGui::Checkbox("Grid", &show_grid_);
+        ImGui::SameLine(0.0f, 12.0f);
+        ImGui::Checkbox("Game", &game_view_mode_);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Game View (G) — hide actor icons");
+        }
 
         ImGui::SameLine(0.0f, 20.0f);
         if (!selection_.empty() && scene.find(primarySelected())) {
@@ -1343,8 +1421,11 @@ private:
         ImGui::BulletText("RMB + WASD / QE — fly look");
         ImGui::BulletText("F — frame selection (sets orbit pivot)");
         ImGui::BulletText("Grid — 1 m major / 0.25 m minor");
+        ImGui::BulletText("G — Game View (hide actor icons)");
         ImGui::Spacing();
         ImGui::TextDisabled("SELECTION");
+        ImGui::BulletText("Meshes — thin white silhouette outline");
+        ImGui::BulletText("Emitters / lights / cameras — viewport icons");
         ImGui::BulletText("LMB — select / marquee");
         ImGui::BulletText("Shift / Ctrl + LMB — multi");
         ImGui::BulletText("Delete — remove (children reparent)");
@@ -1851,32 +1932,122 @@ private:
 
     void drawSelectionOverlays(genesis::Scene& scene) {
         (void)scene;
-        // Selection silhouette is drawn in the 3D pass (inverted-hull edge overlay).
-        // Keep only the marquee rubber-band here — no AABB/cyan screen boxes.
+        // Mesh silhouette is a 3D inverted-hull pass. Icons are drawn separately.
+        // Marquee only — no AABB/cyan screen boxes.
         ImDrawList* draw = ImGui::GetForegroundDrawList();
         if (marquee_.active && marquee_.dragging) {
-            draw->AddRectFilled(marquee_.start, marquee_.current, IM_COL32(232, 140, 48, 28));
-            draw->AddRect(marquee_.start, marquee_.current, IM_COL32(232, 140, 48, 200), 0.0f, 0, 1.25f);
+            draw->AddRectFilled(marquee_.start, marquee_.current, IM_COL32(240, 240, 245, 28));
+            draw->AddRect(marquee_.start, marquee_.current, IM_COL32(240, 240, 245, 200), 0.0f, 0,
+                          1.25f);
+        }
+    }
+
+    static bool projectWorldPointToScreen(const glm::mat4& view_proj, const glm::vec3& world,
+                                          float viewport_w, float viewport_h, float& out_x,
+                                          float& out_y) {
+        const glm::vec4 clip = view_proj * glm::vec4(world, 1.0f);
+        if (std::abs(clip.w) <= 1e-5f || clip.w < 0.0f) {
+            return false;
+        }
+        const float inv_w = 1.0f / clip.w;
+        const float ndc_x = clip.x * inv_w;
+        const float ndc_y = clip.y * inv_w;
+        out_x = (ndc_x * 0.5f + 0.5f) * viewport_w;
+        out_y = (1.0f - ndc_y) * 0.5f * viewport_h;
+        return out_x >= -40.0f && out_y >= -40.0f && out_x <= viewport_w + 40.0f &&
+               out_y <= viewport_h + 40.0f;
+    }
+
+    enum class ActorIconKind { Emitter, Light, Camera };
+
+    static void drawOneActorIcon(ImDrawList* draw, ImVec2 center, float radius, ActorIconKind kind,
+                                 bool selected) {
+        const ImU32 fill =
+            kind == ActorIconKind::Emitter   ? IM_COL32(70, 170, 210, selected ? 230 : 160)
+            : kind == ActorIconKind::Light   ? IM_COL32(230, 190, 70, selected ? 235 : 165)
+                                             : IM_COL32(150, 160, 180, selected ? 230 : 155);
+        const ImU32 edge = selected ? IM_COL32(255, 255, 255, 255) : IM_COL32(20, 22, 26, 200);
+        draw->AddCircleFilled(center, radius, fill, 20);
+        draw->AddCircle(center, radius, edge, 20, selected ? 2.0f : 1.25f);
+
+        if (kind == ActorIconKind::Emitter) {
+            // Soft concentric rings — Niagara/emitter billboard cue.
+            draw->AddCircle(center, radius * 0.55f, IM_COL32(255, 255, 255, selected ? 220 : 140), 16,
+                            1.25f);
+            draw->AddCircle(center, radius * 0.28f, IM_COL32(255, 255, 255, selected ? 200 : 120), 12,
+                            1.0f);
+        } else if (kind == ActorIconKind::Light) {
+            // Simple radial ticks.
+            for (int i = 0; i < 6; ++i) {
+                const float a = static_cast<float>(i) * 1.04719755f;
+                const ImVec2 d(std::cos(a), std::sin(a));
+                draw->AddLine(ImVec2(center.x + d.x * radius * 0.35f, center.y + d.y * radius * 0.35f),
+                              ImVec2(center.x + d.x * radius * 0.85f, center.y + d.y * radius * 0.85f),
+                              IM_COL32(40, 36, 20, selected ? 230 : 170), 1.4f);
+            }
+        } else {
+            // Camera body + lens.
+            draw->AddRectFilled(ImVec2(center.x - radius * 0.45f, center.y - radius * 0.28f),
+                                ImVec2(center.x + radius * 0.15f, center.y + radius * 0.28f),
+                                IM_COL32(30, 32, 38, 220), 2.0f);
+            draw->AddTriangleFilled(ImVec2(center.x + radius * 0.1f, center.y - radius * 0.22f),
+                                    ImVec2(center.x + radius * 0.55f, center.y),
+                                    ImVec2(center.x + radius * 0.1f, center.y + radius * 0.22f),
+                                    IM_COL32(30, 32, 38, 220));
+        }
+        if (selected) {
+            draw->AddCircle(center, radius + 3.0f, IM_COL32(255, 255, 255, 180), 22, 1.5f);
+        }
+    }
+
+    void drawActorIcons(genesis::Scene& scene) {
+        if (game_view_mode_ || !show_actor_icons_ || !show_viewport_ || viewport_.w < 2.0f) {
+            return;
+        }
+
+        runtime_.updateTransforms();
+        const float aspect = renderAspect();
+        const glm::mat4 view_proj =
+            genesis::projectionForImGuizmo(outputProjectionMatrix(aspect)) * outputViewMatrix();
+        ImDrawList* draw = ImGui::GetForegroundDrawList();
+        constexpr float kIconRadius = 11.0f;
+
+        for (const genesis::Node& node : scene.nodes) {
+            if (!node.visible) {
+                continue;
+            }
+            ActorIconKind kind{};
+            if (node.particle_emitter.has_value()) {
+                kind = ActorIconKind::Emitter;
+            } else if (node.light.has_value()) {
+                kind = ActorIconKind::Light;
+            } else if (node.camera.has_value()) {
+                kind = ActorIconKind::Camera;
+            } else {
+                continue;
+            }
+
+            const glm::vec3 world = glm::vec3(node.world[3]);
+            float sx = 0.0f;
+            float sy = 0.0f;
+            if (!projectWorldPointToScreen(view_proj, world, viewport_.w, viewport_.h, sx, sy)) {
+                continue;
+            }
+            const ImVec2 center(viewport_.x + sx, viewport_.y + sy);
+            drawOneActorIcon(draw, center, kIconRadius, kind, isSelected(node.id));
         }
     }
 
     static genesis::MeshMaterialPushConstants makeOutlineMaterial(bool primary) {
         genesis::MeshMaterialPushConstants mat{};
-        // Soft Unreal-amber rim — readable on the black stage, not neon cyan.
-        if (primary) {
-            mat.base_color[0] = 1.0f;
-            mat.base_color[1] = 0.58f;
-            mat.base_color[2] = 0.12f;
-            mat.base_color[3] = 0.95f;
-        } else {
-            mat.base_color[0] = 0.82f;
-            mat.base_color[1] = 0.45f;
-            mat.base_color[2] = 0.10f;
-            mat.base_color[3] = 0.62f;
-        }
-        // Rim power for fresnel silhouette (higher = tighter edge band).
-        mat.material_params[0] = 2.6f;
-        mat.material_params[2] = 0.0f; // opaque so depth prepass writes for helpers
+        // Thin white Unreal-style silhouette — not amber, not a filled wash.
+        mat.base_color[0] = 1.0f;
+        mat.base_color[1] = 1.0f;
+        mat.base_color[2] = 1.0f;
+        mat.base_color[3] = primary ? 0.95f : 0.55f;
+        // Expand scale (meters of shell per meter of camera distance).
+        mat.material_params[0] = 0.006f;
+        mat.material_params[2] = 0.0f;
         return mat;
     }
 
@@ -1889,7 +2060,6 @@ private:
         genesis::Scene& scene = runtime_.scene();
         runtime_.updateTransforms();
 
-        std::unordered_set<genesis::NodeId> outlined_mesh_nodes;
         std::vector<genesis::SceneMeshBatch> outline_batches;
         outline_batches.reserve(selection_.size());
 
@@ -1902,7 +2072,7 @@ private:
             genesis::SceneMeshBatch* batch = nullptr;
             for (genesis::SceneMeshBatch& existing : outline_batches) {
                 if (existing.mesh == mesh &&
-                    existing.material.base_color[3] == (primary ? 0.95f : 0.62f)) {
+                    existing.material.base_color[3] == (primary ? 0.95f : 0.55f)) {
                     batch = &existing;
                     break;
                 }
@@ -1919,50 +2089,27 @@ private:
             batch->node_ids.push_back(id);
         };
 
-        // Mesh / fluid actors: silhouette of the drawn geometry itself.
+        // Mesh / fluid actors only — never particle sprites, never helper spheres/boxes.
+        std::unordered_set<genesis::NodeId> outlined;
         for (const genesis::SceneDrawCommand& cmd : draw_commands_) {
             if (cmd.node_id == 0 || !isSelected(cmd.node_id) || !cmd.mesh) {
                 continue;
             }
+            // Skip GPU particle instances (node_id is 0 above; belt-and-suspenders for future tagging).
             append_instance(cmd.mesh, cmd.model, cmd.node_id);
-            outlined_mesh_nodes.insert(cmd.node_id);
+            outlined.insert(cmd.node_id);
         }
-
-        // Particle emitters / lights / cameras: soft sphere matching pick bounds.
-        genesis::ScenePickParams params{};
         for (const genesis::NodeId id : selection_) {
-            if (outlined_mesh_nodes.count(id) != 0) {
+            if (outlined.count(id) != 0) {
                 continue;
             }
             const genesis::Node* node = scene.find(id);
-            if (!node) {
+            if (!node || !node->mesh_resource.has_value()) {
                 continue;
             }
-            const genesis::Mesh* mesh = nullptr;
-            if (node->mesh_resource.has_value()) {
-                mesh = runtime_.mesh(*node->mesh_resource);
-            }
-            // Prefer real mesh silhouette when the node has mesh data but was culled.
-            if (mesh != nullptr) {
+            if (const genesis::Mesh* mesh = runtime_.mesh(*node->mesh_resource)) {
                 append_instance(mesh, node->world, id);
-                continue;
             }
-
-            glm::vec3 aabb_min{};
-            glm::vec3 aabb_max{};
-            if (!genesis::nodeWorldPickAabb(*node, nullptr, params, aabb_min, aabb_max)) {
-                continue;
-            }
-            const glm::vec3 center = 0.5f * (aabb_min + aabb_max);
-            glm::vec3 extent = glm::max(aabb_max - aabb_min, glm::vec3(0.08f));
-            // Emitters get a slightly larger readable selection shell on the black stage.
-            if (node->particle_emitter.has_value()) {
-                extent = glm::max(extent, glm::vec3(0.7f));
-            }
-            // Sphere mesh is unit diameter 1 (radius 0.5); scale XYZ to the pick AABB.
-            const glm::mat4 model =
-                glm::translate(glm::mat4(1.0f), center) * glm::scale(glm::mat4(1.0f), extent);
-            append_instance(&selection_helper_mesh_, model, id);
         }
 
         if (outline_batches.empty()) {
@@ -2537,7 +2684,6 @@ private:
     genesis::SceneRuntime runtime_;
     genesis::ColorManagement color_mgmt_;
     genesis::Mesh grid_mesh_{};
-    genesis::Mesh selection_helper_mesh_{};
     genesis::Camera editor_camera_{};
     glm::vec3 camera_pivot_{0.0f, 0.85f, 0.0f};
     genesis::ViewportRect viewport_{};
@@ -2583,6 +2729,9 @@ private:
     bool auto_key_ = false;
     bool show_debug_window_ = false;
     bool show_grid_ = true;
+    bool show_actor_icons_ = true;
+    bool game_view_mode_ = false; // Unreal-like: hide actor icons when true
+    int edge_demo_frames_ = 0;
 
     bool show_new_scene_confirm_ = false;
     bool show_open_confirm_ = false;

@@ -1,6 +1,7 @@
 #version 450
 
-// Selection edge overlay: slight normal expand + fresnel rim in the fragment shader.
+// Thin Unreal-style silhouette outline via inverted hull.
+// Drawn with front-face cull + depth test so only the expanded rim survives.
 
 struct Light {
     vec4 position;
@@ -35,6 +36,8 @@ layout(set = 0, binding = 1) readonly buffer InstanceBuffer {
     MeshInstance instances[];
 } uInstances;
 
+// Matches MeshMaterialPushConstants (256 bytes).
+// baseColor = outline color; materialParams.x = expand scale (meters per meter of distance).
 layout(push_constant) uniform Push {
     vec4 baseColor;
     vec4 emissive;
@@ -83,27 +86,21 @@ layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inUv;
 
-layout(location = 0) out vec3 vWorldPos;
-layout(location = 1) out vec3 vWorldNormal;
-layout(location = 2) out vec4 vColor;
-layout(location = 3) out float vRimPower;
-layout(location = 4) out vec3 vCameraPos;
+layout(location = 0) out vec4 vColor;
 
 void main() {
     MeshInstance inst = uInstances.instances[uPush.instanceBase + gl_InstanceIndex];
+    vec3 worldPos = (inst.model * vec4(inPosition, 1.0)).xyz;
     vec3 n = mat3(inst.normalMatrix) * inNormal;
     float nLen2 = dot(n, n);
     vec3 worldN = nLen2 > 1e-8 ? normalize(n) : vec3(0.0, 1.0, 0.0);
 
-    vec3 worldPos = (inst.model * vec4(inPosition, 1.0)).xyz;
-    // Slight shell expand so the rim band has thickness on screen.
-    float dist = max(length(uFrame.cameraPos.xyz - worldPos), 0.4);
-    worldPos += worldN * clamp(0.004 * dist, 0.008, 0.08);
+    // Thin, distance-stable shell — reads as a line, not a filled volume.
+    float dist = max(length(uFrame.cameraPos.xyz - worldPos), 0.35);
+    float expandScale = max(uPush.materialParams.x, 0.0);
+    float expand = clamp(expandScale * dist, 0.012, 0.07);
+    worldPos += worldN * expand;
 
-    vWorldPos = worldPos;
-    vWorldNormal = worldN;
-    vColor = uPush.baseColor;
-    vRimPower = max(uPush.materialParams.x, 1.0);
-    vCameraPos = uFrame.cameraPos.xyz;
     gl_Position = uFrame.viewProj * vec4(worldPos, 1.0);
+    vColor = uPush.baseColor;
 }
