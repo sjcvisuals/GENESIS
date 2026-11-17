@@ -83,39 +83,39 @@ void applyGenesisEditorTheme() {
 
     ImVec4* c = style.Colors;
 
-    // Cool graphite canvas — deeper than XP grey, warmer than pure black.
-    const ImVec4 bg0(0.070f, 0.072f, 0.078f, 1.00f); // app / dock empty
-    const ImVec4 bg1(0.098f, 0.102f, 0.112f, 0.98f); // panel
-    const ImVec4 bg2(0.122f, 0.128f, 0.140f, 1.00f); // elevated / title
-    const ImVec4 bg3(0.148f, 0.156f, 0.170f, 1.00f); // hover surfaces
-    const ImVec4 input(0.078f, 0.082f, 0.090f, 1.00f);
-    const ImVec4 border(0.180f, 0.190f, 0.205f, 0.85f);
-    const ImVec4 text(0.930f, 0.938f, 0.950f, 1.00f);
-    const ImVec4 muted(0.520f, 0.545f, 0.585f, 1.00f);
-    // Cool cyan-teal accent (professional DCC, not purple glow / neon).
-    const ImVec4 accent(0.32f, 0.78f, 0.82f, 1.00f);
-    const ImVec4 accent_hi(0.42f, 0.86f, 0.88f, 1.00f);
-    const ImVec4 accent_lo(0.18f, 0.42f, 0.46f, 1.00f);
-    const ImVec4 accent_soft(0.32f, 0.78f, 0.82f, 0.16f);
-    const ImVec4 select(0.32f, 0.78f, 0.82f, 0.28f);
+    // Deep charcoal DCC shell (UE/Blender-adjacent) — darker panels/menus than mid-graphite.
+    const ImVec4 bg0(0.028f, 0.029f, 0.032f, 1.00f); // dock empty / menu / title
+    const ImVec4 bg1(0.045f, 0.047f, 0.052f, 1.00f); // panel (Hierarchy / Inspector)
+    const ImVec4 bg2(0.068f, 0.072f, 0.080f, 1.00f); // elevated / buttons
+    const ImVec4 bg3(0.095f, 0.100f, 0.112f, 1.00f); // hover surfaces
+    const ImVec4 input(0.022f, 0.023f, 0.026f, 1.00f);
+    const ImVec4 border(0.110f, 0.118f, 0.130f, 0.90f);
+    const ImVec4 text(0.910f, 0.920f, 0.935f, 1.00f);
+    const ImVec4 muted(0.480f, 0.505f, 0.545f, 1.00f);
+    // Cool cyan-teal accent — readable on deep charcoal, not neon.
+    const ImVec4 accent(0.30f, 0.74f, 0.78f, 1.00f);
+    const ImVec4 accent_hi(0.40f, 0.82f, 0.86f, 1.00f);
+    const ImVec4 accent_lo(0.14f, 0.36f, 0.40f, 1.00f);
+    const ImVec4 accent_soft(0.30f, 0.74f, 0.78f, 0.14f);
+    const ImVec4 select(0.30f, 0.74f, 0.78f, 0.26f);
 
     c[ImGuiCol_Text] = text;
     c[ImGuiCol_TextDisabled] = muted;
     c[ImGuiCol_WindowBg] = bg1;
-    c[ImGuiCol_ChildBg] = ImVec4(bg0.x, bg0.y, bg0.z, 0.55f);
-    c[ImGuiCol_PopupBg] = ImVec4(bg2.x, bg2.y, bg2.z, 0.98f);
+    c[ImGuiCol_ChildBg] = ImVec4(bg0.x, bg0.y, bg0.z, 0.70f);
+    c[ImGuiCol_PopupBg] = ImVec4(0.040f, 0.042f, 0.048f, 0.98f);
     c[ImGuiCol_Border] = border;
     c[ImGuiCol_BorderShadow] = ImVec4(0, 0, 0, 0);
     c[ImGuiCol_FrameBg] = input;
     c[ImGuiCol_FrameBgHovered] = bg3;
-    c[ImGuiCol_FrameBgActive] = ImVec4(0.165f, 0.175f, 0.190f, 1.0f);
+    c[ImGuiCol_FrameBgActive] = ImVec4(0.115f, 0.122f, 0.135f, 1.0f);
     c[ImGuiCol_TitleBg] = bg0;
-    c[ImGuiCol_TitleBgActive] = bg2;
+    c[ImGuiCol_TitleBgActive] = ImVec4(0.038f, 0.040f, 0.046f, 1.0f);
     c[ImGuiCol_TitleBgCollapsed] = bg0;
     c[ImGuiCol_MenuBarBg] = bg0;
     c[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0);
-    c[ImGuiCol_ScrollbarGrab] = ImVec4(0.28f, 0.30f, 0.34f, 1.0f);
-    c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.38f, 0.40f, 0.44f, 1.0f);
+    c[ImGuiCol_ScrollbarGrab] = ImVec4(0.20f, 0.22f, 0.25f, 1.0f);
+    c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.30f, 0.32f, 0.36f, 1.0f);
     c[ImGuiCol_ScrollbarGrabActive] = accent_lo;
     c[ImGuiCol_CheckMark] = accent;
     c[ImGuiCol_SliderGrab] = accent;
@@ -125,11 +125,11 @@ void applyGenesisEditorTheme() {
     c[ImGuiCol_ButtonActive] = accent_lo;
     c[ImGuiCol_Header] = accent_soft;
     c[ImGuiCol_HeaderHovered] = select;
-    c[ImGuiCol_HeaderActive] = ImVec4(0.32f, 0.78f, 0.82f, 0.40f);
-    c[ImGuiCol_Separator] = ImVec4(0.160f, 0.170f, 0.185f, 1.0f);
+    c[ImGuiCol_HeaderActive] = ImVec4(0.30f, 0.74f, 0.78f, 0.38f);
+    c[ImGuiCol_Separator] = ImVec4(0.090f, 0.096f, 0.108f, 1.0f);
     c[ImGuiCol_SeparatorHovered] = accent_lo;
     c[ImGuiCol_SeparatorActive] = accent;
-    c[ImGuiCol_ResizeGrip] = ImVec4(0.28f, 0.30f, 0.34f, 0.35f);
+    c[ImGuiCol_ResizeGrip] = ImVec4(0.20f, 0.22f, 0.25f, 0.35f);
     c[ImGuiCol_ResizeGripHovered] = accent_lo;
     c[ImGuiCol_ResizeGripActive] = accent;
     c[ImGuiCol_Tab] = bg0;
@@ -138,28 +138,28 @@ void applyGenesisEditorTheme() {
     c[ImGuiCol_TabSelectedOverline] = accent;
     c[ImGuiCol_TabDimmed] = bg0;
     c[ImGuiCol_TabDimmedSelected] = bg1;
-    c[ImGuiCol_DockingPreview] = ImVec4(0.32f, 0.78f, 0.82f, 0.32f);
+    c[ImGuiCol_DockingPreview] = ImVec4(0.30f, 0.74f, 0.78f, 0.30f);
     c[ImGuiCol_DockingEmptyBg] = bg0;
     c[ImGuiCol_PlotLines] = accent;
     c[ImGuiCol_PlotHistogram] = accent;
     c[ImGuiCol_TableHeaderBg] = bg2;
     c[ImGuiCol_TableBorderStrong] = border;
-    c[ImGuiCol_TableBorderLight] = ImVec4(0.140f, 0.150f, 0.165f, 1.0f);
+    c[ImGuiCol_TableBorderLight] = ImVec4(0.080f, 0.086f, 0.096f, 1.0f);
     c[ImGuiCol_TableRowBg] = ImVec4(0, 0, 0, 0);
-    c[ImGuiCol_TableRowBgAlt] = ImVec4(1, 1, 1, 0.018f);
+    c[ImGuiCol_TableRowBgAlt] = ImVec4(1, 1, 1, 0.012f);
     c[ImGuiCol_TextSelectedBg] = select;
     c[ImGuiCol_DragDropTarget] = accent;
     c[ImGuiCol_NavCursor] = accent;
     c[ImGuiCol_NavWindowingHighlight] = accent;
-    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.02f, 0.02f, 0.03f, 0.62f);
+    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.01f, 0.01f, 0.015f, 0.72f);
 }
 
 void drawEditorSectionLabel(const char* label) {
     ImGui::Spacing();
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.72f, 0.78f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.48f, 0.68f, 0.74f, 1.0f));
     ImGui::TextUnformatted(label);
     ImGui::PopStyleColor();
-    ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4(0.18f, 0.28f, 0.30f, 0.85f));
+    ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4(0.12f, 0.20f, 0.22f, 0.90f));
     ImGui::Separator();
     ImGui::PopStyleColor();
     ImGui::Spacing();
