@@ -752,6 +752,9 @@ std::uint32_t SceneRuntime::resolveMeshRef(const std::string& ref) {
     if (ref == "Cylinder") {
         return addMesh(ref, createCylinderMesh(context_));
     }
+    if (ref == "CylinderShell") {
+        return addMesh(ref, createCylinderShellMesh(context_));
+    }
     if (ref == "Plane") {
         return addMesh(ref, createPlaneMesh(context_));
     }
