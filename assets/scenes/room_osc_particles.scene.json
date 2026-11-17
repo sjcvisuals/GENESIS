@@ -803,9 +803,9 @@
       },
       "transform": {
         "position": [
-          9.2,
-          4.6,
-          10.4
+          8.5,
+          5.2,
+          9.8
         ],
         "rotation": [
           -0.12,
@@ -825,12 +825,12 @@
     {
       "name": "Room Wall",
       "shading_model": "OpenPBR",
-      "base_weight": 0.55,
+      "base_weight": 0.7,
       "base_color": [
-        0.12,
-        0.14,
-        0.17,
-        0.42
+        0.22,
+        0.26,
+        0.32,
+        0.55
       ],
       "base_metalness": 0.0,
       "specular_weight": 0.35,
@@ -839,15 +839,15 @@
         0.6,
         0.65
       ],
-      "specular_roughness": 0.72,
+      "specular_roughness": 0.55,
       "specular_ior": 1.45,
       "transmission_weight": 0.0,
       "emissive": [
-        0.18,
-        0.22,
-        0.28
+        0.35,
+        0.42,
+        0.55
       ],
-      "emissive_strength": 0.22,
+      "emissive_strength": 0.55,
       "alpha_mode": "blend",
       "alpha_cutoff": 0.05
     },
@@ -856,9 +856,9 @@
       "shading_model": "OpenPBR",
       "base_weight": 1.0,
       "base_color": [
-        0.06,
-        0.07,
-        0.08,
+        0.1,
+        0.11,
+        0.13,
         1.0
       ],
       "base_metalness": 0.15,
@@ -872,11 +872,11 @@
       "specular_ior": 1.45,
       "transmission_weight": 0.0,
       "emissive": [
-        0.04,
-        0.05,
-        0.06
+        0.08,
+        0.1,
+        0.12
       ],
-      "emissive_strength": 0.08,
+      "emissive_strength": 0.25,
       "alpha_mode": "opaque",
       "alpha_cutoff": 0.5
     },
@@ -885,10 +885,10 @@
       "shading_model": "OpenPBR",
       "base_weight": 0.06,
       "base_color": [
-        0.1,
-        0.14,
-        0.16,
-        0.28
+        0.12,
+        0.18,
+        0.22,
+        0.4
       ],
       "base_metalness": 0.0,
       "specular_weight": 1.0,
@@ -906,11 +906,11 @@
         0.95
       ],
       "emissive": [
-        0.12,
         0.2,
-        0.26
+        0.35,
+        0.42
       ],
-      "emissive_strength": 0.06,
+      "emissive_strength": 0.18,
       "alpha_mode": "blend",
       "alpha_cutoff": 0.05
     }
