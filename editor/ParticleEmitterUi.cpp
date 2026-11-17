@@ -9,9 +9,9 @@ namespace genesis {
 
 namespace {
 
-constexpr ImVec4 kAccent{0.32f, 0.78f, 0.82f, 1.0f};
-constexpr ImVec4 kMuted{0.52f, 0.545f, 0.585f, 1.0f};
-constexpr ImVec4 kModuleTitle{0.88f, 0.91f, 0.94f, 1.0f};
+constexpr ImVec4 kAccent{0.30f, 0.74f, 0.78f, 1.0f};
+constexpr ImVec4 kMuted{0.48f, 0.505f, 0.545f, 1.0f};
+constexpr ImVec4 kModuleTitle{0.86f, 0.89f, 0.92f, 1.0f};
 
 void mark(ParticleEmitterUiContext& ctx) {
     if (ctx.mark_dirty) {
@@ -24,9 +24,9 @@ bool moduleHeader(const char* label, bool default_open = true) {
         ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_AllowOverlap |
         ImGuiTreeNodeFlags_SpanAvailWidth |
         (default_open ? ImGuiTreeNodeFlags_DefaultOpen : 0);
-    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.118f, 0.132f, 0.148f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.145f, 0.175f, 0.190f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.135f, 0.195f, 0.205f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.062f, 0.070f, 0.080f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.090f, 0.110f, 0.122f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.080f, 0.120f, 0.130f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_Text, kModuleTitle);
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 5.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, 6.0f));
