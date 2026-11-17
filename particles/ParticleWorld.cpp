@@ -691,8 +691,8 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
             out[dest_batch].instances.push_back(instance);
         };
 
-        // Trail Renderer: one soft wedge ribbon tip→head (comet silhouette in stills).
-        // Wide neck must meet EVERY soft-circle head — no length-dependent gap.
+        // Trail Renderer: Niagara-style wake — always BEHIND the head.
+        // tip = oldest history, neck under current world_pos; never lead ahead of the ball.
         if (p.trail_enabled && p.trail_count >= 2 && p.mesh == ParticleRenderMesh::Sprite) {
             const float trail_age_fade =
                 std::clamp(1.0f - (p.age / std::max(p.trail_lifetime * 2.5f, 0.1f)) * 0.12f, 0.75f,
@@ -702,25 +702,39 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
             const std::size_t trail_batch =
                 12u + (p.additive ? 2u : 0u) + (p.unlit ? 1u : 0u);
 
-            // Oldest history sample = tip; live particle = head. Always join to world_pos
-            // (newest history pin can still lag a sub-step behind the drawn disc).
-            const glm::vec3 tip = p.trail_pos[0];
+            // History: [0]=oldest … [count-1]=newest (pinned). Niagara wake must lag BEHIND
+            // the ball along velocity — never lead. Build along from velocity first so a
+            // misplaced oldest sample cannot flip the ribbon ahead of the head.
             const glm::vec3 head = world_pos;
-            const glm::vec3 seg = head - tip;
-            const float seg_len = glm::length(seg);
-            // Was: count>=4 && seg>head — skipped young wakes and looked intermittent.
-            if (seg_len > head_w * 0.2f) {
-                // Camera-facing along/across. Span uses projected tip→head length (not 3D
-                // seg_len×screen along — that foreshortening mismatch opened gaps).
-                const glm::vec3 seg_proj = seg - cam_forward * glm::dot(seg, cam_forward);
-                float screen_len = glm::length(seg_proj);
-                glm::vec3 along;
-                if (screen_len < 1e-4f) {
-                    along = cam_up;
-                    screen_len = std::max(seg_len, head_w * 0.2f);
+            const glm::vec3 oldest = p.trail_pos[0];
+            auto project_plane = [&](glm::vec3 v) {
+                v = v - cam_forward * glm::dot(v, cam_forward);
+                return v;
+            };
+            glm::vec3 along(0.0f);
+            float wake_len = 0.0f;
+            {
+                // +along = toward head from behind = velocity direction (path of travel).
+                glm::vec3 vel_along = project_plane(p.velocity);
+                const float vl = glm::length(vel_along);
+                glm::vec3 hist = project_plane(head - oldest); // oldest→head
+                const float hl = glm::length(hist);
+                if (vl > 1e-4f) {
+                    along = vel_along / vl;
+                    // Wake length from history projected onto -velocity (behind).
+                    wake_len = (hl > 1e-4f) ? std::max(0.0f, glm::dot(hist, along)) : 0.0f;
+                    if (wake_len < head_w * 0.25f) {
+                        wake_len = std::max(hl, head_w * 0.5f);
+                    }
+                } else if (hl > 1e-4f) {
+                    along = hist / hl;
+                    wake_len = hl;
                 } else {
-                    along = seg_proj / screen_len;
+                    along = cam_up;
+                    wake_len = head_w * 0.5f;
                 }
+            }
+            if (wake_len > head_w * 0.2f) {
                 glm::vec3 across = glm::cross(cam_forward, along);
                 const float across_len = glm::length(across);
                 if (across_len < 1e-4f) {
@@ -729,27 +743,17 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
                     across /= across_len;
                 }
 
-                // Quad mesh is local Y ∈ [-0.5,+0.5] (createFluidDisplayQuadMesh). Same as
-                // soft-circle heads: model[1] magnitude = full world length (not half).
-                // Prior code used half_len as both "half span" and model[1] scale → ribbon was
-                // only ~half as long as intended and the neck stopped short of the disc
-                // (worse on long wakes → intermittent gaps).
-                const float ribbon_w = head_w * std::clamp(width_head_frac, 0.65f, 0.95f);
-                const float tip_pad = head_w * 0.12f;
-                const float core_pad = head_w * 1.35f;
-                constexpr float kDissolveFrac = 0.08f; // late neck fade in soft-ribbon UV
-                // overshoot covers core pad + dissolve fraction of full span.
-                // span = screen + tip_pad + overshoot
-                // overshoot = core_pad + kDissolveFrac*span
-                // → overshoot = (core_pad + kDissolveFrac*(screen+tip_pad)) / (1 - kDissolveFrac)
-                const float overshoot =
-                    (core_pad + kDissolveFrac * (screen_len + tip_pad)) /
-                    std::max(1e-3f, 1.0f - kDissolveFrac);
-                const float span = screen_len + tip_pad + overshoot;
-                // Head-anchored ends (perspective-safe): neck under disc, tip at wake tip.
-                const glm::vec3 neck_end = head + along * overshoot;
-                const glm::vec3 tip_end = head - along * (screen_len + tip_pad);
-                const glm::vec3 mid = 0.5f * (neck_end + tip_end);
+                // Quad mesh local Y ∈ [-0.5,+0.5] → model[1] magnitude = full world length.
+                const float ribbon_w = head_w * std::clamp(width_head_frac, 0.65f, 0.92f);
+                const float tip_pad = head_w * 0.1f;
+                // ahead-of-head bug: neck_end = head + along*(~1.35*head_w) with along=tip→head
+                // put the wide neck past the leading rim. Keep neck at/under the disc only.
+                const float into_core = head_w * 0.18f;
+                const glm::vec3 neck_end = head + along * into_core;
+                // Tip strictly behind: head - along * wake (opposite velocity / past path).
+                const glm::vec3 tip_end = head - along * (wake_len + tip_pad);
+                const float span = wake_len + tip_pad + into_core;
+                const glm::vec3 mid = tip_end + along * (span * 0.5f);
 
                 glm::vec4 trail_color = color;
                 trail_color.a *= p.trail_alpha * trail_age_fade * 0.92f;
@@ -757,7 +761,7 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
 
                 glm::mat4 model(1.0f);
                 model[0] = glm::vec4(across * ribbon_w, 0.0f);
-                model[1] = glm::vec4(along * span, 0.0f); // full length; mesh ±0.5 → ±span/2
+                model[1] = glm::vec4(along * span, 0.0f); // +Y → head (neck UV under ball)
                 model[2] = glm::vec4(cam_forward, 0.0f);
                 model[3] = glm::vec4(mid, 1.0f);
                 push_sprite(model, trail_color, trail_batch);

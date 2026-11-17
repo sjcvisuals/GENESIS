@@ -301,9 +301,12 @@ GpuTexture GpuTexture::createSoftRibbonSprite(const VulkanContext& context, cons
         for (std::uint32_t x = 0; x < dim; ++x) {
             const float nx = (static_cast<float>(x) + 0.5f) / static_cast<float>(dim) * 2.0f - 1.0f;
             const float ny = (static_cast<float>(y) + 0.5f) / static_cast<float>(dim) * 2.0f - 1.0f;
-            // Mesh UV: local -Y → V=0, local +Y → V=1. Trail places +Y toward the neck
-            // (head). Tip of the wedge at V=0 (bottom of wake), neck at V=1 (under head).
-            // u=0 tip (ny=-1), u=1 neck (ny=+1).
+            // Mesh UV: local -Y → V=0, local +Y → V=1.
+            // Niagara wake: ParticleWorld sets model[1] = along*(tip→head), so local +Y is at
+            // the HEAD and local -Y is at the oldest tip BEHIND. Therefore V=1 must be the
+            // wide neck and V=0 the pointed tip. (If this mapping is inverted, trails read as
+            // leading ahead of the ball.)
+            // u=0 tip (ny=-1 / V=0), u=1 neck (ny=+1 / V=1).
             const float u = std::clamp((ny + 1.0f) * 0.5f, 0.0f, 1.0f);
             // Quadratic widen: tip stays pointed, flares into the neck.
             float half_w = kTipHalf + (kNeckHalf - kTipHalf) * (u * u);
