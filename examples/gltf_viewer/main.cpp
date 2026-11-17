@@ -2606,24 +2606,37 @@ private:
         resetEditorCamera();
         configureRoomOscDemoIfNeeded();
 
-        // Auto-frame the particle system (room demos: prefer Ambient Field for overview).
-        genesis::NodeId focus = 0;
-        for (const genesis::Node& node : runtime_.scene().nodes) {
-            if (!node.particle_emitter.has_value()) {
-                continue;
+        // Auto-frame: room install gets a fixed overview so the 6 m wall + dual rings read;
+        // other demos still frame the Soft Circles / Outer Ring emitter.
+        const bool room_demo = session_.document_path.filename().string().find("room_osc_particles") !=
+                               std::string::npos;
+        if (room_demo) {
+            camera_pivot_ = glm::vec3(0.0f, 0.9f, 0.0f);
+            placeEditorCameraAt(glm::vec3(9.5f, 5.5f, 11.0f), camera_pivot_);
+            // Select the outer wall so mesh silhouette + install scale are obvious on open.
+            if (std::optional<genesis::NodeId> wall =
+                    genesis::findNodeByPath(runtime_.scene(), "Scene/Outer Room Wall")) {
+                selectNode(*wall);
             }
-            if (focus == 0) {
-                focus = node.id;
+        } else {
+            genesis::NodeId focus = 0;
+            for (const genesis::Node& node : runtime_.scene().nodes) {
+                if (!node.particle_emitter.has_value()) {
+                    continue;
+                }
+                if (focus == 0) {
+                    focus = node.id;
+                }
+                if (node.name == "Outer Ring" || node.name == "Ambient Field" ||
+                    node.name == "Soft Circles") {
+                    focus = node.id;
+                    break;
+                }
             }
-            if (node.name == "Outer Ring" || node.name == "Ambient Field" ||
-                node.name == "Soft Circles") {
-                focus = node.id;
-                break;
+            if (focus != 0) {
+                selectNode(focus);
+                focusEditorCameraOnSelection();
             }
-        }
-        if (focus != 0) {
-            selectNode(focus);
-            focusEditorCameraOnSelection();
         }
     }
 
