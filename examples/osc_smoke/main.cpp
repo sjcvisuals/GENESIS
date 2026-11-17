@@ -2,6 +2,7 @@
 
 #include "protocol/OscParser.hpp"
 #include "protocol/OscParticleEmit.hpp"
+#include "protocol/OscRoomPerson.hpp"
 
 #if !defined(GENESIS_OSC_SMOKE_LIGHT)
 #include "particles/ParticleWorld.hpp"
@@ -77,6 +78,15 @@ std::vector<std::uint8_t> makeParticleEmitXyCount() {
     appendFloatBe(packet, 2.0f);
     appendFloatBe(packet, 3.0f);
     appendFloatBe(packet, 12.0f);
+    return packet;
+}
+
+std::vector<std::uint8_t> makeRoomPersonXz() {
+    std::vector<std::uint8_t> packet;
+    appendPadded(packet, "/genesis/room/person");
+    appendPadded(packet, ",ff");
+    appendFloatBe(packet, 2.0f);
+    appendFloatBe(packet, 1.0f);
     return packet;
 }
 
@@ -180,6 +190,35 @@ int main() {
             ++failures;
         } else {
             std::cout << "OSC particle emit xy+count OK (count=" << event.count << ")\n";
+        }
+    }
+
+    {
+        const auto packet = makeRoomPersonXz();
+        std::string err;
+        const auto msg = genesis::parseOscMessage(packet, &err);
+        genesis::OscRoomPersonSettings settings{};
+        genesis::OscRoomPersonEvent event{};
+        if (!msg || !genesis::tryParseOscRoomPerson(*msg, settings, event)) {
+            std::cerr << "room person xz parse failed: " << err << '\n';
+            ++failures;
+        } else if (std::abs(event.x - 2.0f) > 1e-5f || std::abs(event.z - 1.0f) > 1e-5f) {
+            std::cerr << "room person xz values mismatch\n";
+            ++failures;
+        } else {
+            const genesis::OscRoomPersonPose pose = genesis::oscRoomPersonPose(settings, event);
+            // Person at (2,1) → direction toward +X/+Z; wall should be outside the person.
+            const float person_r = std::sqrt(event.x * event.x + event.z * event.z);
+            const float wall_r = std::sqrt(pose.wall.x * pose.wall.x + pose.wall.z * pose.wall.z);
+            if (wall_r <= person_r + 1e-3f || std::abs(pose.feet.x - 2.0f) > 1e-5f) {
+                std::cerr << "room person wall ray failed (person_r=" << person_r
+                          << " wall_r=" << wall_r << ")\n";
+                ++failures;
+            } else {
+                std::cout << "OSC room person xz OK → feet(" << pose.feet.x << "," << pose.feet.y
+                          << "," << pose.feet.z << ") wall(" << pose.wall.x << "," << pose.wall.y
+                          << "," << pose.wall.z << ")\n";
+            }
         }
     }
 
