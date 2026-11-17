@@ -13,8 +13,7 @@
       }
     ],
     "bindings": {
-      "target_node": "Scene/Particle System/Person Feet",
-      "light_node": "Scene/Key Light"
+      "target_node": "Scene/Particle System/Person Feet"
     }
   }
 }
