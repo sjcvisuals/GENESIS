@@ -28,6 +28,7 @@ namespace genesis {
 SceneRuntime::SceneRuntime(const VulkanContext& context)
     : context_(context), fluid_world_(context) {
     animation_graph_.ensureDefaults();
+    particle_world_.enableGpuCompute(context_);
 }
 
 void SceneRuntime::clear() {
@@ -293,6 +294,10 @@ void SceneRuntime::tickParticlesSteps(const std::uint64_t steps, const float fix
         return;
     }
     particle_world_.simulate(scene_, steps, fixed_step_seconds);
+}
+
+void SceneRuntime::flushParticleGpuUpdates(VkCommandBuffer cmd) {
+    particle_world_.flushGpuUpdates(cmd, scene_);
 }
 
 void SceneRuntime::simulateFluids(VkCommandBuffer cmd, const float dt_seconds) {

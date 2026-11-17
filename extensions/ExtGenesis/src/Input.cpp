@@ -282,6 +282,10 @@ void Input::reloadSceneIfNeeded() {
             loaded_show_index_ = show_index;
             refreshCatalogForLoadedShow();
             applyLoadedPixeraConfig();
+            configureRoomOscIfNeeded(resource);
+            // Fresh per-stream cursors so dual-GPU consumers replay from the shared OSC hub.
+            osc_particle_cursor_ = 0;
+            osc_room_person_cursor_ = 0;
             host().log_info(std::format("GENESIS loaded show '{}'", resource));
         } else {
             host().log_error(std::format("GENESIS failed to load show '{}': {}", resource,
@@ -290,6 +294,31 @@ void Input::reloadSceneIfNeeded() {
     } else {
         host().log_error(std::format("GENESIS could not resolve show '{}'", resource));
     }
+}
+
+void Input::configureRoomOscIfNeeded(const std::string& resource_path) {
+    if (resource_path.find("room_osc_particles") == std::string::npos) {
+        return;
+    }
+    ::genesis::OscProtocol& osc = ::genesis::sharedOscProtocol();
+    ::genesis::OscRoomPersonSettings room = osc.roomPersonSettings();
+    room.enabled = true;
+    room.address = "/genesis/room/person";
+    room.feet_emitter_path = "Scene/Particle System/Person Feet";
+    room.wall_emitter_path = "Scene/Particle System/Wall Trace";
+    room.ray_emitter_path = "Scene/Particle System/Center Ray";
+    room.room_radius = 3.0f;
+    room.tank_radius = 1.0f;
+    room.room_half_x = room.room_radius;
+    room.room_half_z = room.room_radius;
+    osc.setRoomPersonSettings(room);
+
+    ::genesis::OscParticleEmitSettings emit = osc.particleEmitSettings();
+    emit.emitter_path = "Scene/Particle System/Person Feet";
+    emit.track_emitter_position = true;
+    emit.burst_on_message = false;
+    osc.setParticleEmitSettings(emit);
+    host().log_info("GENESIS room OSC person configured for Renderbridge");
 }
 
 void Input::publishTargetTexture() {
@@ -476,6 +505,7 @@ RenderResult Input::render() noexcept try {
         osc.poll(osc_time_seconds_);
         osc.applyBindings(session_->sceneRuntime());
         osc.applyParticleEmits(session_->sceneRuntime(), osc_particle_cursor_);
+        osc.applyRoomPerson(session_->sceneRuntime(), osc_room_person_cursor_);
     }
 
     const ::genesis::HostTimingInput timing =

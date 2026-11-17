@@ -22,8 +22,8 @@ bool Extension::initialize() noexcept {
     std::string error;
     if (osc.startListening(&error)) {
         host().log_info(std::format(
-            "GENESIS OSC particle emit listening on {}:{} address '{}'", settings.bind_ip,
-            settings.port, osc.particleEmitSettings().address));
+            "GENESIS OSC listening on {}:{} (emit '{}' room '{}')", settings.bind_ip, settings.port,
+            osc.particleEmitSettings().address, osc.roomPersonSettings().address));
     } else {
         host().log_error(std::format("GENESIS OSC listen failed: {}", error));
     }

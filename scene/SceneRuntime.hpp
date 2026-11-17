@@ -141,6 +141,7 @@ public:
     void tickParticles(float dt_seconds, float fixed_step_seconds = 0.01f,
                        std::uint64_t max_steps = 8);
     void tickParticlesSteps(std::uint64_t steps, float fixed_step_seconds);
+    void flushParticleGpuUpdates(VkCommandBuffer cmd);
     void resetParticles();
     ParticleWorld& particleWorld() { return particle_world_; }
     const ParticleWorld& particleWorld() const { return particle_world_; }

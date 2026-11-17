@@ -289,6 +289,7 @@ void HostBridge::renderScene() {
                                ? static_cast<float>(current_frame_time_.delta_time_seconds)
                                : 0.0f;
     if (renderer_->canDispatchCompute()) {
+        scene_->flushParticleGpuUpdates(renderer_->currentCommandBuffer());
         scene_->simulateFluids(renderer_->currentCommandBuffer(), fluid_dt);
     }
 
