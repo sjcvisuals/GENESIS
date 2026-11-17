@@ -176,8 +176,8 @@ inline ParticleEmitter makeGentleSoftEmitter() {
     e.size_min = 0.075f;
     e.size_max = 0.1f;
     e.size_end_multiplier = 0.45f;
-    e.color_start = glm::vec4(0.95f, 0.97f, 1.0f, 0.8f);
-    e.color_end = glm::vec4(0.72f, 0.84f, 0.96f, 0.0f);
+    e.color_start = glm::vec4(1.0f, 0.96f, 0.78f, 0.82f); // warm base; tint shifts yellow/green/blue/red
+    e.color_end = glm::vec4(0.55f, 0.75f, 1.0f, 0.0f);   // cool fade over life
     e.force_gravity = true;
     e.gravity = glm::vec3(0.0f, 0.28f, 0.0f); // gentle +Y lift only
     e.force_drag = true;
@@ -196,15 +196,15 @@ inline ParticleEmitter makeGentleSoftEmitter() {
     e.trail_enabled = true;
     e.trail_segments = 14;            // history length for tip→neck wedge ribbon
     e.trail_sample_distance = 0.04f;  // ~0.5m wake behind rising head
-    e.trail_width = 0.95f;            // soft comet neck under the circle head
+    e.trail_width = 0.78f;            // neck under soft-circle core (clean trail→ball join)
     e.trail_width_end = 0.1f;         // authored tip feel (wedge texture owns silhouette)
-    e.trail_alpha = 0.9f;
+    e.trail_alpha = 0.95f;
     e.trail_lifetime = 3.0f;
     syncEmitterCurvesFromEndpoints(e);
     e.color_over_life.count = 3;
-    e.color_over_life.keys[0] = {0.0f, glm::vec4(0.92f, 0.95f, 1.0f, 0.3f)};
-    e.color_over_life.keys[1] = {0.12f, glm::vec4(0.95f, 0.97f, 1.0f, 0.75f)};
-    e.color_over_life.keys[2] = {1.0f, glm::vec4(0.68f, 0.8f, 0.94f, 0.0f)};
+    e.color_over_life.keys[0] = {0.0f, glm::vec4(1.0f, 0.94f, 0.7f, 0.35f)};  // warm birth
+    e.color_over_life.keys[1] = {0.2f, glm::vec4(0.9f, 0.98f, 0.85f, 0.8f)};   // mid glow
+    e.color_over_life.keys[2] = {1.0f, glm::vec4(0.5f, 0.72f, 1.0f, 0.0f)};    // cool fade
     e.size_over_life.count = 3;
     e.size_over_life.keys[0] = {0.0f, 0.9f};
     e.size_over_life.keys[1] = {0.2f, 1.0f};

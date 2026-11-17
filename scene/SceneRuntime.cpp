@@ -401,9 +401,11 @@ void SceneRuntime::appendParticleDrawCommands(std::vector<SceneDrawCommand>& out
 
     // Soft particles must NOT hit mesh.frag's roughness>0.98 early-out (skips tonemap /
     // exposure) — that paints hard pre-tonemapped slabs/streaks against the stage.
+    // Mild emissive adds bloom-safe glow; instance color keeps per-particle tint.
     SceneMaterial unlit = lit;
-    unlit.emissive = glm::vec3(0.0f);
-    unlit.emissive_strength = 0.0f;
+    // Soft cool emissive — keep strength modest so per-particle tint still reads.
+    unlit.emissive = glm::vec3(0.28f, 0.32f, 0.38f);
+    unlit.emissive_strength = 0.45f;
     unlit.roughness = 0.97f;
 
     const GpuTexture* soft_circle = texture(*particle_sprite_texture_id_);
