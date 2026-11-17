@@ -1,6 +1,7 @@
 #include "editor/OscProtocolUi.hpp"
 
 #include "protocol/OscParser.hpp"
+#include "protocol/OscRoomPerson.hpp"
 
 #include <imgui.h>
 
@@ -143,6 +144,35 @@ void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
                         static_cast<unsigned long long>(protocol.totalParticleEmits()));
     if (ImGui::Button("Clear particle emit queue")) {
         protocol.clearParticleEmits();
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.75f, 0.85f, 0.55f, 1.0f), "Room person (feet + center→wall)");
+    ImGui::TextWrapped(
+        "Send /genesis/room/person x,z (floor meters). Spawns denser particles at feet, along "
+        "the room-center→person→wall ray, and at the wall hit in front of them.");
+    OscRoomPersonSettings room = protocol.roomPersonSettings();
+    bool room_dirty = false;
+    room_dirty |= ImGui::Checkbox("Enable room person", &room.enabled);
+    char room_addr[128]{};
+    std::snprintf(room_addr, sizeof(room_addr), "%s", room.address.c_str());
+    if (ImGui::InputText("Room address", room_addr, sizeof(room_addr))) {
+        room.address = room_addr;
+        room_dirty = true;
+    }
+    room_dirty |= ImGui::DragFloat("Room half X", &room.room_half_x, 0.05f, 0.5f, 40.0f);
+    room_dirty |= ImGui::DragFloat("Room half Z", &room.room_half_z, 0.05f, 0.5f, 40.0f);
+    room_dirty |= ImGui::Checkbox("Burst at feet", &room.burst_at_feet);
+    room_dirty |= ImGui::Checkbox("Burst along ray", &room.burst_along_ray);
+    room_dirty |= ImGui::Checkbox("Burst at wall", &room.burst_at_wall);
+    if (room_dirty) {
+        protocol.setRoomPersonSettings(room);
+    }
+    ImGui::TextDisabled("Room person updates: %llu",
+                        static_cast<unsigned long long>(protocol.totalRoomPersonUpdates()));
+    if (ImGui::Button("Clear room person queue")) {
+        protocol.clearRoomPersonEvents();
     }
 
     if (protocol.isAwaitingParameterLink()) {

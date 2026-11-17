@@ -284,6 +284,7 @@ protected:
         osc_protocol_.poll(osc_time_);
         osc_protocol_.applyBindings(runtime_);
         osc_protocol_.applyParticleEmits(runtime_, osc_particle_cursor_);
+        osc_protocol_.applyRoomPerson(runtime_, osc_room_person_cursor_);
         audio_reactive_.tick(runtime_, dt);
         runtime_.updateTransforms();
         // Allow catch-up on slow software GPUs so gentle rise/trails stay readable.
@@ -583,6 +584,32 @@ private:
                         osc_protocol_.setParticleEmitSettings(emit);
                     } catch (const std::exception& ex) {
                         spdlog::error("Open example failed: {}", ex.what());
+                    }
+                }
+                if (ImGui::MenuItem("Room OSC Particles")) {
+                    const std::filesystem::path example =
+                        genesis::resolveAssetPath("assets/scenes/room_osc_particles.scene.json");
+                    try {
+                        loadSceneDocument(example);
+                        genesis::OscRoomPersonSettings room = osc_protocol_.roomPersonSettings();
+                        room.enabled = true;
+                        room.address = "/genesis/room/person";
+                        room.feet_emitter_path = "Scene/Particle System/Person Feet";
+                        room.wall_emitter_path = "Scene/Particle System/Wall Trace";
+                        room.ray_emitter_path = "Scene/Particle System/Center Ray";
+                        room.room_half_x = 4.0f;
+                        room.room_half_z = 4.0f;
+                        osc_protocol_.setRoomPersonSettings(room);
+                        genesis::OscParticleEmitSettings emit = osc_protocol_.particleEmitSettings();
+                        emit.emitter_path = "Scene/Particle System/Person Feet";
+                        emit.track_emitter_position = true;
+                        emit.burst_on_message = false;
+                        osc_protocol_.setParticleEmitSettings(emit);
+                        if (!osc_protocol_.isListening()) {
+                            osc_protocol_.startListening();
+                        }
+                    } catch (const std::exception& ex) {
+                        spdlog::error("Open room OSC example failed: {}", ex.what());
                     }
                 }
                 ImGui::EndMenu();
@@ -2664,19 +2691,56 @@ private:
         runtime_.updateTransforms();
     }
 
+    void configureRoomOscDemoIfNeeded() {
+        const std::string path = session_.document_path.filename().string();
+        if (path.find("room_osc_particles") == std::string::npos) {
+            return;
+        }
+        genesis::OscRoomPersonSettings room = osc_protocol_.roomPersonSettings();
+        room.enabled = true;
+        room.address = "/genesis/room/person";
+        room.feet_emitter_path = "Scene/Particle System/Person Feet";
+        room.wall_emitter_path = "Scene/Particle System/Wall Trace";
+        room.ray_emitter_path = "Scene/Particle System/Center Ray";
+        room.room_half_x = 4.0f;
+        room.room_half_z = 4.0f;
+        osc_protocol_.setRoomPersonSettings(room);
+        genesis::OscParticleEmitSettings emit = osc_protocol_.particleEmitSettings();
+        emit.emitter_path = "Scene/Particle System/Person Feet";
+        emit.track_emitter_position = true;
+        emit.burst_on_message = false;
+        osc_protocol_.setParticleEmitSettings(emit);
+        if (!osc_protocol_.isListening()) {
+            std::string err;
+            if (!osc_protocol_.startListening(&err) && !err.empty()) {
+                spdlog::warn("Room OSC listen failed: {}", err);
+            }
+        }
+    }
+
     void syncEditorAfterDocumentLoad() {
         use_editor_output_ = true;
         orientSceneOutputCameras(runtime_.scene());
         resetEditorCamera();
+        configureRoomOscDemoIfNeeded();
 
-        // Auto-frame the first particle emitter so particle demos open usable.
+        // Auto-frame the particle system (room demos: prefer Ambient Field for overview).
+        genesis::NodeId focus = 0;
         for (const genesis::Node& node : runtime_.scene().nodes) {
             if (!node.particle_emitter.has_value()) {
                 continue;
             }
-            selectNode(node.id);
+            if (focus == 0) {
+                focus = node.id;
+            }
+            if (node.name == "Ambient Field" || node.name == "Soft Circles") {
+                focus = node.id;
+                break;
+            }
+        }
+        if (focus != 0) {
+            selectNode(focus);
             focusEditorCameraOnSelection();
-            break;
         }
     }
 
@@ -2743,6 +2807,7 @@ private:
     genesis::AudioReactive audio_reactive_{};
     double osc_time_ = 0.0;
     std::uint64_t osc_particle_cursor_ = 0;
+    std::uint64_t osc_room_person_cursor_ = 0;
     float last_frame_dt_ = 1.0f / 60.0f;
     float look_time_seconds_ = 0.0f;
 };
