@@ -273,7 +273,7 @@ if(GENESIS_BUILD_EXAMPLES)
     add_executable(genesis_audio_smoke examples/audio_smoke/main.cpp)
     target_link_libraries(genesis_audio_smoke PRIVATE genesis_audio)
 
-    # Header-only Niagara-module authoring smoke (no Vulkan / GPU).
+    # Header-only Tugela-module authoring smoke (no Vulkan / GPU).
     add_executable(genesis_particle_smoke examples/particle_smoke/main.cpp)
     target_include_directories(genesis_particle_smoke PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(genesis_particle_smoke PRIVATE glm::glm)

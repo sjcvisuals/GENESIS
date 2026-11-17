@@ -1,6 +1,6 @@
 #pragma once
 
-// Niagara-inspired particle emitter (public concepts only — not a UE source port).
+// Tugela particle emitter (modular Soft Circles stack — not a UE source port).
 // Flat enabled "modules" instead of a graph VM: spawn shape, forces, over-life curves,
 // kill volumes, sprite renderer, and a Trail Renderer module (history ribbons that taper).
 
@@ -25,7 +25,7 @@ enum class ParticleSpawnShape : std::uint8_t {
 enum class ParticleRenderMesh : std::uint8_t {
     Cube = 0,
     Sphere = 1,
-    Sprite = 2, // camera-facing quad (Niagara SpriteRenderer analogue)
+    Sprite = 2, // camera-facing quad (sprite renderer)
 };
 
 enum class ParticleVelocityMode : std::uint8_t {
@@ -41,7 +41,7 @@ struct ParticleBurst {
 
 // Authoring data stored on a scene node. Simulation state lives in ParticleWorld.
 struct ParticleEmitter {
-    // --- Emitter state (Niagara Emitter Properties) ---
+    // --- Emitter state (Tugela Emitter Properties) ---
     bool enabled = true;
     bool looping = true;
     bool world_space = true;
@@ -129,7 +129,7 @@ struct ParticleEmitter {
     // Optional VelocityAligned stretch (kept for compatibility; prefer Trail for ribbons).
     float velocity_stretch = 0.0f;
 
-    // --- Trail Renderer (Niagara Ribbon/Trail analogue) ---
+    // --- Trail Renderer (ribbon / wake) ---
     // Soft disc chain along motion history; widths are fractions of the head size.
     bool trail_enabled = false;
     std::uint8_t trail_segments = 10;     // history points (2..24)
@@ -163,7 +163,7 @@ inline ParticleEmitter makeDefaultParticleEmitter() {
     return e;
 }
 
-// Gentle soft circles rising with a tapering trail (default Niagara-like demo).
+// Gentle soft circles rising with a tapering trail (default Tugela demo).
 inline ParticleEmitter makeGentleSoftEmitter() {
     ParticleEmitter e = makeDefaultParticleEmitter();
     // Sparse soft discs — round head + quieter tapering trail (stay in frame).

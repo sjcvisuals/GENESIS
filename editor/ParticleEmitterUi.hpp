@@ -27,16 +27,16 @@ struct ParticleEmitterUiContext {
     std::function<ParticleWorldStatsLite()> stats;
 };
 
-// True when this empty/parent node owns one or more emitter children (Niagara System).
+// True when this empty/parent node owns one or more emitter children (Tugela System).
 bool isParticleSystemNode(const Scene& scene, const Node& node);
 
 // Outliner suffix: "SYS" / "EM" / empty.
 const char* particleHierarchyBadge(const Scene& scene, const Node& node);
 
-// Niagara System inspector (emitter list + add templates).
+// Tugela System inspector (emitter list + add templates).
 void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ctx);
 
-// Niagara Emitter module stack.
+// Tugela Emitter module stack.
 void drawParticleEmitterInspector(Node& emitter_node, const std::string& node_path,
                                   ParticleEmitterUiContext& ctx);
 

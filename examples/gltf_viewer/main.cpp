@@ -265,7 +265,7 @@ protected:
         collect_params.enable_gpu_culling = false;
         runtime_.collectDrawCommands(draw_commands_, &render_stats, collect_params);
         {
-            // Niagara-style sprite facing from the active view camera.
+            // Camera-facing sprite basis for Tugela soft circles.
             const glm::mat4 view = outputViewMatrix();
             const glm::mat3 inv = glm::inverse(glm::mat3(view));
             runtime_.setParticleViewBasis(glm::normalize(glm::vec3(inv[0])),
@@ -476,7 +476,7 @@ private:
             }
             ImGui::Separator();
             if (ImGui::BeginMenu("Examples")) {
-                if (ImGui::MenuItem("Niagara Soft Circles + OSC")) {
+                if (ImGui::MenuItem("Tugela Soft Circles + OSC")) {
                     const std::filesystem::path example =
                         genesis::resolveAssetPath("assets/scenes/bubble_ring_osc.scene.json");
                     try {
@@ -624,7 +624,7 @@ private:
             addLightNode("Directional Light", genesis::SceneLightType::Directional);
         });
 
-        genesis::drawEditorSectionLabel("Particles · Niagara");
+        genesis::drawEditorSectionLabel("Particles · Tugela");
         createBtn("Particle System", half, [&] {
             std::optional<genesis::NodeId> scene_root =
                 genesis::findNodeByPath(scene, "Scene");
@@ -1872,7 +1872,7 @@ private:
         draw->AddCircle(center, radius, edge, 20, selected ? 2.0f : 1.25f);
 
         if (kind == ActorIconKind::Emitter) {
-            // Soft concentric rings — Niagara/emitter billboard cue.
+            // Soft concentric rings — Tugela emitter billboard cue.
             draw->AddCircle(center, radius * 0.55f, IM_COL32(255, 255, 255, selected ? 220 : 140), 16,
                             1.25f);
             draw->AddCircle(center, radius * 0.28f, IM_COL32(255, 255, 255, selected ? 200 : 120), 12,

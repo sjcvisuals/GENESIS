@@ -1,6 +1,6 @@
 #pragma once
 
-// Compact over-life curves (Niagara-style Size/Color over Life without a full curve atlas).
+// Compact over-life curves (Tugela Size/Color over Life without a full curve atlas).
 // Fixed key slots keep emitters POD-serializable and cache-friendly.
 
 #include <algorithm>
