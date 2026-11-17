@@ -6,6 +6,7 @@
 #include "protocol/OscUdpReceiver.hpp"
 #include "scene/SceneRuntime.hpp"
 
+#include <array>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -46,7 +47,7 @@ public:
     // sequence so multiple consumers (e.g. one ExtGenesis session per GPU) can
     // each apply the same events without draining them for the others.
     std::uint32_t applyParticleEmits(SceneRuntime& runtime, std::uint64_t& consumer_cursor);
-    // Apply queued room-person poses (feet + center→wall ray + wall hit).
+    // Apply queued room-person poses (pooled feet + wall; idle slots → origin).
     std::uint32_t applyRoomPerson(SceneRuntime& runtime, std::uint64_t& consumer_cursor);
 
     const std::vector<OscLearnedMessage>& learnedMessages() const { return learned_; }
@@ -80,7 +81,7 @@ private:
     void updateLearned(const OscMessage& message, double now_seconds);
     void storeLastValues(const OscMessage& message);
     void ingestParticleEmit(const OscMessage& message);
-    void ingestRoomPerson(const OscMessage& message);
+    void ingestRoomPerson(const OscMessage& message, double now_seconds);
 
     Settings settings_{};
     OscParticleEmitSettings particle_emit_{};
@@ -90,6 +91,8 @@ private:
     std::vector<OscBinding> bindings_;
     std::vector<OscParticleEmitEvent> particle_events_;
     std::vector<OscRoomPersonEvent> room_person_events_;
+    std::array<OscRoomPersonSlot, kRoomPersonSlotCapacity> room_person_slots_{};
+    double last_poll_seconds_ = 0.0;
     std::unordered_map<std::string, std::vector<OscArg>> last_values_;
 
     struct PendingLink {

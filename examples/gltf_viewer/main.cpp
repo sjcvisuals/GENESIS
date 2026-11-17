@@ -594,16 +594,10 @@ private:
                     try {
                         loadSceneDocument(example);
                         genesis::OscRoomPersonSettings room = osc_protocol_.roomPersonSettings();
-                        room.enabled = true;
-                        room.address = "/genesis/room/person";
-                        room.feet_emitter_path = "Scene/Particle System/Person Feet";
-                        room.wall_emitter_path = "Scene/Particle System/Wall Trace";
-                        room.ray_emitter_path = "Scene/Particle System/Center Ray";
-                        room.room_half_x = 4.0f;
-                        room.room_half_z = 4.0f;
+                        genesis::configureRoomOscInstallSettings(room);
                         osc_protocol_.setRoomPersonSettings(room);
                         genesis::OscParticleEmitSettings emit = osc_protocol_.particleEmitSettings();
-                        emit.emitter_path = "Scene/Particle System/Person Feet";
+                        emit.emitter_path = "Scene/Person Pool/Feet 00";
                         emit.track_emitter_position = true;
                         emit.burst_on_message = false;
                         osc_protocol_.setParticleEmitSettings(emit);
@@ -2699,18 +2693,10 @@ private:
             return;
         }
         genesis::OscRoomPersonSettings room = osc_protocol_.roomPersonSettings();
-        room.enabled = true;
-        room.address = "/genesis/room/person";
-        room.feet_emitter_path = "Scene/Particle System/Person Feet";
-        room.wall_emitter_path = "Scene/Particle System/Wall Trace";
-        room.ray_emitter_path = "Scene/Particle System/Center Ray";
-        room.room_radius = 3.0f; // 6 m diameter outer ring / cylindrical wall
-        room.tank_radius = 1.0f; // 2 m diameter tank-base ring
-        room.room_half_x = room.room_radius;
-        room.room_half_z = room.room_radius;
+        genesis::configureRoomOscInstallSettings(room);
         osc_protocol_.setRoomPersonSettings(room);
         genesis::OscParticleEmitSettings emit = osc_protocol_.particleEmitSettings();
-        emit.emitter_path = "Scene/Particle System/Person Feet";
+        emit.emitter_path = "Scene/Person Pool/Feet 00";
         emit.track_emitter_position = true;
         emit.burst_on_message = false;
         osc_protocol_.setParticleEmitSettings(emit);

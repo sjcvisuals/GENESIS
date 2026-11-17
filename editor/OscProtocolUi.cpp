@@ -148,11 +148,11 @@ void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
 
     ImGui::Spacing();
     ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.75f, 0.85f, 0.55f, 1.0f), "Room person (feet + center→wall)");
+    ImGui::TextColored(ImVec4(0.75f, 0.85f, 0.55f, 1.0f), "Room person (pooled feet + wall)");
     ImGui::TextWrapped(
-        "Send /genesis/room/person x,z (floor meters, donut between ~2 m tank and ~6 m outer ring). "
-        "Spawns denser particles at feet, along the room-center→person→outer-wall ray, and at the "
-        "cylindrical wall hit.");
+        "Send /genesis/room/person with Int32 id + x,z (`,iff`) for up to 10 people. "
+        "Each ID drives Feet + Wall Tugela emitters; idle pairs park at world origin. "
+        "Wall hit = center→person ray at outer radius (~3 m).");
     OscRoomPersonSettings room = protocol.roomPersonSettings();
     bool room_dirty = false;
     room_dirty |= ImGui::Checkbox("Enable room person", &room.enabled);
@@ -162,6 +162,12 @@ void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
         room.address = room_addr;
         room_dirty = true;
     }
+    int max_persons = static_cast<int>(room.max_persons);
+    if (ImGui::SliderInt("Max persons", &max_persons, 1, static_cast<int>(kRoomPersonSlotCapacity))) {
+        room.max_persons = static_cast<std::uint32_t>(max_persons);
+        room_dirty = true;
+    }
+    room_dirty |= ImGui::DragFloat("Slot idle (s)", &room.slot_idle_seconds, 0.05f, 0.1f, 5.0f);
     room_dirty |= ImGui::DragFloat("Outer room radius (m)", &room.room_radius, 0.05f, 0.5f, 40.0f);
     room_dirty |= ImGui::DragFloat("Tank radius (m)", &room.tank_radius, 0.05f, 0.25f, 20.0f);
     // Keep legacy AABB fields aligned with the cylindrical outer radius.

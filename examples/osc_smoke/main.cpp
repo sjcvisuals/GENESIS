@@ -90,6 +90,16 @@ std::vector<std::uint8_t> makeRoomPersonXz() {
     return packet;
 }
 
+std::vector<std::uint8_t> makeRoomPersonIdXz() {
+    std::vector<std::uint8_t> packet;
+    appendPadded(packet, "/genesis/room/person");
+    appendPadded(packet, ",iff");
+    appendIntBe(packet, 3);
+    appendFloatBe(packet, 2.0f);
+    appendFloatBe(packet, 1.0f);
+    return packet;
+}
+
 } // namespace
 
 int main() {
@@ -221,6 +231,21 @@ int main() {
                           << "," << pose.feet.z << ") wall(" << pose.wall.x << "," << pose.wall.y
                           << "," << pose.wall.z << ")\n";
             }
+        }
+    }
+
+    {
+        const auto packet = makeRoomPersonIdXz();
+        std::string err;
+        const auto msg = genesis::parseOscMessage(packet, &err);
+        genesis::OscRoomPersonSettings settings{};
+        genesis::OscRoomPersonEvent event{};
+        if (!msg || !genesis::tryParseOscRoomPerson(*msg, settings, event) || event.person_id != 3 ||
+            std::abs(event.x - 2.0f) > 1e-5f || std::abs(event.z - 1.0f) > 1e-5f) {
+            std::cerr << "room person id+xz parse failed\n";
+            ++failures;
+        } else {
+            std::cout << "OSC room person id+xz OK (id=" << event.person_id << ")\n";
         }
     }
 

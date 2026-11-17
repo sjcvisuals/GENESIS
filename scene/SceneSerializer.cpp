@@ -332,6 +332,8 @@ const char* velocityModeName(ParticleVelocityMode mode) {
         return "from_point";
     case ParticleVelocityMode::Random:
         return "random";
+    case ParticleVelocityMode::HorizontalPlane:
+        return "horizontal_plane";
     default:
         return "cone";
     }
@@ -340,6 +342,7 @@ const char* velocityModeName(ParticleVelocityMode mode) {
 ParticleVelocityMode velocityModeFromName(const std::string& name) {
     if (name == "from_point") return ParticleVelocityMode::FromPoint;
     if (name == "random") return ParticleVelocityMode::Random;
+    if (name == "horizontal_plane") return ParticleVelocityMode::HorizontalPlane;
     return ParticleVelocityMode::Cone;
 }
 

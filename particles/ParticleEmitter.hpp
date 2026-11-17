@@ -29,9 +29,10 @@ enum class ParticleRenderMesh : std::uint8_t {
 };
 
 enum class ParticleVelocityMode : std::uint8_t {
-    Cone = 0,      // along spawn direction / cone
-    FromPoint = 1, // radial from emitter origin
-    Random = 2,    // random unit direction
+    Cone = 0,             // along spawn direction / cone
+    FromPoint = 1,        // radial from emitter origin
+    Random = 2,           // random unit direction
+    HorizontalPlane = 3,  // unit direction in XZ (no rise) — feet / floor drift
 };
 
 struct ParticleBurst {
