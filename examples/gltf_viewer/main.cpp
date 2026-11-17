@@ -2544,8 +2544,10 @@ private:
         room.feet_emitter_path = "Scene/Particle System/Person Feet";
         room.wall_emitter_path = "Scene/Particle System/Wall Trace";
         room.ray_emitter_path = "Scene/Particle System/Center Ray";
-        room.room_half_x = 4.0f;
-        room.room_half_z = 4.0f;
+        room.room_radius = 3.0f; // 6 m diameter outer ring / cylindrical wall
+        room.tank_radius = 1.0f; // 2 m diameter tank-base ring
+        room.room_half_x = room.room_radius;
+        room.room_half_z = room.room_radius;
         osc_protocol_.setRoomPersonSettings(room);
         genesis::OscParticleEmitSettings emit = osc_protocol_.particleEmitSettings();
         emit.emitter_path = "Scene/Particle System/Person Feet";
@@ -2575,7 +2577,8 @@ private:
             if (focus == 0) {
                 focus = node.id;
             }
-            if (node.name == "Ambient Field" || node.name == "Soft Circles") {
+            if (node.name == "Outer Ring" || node.name == "Ambient Field" ||
+                node.name == "Soft Circles") {
                 focus = node.id;
                 break;
             }
