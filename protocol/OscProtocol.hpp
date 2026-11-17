@@ -1,6 +1,7 @@
 #pragma once
 
 #include "protocol/OscParticleEmit.hpp"
+#include "protocol/OscRoomPerson.hpp"
 #include "protocol/OscTypes.hpp"
 #include "protocol/OscUdpReceiver.hpp"
 #include "scene/SceneRuntime.hpp"
@@ -28,6 +29,10 @@ public:
     const OscParticleEmitSettings& particleEmitSettings() const { return particle_emit_; }
     void setParticleEmitSettings(const OscParticleEmitSettings& settings) { particle_emit_ = settings; }
 
+    OscRoomPersonSettings& roomPersonSettings() { return room_person_; }
+    const OscRoomPersonSettings& roomPersonSettings() const { return room_person_; }
+    void setRoomPersonSettings(const OscRoomPersonSettings& settings) { room_person_ = settings; }
+
     bool startListening(std::string* out_error = nullptr);
     void stopListening();
     bool isListening() const { return receiver_.isListening(); }
@@ -41,15 +46,19 @@ public:
     // sequence so multiple consumers (e.g. one ExtGenesis session per GPU) can
     // each apply the same events without draining them for the others.
     std::uint32_t applyParticleEmits(SceneRuntime& runtime, std::uint64_t& consumer_cursor);
+    // Apply queued room-person poses (feet + center→wall ray + wall hit).
+    std::uint32_t applyRoomPerson(SceneRuntime& runtime, std::uint64_t& consumer_cursor);
 
     const std::vector<OscLearnedMessage>& learnedMessages() const { return learned_; }
     const std::vector<OscBinding>& bindings() const { return bindings_; }
     const std::vector<OscParticleEmitEvent>& particleEmitEvents() const { return particle_events_; }
+    const std::vector<OscRoomPersonEvent>& roomPersonEvents() const { return room_person_events_; }
 
     void clearLearned();
     void removeBinding(std::size_t index);
     void clearBindings();
     void clearParticleEmits();
+    void clearRoomPersonEvents();
 
     bool isAwaitingParameterLink() const { return pending_link_.has_value(); }
     const std::string& pendingLinkAddress() const { return pending_link_address_; }
@@ -64,19 +73,23 @@ public:
     std::uint64_t totalMessages() const { return total_messages_; }
     std::uint64_t parseErrors() const { return parse_errors_; }
     std::uint64_t totalParticleEmits() const { return total_particle_emits_; }
+    std::uint64_t totalRoomPersonUpdates() const { return total_room_person_updates_; }
 
 private:
     void ingestMessage(const OscMessage& message, double now_seconds);
     void updateLearned(const OscMessage& message, double now_seconds);
     void storeLastValues(const OscMessage& message);
     void ingestParticleEmit(const OscMessage& message);
+    void ingestRoomPerson(const OscMessage& message);
 
     Settings settings_{};
     OscParticleEmitSettings particle_emit_{};
+    OscRoomPersonSettings room_person_{};
     OscUdpReceiver receiver_;
     std::vector<OscLearnedMessage> learned_;
     std::vector<OscBinding> bindings_;
     std::vector<OscParticleEmitEvent> particle_events_;
+    std::vector<OscRoomPersonEvent> room_person_events_;
     std::unordered_map<std::string, std::vector<OscArg>> last_values_;
 
     struct PendingLink {
@@ -93,6 +106,8 @@ private:
     std::uint64_t parse_errors_ = 0;
     std::uint64_t next_particle_sequence_ = 1;
     std::uint64_t total_particle_emits_ = 0;
+    std::uint64_t next_room_person_sequence_ = 1;
+    std::uint64_t total_room_person_updates_ = 0;
     bool settings_dirty_ = false;
 };
 
