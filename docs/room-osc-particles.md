@@ -10,14 +10,14 @@ Dual-ring cylindrical room soft-particle demo driven by OSC person tracking. Sta
 
 ### Geometry (install scale)
 
+Particles only — no room/tank meshes. Scale is authored in emitter spawn radii; the editor meter grid is the size reference.
+
 | Element | Size | Notes |
 |---------|------|--------|
-| **Outer Room Wall** | **~6.1 m diameter** shell × ~3.2 m tall | `CylinderShell` mesh — open cylinder (no caps), dual-sided; dark blend so the room reads without eating the particles |
-| **Outer ring** | **~6 m diameter** (radius 3 m) | Ambient Soft Circles just inside the wall |
-| **Inner tank ring** | **~2 m diameter** (radius 1 m) | Ambient Soft Circles at the fish-tank base |
-| **Fish Tank Base** | ~2.05 m dia × 0.12 m | Dark plinth under the glass |
-| **Fish tank** | Cylinder, 2 m dia × ~2.4 m tall | Dark transmissive glass over the base |
+| **Outer ring** | **~6 m diameter** (radius 3 m) | Ambient Soft Circles on the cylindrical room perimeter |
+| **Inner tank ring** | **~2 m diameter** (radius 1 m) | Ambient Soft Circles at the central tank-base radius |
 | **Walk donut** | Between ~1 m and ~3 m radius | People track in this annulus |
+| **Outer wall (math)** | radius 3 m | OSC center→person→wall ray only — no wall mesh |
 
 Black unlit stage (no scene lights); meter world grid + Unreal-like slower pan from editor chrome. Particles read as additive emissive glow with trail-behind wakes from the look tip.
 

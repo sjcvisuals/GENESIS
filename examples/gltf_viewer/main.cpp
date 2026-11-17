@@ -2733,10 +2733,10 @@ private:
         if (room_demo) {
             camera_pivot_ = glm::vec3(0.0f, 0.9f, 0.0f);
             placeEditorCameraAt(glm::vec3(9.5f, 5.5f, 11.0f), camera_pivot_);
-            // Select the outer wall so mesh silhouette + install scale are obvious on open.
-            if (std::optional<genesis::NodeId> wall =
-                    genesis::findNodeByPath(runtime_.scene(), "Scene/Outer Room Wall")) {
-                selectNode(*wall);
+            // Particles-only install: frame the outer ring emitter (no room/tank meshes).
+            if (std::optional<genesis::NodeId> ring =
+                    genesis::findNodeByPath(runtime_.scene(), "Scene/Particle System/Outer Ring")) {
+                selectNode(*ring);
             }
         } else {
             genesis::NodeId focus = 0;
