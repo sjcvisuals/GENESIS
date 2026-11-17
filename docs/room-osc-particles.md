@@ -1,6 +1,6 @@
 # Room OSC Particles
 
-Dual-ring cylindrical room soft-particle demo driven by OSC person tracking. Stacked on the Niagara Soft Circles / Trail look work (`#38`).
+Dual-ring cylindrical room soft-particle demo driven by OSC person tracking. Stacked on the Tugela Soft Circles / Trail look work (`#38`).
 
 ## Scene
 
@@ -21,7 +21,7 @@ Particles only — no room/tank meshes. Scale is authored in emitter spawn radii
 
 Black unlit stage (no scene lights); meter world grid + Unreal-like slower pan from editor chrome. Particles read as additive emissive glow with trail-behind wakes from the look tip.
 
-### Niagara-like hierarchy
+### Tugela hierarchy
 
 ```
 Particle System

@@ -39,7 +39,7 @@ public:
 
     static GpuTexture createSolid(const VulkanContext& context, std::uint8_t r, std::uint8_t g,
                                   std::uint8_t b, std::uint8_t a = 255);
-    // Niagara/Cascade-style default sprite: white disc, slight edge feather, transparent outside.
+    // Tugela default soft sprite: white disc, slight edge feather, transparent outside.
     static GpuTexture createSoftCircleSprite(const VulkanContext& context, std::uint32_t size = 64);
     // Soft capsule/stadium strip for Trail Renderer ribbons (U=across, V=along).
     static GpuTexture createSoftRibbonSprite(const VulkanContext& context, std::uint32_t size = 256);

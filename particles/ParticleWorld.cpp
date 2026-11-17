@@ -402,7 +402,7 @@ void ParticleWorld::stepOnce(Scene& scene, float dt, bool update_particles) {
             }
         }
 
-        // Niagara-style spawn-by-distance (Emitter Update).
+        // Tugela spawn-by-distance (Emitter Update).
         if (!runtime.finished && desc.spawn_per_unit > 0.0f && traveled > 0.0f) {
             runtime.distance_spawn_accumulator +=
                 static_cast<double>(traveled) * static_cast<double>(desc.spawn_per_unit);
@@ -851,7 +851,7 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
             out[dest_batch].instances.push_back(instance);
         };
 
-        // Trail Renderer: Niagara-style wake — always BEHIND the head.
+        // Trail Renderer: wake always BEHIND the head.
         // tip = oldest history, neck under current world_pos; never lead ahead of the ball.
         if (p.trail_enabled && p.trail_count >= 2 && p.mesh == ParticleRenderMesh::Sprite) {
             const float trail_age_fade =

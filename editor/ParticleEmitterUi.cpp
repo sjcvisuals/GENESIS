@@ -87,7 +87,7 @@ void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ct
     Scene& scene = *ctx.scene;
 
     ImGui::Spacing();
-    ImGui::TextColored(kAccent, "Niagara System");
+    ImGui::TextColored(kAccent, "Tugela System");
     ImGui::TextColored(kMuted, "System → Emitter hierarchy · lean basics");
     ImGui::Spacing();
 
@@ -165,7 +165,7 @@ void drawParticleEmitterInspector(Node& emitter_node, const std::string& node_pa
     bool dirty = false;
 
     ImGui::Separator();
-    ImGui::TextColored(kAccent, "Niagara Emitter");
+    ImGui::TextColored(kAccent, "Tugela Emitter");
     ImGui::TextColored(kMuted, "Module stack · Spawn → Initialize → Update → Render");
 
     if (ctx.scene && emitter_node.parent.has_value()) {

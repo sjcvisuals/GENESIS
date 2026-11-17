@@ -1,4 +1,4 @@
-// Header-only smoke for Niagara-inspired particle authoring types (no Vulkan).
+// Header-only smoke for Tugela particle authoring types (no Vulkan).
 #include "particles/ParticleCurve.hpp"
 #include "particles/ParticleEmitter.hpp"
 
@@ -39,7 +39,7 @@ int main() {
     genesis::ParticleEmitter soft = genesis::makeGentleSoftEmitter();
     if (soft.render_mesh != ParticleRenderMesh::Sprite || soft.size_over_life.count < 2 ||
         soft.color_over_life.count < 2 || !soft.trail_enabled || soft.trail_segments < 2) {
-        std::fprintf(stderr, "particle_smoke: gentle soft preset missing Niagara modules/trails\n");
+        std::fprintf(stderr, "particle_smoke: gentle soft preset missing Tugela modules/trails\n");
         return 1;
     }
 

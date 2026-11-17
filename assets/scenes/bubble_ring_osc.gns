@@ -1,7 +1,7 @@
 {
   "format": "gns",
   "version": 1,
-  "name": "Niagara Soft Circles + OSC",
+  "name": "Tugela Soft Circles + OSC",
   "scene_ref": "bubble_ring_osc.scene.json",
   "pixera": {
     "streams": [

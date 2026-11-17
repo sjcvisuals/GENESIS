@@ -29,7 +29,7 @@ struct ParticleViewBasis {
     bool valid = false;
 };
 
-// Niagara-like particle world: CPU spawn + GPU compute motion (with CPU fallback).
+// Tugela particle world: CPU spawn + GPU compute motion (with CPU fallback).
 class ParticleWorld {
 public:
     void setSceneSeed(std::uint64_t seed) { scene_seed_ = seed; }
