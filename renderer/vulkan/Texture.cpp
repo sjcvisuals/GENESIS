@@ -294,18 +294,22 @@ GpuTexture GpuTexture::createSoftRibbonSprite(const VulkanContext& context, cons
     // (not disc beads or segmented capsules). Soft sides keep the gentle look.
     const std::uint32_t dim = std::max(size, 64u);
     std::vector<std::uint8_t> rgba(static_cast<std::size_t>(dim) * dim * 4u);
-            constexpr float kPeak = 0.9f;
-    constexpr float kTipHalf = 0.09f;   // soft readable tip (above sparkle floor)
-    constexpr float kNeckHalf = 0.92f;  // under soft-circle core (avoids flat corners past the ball)
+            constexpr float kPeak = 0.88f;
+    // Round H.2: tip must stay a faint point — bright yellow tips were blooming into a
+    // second "soft circle" behind the head and reading as anti-comet outliers.
+    constexpr float kTipHalf = 0.045f;
+    constexpr float kNeckHalf = 0.95f;
     for (std::uint32_t y = 0; y < dim; ++y) {
         for (std::uint32_t x = 0; x < dim; ++x) {
             const float nx = (static_cast<float>(x) + 0.5f) / static_cast<float>(dim) * 2.0f - 1.0f;
             const float ny = (static_cast<float>(y) + 0.5f) / static_cast<float>(dim) * 2.0f - 1.0f;
             // Mesh UV: local -Y → V=0, local +Y → V=1.
-            // ParticleWorld model[1] = +along*(tip→head): +Y at HEAD, -Y at tip behind.
-            // u=0 tip (ny=-1), u=1 neck (ny=+1) under the soft circle.
-            const float u = std::clamp((ny + 1.0f) * 0.5f, 0.0f, 1.0f);
-            float half_w = kTipHalf + (kNeckHalf - kTipHalf) * (u * u);
+            // ParticleWorld: model[1] = +along*(tip→head), tip behind travel.
+            // V=0 tip at -Y (behind), V=1 neck at +Y (under soft-circle head).
+            const float u = std::clamp((ny + 1.0f) * 0.5f, 0.0f, 1.0f); // 0=tip/-Y, 1=neck/+Y
+            // Cubic widen so brightness stays under the head; tip stays needle-thin.
+            const float flare = u * u * u;
+            float half_w = kTipHalf + (kNeckHalf - kTipHalf) * flare;
             if (ny > 0.55f) {
                 const float cy = 0.55f;
                 const float round_r = kNeckHalf;
@@ -321,14 +325,17 @@ GpuTexture GpuTexture::createSoftRibbonSprite(const VulkanContext& context, cons
             if (half_w > 1e-4f && ax < half_w) {
                 const float edge = 1.0f - (ax / half_w);
                 const float soft = edge * edge * (3.0f - 2.0f * edge);
-                const float tip_fade = u < 0.06f ? (u / 0.06f) : 1.0f;
+                // Long tip fade: first 35% of length is dim so tip never blooms into a head.
+                const float tip_fade = u < 0.35f ? (u / 0.35f) : 1.0f;
+                const float tip_fade_s = tip_fade * tip_fade;
                 float neck_dissolve = 1.0f;
-                if (ny > 0.84f) {
-                    const float nd = 1.0f - (ny - 0.84f) / 0.16f;
+                if (ny > 0.88f) {
+                    const float nd = 1.0f - (ny - 0.88f) / 0.12f;
                     neck_dissolve = nd * nd * (3.0f - 2.0f * nd);
                 }
-                const float along = 0.82f + 0.18f * u;
-                falloff = soft * tip_fade * neck_dissolve * along * kPeak;
+                // Brightness rises toward the neck (head); tip stays dim.
+                const float along = 0.35f + 0.65f * flare;
+                falloff = soft * tip_fade_s * neck_dissolve * along * kPeak;
             }
             falloff = std::clamp(falloff, 0.0f, 1.0f);
             const std::uint8_t v = static_cast<std::uint8_t>(falloff * 255.0f + 0.5f);

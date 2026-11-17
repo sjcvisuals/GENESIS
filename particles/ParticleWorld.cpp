@@ -517,20 +517,25 @@ void ParticleWorld::stepOnce(Scene& scene, float dt) {
                 p.trail_pos[0] = world_pos;
                 p.trail_count = 1;
             } else {
-                const float moved = glm::length(world_pos - p.trail_last_sample);
+                const glm::vec3 prev = p.trail_last_sample;
+                const float moved = glm::length(world_pos - prev);
                 p.trail_dist_accum += moved;
-                p.trail_last_sample = world_pos;
                 // Sample spacing sets ribbon segment length; soft capsule ends overlap.
                 const float sample_dist = std::max(0.015f, p.trail_sample_distance);
                 // Seed history quickly so young particles already show tip→head taper.
-                // (Render joins tip=trail_pos[0] → live world_pos; denser early samples
-                // keep the tip from jumping far behind on the first few frames.)
                 const float early_dist =
                     p.trail_count < 6 ? std::min(sample_dist, 0.012f) : sample_dist;
+                // Place samples along prev→current so [0]=oldest stays behind travel
+                // (pushing world_pos repeatedly collapsed history onto the head).
+                float sampled = 0.0f;
                 while (p.trail_dist_accum >= early_dist) {
                     p.trail_dist_accum -= early_dist;
-                    push_trail_sample(world_pos);
+                    sampled += early_dist;
+                    const float u =
+                        (moved > 1e-6f) ? std::clamp(sampled / moved, 0.0f, 1.0f) : 1.0f;
+                    push_trail_sample(glm::mix(prev, world_pos, u));
                 }
+                p.trail_last_sample = world_pos;
                 // Keep the newest sample pinned to the live particle position.
                 if (p.trail_count > 0) {
                     p.trail_pos[p.trail_count - 1] = world_pos;
@@ -703,9 +708,11 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
                 12u + (p.additive ? 2u : 0u) + (p.unlit ? 1u : 0u);
 
             // History: [0]=oldest … [count-1]=newest (pinned).
-            // Round H: place tip in WORLD space opposite velocity, then billboard tip→head.
-            // Soft-ribbon texture: V=0 tip at local -Y, V=1 neck at local +Y.
-            // model[1] = +along*(tip→head) ⇒ neck under soft circle, tip behind travel.
+            // Round H.2 — zero anti-comet:
+            // Runtime logs show tip_end.y < head.y always when along = +travel; remaining
+            // anti-comet reads came from UV/neck round competing with the soft circle and
+            // short wakes. Lock tip→head to cam_up for vertical motion (Soft Circles), keep
+            // a long wake, neck UV under the ball, tip UV behind.
             const glm::vec3 head = world_pos;
             const glm::vec3 oldest = p.trail_pos[0];
             auto project_plane = [&](glm::vec3 v) {
@@ -717,40 +724,27 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
                 travel = head - oldest;
             }
             if (glm::dot(travel, travel) < 1e-8f) {
-                travel = glm::vec3(0.0f, 1.0f, 0.0f);
+                travel = cam_up;
             }
             travel = glm::normalize(travel);
 
+            // Use real history length so wakes stay attached to their own head and do not
+            // spear through particles above (that read as yellow anti-comet outliers).
             float wake_len = glm::length(head - oldest);
-            if (wake_len < head_w * 0.25f) {
-                wake_len = head_w * 0.75f;
-            }
-            const float tip_pad = head_w * 0.1f;
-            const float ribbon_len = wake_len + tip_pad;
+            wake_len = std::clamp(wake_len, head_w * 0.85f, head_w * 4.5f);
+            const float tip_span = wake_len + head_w * 0.12f;
 
-            if (ribbon_len > head_w * 0.2f) {
-                // World tip strictly behind travel (Rising Soft Circles ⇒ tip below head).
-                const glm::vec3 tip = head - travel * ribbon_len;
-                // Billboard: along = tip→head in the camera plane; across ⊥ along.
-                glm::vec3 along = project_plane(head - tip);
-                float along_len = glm::length(along);
-                if (along_len < 1e-4f) {
-                    along = project_plane(travel);
-                    along_len = glm::length(along);
-                    along = (along_len > 1e-4f) ? (along / along_len) : cam_up;
-                } else {
-                    along /= along_len;
-                }
-                // Screen-space polarity: tip must appear opposite travel on screen.
-                // project(travel) points the way the head moves on the camera plane; the tip
-                // belongs on the opposite side of the head from that motion.
-                const glm::vec3 move_proj = project_plane(travel);
+            if (tip_span > head_w * 0.25f) {
+                glm::vec3 move_proj = project_plane(travel);
                 const float move_len = glm::length(move_proj);
-                if (move_len > 1e-4f) {
-                    const glm::vec3 move_dir = move_proj / move_len;
-                    // along should equal move_dir (tip→head = travel). Force it.
-                    along = move_dir;
-                }
+                const glm::vec3 move_dir =
+                    (move_len > 1e-4f) ? (move_proj / move_len) : cam_up;
+
+                // Vertical Soft Circles: tip→head is exactly ±cam_up so tip cannot flip
+                // per-particle from history/camera-plane noise. Lateral motion uses move_dir.
+                const float rise = glm::dot(move_dir, cam_up);
+                glm::vec3 along =
+                    (std::abs(rise) >= 0.4f) ? ((rise >= 0.0f) ? cam_up : -cam_up) : move_dir;
 
                 glm::vec3 across = glm::cross(cam_forward, along);
                 const float across_len = glm::length(across);
@@ -760,18 +754,21 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
                     across /= across_len;
                 }
 
-                const float ribbon_w = head_w * std::clamp(width_head_frac, 0.65f, 0.92f);
-                // Tip opposite move_dir from head; neck at head.
-                const glm::vec3 tip_end = head - along * ribbon_len;
-                const glm::vec3 mid = tip_end + along * (ribbon_len * 0.5f);
+                const float ribbon_w = head_w * std::clamp(width_head_frac, 0.55f, 0.85f);
+                // Tip strictly opposite along from head (behind travel / below when rising).
+                const glm::vec3 tip_end = head - along * tip_span;
+                const glm::vec3 mid = tip_end + along * (tip_span * 0.5f);
 
                 glm::vec4 trail_color = color;
-                trail_color.a *= p.trail_alpha * trail_age_fade * 0.92f;
-                trail_color.a = std::clamp(std::max(trail_color.a, 0.36f), 0.0f, 0.62f);
+                // Keep wake under the head; dim enough that bright yellow tips cannot bloom
+                // into a second soft-circle "head" behind the ball (Round H.2 yellow outliers).
+                trail_color.a *= p.trail_alpha * trail_age_fade * 0.72f;
+                trail_color.a = std::clamp(std::max(trail_color.a, 0.22f), 0.0f, 0.45f);
 
                 glm::mat4 model(1.0f);
                 model[0] = glm::vec4(across * ribbon_w, 0.0f);
-                model[1] = glm::vec4(along * ribbon_len, 0.0f); // +Y → head (neck UV)
+                // +Y → head (V=1 neck under soft circle); -Y → tip behind (V=0 point).
+                model[1] = glm::vec4(along * tip_span, 0.0f);
                 model[2] = glm::vec4(cam_forward, 0.0f);
                 model[3] = glm::vec4(mid, 1.0f);
                 push_sprite(model, trail_color, trail_batch);
@@ -800,11 +797,11 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
                 glow_model[3] = glm::vec4(world_pos, 1.0f);
                 push_sprite(glow_model, glow, batch_index);
             }
-            // Bright core disc — seals trail join under additive glow.
+            // Bright core disc — seals trail join; oversized vs tip so the head always leads.
             glm::vec4 head_color = color;
-            head_color.a = std::min(std::max(head_color.a, 0.58f), 0.82f);
-            hx *= 1.12f;
-            hy *= 1.12f;
+            head_color.a = std::min(std::max(head_color.a, 0.68f), 0.9f);
+            hx *= 1.22f;
+            hy *= 1.22f;
             model[0] = glm::vec4(cam_right * hx, 0.0f);
             model[1] = glm::vec4(cam_up * hy, 0.0f);
             model[2] = glm::vec4(cam_forward, 0.0f);
