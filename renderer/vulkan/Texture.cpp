@@ -302,15 +302,10 @@ GpuTexture GpuTexture::createSoftRibbonSprite(const VulkanContext& context, cons
             const float nx = (static_cast<float>(x) + 0.5f) / static_cast<float>(dim) * 2.0f - 1.0f;
             const float ny = (static_cast<float>(y) + 0.5f) / static_cast<float>(dim) * 2.0f - 1.0f;
             // Mesh UV: local -Y → V=0, local +Y → V=1.
-            // Niagara wake: ParticleWorld sets model[1] = along*(tip→head), so local +Y is at
-            // the HEAD and local -Y is at the oldest tip BEHIND. Therefore V=1 must be the
-            // wide neck and V=0 the pointed tip. (If this mapping is inverted, trails read as
-            // leading ahead of the ball.)
-            // u=0 tip (ny=-1 / V=0), u=1 neck (ny=+1 / V=1).
+            // ParticleWorld model[1] = +along*(tip→head): +Y at HEAD, -Y at tip behind.
+            // u=0 tip (ny=-1), u=1 neck (ny=+1) under the soft circle.
             const float u = std::clamp((ny + 1.0f) * 0.5f, 0.0f, 1.0f);
-            // Quadratic widen: tip stays pointed, flares into the neck.
             float half_w = kTipHalf + (kNeckHalf - kTipHalf) * (u * u);
-            // Round the neck end into a soft disc so the join under the ball isn't a flat cut.
             if (ny > 0.55f) {
                 const float cy = 0.55f;
                 const float round_r = kNeckHalf;
@@ -325,12 +320,8 @@ GpuTexture GpuTexture::createSoftRibbonSprite(const VulkanContext& context, cons
             float falloff = 0.0f;
             if (half_w > 1e-4f && ax < half_w) {
                 const float edge = 1.0f - (ax / half_w);
-                const float soft = edge * edge * (3.0f - 2.0f * edge); // smoothstep
-                // Mild length fade at the very tip so the point reads soft, not clipped.
+                const float soft = edge * edge * (3.0f - 2.0f * edge);
                 const float tip_fade = u < 0.06f ? (u / 0.06f) : 1.0f;
-                // Minimal neck fade — only the last ~8% — so the wide neck stays opaque
-                // under the soft circle. Geometry overshoot in ParticleWorld scales with
-                // wake length to cover this fraction (fixed overshoot left long-trail gaps).
                 float neck_dissolve = 1.0f;
                 if (ny > 0.84f) {
                     const float nd = 1.0f - (ny - 0.84f) / 0.16f;
