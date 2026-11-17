@@ -33,6 +33,7 @@
 
 #include <SDL3/SDL.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <imgui.h>
 #include <ImGuizmo.h>
@@ -85,6 +86,8 @@ public:
         show_grid_ = true;
 
         grid_mesh_ = genesis::createEditorGridMesh(renderer().context(), kGridHalfExtentM, kGridDivisions);
+        // Soft sphere for meshless actor selection (emitters / lights / cameras).
+        selection_helper_mesh_ = genesis::createSphereMesh(renderer().context(), 0.5f, 20, 12);
         if (color_mgmt_.lutDirty()) {
             renderer().uploadDisplayLut(color_mgmt_.rebuildDisplayLut());
         }
@@ -95,6 +98,7 @@ public:
         draw_commands_.clear();
         draw_batches_.clear();
         grid_mesh_ = {};
+        selection_helper_mesh_ = {};
         runtime_.clear();
         if (renderer().context().device() != VK_NULL_HANDLE) {
             vkDeviceWaitIdle(renderer().context().device());
@@ -316,6 +320,8 @@ protected:
             renderer().drawGrid(grid_mesh_, grid_pc);
         }
 
+        drawSelectionEdgeOutlines(draw_options, &vp[0][0]);
+
         last_culled_nodes_ = render_stats.culled_mesh_nodes;
     }
 
@@ -393,6 +399,45 @@ private:
         }
         if (input().keyPressed(SDL_SCANCODE_F)) {
             focusEditorCameraOnSelection();
+        }
+        // Demo / QA hotkeys for edge-selection screenshots (black-stage visible cube).
+        if (input().keyPressed(SDL_SCANCODE_F6)) {
+            addPrimitiveMesh("Cube", genesis::createCubeMesh(renderer().context()));
+            if (genesis::Node* node = runtime_.scene().find(primarySelected())) {
+                if (node->material_resource.has_value()) {
+                    if (genesis::SceneMaterial* mat = runtime_.material(*node->material_resource)) {
+                        mat->base_color = glm::vec4(0.55f, 0.58f, 0.62f, 1.0f);
+                        mat->emissive = glm::vec3(0.35f, 0.37f, 0.40f);
+                        mat->emissive_strength = 1.0f;
+                        mat->roughness = 0.55f;
+                    }
+                }
+                node->local.position = glm::vec3(0.0f, 0.5f, 0.0f);
+                node->local.scale = glm::vec3(0.85f);
+            }
+            runtime_.updateTransforms();
+            focusEditorCameraOnSelection();
+        }
+        if (input().keyPressed(SDL_SCANCODE_F7)) {
+            std::optional<genesis::NodeId> id =
+                genesis::findNodeByPath(runtime_.scene(), "Scene/Particle System/Soft Circles");
+            if (!id) {
+                for (const genesis::Node& n : runtime_.scene().nodes) {
+                    if (n.particle_emitter.has_value() && n.name.find("Soft Circles") != std::string::npos) {
+                        id = n.id;
+                        break;
+                    }
+                }
+            }
+            if (id) {
+                selectNode(*id);
+                focusEditorCameraOnSelection();
+            } else {
+                spdlog::warn("F7: Soft Circles emitter not found");
+            }
+        }
+        if (input().keyPressed(SDL_SCANCODE_F8)) {
+            clearSelection();
         }
         if (!selection_.empty() && !ImGuizmo::IsUsing()) {
             if (input().keyPressed(SDL_SCANCODE_DELETE)) {
@@ -1805,23 +1850,90 @@ private:
     }
 
     void drawSelectionOverlays(genesis::Scene& scene) {
+        (void)scene;
+        // Selection silhouette is drawn in the 3D pass (inverted-hull edge overlay).
+        // Keep only the marquee rubber-band here — no AABB/cyan screen boxes.
         ImDrawList* draw = ImGui::GetForegroundDrawList();
         if (marquee_.active && marquee_.dragging) {
-            draw->AddRectFilled(marquee_.start, marquee_.current, IM_COL32(56, 194, 178, 28));
-            draw->AddRect(marquee_.start, marquee_.current, IM_COL32(56, 194, 178, 200), 0.0f, 0, 1.25f);
+            draw->AddRectFilled(marquee_.start, marquee_.current, IM_COL32(232, 140, 48, 28));
+            draw->AddRect(marquee_.start, marquee_.current, IM_COL32(232, 140, 48, 200), 0.0f, 0, 1.25f);
         }
+    }
 
-        if (selection_.empty() || viewport_.w < 2.0f) {
+    static genesis::MeshMaterialPushConstants makeOutlineMaterial(bool primary) {
+        genesis::MeshMaterialPushConstants mat{};
+        // Soft Unreal-amber rim — readable on the black stage, not neon cyan.
+        if (primary) {
+            mat.base_color[0] = 1.0f;
+            mat.base_color[1] = 0.58f;
+            mat.base_color[2] = 0.12f;
+            mat.base_color[3] = 0.95f;
+        } else {
+            mat.base_color[0] = 0.82f;
+            mat.base_color[1] = 0.45f;
+            mat.base_color[2] = 0.10f;
+            mat.base_color[3] = 0.62f;
+        }
+        // Rim power for fresnel silhouette (higher = tighter edge band).
+        mat.material_params[0] = 2.6f;
+        mat.material_params[2] = 0.0f; // opaque so depth prepass writes for helpers
+        return mat;
+    }
+
+    void drawSelectionEdgeOutlines(const genesis::MeshDrawOptions& draw_options,
+                                   const float* view_proj_col_major) {
+        if (selection_.empty() || !show_viewport_ || viewport_.w < 2.0f) {
             return;
         }
 
+        genesis::Scene& scene = runtime_.scene();
         runtime_.updateTransforms();
-        const float aspect = renderAspect();
-        const glm::mat4 view_proj =
-            genesis::projectionForImGuizmo(outputProjectionMatrix(aspect)) * outputViewMatrix();
-        genesis::ScenePickParams params{};
 
+        std::unordered_set<genesis::NodeId> outlined_mesh_nodes;
+        std::vector<genesis::SceneMeshBatch> outline_batches;
+        outline_batches.reserve(selection_.size());
+
+        auto append_instance = [&](const genesis::Mesh* mesh, const glm::mat4& model,
+                                   genesis::NodeId id) {
+            if (!mesh || !mesh->vertex_buffer || !mesh->index_buffer || mesh->index_count == 0) {
+                return;
+            }
+            const bool primary = id == primarySelected();
+            genesis::SceneMeshBatch* batch = nullptr;
+            for (genesis::SceneMeshBatch& existing : outline_batches) {
+                if (existing.mesh == mesh &&
+                    existing.material.base_color[3] == (primary ? 0.95f : 0.62f)) {
+                    batch = &existing;
+                    break;
+                }
+            }
+            if (!batch) {
+                outline_batches.push_back({});
+                batch = &outline_batches.back();
+                batch->mesh = mesh;
+                batch->material = makeOutlineMaterial(primary);
+            }
+            genesis::GpuMeshInstance instance{};
+            genesis::fillGpuMeshInstance(instance, model, mesh->local_aabb_min, mesh->local_aabb_max);
+            batch->instances.push_back(instance);
+            batch->node_ids.push_back(id);
+        };
+
+        // Mesh / fluid actors: silhouette of the drawn geometry itself.
+        for (const genesis::SceneDrawCommand& cmd : draw_commands_) {
+            if (cmd.node_id == 0 || !isSelected(cmd.node_id) || !cmd.mesh) {
+                continue;
+            }
+            append_instance(cmd.mesh, cmd.model, cmd.node_id);
+            outlined_mesh_nodes.insert(cmd.node_id);
+        }
+
+        // Particle emitters / lights / cameras: soft sphere matching pick bounds.
+        genesis::ScenePickParams params{};
         for (const genesis::NodeId id : selection_) {
+            if (outlined_mesh_nodes.count(id) != 0) {
+                continue;
+            }
             const genesis::Node* node = scene.find(id);
             if (!node) {
                 continue;
@@ -1830,22 +1942,38 @@ private:
             if (node->mesh_resource.has_value()) {
                 mesh = runtime_.mesh(*node->mesh_resource);
             }
+            // Prefer real mesh silhouette when the node has mesh data but was culled.
+            if (mesh != nullptr) {
+                append_instance(mesh, node->world, id);
+                continue;
+            }
+
             glm::vec3 aabb_min{};
             glm::vec3 aabb_max{};
-            if (!genesis::nodeWorldPickAabb(*node, mesh, params, aabb_min, aabb_max)) {
+            if (!genesis::nodeWorldPickAabb(*node, nullptr, params, aabb_min, aabb_max)) {
                 continue;
             }
-            genesis::ScreenRect rect{};
-            if (!genesis::projectWorldAabbToScreen(view_proj, aabb_min, aabb_max, viewport_.w, viewport_.h,
-                                                    rect)) {
-                continue;
+            const glm::vec3 center = 0.5f * (aabb_min + aabb_max);
+            glm::vec3 extent = glm::max(aabb_max - aabb_min, glm::vec3(0.08f));
+            // Emitters get a slightly larger readable selection shell on the black stage.
+            if (node->particle_emitter.has_value()) {
+                extent = glm::max(extent, glm::vec3(0.7f));
             }
-            const ImVec2 a(viewport_.x + rect.min_x, viewport_.y + rect.min_y);
-            const ImVec2 b(viewport_.x + rect.max_x, viewport_.y + rect.max_y);
-            const bool primary = id == primarySelected();
-            draw->AddRect(a, b, primary ? IM_COL32(56, 194, 178, 220) : IM_COL32(56, 194, 178, 120), 3.0f,
-                          0, primary ? 1.5f : 1.0f);
+            // Sphere mesh is unit diameter 1 (radius 0.5); scale XYZ to the pick AABB.
+            const glm::mat4 model =
+                glm::translate(glm::mat4(1.0f), center) * glm::scale(glm::mat4(1.0f), extent);
+            append_instance(&selection_helper_mesh_, model, id);
         }
+
+        if (outline_batches.empty()) {
+            return;
+        }
+
+        genesis::MeshDrawOptions opts = draw_options;
+        opts.view_proj_col_major = view_proj_col_major;
+        opts.enable_gpu_cull = false;
+        opts.enable_depth_prepass = false;
+        renderer().drawSelectionOutlineBatches(outline_batches, opts);
     }
 
     bool isSelected(const genesis::NodeId id) const {
@@ -2409,6 +2537,7 @@ private:
     genesis::SceneRuntime runtime_;
     genesis::ColorManagement color_mgmt_;
     genesis::Mesh grid_mesh_{};
+    genesis::Mesh selection_helper_mesh_{};
     genesis::Camera editor_camera_{};
     glm::vec3 camera_pivot_{0.0f, 0.85f, 0.0f};
     genesis::ViewportRect viewport_{};

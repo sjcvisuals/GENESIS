@@ -30,6 +30,8 @@ genesis_compile_shaders(genesis_shaders
     shaders/mesh_depth.frag
     shaders/grid.vert
     shaders/grid.frag
+    shaders/selection_outline.vert
+    shaders/selection_outline.frag
     shaders/cull_instances.comp
     shaders/finalize_cull.comp
     shaders/fluid_advect.comp

@@ -385,6 +385,7 @@ void Renderer::createMeshPipelines() {
     mesh_pipeline_.reset();
     mesh_additive_pipeline_.reset();
     mesh_depth_pipeline_.reset();
+    selection_outline_pipeline_.reset();
     if (!bindless_textures_ || !display_lut_) {
         return;
     }
@@ -420,6 +421,27 @@ void Renderer::createMeshPipelines() {
     depth_config.push_constant_stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     if (std::filesystem::exists(depth_config.vert_shader) && std::filesystem::exists(depth_config.frag_shader)) {
         mesh_depth_pipeline_ = std::make_unique<GraphicsPipeline>(*context_, depth_config);
+    }
+
+    GraphicsPipelineConfig outline_config = withMeshVertexLayout({});
+    outline_config.render_pass = swapchain_->renderPass();
+    outline_config.vert_shader = shader_dir / "selection_outline.vert.spv";
+    outline_config.frag_shader = shader_dir / "selection_outline.frag.spv";
+    outline_config.extent = swapchain_->extent();
+    outline_config.set0_layout = frame_set_layout_;
+    // Layout matches MeshBatchDrawer binds (set0 + bindless); frag does not sample.
+    outline_config.set1_layout = bindless_textures_->layout();
+    // Depth-test off: rim draws on top of the actor (lavapipe equal-depth is flaky).
+    outline_config.depth_test = false;
+    outline_config.depth_write = false;
+    outline_config.alpha_blend = true;
+    // Fresnel rim on both faces — readable silhouette without inverted-hull winding issues.
+    outline_config.cull_mode = VK_CULL_MODE_NONE;
+    outline_config.push_constant_size = sizeof(MeshMaterialPushConstants);
+    outline_config.push_constant_stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    if (std::filesystem::exists(outline_config.vert_shader) &&
+        std::filesystem::exists(outline_config.frag_shader)) {
+        selection_outline_pipeline_ = std::make_unique<GraphicsPipeline>(*context_, outline_config);
     }
 }
 
@@ -675,6 +697,36 @@ void Renderer::drawMeshBatches(const std::vector<SceneMeshBatch>& batches, const
     } else {
         draw_group(additive_batches, *mesh_pipeline_, false);
     }
+}
+
+void Renderer::drawSelectionOutlineBatches(const std::vector<SceneMeshBatch>& batches,
+                                           const MeshDrawOptions& options) {
+    if (!selection_outline_pipeline_) {
+        spdlog::warn("selection outline pipeline missing");
+        return;
+    }
+    if (!bindless_textures_ || !mesh_batch_drawer_ || batches.empty()) {
+        return;
+    }
+
+    VkCommandBuffer cmd = command_buffers_[current_frame_];
+    MeshDrawOptions draw_options = options;
+    if (draw_options.view_proj_col_major == nullptr) {
+        draw_options.view_proj_col_major = frame_uniforms_.view_proj;
+    }
+    draw_options.enable_gpu_cull = false;
+    draw_options.enable_depth_prepass = false;
+
+    if (!mesh_batch_drawer_->prepareDraw(batches, *bindless_textures_, draw_options)) {
+        return;
+    }
+    mesh_batch_drawer_->bindDrawInstanceBuffer(context_->device(),
+                                               frame_descriptor_sets_[current_frame_]);
+    ensureRenderPass();
+    applyDrawRegion(cmd);
+    mesh_batch_drawer_->drawColorPass(cmd, *selection_outline_pipeline_,
+                                      frame_descriptor_sets_[current_frame_], *bindless_textures_,
+                                      VK_NULL_HANDLE);
 }
 
 void Renderer::drawGrid(const Mesh& mesh, const GridDrawPushConstants& draw_constants) {
