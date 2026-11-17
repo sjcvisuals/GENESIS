@@ -648,14 +648,15 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
         const float size = std::max(0.04f, p.size0 * size_mul);
         glm::vec4 color =
             p.color_curve.count > 0 ? p.color_curve.evaluate(t) : glm::vec4(1.0f, 1.0f, 1.0f, 1.0f - t);
-        // Tint owns hue; curve owns energy/alpha. Mild HDR headroom for bloom-safe glow.
+        // Tint owns hue; curve owns energy/alpha. Additive self-glow on black stage.
         {
             const float energy =
-                std::max(0.15f, (color.r + color.g + color.b) * (1.0f / 3.0f));
-            color.r = std::min(p.color_tint.r * energy * 1.35f, 1.35f);
-            color.g = std::min(p.color_tint.g * energy * 1.35f, 1.35f);
-            color.b = std::min(p.color_tint.b * energy * 1.35f, 1.35f);
-            color.a = std::clamp(color.a, 0.0f, 0.8f);
+                std::max(0.2f, (color.r + color.g + color.b) * (1.0f / 3.0f));
+            color.r = std::min(p.color_tint.r * energy * 1.2f, 1.2f);
+            color.g = std::min(p.color_tint.g * energy * 1.2f, 1.2f);
+            color.b = std::min(p.color_tint.b * energy * 1.2f, 1.2f);
+            // Additive: alpha gates emission strength (keep below firefly).
+            color.a = std::clamp(color.a, 0.0f, 0.7f);
         }
 
         glm::vec3 world_pos = p.position;
@@ -729,9 +730,9 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
                 const glm::vec3 mid = tip + along * (seg_len * 0.5f + head_w * 0.08f);
 
                 glm::vec4 trail_color = color;
-                trail_color.a *= p.trail_alpha * trail_age_fade;
-                // Match head energy at the neck; tip stays quieter via wedge texture.
-                trail_color.a = std::clamp(std::max(trail_color.a, 0.48f), 0.0f, 0.78f);
+                trail_color.a *= p.trail_alpha * trail_age_fade * 0.85f;
+                // Additive trail — quieter than the head core, still joins cleanly.
+                trail_color.a = std::clamp(std::max(trail_color.a, 0.28f), 0.0f, 0.55f);
 
                 glm::mat4 model(1.0f);
                 model[0] = glm::vec4(across * ribbon_w, 0.0f);
@@ -753,22 +754,22 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
                 hx = size * aspect;
                 hy = size * (1.0f + speed * p.velocity_stretch);
             }
-            // Soft outer glow halo (bloom-safe, same tint — seals trail join + emissive feel).
+            // Controlled emission halo (same tint) — soft falloff, not a huge blur plate.
             {
                 glm::vec4 glow = color;
-                glow.a = std::clamp(glow.a * 0.42f, 0.16f, 0.38f);
+                glow.a = std::clamp(glow.a * 0.28f, 0.1f, 0.22f);
                 glm::mat4 glow_model(1.0f);
-                glow_model[0] = glm::vec4(cam_right * hx * 1.7f, 0.0f);
-                glow_model[1] = glm::vec4(cam_up * hy * 1.7f, 0.0f);
+                glow_model[0] = glm::vec4(cam_right * hx * 1.35f, 0.0f);
+                glow_model[1] = glm::vec4(cam_up * hy * 1.35f, 0.0f);
                 glow_model[2] = glm::vec4(cam_forward, 0.0f);
                 glow_model[3] = glm::vec4(world_pos, 1.0f);
                 push_sprite(glow_model, glow, batch_index);
             }
+            // Bright core disc — seals trail join under additive glow.
             glm::vec4 head_color = color;
-            head_color.a = std::min(std::max(head_color.a, 0.62f), 0.9f);
-            // Slightly larger head so it covers the ribbon neck completely.
-            hx *= 1.12f;
-            hy *= 1.12f;
+            head_color.a = std::min(std::max(head_color.a, 0.55f), 0.78f);
+            hx *= 1.08f;
+            hy *= 1.08f;
             model[0] = glm::vec4(cam_right * hx, 0.0f);
             model[1] = glm::vec4(cam_up * hy, 0.0f);
             model[2] = glm::vec4(cam_forward, 0.0f);

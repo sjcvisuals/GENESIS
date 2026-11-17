@@ -27,80 +27,6 @@
       }
     },
     {
-      "path": "Scene/Key Light",
-      "name": "Key Light",
-      "parent": "Scene",
-      "visible": true,
-      "light": {
-        "type": "directional",
-        "color": [
-          0.82,
-          0.88,
-          1.0
-        ],
-        "intensity": 1.0,
-        "enabled": true,
-        "range": 10.0,
-        "inner_cone_degrees": 20.0,
-        "outer_cone_degrees": 30.0
-      },
-      "transform": {
-        "position": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "rotation": [
-          -0.38,
-          0.3,
-          0.13,
-          0.86
-        ],
-        "scale": [
-          1.0,
-          1.0,
-          1.0
-        ]
-      }
-    },
-    {
-      "path": "Scene/Fill Light",
-      "name": "Fill Light",
-      "parent": "Scene",
-      "visible": true,
-      "light": {
-        "type": "directional",
-        "color": [
-          0.6,
-          0.66,
-          0.8
-        ],
-        "intensity": 0.5,
-        "enabled": true,
-        "range": 10.0,
-        "inner_cone_degrees": 20.0,
-        "outer_cone_degrees": 30.0
-      },
-      "transform": {
-        "position": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "rotation": [
-          0.2,
-          -0.55,
-          -0.1,
-          0.8
-        ],
-        "scale": [
-          1.0,
-          1.0,
-          1.0
-        ]
-      }
-    },
-    {
       "path": "Scene/Particle System",
       "name": "Particle System",
       "parent": "Scene",
@@ -232,7 +158,7 @@
         "trail_alpha": 0.95,
         "trail_lifetime": 3.0,
         "unlit": true,
-        "additive": false,
+        "additive": true,
         "seed_override": 0,
         "fluid_coupled": false
       },

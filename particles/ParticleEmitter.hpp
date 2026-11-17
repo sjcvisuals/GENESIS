@@ -188,7 +188,7 @@ inline ParticleEmitter makeGentleSoftEmitter() {
     e.cone_angle_degrees = 5.0f;
     e.velocity_mode = ParticleVelocityMode::Cone;
     e.render_mesh = ParticleRenderMesh::Sprite;
-    e.additive = false;
+    e.additive = true; // self-illuminated glow on black stage
     e.unlit = true;
     e.sprite_aspect = 1.0f;
     e.velocity_stretch = 0.0f;
