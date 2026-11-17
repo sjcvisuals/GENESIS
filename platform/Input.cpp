@@ -7,6 +7,7 @@ namespace genesis {
 void Input::beginFrame() {
   std::memcpy(keys_previous_, keys_current_, sizeof(keys_current_));
   std::memcpy(mouse_buttons_previous_, mouse_buttons_, sizeof(mouse_buttons_));
+  mouse_wheel_y_ = 0.0f;
 }
 
 void Input::onEvent(const SDL_Event& event) {
@@ -39,6 +40,9 @@ void Input::onEvent(const SDL_Event& event) {
     mouse_x_ = event.motion.x;
     mouse_y_ = event.motion.y;
     break;
+  case SDL_EVENT_MOUSE_WHEEL:
+    mouse_wheel_y_ += event.wheel.y;
+    break;
   default:
     break;
   }
@@ -68,6 +72,7 @@ bool Input::mouseButtonPressed(int button) const {
 void Input::resetMouseDelta() {
   mouse_delta_x_ = 0.0f;
   mouse_delta_y_ = 0.0f;
+  mouse_wheel_y_ = 0.0f;
 }
 
 void Input::setMouseCaptured(bool captured) {

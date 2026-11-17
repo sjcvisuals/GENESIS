@@ -59,8 +59,9 @@
 
 namespace {
 
-constexpr float kGridHalfExtentM = 12.0f;
-constexpr int kGridDivisions = 24;
+// Room-scale meter grid (~6 m install footprint + margin).
+constexpr float kGridHalfExtentM = 24.0f;
+constexpr int kGridDivisions = 48;
 
 struct ExampleLoadOptions {
     bool auto_play_animation = false;
@@ -81,7 +82,7 @@ public:
         color_mgmt_.settings().bloom_strength = 0.04f; // not bloom-as-blur; additive sprites carry glow
         color_mgmt_.settings().grain_strength = 0.0f;
         color_mgmt_.settings().vignette_strength = 0.0f;
-        show_grid_ = false;
+        show_grid_ = true;
 
         grid_mesh_ = genesis::createEditorGridMesh(renderer().context(), kGridHalfExtentM, kGridDivisions);
         if (color_mgmt_.lutDirty()) {
@@ -231,47 +232,7 @@ protected:
             show_exit_confirm_ = true;
         }
 
-        // Start fly when RMB begins over the viewport; keep flying while RMB is held
-        // even after relative-mouse capture moves the cursor off the hover rect.
-        if (input().mouseButtonDown(SDL_BUTTON_RIGHT) && !ImGuizmo::IsUsing()) {
-            if (fly_camera_active_ || viewport_hovered_ || viewport_.contains(input().mouseX(), input().mouseY())) {
-                fly_camera_active_ = true;
-            }
-        } else {
-            fly_camera_active_ = false;
-        }
-
-        if (fly_camera_active_) {
-            use_editor_output_ = true;
-            input().setMouseCaptured(window().handle(), true);
-            const float sensitivity = 0.0025f;
-            editor_camera_.yaw_radians += input().mouseDeltaX() * sensitivity;
-            editor_camera_.pitch_radians += input().mouseDeltaY() * sensitivity;
-            editor_camera_.pitch_radians = glm::clamp(editor_camera_.pitch_radians, -1.4f, 1.4f);
-            editor_camera_.rebuildRotationFromYawPitch();
-
-            const float speed = (input().keyDown(SDL_SCANCODE_LSHIFT) ? 6.0f : 2.5f);
-            glm::vec3 move(0.0f);
-            if (input().keyDown(SDL_SCANCODE_W)) move += editor_camera_.forward();
-            if (input().keyDown(SDL_SCANCODE_S)) move -= editor_camera_.forward();
-            if (input().keyDown(SDL_SCANCODE_D)) move += editor_camera_.right();
-            if (input().keyDown(SDL_SCANCODE_A)) move -= editor_camera_.right();
-            if (input().keyDown(SDL_SCANCODE_E)) move += glm::vec3(0.0f, 1.0f, 0.0f);
-            if (input().keyDown(SDL_SCANCODE_Q)) move -= glm::vec3(0.0f, 1.0f, 0.0f);
-            if (glm::length(move) > 0.0f) {
-                editor_camera_.transform.position += glm::normalize(move) * speed * dt;
-            }
-        } else {
-            input().setMouseCaptured(window().handle(), false);
-
-            // W/E/R switch tools even over the viewport; RMB+WASD is reserved for fly above.
-            const bool typing = ImGui::GetIO().WantTextInput;
-            if (!ImGuizmo::IsUsing() && !typing) {
-                if (input().keyPressed(SDL_SCANCODE_W)) gizmo_operation_ = ImGuizmo::TRANSLATE;
-                if (input().keyPressed(SDL_SCANCODE_E)) gizmo_operation_ = ImGuizmo::ROTATE;
-                if (input().keyPressed(SDL_SCANCODE_R)) gizmo_operation_ = ImGuizmo::SCALE;
-            }
-        }
+        updateEditorCameraNavigation(dt);
 
         const float aspect = refreshOutputAspect();
         const glm::mat4 vp = outputViewProjection(renderAspect());
@@ -349,9 +310,9 @@ protected:
         }
 
         if (show_grid_) {
-            // Soft graphite procedural grid (fragment-shaded ground plane).
+            // Cool readable lines on black unlit stage (1 m major / 0.25 m minor).
             const genesis::GridDrawPushConstants grid_pc =
-                genesis::makeGridDrawPushConstants(nullptr, 0.42f, 0.45f, 0.50f, 0.55f);
+                genesis::makeGridDrawPushConstants(nullptr, 0.38f, 0.48f, 0.52f, 0.72f);
             renderer().drawGrid(grid_mesh_, grid_pc);
         }
 
@@ -803,7 +764,7 @@ private:
             ImGui::TextWrapped("Select an actor in the viewport or outliner.");
             ImGui::Spacing();
             ImGui::TextDisabled("LMB pick / drag marquee");
-            ImGui::TextDisabled("Shift/Ctrl multi  ·  RMB+WASD fly  ·  W/E/R gizmo");
+            ImGui::TextDisabled("Alt+LMB orbit · MMB pan · Alt+RMB dolly · RMB fly");
         } else if (genesis::Node* n = scene.find(primarySelected())) {
             genesis::drawEditorSectionLabel(n->name.c_str());
             const std::string node_path = genesis::nodePath(scene, n->id);
@@ -1330,9 +1291,13 @@ private:
 
     void drawViewportHelpPanel() {
         ImGui::Begin("Shortcuts", &show_viewport_help_);
-        ImGui::TextDisabled("NAVIGATION");
-        ImGui::BulletText("RMB + WASD / QE — fly");
-        ImGui::BulletText("F — frame selection");
+        ImGui::TextDisabled("NAVIGATION (Unreal-like, slowed)");
+        ImGui::BulletText("Alt + LMB — orbit around pivot");
+        ImGui::BulletText("MMB / Alt + MMB — pan (slow)");
+        ImGui::BulletText("Alt + RMB / wheel — dolly");
+        ImGui::BulletText("RMB + WASD / QE — fly look");
+        ImGui::BulletText("F — frame selection (sets orbit pivot)");
+        ImGui::BulletText("Grid — 1 m major / 0.25 m minor");
         ImGui::Spacing();
         ImGui::TextDisabled("SELECTION");
         ImGui::BulletText("LMB — select / marquee");
@@ -1737,7 +1702,8 @@ private:
 
     void handleViewportSelection(genesis::Scene& scene) {
         (void)scene;
-        if (fly_camera_active_) {
+        const bool alt_nav = ImGui::GetIO().KeyAlt;
+        if (fly_camera_active_ || navigating_active_ || alt_nav) {
             marquee_ = {};
             return;
         }
@@ -2225,14 +2191,139 @@ private:
         return editor_camera_.transform.position;
     }
 
+    void placeEditorCameraAt(const glm::vec3& eye, const glm::vec3& pivot) {
+        camera_pivot_ = pivot;
+        editor_camera_.transform.position = eye;
+        editor_camera_.setRotation(genesis::cameraRotationFromLookAt(eye, pivot));
+        genesis::extractYawPitchFromForward(editor_camera_.forward(), editor_camera_.yaw_radians,
+                                            editor_camera_.pitch_radians);
+    }
+
+    float editorCameraPivotDistance() const {
+        return std::max(glm::length(editor_camera_.transform.position - camera_pivot_), 0.35f);
+    }
+
+    void applyEditorCameraOrbit(const float dx, const float dy) {
+        // Unreal-like Alt+LMB orbit around pivot (slower than stock UE feel).
+        constexpr float kOrbit = 0.0032f;
+        editor_camera_.yaw_radians -= dx * kOrbit;
+        editor_camera_.pitch_radians -= dy * kOrbit;
+        editor_camera_.pitch_radians = glm::clamp(editor_camera_.pitch_radians, -1.45f, 1.45f);
+        editor_camera_.rebuildRotationFromYawPitch();
+        const float dist = editorCameraPivotDistance();
+        editor_camera_.transform.position = camera_pivot_ - editor_camera_.forward() * dist;
+    }
+
+    void applyEditorCameraPan(const float dx, const float dy) {
+        // Unreal Alt+MMB / MMB track — intentionally slow for install-scale work.
+        const float dist = editorCameraPivotDistance();
+        const float pan_scale = dist * 0.00055f;
+        const glm::vec3 delta = (-editor_camera_.right() * dx + editor_camera_.up() * dy) * pan_scale;
+        editor_camera_.transform.position += delta;
+        camera_pivot_ += delta;
+    }
+
+    void applyEditorCameraDolly(const float amount) {
+        // Positive amount dollies in toward pivot (Unreal Alt+RMB / wheel).
+        float dist = editorCameraPivotDistance();
+        dist = std::clamp(dist * std::exp(-amount * 0.12f), 0.35f, 120.0f);
+        editor_camera_.rebuildRotationFromYawPitch();
+        editor_camera_.transform.position = camera_pivot_ - editor_camera_.forward() * dist;
+    }
+
+    void updateEditorCameraNavigation(const float dt) {
+        const bool typing = ImGui::GetIO().WantTextInput;
+        const bool alt = input().keyDown(SDL_SCANCODE_LALT) || input().keyDown(SDL_SCANCODE_RALT);
+        const bool over_viewport =
+            viewport_hovered_ || viewport_.contains(input().mouseX(), input().mouseY());
+        const bool lmb = input().mouseButtonDown(SDL_BUTTON_LEFT);
+        const bool mmb = input().mouseButtonDown(SDL_BUTTON_MIDDLE);
+        const bool rmb = input().mouseButtonDown(SDL_BUTTON_RIGHT);
+        const float dx = input().mouseDeltaX();
+        const float dy = input().mouseDeltaY();
+        const float wheel = input().mouseWheelY();
+
+        // Unreal Maya-style: Alt+LMB orbit, Alt+MMB (or MMB) pan, Alt+RMB dolly.
+        const bool orbiting = alt && lmb && !ImGuizmo::IsUsing();
+        const bool panning = (mmb || (alt && mmb)) && !ImGuizmo::IsUsing();
+        const bool dollying = alt && rmb && !ImGuizmo::IsUsing();
+        const bool navigating = orbiting || panning || dollying;
+
+        if (navigating && (navigating_active_ || over_viewport)) {
+            navigating_active_ = true;
+            use_editor_output_ = true;
+            runtime_.scene().active_output_camera.reset();
+            input().setMouseCaptured(window().handle(), true);
+            fly_camera_active_ = false;
+
+            if (orbiting) {
+                applyEditorCameraOrbit(dx, dy);
+            } else if (panning) {
+                applyEditorCameraPan(dx, dy);
+            } else if (dollying) {
+                // Drag up/right → dolly in (match Unreal Alt+RMB feel, slowed).
+                applyEditorCameraDolly((dx + dy) * 0.045f);
+            }
+        } else {
+            navigating_active_ = false;
+        }
+
+        // Mouse wheel dolly when pointer is over the viewport (not captured by ImGui widgets).
+        if (over_viewport && !ImGui::GetIO().WantCaptureMouse && std::abs(wheel) > 0.0f &&
+            !ImGuizmo::IsUsing()) {
+            use_editor_output_ = true;
+            runtime_.scene().active_output_camera.reset();
+            applyEditorCameraDolly(wheel * 0.85f);
+        }
+
+        // RMB fly look (no Alt) — slower / less twitchy than before.
+        if (!alt && rmb && !ImGuizmo::IsUsing()) {
+            if (fly_camera_active_ || over_viewport) {
+                fly_camera_active_ = true;
+            }
+        } else if (!rmb || alt) {
+            fly_camera_active_ = false;
+        }
+
+        if (fly_camera_active_ && !navigating_active_) {
+            use_editor_output_ = true;
+            input().setMouseCaptured(window().handle(), true);
+            constexpr float kLook = 0.00155f;
+            editor_camera_.yaw_radians += dx * kLook;
+            editor_camera_.pitch_radians += dy * kLook;
+            editor_camera_.pitch_radians = glm::clamp(editor_camera_.pitch_radians, -1.4f, 1.4f);
+            editor_camera_.rebuildRotationFromYawPitch();
+
+            const float speed = (input().keyDown(SDL_SCANCODE_LSHIFT) ? 3.2f : 1.35f);
+            glm::vec3 move(0.0f);
+            if (input().keyDown(SDL_SCANCODE_W)) move += editor_camera_.forward();
+            if (input().keyDown(SDL_SCANCODE_S)) move -= editor_camera_.forward();
+            if (input().keyDown(SDL_SCANCODE_D)) move += editor_camera_.right();
+            if (input().keyDown(SDL_SCANCODE_A)) move -= editor_camera_.right();
+            if (input().keyDown(SDL_SCANCODE_E)) move += glm::vec3(0.0f, 1.0f, 0.0f);
+            if (input().keyDown(SDL_SCANCODE_Q)) move -= glm::vec3(0.0f, 1.0f, 0.0f);
+            if (glm::length(move) > 0.0f) {
+                const glm::vec3 step = glm::normalize(move) * speed * dt;
+                editor_camera_.transform.position += step;
+                camera_pivot_ += step;
+            }
+        } else if (!navigating_active_) {
+            input().setMouseCaptured(window().handle(), false);
+
+            // W/E/R switch tools even over the viewport; RMB+WASD is reserved for fly above.
+            if (!ImGuizmo::IsUsing() && !typing && !alt) {
+                if (input().keyPressed(SDL_SCANCODE_W)) gizmo_operation_ = ImGuizmo::TRANSLATE;
+                if (input().keyPressed(SDL_SCANCODE_E)) gizmo_operation_ = ImGuizmo::ROTATE;
+                if (input().keyPressed(SDL_SCANCODE_R)) gizmo_operation_ = ImGuizmo::SCALE;
+            }
+        }
+    }
+
     void resetEditorCamera() {
         // Calm three-quarter view for soft rising circles + trails.
         const glm::vec3 target(0.0f, 0.85f, 0.0f);
         const glm::vec3 eye(2.55f, 1.55f, 3.35f);
-        editor_camera_.transform.position = eye;
-        editor_camera_.setRotation(genesis::cameraRotationFromLookAt(eye, target));
-        genesis::extractYawPitchFromForward(editor_camera_.forward(), editor_camera_.yaw_radians,
-                                            editor_camera_.pitch_radians);
+        placeEditorCameraAt(eye, target);
         editor_camera_.fov_y_radians = glm::radians(40.0f);
         editor_camera_.near_plane = 0.1f;
         editor_camera_.far_plane = 250.0f;
@@ -2273,11 +2364,7 @@ private:
             offset = glm::normalize(offset);
         }
 
-        editor_camera_.transform.position = target + offset * focus_distance;
-        editor_camera_.setRotation(
-            genesis::cameraRotationFromLookAt(editor_camera_.transform.position, target));
-        genesis::extractYawPitchFromForward(editor_camera_.forward(), editor_camera_.yaw_radians,
-                                            editor_camera_.pitch_radians);
+        placeEditorCameraAt(target + offset * focus_distance, target);
         use_editor_output_ = true;
         runtime_.scene().active_output_camera.reset();
     }
@@ -2323,11 +2410,13 @@ private:
     genesis::ColorManagement color_mgmt_;
     genesis::Mesh grid_mesh_{};
     genesis::Camera editor_camera_{};
+    glm::vec3 camera_pivot_{0.0f, 0.85f, 0.0f};
     genesis::ViewportRect viewport_{};
     bool use_editor_output_ = true;
     float output_aspect_ = 1.0f;
     bool viewport_hovered_ = false;
     bool fly_camera_active_ = false;
+    bool navigating_active_ = false;
     bool ui_style_initialized_ = false;
     std::vector<genesis::NodeId> selection_;
     std::vector<genesis::NodeId> pending_delete_;
