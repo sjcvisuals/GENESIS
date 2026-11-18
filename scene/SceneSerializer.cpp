@@ -407,10 +407,15 @@ json particleEmitterToJson(const ParticleEmitter& e) {
         {"world_space", e.world_space},
         {"duration", e.duration_seconds},
         {"start_delay", e.start_delay_seconds},
+        {"mod_spawn_rate", e.mod_spawn_rate},
         {"rate", e.rate_per_second},
         {"burst", e.burst_count},
         {"bursts", bursts},
         {"max_particles", e.max_particles},
+        {"mod_lifetime", e.mod_lifetime},
+        {"mod_velocity", e.mod_velocity},
+        {"mod_size", e.mod_size},
+        {"mod_color", e.mod_color},
         {"lifetime_min", e.lifetime_min},
         {"lifetime_max", e.lifetime_max},
         {"speed_min", e.speed_min},
@@ -422,6 +427,7 @@ json particleEmitterToJson(const ParticleEmitter& e) {
         {"color_end", vec4ToJson(e.color_end)},
         {"velocity_mode", velocityModeName(e.velocity_mode)},
         {"inherit_velocity", e.inherit_velocity},
+        {"mod_shape", e.mod_shape},
         {"force_gravity", e.force_gravity},
         {"gravity", vec3ToJson(e.gravity)},
         {"force_drag", e.force_drag},
@@ -444,6 +450,8 @@ json particleEmitterToJson(const ParticleEmitter& e) {
         {"kill_box", e.kill_box},
         {"kill_box_min", vec3ToJson(e.kill_box_min)},
         {"kill_box_max", vec3ToJson(e.kill_box_max)},
+        {"mod_size_over_life", e.mod_size_over_life},
+        {"mod_color_over_life", e.mod_color_over_life},
         {"size_over_life", curve1ToJson(e.size_over_life)},
         {"color_over_life", curveColorToJson(e.color_over_life)},
         {"scale_by_speed", e.scale_by_speed},
@@ -456,6 +464,7 @@ json particleEmitterToJson(const ParticleEmitter& e) {
         {"spawn_radius", e.spawn_radius},
         {"spawn_box_height", e.spawn_box_height},
         {"cone_angle_degrees", e.cone_angle_degrees},
+        {"mod_sprite", e.mod_sprite},
         {"render_mesh", renderMeshName(e.render_mesh)},
         {"sprite_aspect", e.sprite_aspect},
         {"velocity_stretch", e.velocity_stretch},
@@ -480,9 +489,14 @@ ParticleEmitter particleEmitterFromJson(const json& j) {
     e.world_space = j.value("world_space", e.world_space);
     e.duration_seconds = j.value("duration", e.duration_seconds);
     e.start_delay_seconds = j.value("start_delay", e.start_delay_seconds);
+    e.mod_spawn_rate = j.value("mod_spawn_rate", e.mod_spawn_rate);
     e.rate_per_second = j.value("rate", e.rate_per_second);
     e.burst_count = j.value("burst", e.burst_count);
     e.max_particles = j.value("max_particles", e.max_particles);
+    e.mod_lifetime = j.value("mod_lifetime", e.mod_lifetime);
+    e.mod_velocity = j.value("mod_velocity", e.mod_velocity);
+    e.mod_size = j.value("mod_size", e.mod_size);
+    e.mod_color = j.value("mod_color", e.mod_color);
     e.lifetime_min = j.value("lifetime_min", e.lifetime_min);
     e.lifetime_max = j.value("lifetime_max", e.lifetime_max);
     e.speed_min = j.value("speed_min", e.speed_min);
@@ -494,6 +508,7 @@ ParticleEmitter particleEmitterFromJson(const json& j) {
     if (j.contains("color_end")) e.color_end = vec4FromJson(j["color_end"]);
     if (j.contains("velocity_mode")) e.velocity_mode = velocityModeFromName(j["velocity_mode"].get<std::string>());
     e.inherit_velocity = j.value("inherit_velocity", e.inherit_velocity);
+    e.mod_shape = j.value("mod_shape", e.mod_shape);
     e.force_gravity = j.value("force_gravity", e.force_gravity);
     if (j.contains("gravity")) e.gravity = vec3FromJson(j["gravity"]);
     e.force_drag = j.value("force_drag", e.force_drag);
@@ -516,6 +531,8 @@ ParticleEmitter particleEmitterFromJson(const json& j) {
     e.kill_box = j.value("kill_box", e.kill_box);
     if (j.contains("kill_box_min")) e.kill_box_min = vec3FromJson(j["kill_box_min"]);
     if (j.contains("kill_box_max")) e.kill_box_max = vec3FromJson(j["kill_box_max"]);
+    e.mod_size_over_life = j.value("mod_size_over_life", e.mod_size_over_life);
+    e.mod_color_over_life = j.value("mod_color_over_life", e.mod_color_over_life);
     if (j.contains("size_over_life")) e.size_over_life = curve1FromJson(j["size_over_life"]);
     if (j.contains("color_over_life")) e.color_over_life = curveColorFromJson(j["color_over_life"]);
     e.scale_by_speed = j.value("scale_by_speed", e.scale_by_speed);
@@ -528,6 +545,7 @@ ParticleEmitter particleEmitterFromJson(const json& j) {
     e.spawn_radius = j.value("spawn_radius", e.spawn_radius);
     e.spawn_box_height = j.value("spawn_box_height", e.spawn_box_height);
     e.cone_angle_degrees = j.value("cone_angle_degrees", e.cone_angle_degrees);
+    e.mod_sprite = j.value("mod_sprite", e.mod_sprite);
     if (j.contains("render_mesh")) {
         e.render_mesh = renderMeshFromName(j["render_mesh"].get<std::string>());
     }

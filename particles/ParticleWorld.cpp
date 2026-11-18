@@ -211,23 +211,45 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
         p.emitter_node = runtime.node_id;
         p.emit_index = emit_index;
         p.age = 0.0f;
-        p.lifetime = std::max(0.001f, particleRandomRange(seed, runtime.node_id, emit_index, kChanLifetime,
-                                                          desc.lifetime_min, desc.lifetime_max));
-        p.size0 = particleRandomRange(seed, runtime.node_id, emit_index, kChanSize, desc.size_min,
-                                      desc.size_max);
+        if (desc.mod_lifetime) {
+            p.lifetime = std::max(0.001f, particleRandomRange(seed, runtime.node_id, emit_index,
+                                                              kChanLifetime, desc.lifetime_min,
+                                                              desc.lifetime_max));
+        } else {
+            p.lifetime = 1.0f;
+        }
+        if (desc.mod_size) {
+            p.size0 = particleRandomRange(seed, runtime.node_id, emit_index, kChanSize, desc.size_min,
+                                          desc.size_max);
+        } else {
+            p.size0 = 0.08f;
+        }
         p.sprite_aspect = desc.sprite_aspect;
         p.velocity_stretch = desc.velocity_stretch;
-        p.mesh = desc.render_mesh;
+        p.mesh = desc.mod_sprite ? desc.render_mesh : ParticleRenderMesh::Sphere;
         p.unlit = desc.unlit;
         p.additive = desc.additive;
         p.world_space = desc.world_space;
-        p.size_curve = authored.size_over_life;
-        p.color_curve = authored.color_over_life;
+        if (desc.mod_size_over_life) {
+            p.size_curve = authored.size_over_life;
+        } else {
+            p.size_curve = ParticleCurve1{};
+            p.size_curve.count = 0;
+        }
+        if (desc.mod_color_over_life) {
+            p.color_curve = authored.color_over_life;
+        } else if (desc.mod_color) {
+            p.color_curve = ParticleCurveColor::linear(desc.color_start, desc.color_start);
+        } else {
+            p.color_curve = ParticleCurveColor::linear(glm::vec4(1.0f), glm::vec4(1.0f, 1.0f, 1.0f, 0.0f));
+        }
         // Gentle palette: yellow → green → blue, with the odd soft red mixed in.
         {
             const float u =
                 particleRandom01(seed, runtime.node_id, emit_index, kChanColor);
-            if (u < 0.30f) {
+            if (!desc.mod_color) {
+                p.color_tint = glm::vec3(1.0f);
+            } else if (u < 0.30f) {
                 p.color_tint = glm::vec3(1.0f, 0.78f, 0.18f); // soft yellow
             } else if (u < 0.55f) {
                 p.color_tint = glm::vec3(0.32f, 1.0f, 0.4f); // soft green
@@ -251,95 +273,107 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
 
         glm::vec3 local_offset(0.0f);
         glm::vec3 direction = glm::normalize(glm::mat3(world) * glm::vec3(0.0f, 1.0f, 0.0f));
-        switch (desc.spawn_shape) {
-        case ParticleSpawnShape::Point:
-            break;
-        case ParticleSpawnShape::Sphere: {
-            // Offset only — do NOT steal velocity direction (that sprayed sideways and
-            // turned soft discs + trails into horizontal streaks).
-            const glm::vec3 unit = randomUnitVector(seed, runtime.node_id, emit_index);
-            local_offset = unit * (desc.spawn_radius *
-                                   particleRandom01(seed, runtime.node_id, emit_index, kChanPosX));
-            break;
-        }
-        case ParticleSpawnShape::Box: {
-            local_offset = glm::vec3(
-                (particleRandom01(seed, runtime.node_id, emit_index, kChanPosX) * 2.0f - 1.0f) *
-                    desc.spawn_radius,
-                (particleRandom01(seed, runtime.node_id, emit_index, kChanPosY) * 2.0f - 1.0f) *
-                    desc.spawn_box_height,
-                (particleRandom01(seed, runtime.node_id, emit_index, kChanPosZ) * 2.0f - 1.0f) *
-                    desc.spawn_radius);
-            direction = coneDirection(world, desc.cone_angle_degrees, seed, runtime.node_id, emit_index);
-            break;
-        }
-        case ParticleSpawnShape::Ring: {
-            constexpr float kTwoPi = 6.28318530718f;
-            const float angle =
-                particleRandom01(seed, runtime.node_id, emit_index, kChanPosX) * kTwoPi;
-            const float radial_jitter =
-                0.9f + 0.1f * particleRandom01(seed, runtime.node_id, emit_index, kChanPosZ);
-            const float radius = desc.spawn_radius * radial_jitter;
-            const float y =
-                (particleRandom01(seed, runtime.node_id, emit_index, kChanPosY) * 2.0f - 1.0f) *
-                desc.spawn_box_height;
-            local_offset = glm::vec3(std::cos(angle) * radius, y, std::sin(angle) * radius);
-            direction = coneDirection(world, desc.cone_angle_degrees, seed, runtime.node_id, emit_index);
-            break;
-        }
-        case ParticleSpawnShape::Cone:
-        default:
-            direction = coneDirection(world, desc.cone_angle_degrees, seed, runtime.node_id, emit_index);
-            break;
+        if (desc.mod_shape) {
+            switch (desc.spawn_shape) {
+            case ParticleSpawnShape::Point:
+                break;
+            case ParticleSpawnShape::Sphere: {
+                // Offset only — do NOT steal velocity direction (that sprayed sideways and
+                // turned soft discs + trails into horizontal streaks).
+                const glm::vec3 unit = randomUnitVector(seed, runtime.node_id, emit_index);
+                local_offset = unit * (desc.spawn_radius *
+                                       particleRandom01(seed, runtime.node_id, emit_index, kChanPosX));
+                break;
+            }
+            case ParticleSpawnShape::Box: {
+                local_offset = glm::vec3(
+                    (particleRandom01(seed, runtime.node_id, emit_index, kChanPosX) * 2.0f - 1.0f) *
+                        desc.spawn_radius,
+                    (particleRandom01(seed, runtime.node_id, emit_index, kChanPosY) * 2.0f - 1.0f) *
+                        desc.spawn_box_height,
+                    (particleRandom01(seed, runtime.node_id, emit_index, kChanPosZ) * 2.0f - 1.0f) *
+                        desc.spawn_radius);
+                direction =
+                    coneDirection(world, desc.cone_angle_degrees, seed, runtime.node_id, emit_index);
+                break;
+            }
+            case ParticleSpawnShape::Ring: {
+                constexpr float kTwoPi = 6.28318530718f;
+                const float angle =
+                    particleRandom01(seed, runtime.node_id, emit_index, kChanPosX) * kTwoPi;
+                const float radial_jitter =
+                    0.9f + 0.1f * particleRandom01(seed, runtime.node_id, emit_index, kChanPosZ);
+                const float radius = desc.spawn_radius * radial_jitter;
+                const float y =
+                    (particleRandom01(seed, runtime.node_id, emit_index, kChanPosY) * 2.0f - 1.0f) *
+                    desc.spawn_box_height;
+                local_offset = glm::vec3(std::cos(angle) * radius, y, std::sin(angle) * radius);
+                direction =
+                    coneDirection(world, desc.cone_angle_degrees, seed, runtime.node_id, emit_index);
+                break;
+            }
+            case ParticleSpawnShape::Cone:
+            default:
+                direction =
+                    coneDirection(world, desc.cone_angle_degrees, seed, runtime.node_id, emit_index);
+                break;
+            }
         }
 
-        switch (desc.velocity_mode) {
-        case ParticleVelocityMode::FromPoint: {
-            const glm::vec3 world_pos = origin + glm::mat3(world) * local_offset;
-            const glm::vec3 radial = world_pos - origin;
-            if (glm::dot(radial, radial) > 1e-8f) {
-                direction = glm::normalize(radial);
+        if (desc.mod_velocity) {
+            switch (desc.velocity_mode) {
+            case ParticleVelocityMode::FromPoint: {
+                const glm::vec3 world_pos = origin + glm::mat3(world) * local_offset;
+                const glm::vec3 radial = world_pos - origin;
+                if (glm::dot(radial, radial) > 1e-8f) {
+                    direction = glm::normalize(radial);
+                }
+                break;
             }
-            break;
-        }
-        case ParticleVelocityMode::HorizontalPlane: {
-            // Drift on the floor plane (cylinder footprint) — never birth with +Y.
-            const float u = particleRandom01(seed, runtime.node_id, emit_index, kChanDirX);
-            const float v = particleRandom01(seed, runtime.node_id, emit_index, kChanDirY);
-            const float phi = v * glm::two_pi<float>();
-            const float radial_mix = 0.35f + 0.65f * u;
-            glm::vec3 planar(std::cos(phi) * radial_mix, 0.0f, std::sin(phi) * radial_mix);
-            // Prefer tangential swirl around the emitter so the ring reads as a cylinder.
-            const glm::vec3 world_pos = origin + glm::mat3(world) * local_offset;
-            glm::vec3 radial = world_pos - origin;
-            radial.y = 0.0f;
-            if (glm::dot(radial, radial) > 1e-8f) {
-                radial = glm::normalize(radial);
-                const glm::vec3 tangent = glm::normalize(glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), radial));
-                planar = glm::normalize(tangent * (0.75f + 0.25f * u) + radial * (0.35f * (1.0f - u)));
-            } else if (glm::dot(planar, planar) > 1e-8f) {
-                planar = glm::normalize(planar);
-            } else {
-                planar = glm::vec3(1.0f, 0.0f, 0.0f);
+            case ParticleVelocityMode::HorizontalPlane: {
+                // Drift on the floor plane (cylinder footprint) — never birth with +Y.
+                const float u = particleRandom01(seed, runtime.node_id, emit_index, kChanDirX);
+                const float v = particleRandom01(seed, runtime.node_id, emit_index, kChanDirY);
+                const float phi = v * glm::two_pi<float>();
+                const float radial_mix = 0.35f + 0.65f * u;
+                glm::vec3 planar(std::cos(phi) * radial_mix, 0.0f, std::sin(phi) * radial_mix);
+                // Prefer tangential swirl around the emitter so the ring reads as a cylinder.
+                const glm::vec3 world_pos = origin + glm::mat3(world) * local_offset;
+                glm::vec3 radial = world_pos - origin;
+                radial.y = 0.0f;
+                if (glm::dot(radial, radial) > 1e-8f) {
+                    radial = glm::normalize(radial);
+                    const glm::vec3 tangent =
+                        glm::normalize(glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), radial));
+                    planar = glm::normalize(tangent * (0.75f + 0.25f * u) +
+                                            radial * (0.35f * (1.0f - u)));
+                } else if (glm::dot(planar, planar) > 1e-8f) {
+                    planar = glm::normalize(planar);
+                } else {
+                    planar = glm::vec3(1.0f, 0.0f, 0.0f);
+                }
+                direction = planar;
+                break;
             }
-            direction = planar;
-            break;
-        }
-        case ParticleVelocityMode::Random:
-            direction = randomUnitVector(seed, runtime.node_id, emit_index);
-            break;
-        case ParticleVelocityMode::Cone:
-        default:
-            // Always apply cone (spawn shapes must not leave a non-up direction).
-            direction =
-                coneDirection(world, desc.cone_angle_degrees, seed, runtime.node_id, emit_index);
-            break;
+            case ParticleVelocityMode::Random:
+                direction = randomUnitVector(seed, runtime.node_id, emit_index);
+                break;
+            case ParticleVelocityMode::Cone:
+            default:
+                // Always apply cone (spawn shapes must not leave a non-up direction).
+                direction =
+                    coneDirection(world, desc.cone_angle_degrees, seed, runtime.node_id, emit_index);
+                break;
+            }
         }
 
-        const float speed = particleRandomRange(seed, runtime.node_id, emit_index, kChanSpeed,
-                                                desc.speed_min, desc.speed_max);
+        const float speed =
+            desc.mod_velocity
+                ? particleRandomRange(seed, runtime.node_id, emit_index, kChanSpeed, desc.speed_min,
+                                      desc.speed_max)
+                : 0.0f;
         glm::vec3 birth_vel = direction * speed;
-        if (desc.inherit_velocity > 0.0f) {
+        if (desc.mod_velocity && desc.inherit_velocity > 0.0f) {
             birth_vel += runtime.velocity * std::clamp(desc.inherit_velocity, 0.0f, 1.0f);
         }
 
@@ -416,7 +450,7 @@ void ParticleWorld::stepOnce(Scene& scene, float dt, bool update_particles) {
             }
         }
 
-        if (!runtime.finished && desc.rate_per_second > 0.0f) {
+        if (!runtime.finished && desc.mod_spawn_rate && desc.rate_per_second > 0.0f) {
             runtime.emit_accumulator += static_cast<double>(desc.rate_per_second) * static_cast<double>(dt);
             const std::uint32_t to_spawn = static_cast<std::uint32_t>(runtime.emit_accumulator);
             if (to_spawn > 0) {

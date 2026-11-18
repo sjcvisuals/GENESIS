@@ -1,7 +1,7 @@
 #pragma once
 
 // Lean Tugela Editor pop-out — System (one level actor) → multiple Emitters →
-// module node graph + timings + curves. Niagara-like, not a full Unreal clone.
+// Niagara-like module stack graph (leaf modules with enable) + timings + curves.
 
 #include "editor/ParticleEmitterUi.hpp"
 
@@ -14,6 +14,7 @@ enum class TugelaEditorTab : std::uint8_t {
     Graph = 1,
 };
 
+// Stage columns on the graph (wires between stages).
 enum class TugelaModuleKind : std::uint8_t {
     Spawn = 0,
     Initialize = 1,
@@ -24,14 +25,39 @@ enum class TugelaModuleKind : std::uint8_t {
     Count = 6,
 };
 
+// Leaf modules shown inside stage nodes (Niagara-like stack entries).
+enum class TugelaStackMod : std::uint8_t {
+    SpawnRate = 0,
+    Burst,
+    Shape,
+    Lifetime,
+    Velocity,
+    Size,
+    Color,
+    Gravity,
+    Drag,
+    PointForce,
+    Vortex,
+    Noise,
+    Accel,
+    KillPlane,
+    SizeOverLife,
+    ColorOverLife,
+    ScaleBySpeed,
+    Sprite,
+    Trail,
+    Count,
+};
+
 struct TugelaEditorState {
     bool open = false;
     TugelaEditorTab tab = TugelaEditorTab::Graph;
     NodeId focus_system = 0;
     NodeId focus_emitter = 0;
     TugelaModuleKind focus_module = TugelaModuleKind::Spawn;
-    float graph_pan_x = 20.0f;
-    float graph_pan_y = 24.0f;
+    TugelaStackMod focus_stack = TugelaStackMod::SpawnRate;
+    float graph_pan_x = 16.0f;
+    float graph_pan_y = 22.0f;
 };
 
 // Floating Tugela Editor window. Safe to call every frame; respects state.open.

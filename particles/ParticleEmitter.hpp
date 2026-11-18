@@ -51,6 +51,7 @@ struct ParticleEmitter {
     float start_delay_seconds = 0.0f;
 
     // --- Spawn Rate / Burst (Spawn modules) ---
+    bool mod_spawn_rate = true; // graph stack enable
     float rate_per_second = 40.0f;
     std::uint32_t burst_count = 0;
     std::array<ParticleBurst, 4> bursts{};
@@ -58,6 +59,10 @@ struct ParticleEmitter {
     std::uint32_t max_particles = 4096;
 
     // --- Initialize (Lifetime / Size / Color / Velocity) ---
+    bool mod_lifetime = true;
+    bool mod_velocity = true;
+    bool mod_size = true;
+    bool mod_color = true;
     float lifetime_min = 1.0f;
     float lifetime_max = 2.0f;
     float speed_min = 0.5f;
@@ -71,6 +76,7 @@ struct ParticleEmitter {
     float inherit_velocity = 0.0f;
 
     // --- Location (Shape Location module) ---
+    bool mod_shape = true;
     ParticleSpawnShape spawn_shape = ParticleSpawnShape::Cone;
     float spawn_radius = 0.1f;
     float spawn_box_height = 0.1f;
@@ -109,6 +115,8 @@ struct ParticleEmitter {
     glm::vec3 kill_box_max{10.0f, 10.0f, 10.0f};
 
     // --- Scale / Color over Life ---
+    bool mod_size_over_life = true;
+    bool mod_color_over_life = true;
     ParticleCurve1 size_over_life{};
     ParticleCurveColor color_over_life{};
 
@@ -123,6 +131,7 @@ struct ParticleEmitter {
     float spawn_per_unit = 0.0f;
 
     // --- Sprite Renderer ---
+    bool mod_sprite = true;
     ParticleRenderMesh render_mesh = ParticleRenderMesh::Sprite;
     bool unlit = true;
     bool additive = true; // SrcAlpha/One soft-emissive

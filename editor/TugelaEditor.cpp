@@ -19,12 +19,14 @@ constexpr ImVec4 kAccent{0.34f, 0.78f, 0.82f, 1.0f};
 constexpr ImVec4 kMuted{0.50f, 0.54f, 0.58f, 1.0f};
 constexpr ImVec4 kPanel{0.032f, 0.034f, 0.038f, 1.0f};
 
-constexpr float kNodeW = 102.0f;
-constexpr float kNodeH = 48.0f;
-constexpr float kNodeGapX = 18.0f;
-constexpr float kEmitterRowH = 100.0f;
+constexpr float kStageW = 148.0f;
+constexpr float kStageGapX = 22.0f;
+constexpr float kStageHeaderH = 26.0f;
+constexpr float kStackRowH = 20.0f;
+constexpr float kStagePad = 8.0f;
+constexpr float kEmitterLaneGap = 36.0f;
 
-const char* moduleLabel(TugelaModuleKind kind) {
+const char* stageLabel(TugelaModuleKind kind) {
     switch (kind) {
     case TugelaModuleKind::Spawn:
         return "Spawn";
@@ -35,60 +37,286 @@ const char* moduleLabel(TugelaModuleKind kind) {
     case TugelaModuleKind::OverLife:
         return "Over Life";
     case TugelaModuleKind::Sprite:
-        return "Sprite";
+        return "Render";
     case TugelaModuleKind::Trail:
         return "Trail";
+    default:
+        return "Stage";
+    }
+}
+
+const char* stackLabel(TugelaStackMod mod) {
+    switch (mod) {
+    case TugelaStackMod::SpawnRate:
+        return "Spawn Rate";
+    case TugelaStackMod::Burst:
+        return "Burst";
+    case TugelaStackMod::Shape:
+        return "Shape Location";
+    case TugelaStackMod::Lifetime:
+        return "Lifetime";
+    case TugelaStackMod::Velocity:
+        return "Velocity";
+    case TugelaStackMod::Size:
+        return "Size";
+    case TugelaStackMod::Color:
+        return "Color";
+    case TugelaStackMod::Gravity:
+        return "Gravity / Lift";
+    case TugelaStackMod::Drag:
+        return "Drag";
+    case TugelaStackMod::PointForce:
+        return "Point Force";
+    case TugelaStackMod::Vortex:
+        return "Vortex";
+    case TugelaStackMod::Noise:
+        return "Noise";
+    case TugelaStackMod::Accel:
+        return "Acceleration";
+    case TugelaStackMod::KillPlane:
+        return "Kill Plane";
+    case TugelaStackMod::SizeOverLife:
+        return "Size over Life";
+    case TugelaStackMod::ColorOverLife:
+        return "Color over Life";
+    case TugelaStackMod::ScaleBySpeed:
+        return "Scale by Speed";
+    case TugelaStackMod::Sprite:
+        return "Sprite Renderer";
+    case TugelaStackMod::Trail:
+        return "Trail Renderer";
     default:
         return "Module";
     }
 }
 
-const char* moduleSubtitle(TugelaModuleKind kind, const ParticleEmitter& e) {
-    switch (kind) {
-    case TugelaModuleKind::Spawn:
-        return e.rate_per_second > 0.0f ? "rate" : "burst";
-    case TugelaModuleKind::Initialize:
-        return "life · size";
-    case TugelaModuleKind::Update:
-        return e.force_gravity ? "lift on" : "forces";
-    case TugelaModuleKind::OverLife:
-        return "curves";
-    case TugelaModuleKind::Sprite:
-        return e.additive ? "additive" : "sprite";
-    case TugelaModuleKind::Trail:
-        return e.trail_enabled ? "on" : "off";
+TugelaModuleKind stageForStack(TugelaStackMod mod) {
+    switch (mod) {
+    case TugelaStackMod::SpawnRate:
+    case TugelaStackMod::Burst:
+    case TugelaStackMod::Shape:
+        return TugelaModuleKind::Spawn;
+    case TugelaStackMod::Lifetime:
+    case TugelaStackMod::Velocity:
+    case TugelaStackMod::Size:
+    case TugelaStackMod::Color:
+        return TugelaModuleKind::Initialize;
+    case TugelaStackMod::Gravity:
+    case TugelaStackMod::Drag:
+    case TugelaStackMod::PointForce:
+    case TugelaStackMod::Vortex:
+    case TugelaStackMod::Noise:
+    case TugelaStackMod::Accel:
+    case TugelaStackMod::KillPlane:
+        return TugelaModuleKind::Update;
+    case TugelaStackMod::SizeOverLife:
+    case TugelaStackMod::ColorOverLife:
+    case TugelaStackMod::ScaleBySpeed:
+        return TugelaModuleKind::OverLife;
+    case TugelaStackMod::Sprite:
+        return TugelaModuleKind::Sprite;
+    case TugelaStackMod::Trail:
+        return TugelaModuleKind::Trail;
     default:
-        return "";
+        return TugelaModuleKind::Spawn;
     }
 }
 
-bool moduleActive(TugelaModuleKind kind, const ParticleEmitter& e) {
-    switch (kind) {
-    case TugelaModuleKind::Trail:
+bool stackEnabled(TugelaStackMod mod, const ParticleEmitter& e) {
+    switch (mod) {
+    case TugelaStackMod::SpawnRate:
+        return e.mod_spawn_rate && e.rate_per_second > 0.0f;
+    case TugelaStackMod::Burst:
+        return e.burst_count > 0 || e.burst_entries > 0;
+    case TugelaStackMod::Shape:
+        return e.mod_shape;
+    case TugelaStackMod::Lifetime:
+        return e.mod_lifetime;
+    case TugelaStackMod::Velocity:
+        return e.mod_velocity;
+    case TugelaStackMod::Size:
+        return e.mod_size;
+    case TugelaStackMod::Color:
+        return e.mod_color;
+    case TugelaStackMod::Gravity:
+        return e.force_gravity;
+    case TugelaStackMod::Drag:
+        return e.force_drag;
+    case TugelaStackMod::PointForce:
+        return e.force_point;
+    case TugelaStackMod::Vortex:
+        return e.force_vortex;
+    case TugelaStackMod::Noise:
+        return e.force_noise;
+    case TugelaStackMod::Accel:
+        return e.force_accel;
+    case TugelaStackMod::KillPlane:
+        return e.kill_plane;
+    case TugelaStackMod::SizeOverLife:
+        return e.mod_size_over_life && e.size_over_life.count > 0;
+    case TugelaStackMod::ColorOverLife:
+        return e.mod_color_over_life && e.color_over_life.count > 0;
+    case TugelaStackMod::ScaleBySpeed:
+        return e.scale_by_speed;
+    case TugelaStackMod::Sprite:
+        return e.mod_sprite && e.render_mesh == ParticleRenderMesh::Sprite;
+    case TugelaStackMod::Trail:
         return e.trail_enabled;
-    case TugelaModuleKind::Update:
-        return e.force_gravity || e.force_drag || e.force_vortex || e.force_point || e.force_noise ||
-               e.force_accel;
-    case TugelaModuleKind::Sprite:
-        return e.render_mesh == ParticleRenderMesh::Sprite;
     default:
-        return true;
+        return false;
     }
 }
 
-void toggleModule(TugelaModuleKind kind, ParticleEmitter& e) {
-    switch (kind) {
-    case TugelaModuleKind::Trail:
-        e.trail_enabled = !e.trail_enabled;
+// True when the module is on the emitter stack (shown even if disabled).
+bool stackPresent(TugelaStackMod mod, const ParticleEmitter& e) {
+    switch (mod) {
+    case TugelaStackMod::SpawnRate:
+    case TugelaStackMod::Shape:
+    case TugelaStackMod::Lifetime:
+    case TugelaStackMod::Velocity:
+    case TugelaStackMod::Size:
+    case TugelaStackMod::Color:
+    case TugelaStackMod::SizeOverLife:
+    case TugelaStackMod::ColorOverLife:
+    case TugelaStackMod::Sprite:
+        return true; // core stack — always listed
+    case TugelaStackMod::Burst:
+        return e.burst_count > 0 || e.burst_entries > 0;
+    case TugelaStackMod::Gravity:
+    case TugelaStackMod::Drag:
+    case TugelaStackMod::PointForce:
+    case TugelaStackMod::Vortex:
+    case TugelaStackMod::Noise:
+    case TugelaStackMod::Accel:
+    case TugelaStackMod::KillPlane:
+    case TugelaStackMod::ScaleBySpeed:
+    case TugelaStackMod::Trail:
+        return stackEnabled(mod, e); // optional — only when added/enabled
+    default:
+        return false;
+    }
+}
+
+void setStackEnabled(TugelaStackMod mod, ParticleEmitter& e, bool on) {
+    switch (mod) {
+    case TugelaStackMod::SpawnRate:
+        e.mod_spawn_rate = on;
+        if (!on) {
+            e.rate_per_second = 0.0f;
+        } else if (e.rate_per_second <= 0.0f) {
+            e.rate_per_second = 14.0f;
+        }
         break;
-    case TugelaModuleKind::Update:
-        e.force_gravity = !e.force_gravity;
+    case TugelaStackMod::Burst:
+        if (on) {
+            if (e.burst_count == 0 && e.burst_entries == 0) {
+                e.burst_count = 32;
+            }
+        } else {
+            e.burst_count = 0;
+            e.burst_entries = 0;
+        }
         break;
-    case TugelaModuleKind::Sprite:
-        e.additive = !e.additive;
+    case TugelaStackMod::Shape:
+        e.mod_shape = on;
+        break;
+    case TugelaStackMod::Lifetime:
+        e.mod_lifetime = on;
+        break;
+    case TugelaStackMod::Velocity:
+        e.mod_velocity = on;
+        break;
+    case TugelaStackMod::Size:
+        e.mod_size = on;
+        break;
+    case TugelaStackMod::Color:
+        e.mod_color = on;
+        break;
+    case TugelaStackMod::Gravity:
+        e.force_gravity = on;
+        break;
+    case TugelaStackMod::Drag:
+        e.force_drag = on;
+        break;
+    case TugelaStackMod::PointForce:
+        e.force_point = on;
+        if (on && std::fabs(e.point_force_strength) < 1e-6f) {
+            e.point_force_strength = 4.0f;
+        }
+        break;
+    case TugelaStackMod::Vortex:
+        e.force_vortex = on;
+        if (on && std::fabs(e.vortex_strength) < 1e-6f) {
+            e.vortex_strength = 2.0f;
+        }
+        break;
+    case TugelaStackMod::Noise:
+        e.force_noise = on;
+        if (on && e.noise_strength < 1e-6f) {
+            e.noise_strength = 0.15f;
+        }
+        break;
+    case TugelaStackMod::Accel:
+        e.force_accel = on;
+        break;
+    case TugelaStackMod::KillPlane:
+        e.kill_plane = on;
+        break;
+    case TugelaStackMod::SizeOverLife:
+        e.mod_size_over_life = on;
+        if (on && e.size_over_life.count == 0) {
+            e.size_over_life = ParticleCurve1::linear(1.0f, e.size_end_multiplier);
+        }
+        break;
+    case TugelaStackMod::ColorOverLife:
+        e.mod_color_over_life = on;
+        if (on && e.color_over_life.count == 0) {
+            e.color_over_life = ParticleCurveColor::linear(e.color_start, e.color_end);
+        }
+        break;
+    case TugelaStackMod::ScaleBySpeed:
+        e.scale_by_speed = on;
+        break;
+    case TugelaStackMod::Sprite:
+        e.mod_sprite = on;
+        if (on) {
+            e.render_mesh = ParticleRenderMesh::Sprite;
+        } else {
+            e.render_mesh = ParticleRenderMesh::Sphere;
+        }
+        break;
+    case TugelaStackMod::Trail:
+        e.trail_enabled = on;
         break;
     default:
         break;
+    }
+}
+
+void collectStageStack(TugelaModuleKind stage, const ParticleEmitter& e,
+                       std::vector<TugelaStackMod>& out) {
+    out.clear();
+    for (int i = 0; i < static_cast<int>(TugelaStackMod::Count); ++i) {
+        const auto mod = static_cast<TugelaStackMod>(i);
+        if (stageForStack(mod) == stage && stackPresent(mod, e)) {
+            out.push_back(mod);
+        }
+    }
+}
+
+void collectAddableForStage(TugelaModuleKind stage, const ParticleEmitter& e,
+                            std::vector<TugelaStackMod>& out) {
+    out.clear();
+    static constexpr TugelaStackMod kOptional[] = {
+        TugelaStackMod::Burst,       TugelaStackMod::Gravity,      TugelaStackMod::Drag,
+        TugelaStackMod::PointForce,  TugelaStackMod::Vortex,       TugelaStackMod::Noise,
+        TugelaStackMod::Accel,       TugelaStackMod::KillPlane,    TugelaStackMod::ScaleBySpeed,
+        TugelaStackMod::Trail,
+    };
+    for (const TugelaStackMod mod : kOptional) {
+        if (stageForStack(mod) == stage && !stackPresent(mod, e)) {
+            out.push_back(mod);
+        }
     }
 }
 
@@ -127,7 +355,6 @@ NodeId resolveSystemForNode(Scene& scene, NodeId id) {
             parent && isParticleSystemNode(scene, *parent)) {
             return *n->parent;
         }
-        // Orphan emitter under any empty parent → treat parent as system actor.
         if (const Node* parent = scene.find(*n->parent);
             parent && !parent->particle_emitter.has_value() && !parent->mesh_resource.has_value() &&
             !parent->camera.has_value() && !parent->light.has_value()) {
@@ -282,77 +509,138 @@ bool selectableRow(const char* label, bool selected, const char* badge) {
     return clicked;
 }
 
-void drawModuleInspector(ParticleEmitter& e, TugelaModuleKind kind, ParticleEmitterUiContext& ctx) {
+void drawStackModuleInspector(ParticleEmitter& e, TugelaStackMod mod, ParticleEmitterUiContext& ctx) {
     bool dirty = false;
-    ImGui::TextColored(kAccent, "%s", moduleLabel(kind));
+    ImGui::TextColored(kAccent, "%s", stackLabel(mod));
+    ImGui::SameLine();
+    ImGui::TextColored(kMuted, "  ·  %s", stackEnabled(mod, e) ? "enabled" : "disabled");
     ImGui::Spacing();
-    switch (kind) {
-    case TugelaModuleKind::Spawn:
+    {
+        bool en = stackEnabled(mod, e);
+        if (ImGui::Checkbox("Enabled on emitter", &en)) {
+            setStackEnabled(mod, e, en);
+            dirty = true;
+        }
+    }
+    ImGui::Spacing();
+
+    switch (mod) {
+    case TugelaStackMod::SpawnRate:
         dirty |= ImGui::DragFloat("Rate / s", &e.rate_per_second, 0.5f, 0.0f, 20000.0f);
         dirty |= ImGui::DragFloat("Spawn / meter", &e.spawn_per_unit, 0.1f, 0.0f, 500.0f);
-        {
-            int burst = static_cast<int>(e.burst_count);
-            if (ImGui::DragInt("Burst @ t=0", &burst, 1, 0, 100000)) {
-                e.burst_count = static_cast<std::uint32_t>(std::max(burst, 0));
-                dirty = true;
-            }
+        break;
+    case TugelaStackMod::Burst: {
+        int burst = static_cast<int>(e.burst_count);
+        if (ImGui::DragInt("Burst @ t=0", &burst, 1, 0, 100000)) {
+            e.burst_count = static_cast<std::uint32_t>(std::max(burst, 0));
+            dirty = true;
         }
         break;
-    case TugelaModuleKind::Initialize:
+    }
+    case TugelaStackMod::Shape: {
+        const char* shapes[] = {"Point", "Sphere", "Cone", "Box", "Ring (cylinder)"};
+        int shape = static_cast<int>(e.spawn_shape);
+        if (ImGui::Combo("Spawn shape", &shape, shapes, IM_ARRAYSIZE(shapes))) {
+            e.spawn_shape = static_cast<ParticleSpawnShape>(shape);
+            dirty = true;
+        }
+        dirty |= ImGui::DragFloat("Spawn radius", &e.spawn_radius, 0.01f, 0.0f, 50.0f);
+        dirty |= ImGui::DragFloat("Spawn height", &e.spawn_box_height, 0.01f, 0.0f, 50.0f);
+        dirty |= ImGui::DragFloat("Cone angle", &e.cone_angle_degrees, 0.5f, 0.0f, 89.0f);
+        break;
+    }
+    case TugelaStackMod::Lifetime:
         dirty |= ImGui::DragFloatRange2("Lifetime", &e.lifetime_min, &e.lifetime_max, 0.01f, 0.01f,
                                         60.0f);
+        break;
+    case TugelaStackMod::Velocity: {
         dirty |= ImGui::DragFloatRange2("Speed", &e.speed_min, &e.speed_max, 0.01f, 0.0f, 100.0f);
+        const char* vel_modes[] = {"Cone", "From point", "Random", "Horizontal plane"};
+        int vel_mode = static_cast<int>(e.velocity_mode);
+        if (ImGui::Combo("Velocity mode", &vel_mode, vel_modes, IM_ARRAYSIZE(vel_modes))) {
+            e.velocity_mode = static_cast<ParticleVelocityMode>(vel_mode);
+            dirty = true;
+        }
+        dirty |= ImGui::DragFloat("Inherit velocity", &e.inherit_velocity, 0.01f, 0.0f, 1.0f);
+        break;
+    }
+    case TugelaStackMod::Size:
         dirty |= ImGui::DragFloatRange2("Size", &e.size_min, &e.size_max, 0.001f, 0.02f, 10.0f);
+        dirty |= ImGui::DragFloat("Size end mul", &e.size_end_multiplier, 0.01f, 0.0f, 2.0f);
+        break;
+    case TugelaStackMod::Color:
         dirty |= ImGui::ColorEdit4("Color start", &e.color_start.x,
                                    ImGuiColorEditFlags_AlphaPreviewHalf);
         dirty |=
             ImGui::ColorEdit4("Color end", &e.color_end.x, ImGuiColorEditFlags_AlphaPreviewHalf);
         break;
-    case TugelaModuleKind::Update:
-        dirty |= ImGui::Checkbox("Gravity / Lift", &e.force_gravity);
-        if (e.force_gravity) {
-            dirty |= ImGui::DragFloat3("Gravity (+Y = lift)", &e.gravity.x, 0.02f);
-        }
-        dirty |= ImGui::Checkbox("Drag", &e.force_drag);
-        if (e.force_drag) {
-            dirty |= ImGui::DragFloat("Drag amount", &e.drag, 0.01f, 0.0f, 10.0f);
-        }
-        dirty |= ImGui::Checkbox("Vortex / Orbit", &e.force_vortex);
+    case TugelaStackMod::Gravity:
+        dirty |= ImGui::DragFloat3("Gravity (+Y = lift)", &e.gravity.x, 0.02f);
         break;
-    case TugelaModuleKind::OverLife:
+    case TugelaStackMod::Drag:
+        dirty |= ImGui::DragFloat("Drag amount", &e.drag, 0.01f, 0.0f, 10.0f);
+        break;
+    case TugelaStackMod::PointForce:
+        dirty |= ImGui::DragFloat3("Point position", &e.point_force_position.x, 0.05f);
+        dirty |= ImGui::DragFloat("Strength", &e.point_force_strength, 0.1f, -200.0f, 200.0f);
+        break;
+    case TugelaStackMod::Vortex:
+        dirty |= ImGui::DragFloat("Vortex strength", &e.vortex_strength, 0.05f, -50.0f, 50.0f);
+        dirty |= ImGui::DragFloat3("Vortex axis", &e.vortex_axis.x, 0.05f);
+        dirty |= ImGui::DragFloat("Vortex radius", &e.vortex_radius, 0.05f, 0.1f, 100.0f);
+        break;
+    case TugelaStackMod::Noise:
+        dirty |= ImGui::DragFloat("Noise strength", &e.noise_strength, 0.005f, 0.0f, 5.0f);
+        dirty |= ImGui::DragFloat("Noise frequency", &e.noise_frequency, 0.01f, 0.01f, 20.0f);
+        break;
+    case TugelaStackMod::Accel:
+        dirty |= ImGui::DragFloat3("Acceleration", &e.acceleration.x, 0.05f);
+        break;
+    case TugelaStackMod::KillPlane:
+        dirty |= ImGui::DragFloat("Kill plane Y", &e.kill_plane_y, 0.05f);
+        break;
+    case TugelaStackMod::SizeOverLife:
         dirty |= ImGui::DragFloat("Size end mul", &e.size_end_multiplier, 0.01f, 0.0f, 2.0f);
-        if (ImGui::Button("Rebuild curves from endpoints")) {
-            rebuildEmitterCurvesFromEndpoints(e);
+        if (ImGui::Button("Rebuild size curve")) {
+            e.size_over_life = ParticleCurve1::linear(1.0f, e.size_end_multiplier);
             dirty = true;
         }
         break;
-    case TugelaModuleKind::Sprite:
+    case TugelaStackMod::ColorOverLife:
+        if (ImGui::Button("Rebuild color curve")) {
+            e.color_over_life = ParticleCurveColor::linear(e.color_start, e.color_end);
+            dirty = true;
+        }
+        break;
+    case TugelaStackMod::ScaleBySpeed:
+        dirty |= ImGui::DragFloatRange2("Speed range", &e.scale_by_speed_range_min,
+                                        &e.scale_by_speed_range_max, 0.01f, 0.0f, 50.0f);
+        dirty |= ImGui::DragFloatRange2("Size mul", &e.scale_by_speed_mul_min,
+                                        &e.scale_by_speed_mul_max, 0.01f, 0.0f, 8.0f);
+        break;
+    case TugelaStackMod::Sprite:
         dirty |= ImGui::Checkbox("Unlit", &e.unlit);
         dirty |= ImGui::Checkbox("Soft additive", &e.additive);
         dirty |= ImGui::DragFloat("Sprite aspect", &e.sprite_aspect, 0.01f, 0.05f, 8.0f);
         break;
-    case TugelaModuleKind::Trail:
-        dirty |= ImGui::Checkbox("Enable trails", &e.trail_enabled);
-        if (e.trail_enabled) {
-            int segs = static_cast<int>(e.trail_segments);
-            if (ImGui::DragInt("Segments", &segs, 1, 2, 24)) {
-                e.trail_segments = static_cast<std::uint8_t>(std::clamp(segs, 2, 24));
-                dirty = true;
-            }
-            dirty |= ImGui::DragFloat("Width (head)", &e.trail_width, 0.001f, 0.01f, 1.0f);
-            dirty |= ImGui::DragFloat("Width (tip)", &e.trail_width_end, 0.001f, 0.0f, 1.0f);
-            dirty |= ImGui::DragFloat("Trail alpha", &e.trail_alpha, 0.01f, 0.0f, 1.0f);
+    case TugelaStackMod::Trail: {
+        int segs = static_cast<int>(e.trail_segments);
+        if (ImGui::DragInt("Segments", &segs, 1, 2, 24)) {
+            e.trail_segments = static_cast<std::uint8_t>(std::clamp(segs, 2, 24));
+            dirty = true;
         }
+        dirty |= ImGui::DragFloat("Width (head)", &e.trail_width, 0.001f, 0.01f, 1.0f);
+        dirty |= ImGui::DragFloat("Width (tip)", &e.trail_width_end, 0.001f, 0.0f, 1.0f);
+        dirty |= ImGui::DragFloat("Trail alpha", &e.trail_alpha, 0.01f, 0.0f, 1.0f);
         break;
+    }
     default:
         break;
     }
+
     if (dirty) {
         syncEmitterCurvesFromEndpoints(e);
         mark(ctx);
-        if (ctx.reset_particles) {
-            // leave running; mark only
-        }
     }
 }
 
@@ -360,99 +648,176 @@ bool pointInRect(ImVec2 p, ImVec2 a, ImVec2 b) {
     return p.x >= a.x && p.x <= b.x && p.y >= a.y && p.y <= b.y;
 }
 
-// Returns true if a module node under the mouse was selected / toggled.
+float stageHeightFor(const std::vector<TugelaStackMod>& stack) {
+    const int rows = std::max(1, static_cast<int>(stack.size()));
+    return kStageHeaderH + kStagePad * 2.0f + static_cast<float>(rows) * kStackRowH + 22.0f;
+}
+
 bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_index,
                          ParticleEmitterUiContext& ctx, ImDrawList* draw, ImVec2 canvas_origin,
-                         bool allow_pick) {
+                         float& out_row_h, bool allow_pick) {
     ParticleEmitter& e = *emitter_node.particle_emitter;
-    const float y =
-        canvas_origin.y + state.graph_pan_y + static_cast<float>(row_index) * kEmitterRowH;
-    const float x0 = canvas_origin.x + state.graph_pan_x;
     const ImVec2 mouse = ImGui::GetIO().MousePos;
     bool picked = false;
 
-    draw->AddText(ImVec2(x0, y - 18.0f), IM_COL32(140, 150, 160, 255), emitter_node.name.c_str());
+    float max_h = 80.0f;
+    std::vector<TugelaStackMod> stacks[static_cast<int>(TugelaModuleKind::Count)];
+    for (int si = 0; si < static_cast<int>(TugelaModuleKind::Count); ++si) {
+        collectStageStack(static_cast<TugelaModuleKind>(si), e, stacks[si]);
+        max_h = std::max(max_h, stageHeightFor(stacks[si]));
+    }
+    out_row_h = max_h + kEmitterLaneGap;
+
+    const float y = canvas_origin.y + state.graph_pan_y +
+                    static_cast<float>(row_index) * 0.0f; // caller accumulates via out_row_h
+    (void)row_index;
+    const float x0 = canvas_origin.x + state.graph_pan_x;
+
+    draw->AddText(ImVec2(x0, y - 16.0f), IM_COL32(140, 150, 160, 255), emitter_node.name.c_str());
     if (!e.enabled) {
-        draw->AddText(ImVec2(x0 + ImGui::CalcTextSize(emitter_node.name.c_str()).x + 8.0f, y - 18.0f),
+        draw->AddText(ImVec2(x0 + ImGui::CalcTextSize(emitter_node.name.c_str()).x + 8.0f, y - 16.0f),
                       IM_COL32(120, 90, 90, 220), "off");
     }
 
     ImVec2 prev_center{};
     bool has_prev = false;
-    for (int mi = 0; mi < static_cast<int>(TugelaModuleKind::Count); ++mi) {
-        const auto kind = static_cast<TugelaModuleKind>(mi);
-        const float x = x0 + static_cast<float>(mi) * (kNodeW + kNodeGapX);
+    TugelaStackMod popup_add_stage_mod = TugelaStackMod::Gravity;
+    TugelaModuleKind popup_stage = TugelaModuleKind::Update;
+    bool open_add_popup = false;
+
+    for (int si = 0; si < static_cast<int>(TugelaModuleKind::Count); ++si) {
+        const auto stage = static_cast<TugelaModuleKind>(si);
+        const std::vector<TugelaStackMod>& stack = stacks[si];
+        const float x = x0 + static_cast<float>(si) * (kStageW + kStageGapX);
+        const float h = stageHeightFor(stack);
         const ImVec2 p0(x, y);
-        const ImVec2 p1(x + kNodeW, y + kNodeH);
-        const bool selected =
-            state.focus_emitter == emitter_node.id && state.focus_module == kind;
-        const bool active = moduleActive(kind, e);
-        const bool hovered = pointInRect(mouse, p0, p1);
+        const ImVec2 p1(x + kStageW, y + h);
+        const bool stage_selected = state.focus_emitter == emitter_node.id &&
+                                    state.focus_module == stage;
+        const bool stage_hovered = pointInRect(mouse, p0, p1);
 
-        const ImU32 fill = active ? (selected ? IM_COL32(28, 62, 68, 255) : IM_COL32(24, 42, 48, 255))
-                                  : IM_COL32(28, 28, 32, 255);
-        const ImU32 border =
-            selected ? IM_COL32(100, 210, 220, 255)
-                     : (hovered ? IM_COL32(90, 150, 160, 230)
-                                : (active ? IM_COL32(70, 110, 120, 220) : IM_COL32(55, 58, 64, 200)));
-        draw->AddRectFilled(p0, p1, fill, 6.0f);
-        draw->AddRect(p0, p1, border, 6.0f, 0, selected || hovered ? 2.0f : 1.0f);
-        draw->AddText(ImVec2(p0.x + 10.0f, p0.y + 10.0f), IM_COL32(230, 235, 240, 255),
-                      moduleLabel(kind));
-        draw->AddText(ImVec2(p0.x + 10.0f, p0.y + 28.0f), IM_COL32(130, 145, 155, 255),
-                      moduleSubtitle(kind, e));
+        draw->AddRectFilled(p0, p1, IM_COL32(22, 26, 30, 255), 6.0f);
+        draw->AddRect(p0, p1,
+                      stage_selected ? IM_COL32(100, 210, 220, 255)
+                                     : (stage_hovered ? IM_COL32(80, 130, 140, 220)
+                                                      : IM_COL32(55, 62, 70, 220)),
+                      6.0f, 0, stage_selected ? 2.0f : 1.0f);
+        draw->AddRectFilled(p0, ImVec2(p1.x, p0.y + kStageHeaderH), IM_COL32(28, 36, 42, 255), 6.0f,
+                            ImDrawFlags_RoundCornersTop);
+        draw->AddText(ImVec2(p0.x + 10.0f, p0.y + 5.0f), IM_COL32(220, 230, 235, 255),
+                      stageLabel(stage));
 
-        const ImVec2 center((p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f);
+        // "+ Add" affordance for optional modules
+        std::vector<TugelaStackMod> addable;
+        collectAddableForStage(stage, e, addable);
+        if (!addable.empty()) {
+            const ImVec2 add_p0(p1.x - 28.0f, p0.y + 4.0f);
+            const ImVec2 add_p1(p1.x - 8.0f, p0.y + 20.0f);
+            const bool add_hov = pointInRect(mouse, add_p0, add_p1);
+            draw->AddRectFilled(add_p0, add_p1,
+                                add_hov ? IM_COL32(50, 90, 100, 255) : IM_COL32(36, 48, 54, 255),
+                                3.0f);
+            draw->AddText(ImVec2(add_p0.x + 5.0f, add_p0.y + 1.0f), IM_COL32(180, 220, 230, 255),
+                          "+");
+            if (allow_pick && add_hov && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                popup_stage = stage;
+                open_add_popup = true;
+                state.focus_emitter = emitter_node.id;
+                state.focus_module = stage;
+                picked = true;
+            }
+        }
+
+        float row_y = p0.y + kStageHeaderH + 4.0f;
+        for (const TugelaStackMod mod : stack) {
+            const ImVec2 r0(p0.x + 6.0f, row_y);
+            const ImVec2 r1(p1.x - 6.0f, row_y + kStackRowH - 2.0f);
+            const bool en = stackEnabled(mod, e);
+            const bool sel = state.focus_emitter == emitter_node.id && state.focus_stack == mod;
+            const bool hov = pointInRect(mouse, r0, r1);
+
+            draw->AddRectFilled(r0, r1,
+                                sel ? IM_COL32(32, 70, 78, 255)
+                                    : (en ? IM_COL32(30, 42, 48, 255) : IM_COL32(26, 28, 32, 255)),
+                                3.0f);
+            if (sel || hov) {
+                draw->AddRect(r0, r1, IM_COL32(90, 180, 190, 220), 3.0f);
+            }
+
+            // Enable checkbox square
+            const ImVec2 c0(r0.x + 4.0f, r0.y + 3.0f);
+            const ImVec2 c1(c0.x + 12.0f, c0.y + 12.0f);
+            draw->AddRectFilled(c0, c1,
+                                en ? IM_COL32(70, 170, 180, 255) : IM_COL32(40, 44, 48, 255), 2.0f);
+            draw->AddRect(c0, c1, IM_COL32(120, 140, 150, 220), 2.0f);
+            if (en) {
+                draw->AddLine(ImVec2(c0.x + 2.5f, c0.y + 6.0f), ImVec2(c0.x + 5.0f, c0.y + 9.0f),
+                              IM_COL32(10, 20, 24, 255), 1.6f);
+                draw->AddLine(ImVec2(c0.x + 5.0f, c0.y + 9.0f), ImVec2(c0.x + 10.0f, c0.y + 3.0f),
+                              IM_COL32(10, 20, 24, 255), 1.6f);
+            }
+
+            draw->AddText(ImVec2(c1.x + 5.0f, r0.y + 2.0f),
+                          en ? IM_COL32(220, 230, 235, 255) : IM_COL32(110, 118, 125, 255),
+                          stackLabel(mod));
+
+            if (hov) {
+                ImGui::SetTooltip("%s · click select · click □ enable/disable", stackLabel(mod));
+            }
+            if (allow_pick && hov && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                state.focus_emitter = emitter_node.id;
+                state.focus_module = stage;
+                state.focus_stack = mod;
+                if (ctx.select_node) {
+                    ctx.select_node(emitter_node.id);
+                }
+                // Toggle when clicking the checkbox region
+                if (pointInRect(mouse, ImVec2(c0.x - 2.0f, c0.y - 2.0f),
+                                ImVec2(c1.x + 2.0f, c1.y + 2.0f))) {
+                    setStackEnabled(mod, e, !en);
+                    mark(ctx);
+                }
+                picked = true;
+            }
+            row_y += kStackRowH;
+        }
+
+        if (stack.empty()) {
+            draw->AddText(ImVec2(p0.x + 10.0f, p0.y + kStageHeaderH + 8.0f),
+                          IM_COL32(100, 110, 120, 200), "empty · + to add");
+        }
+
+        const ImVec2 center((p0.x + p1.x) * 0.5f, p0.y + h * 0.5f);
         if (has_prev) {
-            const ImVec2 a(prev_center.x + kNodeW * 0.5f, prev_center.y);
-            const ImVec2 b(center.x - kNodeW * 0.5f, center.y);
-            const ImU32 wire = active ? IM_COL32(70, 160, 170, 200) : IM_COL32(60, 65, 72, 160);
-            draw->AddBezierCubic(a, ImVec2(a.x + 18.0f, a.y), ImVec2(b.x - 18.0f, b.y), b, wire,
-                                 2.0f);
+            const ImVec2 a(prev_center.x + kStageW * 0.5f, prev_center.y);
+            const ImVec2 b(center.x - kStageW * 0.5f, center.y);
+            draw->AddBezierCubic(a, ImVec2(a.x + 16.0f, a.y), ImVec2(b.x - 16.0f, b.y), b,
+                                 IM_COL32(70, 150, 160, 180), 2.0f);
         }
         prev_center = center;
         has_prev = true;
-
-        if (hovered) {
-            ImGui::SetTooltip("%s · click select · Ctrl+click toggle", moduleLabel(kind));
-        }
-        if (allow_pick && hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-            state.focus_emitter = emitter_node.id;
-            state.focus_module = kind;
-            if (ctx.select_node) {
-                ctx.select_node(emitter_node.id);
-            }
-            if (ImGui::GetIO().KeyCtrl) {
-                toggleModule(kind, e);
-                mark(ctx);
-            }
-            picked = true;
-        }
-        if (allow_pick && hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
-            state.focus_emitter = emitter_node.id;
-            state.focus_module = kind;
-            ImGui::OpenPopup("tugela_node_ctx");
-        }
     }
 
-    if (ImGui::BeginPopup("tugela_node_ctx")) {
-        ImGui::TextDisabled("%s / %s", emitter_node.name.c_str(),
-                            moduleLabel(state.focus_module));
-        if (ImGui::MenuItem("Select module")) {
-            if (ctx.select_node) {
-                ctx.select_node(emitter_node.id);
-            }
-        }
-        if (state.focus_module == TugelaModuleKind::Trail ||
-            state.focus_module == TugelaModuleKind::Update ||
-            state.focus_module == TugelaModuleKind::Sprite) {
-            if (ImGui::MenuItem(moduleActive(state.focus_module, e) ? "Disable module"
-                                                                    : "Enable module")) {
-                toggleModule(state.focus_module, e);
+    if (open_add_popup) {
+        ImGui::OpenPopup("tugela_add_mod");
+    }
+    if (ImGui::BeginPopup("tugela_add_mod")) {
+        ImGui::TextDisabled("Add module · %s", stageLabel(popup_stage));
+        std::vector<TugelaStackMod> addable;
+        collectAddableForStage(popup_stage, e, addable);
+        for (const TugelaStackMod mod : addable) {
+            if (ImGui::MenuItem(stackLabel(mod))) {
+                setStackEnabled(mod, e, true);
+                state.focus_stack = mod;
+                state.focus_module = popup_stage;
                 mark(ctx);
             }
         }
+        if (addable.empty()) {
+            ImGui::TextDisabled("Nothing left to add.");
+        }
         ImGui::EndPopup();
+        (void)popup_add_stage_mod;
     }
     return picked;
 }
@@ -464,13 +829,14 @@ void drawModuleGraph(TugelaEditorState& state, Scene& scene, const std::vector<N
 
     ImGui::TextColored(kAccent, "Module graph");
     ImGui::SameLine();
-    ImGui::TextColored(kMuted, "  ·  one System actor · multiple Emitters · Ctrl+click toggles");
+    ImGui::TextColored(kMuted,
+                       "  ·  stack shows added modules · □ enable/disable · + adds forces/etc");
     ImGui::Spacing();
 
     const ImVec2 canvas_p0 = ImGui::GetCursorScreenPos();
     ImVec2 canvas_size = ImGui::GetContentRegionAvail();
-    if (canvas_size.y < 160.0f) {
-        canvas_size.y = 160.0f;
+    if (canvas_size.y < 180.0f) {
+        canvas_size.y = 180.0f;
     }
 
     ImGui::InvisibleButton("##graph_bg", canvas_size);
@@ -501,16 +867,23 @@ void drawModuleGraph(TugelaEditorState& state, Scene& scene, const std::vector<N
     }
 
     bool picked_node = false;
+    float lane_y = state.graph_pan_y;
     int row = 0;
     for (const NodeId id : emitters) {
         Node* n = scene.find(id);
         if (!n || !n->particle_emitter.has_value()) {
             continue;
         }
+        // Temporarily set pan_y so draw uses absolute lane position
+        const float saved_pan_y = state.graph_pan_y;
+        state.graph_pan_y = lane_y;
+        float row_h = 0.0f;
         ImGui::PushID(static_cast<int>(id));
         picked_node |=
-            drawEmitterGraphRow(state, *n, row, ctx, draw, canvas_p0, canvas_hovered);
+            drawEmitterGraphRow(state, *n, row, ctx, draw, canvas_p0, row_h, canvas_hovered);
         ImGui::PopID();
+        state.graph_pan_y = saved_pan_y;
+        lane_y += row_h;
         ++row;
     }
     draw->PopClipRect();
@@ -596,8 +969,8 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
     }
     Scene& scene = *ctx.scene;
 
-    ImGui::SetNextWindowSize(ImVec2(1180.0f, 720.0f), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(900.0f, 520.0f), ImVec2(2600.0f, 1800.0f));
+    ImGui::SetNextWindowSize(ImVec2(1240.0f, 760.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(960.0f, 540.0f), ImVec2(2800.0f, 1800.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0f);
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.038f, 0.040f, 0.046f, 0.98f));
@@ -612,7 +985,6 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
     }
     ImGui::PopStyleVar(2);
 
-    // Header bar
     {
         ImDrawList* draw = ImGui::GetWindowDrawList();
         const ImVec2 p = ImGui::GetCursorScreenPos();
@@ -623,9 +995,9 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
         ImGui::SetCursorScreenPos(ImVec2(p.x + 14.0f, p.y + 9.0f));
         ImGui::TextColored(kAccent, "Tugela");
         ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.88f, 0.90f, 0.93f, 1.0f), "  System actor · Emitters · Graph");
+        ImGui::TextColored(ImVec4(0.88f, 0.90f, 0.93f, 1.0f), "  System · Emitters · Module stack");
         ImGui::SameLine();
-        ImGui::TextColored(kMuted, "   lean Niagara-like modules");
+        ImGui::TextColored(kMuted, "   forces · velocity · color");
         ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + 40.0f));
     }
 
@@ -652,7 +1024,6 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
         state.focus_emitter = emitters.empty() ? 0 : emitters.front();
     }
 
-    // Left: systems (one level actor each)
     ImGui::BeginChild("tugela_systems", ImVec2(150.0f, 0.0f), ImGuiChildFlags_Borders);
     drawEditorSectionLabel("Systems");
     ImGui::TextDisabled("1 actor = N emitters");
@@ -684,7 +1055,6 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
 
     ImGui::SameLine();
 
-    // Mid: emitters in focused system
     ImGui::BeginChild("tugela_emitters", ImVec2(158.0f, 0.0f), ImGuiChildFlags_Borders);
     drawEditorSectionLabel("Emitters");
     if (state.focus_system != 0) {
@@ -716,14 +1086,12 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
     ImGui::Separator();
     if (state.focus_system != 0) {
         drawAddEmitterButtons(scene, state.focus_system, ctx, state);
-        // Refresh emitter list after potential adds
         collectEmitters(scene, state.focus_system, emitters);
     }
     ImGui::EndChild();
 
     ImGui::SameLine();
 
-    // Right: tabs Graph / Details
     ImGui::BeginChild("tugela_detail", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None);
     if (ImGui::BeginTabBar("tugela_tabs", ImGuiTabBarFlags_None)) {
         if (ImGui::BeginTabItem("Graph")) {
@@ -738,8 +1106,7 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
     }
 
     if (state.tab == TugelaEditorTab::Graph) {
-        // Graph on top; compact module inspector under for selected node
-        const float graph_h = std::max(220.0f, ImGui::GetContentRegionAvail().y * 0.55f);
+        const float graph_h = std::max(260.0f, ImGui::GetContentRegionAvail().y * 0.58f);
         ImGui::BeginChild("graph_wrap", ImVec2(0.0f, graph_h), ImGuiChildFlags_None);
         drawModuleGraph(state, scene, emitters, ctx);
         ImGui::EndChild();
@@ -750,12 +1117,13 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
             ImGui::BeginChild("graph_module_insp", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
             ImGui::TextColored(ImVec4(0.90f, 0.92f, 0.94f, 1.0f), "%s", emitter->name.c_str());
             ImGui::SameLine();
-            ImGui::TextColored(kMuted, " / %s", moduleLabel(state.focus_module));
+            ImGui::TextColored(kMuted, " / %s / %s", stageLabel(state.focus_module),
+                               stackLabel(state.focus_stack));
             ImGui::Spacing();
-            drawModuleInspector(*emitter->particle_emitter, state.focus_module, ctx);
+            drawStackModuleInspector(*emitter->particle_emitter, state.focus_stack, ctx);
             ImGui::EndChild();
         } else {
-            ImGui::TextDisabled("Select a module node to edit parameters.");
+            ImGui::TextDisabled("Select a stack module to edit parameters.");
         }
     } else {
         Node* emitter = scene.find(state.focus_emitter);
