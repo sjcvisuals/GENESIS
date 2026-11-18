@@ -216,18 +216,35 @@ protected:
         if (tugela_demo_frames_ != 40) {
             return;
         }
+        genesis::Scene& scene = runtime_.scene();
         tugela_editor_.open = true;
+        tugela_editor_.tab = genesis::TugelaEditorTab::Graph;
+
         if (std::optional<genesis::NodeId> id =
-                genesis::findNodeByPath(runtime_.scene(), "Scene/Particle System/Outer Ring")) {
+                genesis::findNodeByPath(scene, "Scene/Particle System/Outer Ring")) {
             selectNode(*id);
-            tugela_editor_.open = true;
-            genesis::tugelaEditorFocusSelection(tugela_editor_, runtime_.scene(), *id);
-        } else if (std::optional<genesis::NodeId> sys =
-                       genesis::findNodeByPath(runtime_.scene(), "Scene/Particle System")) {
-            selectNode(*sys);
-            tugela_editor_.open = true;
-            genesis::tugelaEditorFocusSelection(tugela_editor_, runtime_.scene(), *sys);
+            genesis::tugelaEditorFocusSelection(tugela_editor_, scene, *id);
+            return;
         }
+        if (std::optional<genesis::NodeId> sys =
+                genesis::findNodeByPath(scene, "Scene/Particle System")) {
+            selectNode(*sys);
+            genesis::tugelaEditorFocusSelection(tugela_editor_, scene, *sys);
+            return;
+        }
+
+        // Empty scene: seed one System actor with Soft Circles + Trail emitters.
+        std::optional<genesis::NodeId> scene_root = genesis::findNodeByPath(scene, "Scene");
+        const genesis::NodeId system = scene.createEmptyNode("Particle System", scene_root);
+        scene.createParticleEmitterNode("Soft Circles", system, genesis::makeGentleCirclesEmitter());
+        genesis::ParticleEmitter trail = genesis::makeGentleSoftEmitter();
+        trail.rate_per_second = 5.0f;
+        trail.trail_enabled = true;
+        trail.force_gravity = true;
+        scene.createParticleEmitterNode("Trail", system, trail);
+        selectNode(system);
+        genesis::tugelaEditorFocusSelection(tugela_editor_, scene, system);
+        markDirty();
     }
 
     void maybeRunEdgeDemoHook() {
@@ -763,20 +780,42 @@ private:
 
         genesis::drawEditorSectionLabel("Particles · Tugela");
         createBtn("Particle System", half, [&] {
+            // One System actor holding Soft Circles + Trail emitters (multi-emitter).
             std::optional<genesis::NodeId> scene_root =
                 genesis::findNodeByPath(scene, "Scene");
             const genesis::NodeId system =
                 scene.createEmptyNode("Particle System", scene_root);
-            selectNode(scene.createParticleEmitterNode("Soft Circles", system,
-                                                       genesis::makeGentleSoftEmitter()));
+            scene.createParticleEmitterNode("Soft Circles", system,
+                                            genesis::makeGentleCirclesEmitter());
+            genesis::ParticleEmitter trail = genesis::makeGentleSoftEmitter();
+            trail.rate_per_second = 5.0f;
+            trail.trail_enabled = true;
+            scene.createParticleEmitterNode("Trail", system, trail);
+            selectNode(system);
+            tugela_editor_.open = true;
+            genesis::tugelaEditorFocusSelection(tugela_editor_, scene, system);
             markDirty();
         });
         ImGui::SameLine();
         createBtn("Emitter", half, [&] {
-            std::optional<genesis::NodeId> parent =
-                genesis::findNodeByPath(scene, "Scene/Particle System");
+            // Add under selected System (or parent of selected emitter), else default path.
+            std::optional<genesis::NodeId> parent;
+            if (const genesis::NodeId sel = primarySelected()) {
+                if (const genesis::Node* n = scene.find(sel)) {
+                    if (genesis::isParticleSystemNode(scene, *n)) {
+                        parent = sel;
+                    } else if (n->particle_emitter.has_value() && n->parent.has_value()) {
+                        parent = *n->parent;
+                    }
+                }
+            }
             if (!parent.has_value()) {
-                parent = genesis::findNodeByPath(scene, "Scene");
+                parent = genesis::findNodeByPath(scene, "Scene/Particle System");
+            }
+            if (!parent.has_value()) {
+                std::optional<genesis::NodeId> scene_root =
+                    genesis::findNodeByPath(scene, "Scene");
+                parent = scene.createEmptyNode("Particle System", scene_root);
             }
             selectNode(scene.createParticleEmitterNode("Emitter", parent,
                                                        genesis::makeGentleCirclesEmitter()));

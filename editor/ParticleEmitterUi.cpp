@@ -145,11 +145,22 @@ void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ct
             addEmitter("Soft Circles", makeGentleCirclesEmitter());
         }
         ImGui::SameLine();
-        if (ImGui::Button("Soft + Trails", ImVec2(third, 0))) {
-            addEmitter("Soft + Trails", makeGentleSoftEmitter());
+        if (ImGui::Button("Trail", ImVec2(third, 0))) {
+            ParticleEmitter trail = makeGentleSoftEmitter();
+            trail.rate_per_second = 6.0f;
+            trail.trail_enabled = true;
+            trail.force_gravity = true;
+            addEmitter("Trail", trail);
         }
         ImGui::SameLine();
-        if (ImGui::Button("OSC Tracker", ImVec2(third, 0))) {
+        if (ImGui::Button("Circles+Trail", ImVec2(third, 0))) {
+            addEmitter("Soft Circles", makeGentleCirclesEmitter());
+            ParticleEmitter trail = makeGentleSoftEmitter();
+            trail.rate_per_second = 5.0f;
+            trail.trail_enabled = true;
+            addEmitter("Trail", trail);
+        }
+        if (ImGui::Button("OSC Tracker", ImVec2(-1.0f, 0))) {
             addEmitter("OSC Tracker", makeOscTrackerBubbleEmitter());
         }
         moduleIndentEnd();
