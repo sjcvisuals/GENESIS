@@ -28,6 +28,7 @@ namespace genesis {
 SceneRuntime::SceneRuntime(const VulkanContext& context)
     : context_(context), fluid_world_(context) {
     animation_graph_.ensureDefaults();
+    particle_world_.enableGpuCompute(context_);
 }
 
 void SceneRuntime::clear() {
@@ -53,6 +54,9 @@ void SceneRuntime::clear() {
     particle_step_accumulator_ = 0.0;
     particle_cube_mesh_id_.reset();
     particle_sphere_mesh_id_.reset();
+    particle_sprite_mesh_id_.reset();
+    particle_sprite_texture_id_.reset();
+    particle_ribbon_texture_id_.reset();
     fluid_box_mesh_id_.reset();
     fluid_display_material_id_.reset();
 }
@@ -292,6 +296,10 @@ void SceneRuntime::tickParticlesSteps(const std::uint64_t steps, const float fix
     particle_world_.simulate(scene_, steps, fixed_step_seconds);
 }
 
+void SceneRuntime::flushParticleGpuUpdates(VkCommandBuffer cmd) {
+    particle_world_.flushGpuUpdates(cmd, scene_);
+}
+
 void SceneRuntime::simulateFluids(VkCommandBuffer cmd, const float dt_seconds) {
     fluid_world_.simulate(cmd, scene_, dt_seconds);
     particle_world_.setFluidWorld(&fluid_world_);
@@ -347,16 +355,48 @@ void SceneRuntime::resetParticles() {
     particle_step_accumulator_ = 0.0;
 }
 
+void SceneRuntime::setParticleViewBasis(const glm::vec3& camera_right, const glm::vec3& camera_up) {
+    particle_view_basis_.right = camera_right;
+    particle_view_basis_.up = camera_up;
+    particle_view_basis_.valid = true;
+}
+
 void SceneRuntime::appendParticleDrawCommands(std::vector<SceneDrawCommand>& out) {
     if (!particle_cube_mesh_id_.has_value()) {
         particle_cube_mesh_id_ = addMesh("ParticleCube", createCubeMesh(context_));
     }
     if (!particle_sphere_mesh_id_.has_value()) {
-        particle_sphere_mesh_id_ = addMesh("ParticleSphere", createSphereMesh(context_, 0.5f, 12, 8));
+        // Low-poly sphere for mesh particles (efficiency vs 12×8).
+        particle_sphere_mesh_id_ = addMesh("ParticleSphere", createSphereMesh(context_, 0.5f, 8, 6));
+    }
+    if (!particle_sprite_mesh_id_.has_value()) {
+        // XY quad (normal +Z) — matches billboard basis in ParticleWorld::collectInstances.
+        // Floor/XZ planes render edge-on under that transform; do not use createPlaneMesh here.
+        particle_sprite_mesh_id_ =
+            addMesh("ParticleSprite", createFluidDisplayQuadMesh(context_, 0.5f));
+    }
+    if (!particle_sprite_texture_id_.has_value()) {
+        // Soft white circle + feathered alpha (Unreal default sprite look).
+        particle_sprite_texture_id_ =
+            addTexture("ParticleSoftCircle", GpuTexture::createSoftCircleSprite(context_, 256));
+    }
+    if (!particle_ribbon_texture_id_.has_value()) {
+        // Soft capsule strip for Trail Renderer — continuous ribbon silhouette.
+        particle_ribbon_texture_id_ =
+            addTexture("ParticleSoftRibbon", GpuTexture::createSoftRibbonSprite(context_, 256));
+    }
+
+    if (!particle_view_basis_.valid) {
+        if (const Node* cam = scene_.activeOutputCameraNode()) {
+            const glm::mat3 rot = glm::mat3(cam->world);
+            particle_view_basis_.right = glm::normalize(glm::vec3(rot[0]));
+            particle_view_basis_.up = glm::normalize(glm::vec3(rot[1]));
+            particle_view_basis_.valid = true;
+        }
     }
 
     std::vector<ParticleWorld::ParticleInstanceBatch> batches;
-    particle_world_.collectInstances(scene_, batches);
+    particle_world_.collectInstances(scene_, batches, particle_view_basis_);
 
     SceneMaterial lit{};
     lit.base_color = glm::vec4(1.0f);
@@ -364,22 +404,39 @@ void SceneRuntime::appendParticleDrawCommands(std::vector<SceneDrawCommand>& out
     lit.metallic = 0.0f;
     lit.alpha_mode = AlphaMode::Blend;
 
+    // Unlit additive sprites: roughness>0.98 takes mesh.frag's early-out that writes
+    // baseColor×instanceColor directly (true self-illumination). Below that threshold
+    // OpenPBR runs — with ambient/lights killed for the black stage, particles shade black.
+    // Glow is additive RGB×alpha on black, not material emissive / bloom mush.
     SceneMaterial unlit = lit;
-    unlit.emissive = glm::vec3(1.0f);
-    unlit.emissive_strength = 2.5f;
-    unlit.roughness = 1.0f;
+    unlit.emissive = glm::vec3(0.0f);
+    unlit.emissive_strength = 0.0f;
+    unlit.roughness = 0.985f;
+
+    const GpuTexture* soft_circle = texture(*particle_sprite_texture_id_);
+    const GpuTexture* soft_ribbon = texture(*particle_ribbon_texture_id_);
 
     for (const ParticleWorld::ParticleInstanceBatch& batch : batches) {
         const Mesh* mesh = nullptr;
-        if (batch.mesh == ParticleRenderMesh::Sphere) {
+        const bool is_sprite = batch.mesh == ParticleRenderMesh::Sprite;
+        switch (batch.mesh) {
+        case ParticleRenderMesh::Sphere:
             mesh = this->mesh(*particle_sphere_mesh_id_);
-        } else {
+            break;
+        case ParticleRenderMesh::Sprite:
+            mesh = this->mesh(*particle_sprite_mesh_id_);
+            break;
+        case ParticleRenderMesh::Cube:
+        default:
             mesh = this->mesh(*particle_cube_mesh_id_);
+            break;
         }
         if (!mesh) {
             continue;
         }
         const SceneMaterial& material = batch.unlit ? unlit : lit;
+        // One SceneDrawCommand per instance; buildDrawBatches GPU-instances them.
+        out.reserve(out.size() + batch.instances.size());
         for (const GpuMeshInstance& instance : batch.instances) {
             SceneDrawCommand cmd{};
             cmd.node_id = 0;
@@ -387,6 +444,10 @@ void SceneRuntime::appendParticleDrawCommands(std::vector<SceneDrawCommand>& out
             cmd.model = instance.model;
             cmd.material = makeMeshMaterialPushConstants(material);
             cmd.instance_color = instance.color;
+            cmd.additive = batch.additive;
+            if (is_sprite) {
+                cmd.base_color_texture = batch.ribbon ? soft_ribbon : soft_circle;
+            }
             out.push_back(cmd);
         }
     }
@@ -518,6 +579,13 @@ void SceneRuntime::loadGltfSource(const std::filesystem::path& path) {
     scene_ = GltfLoader::loadScene(path, &materials_);
     meshes_.clear();
     mesh_names_.clear();
+    particle_cube_mesh_id_.reset();
+    particle_sphere_mesh_id_.reset();
+    particle_sprite_mesh_id_.reset();
+    particle_sprite_texture_id_.reset();
+    particle_ribbon_texture_id_.reset();
+    fluid_box_mesh_id_.reset();
+    fluid_display_material_id_.reset();
 
     for (std::size_t i = 0; i < materials_.size(); ++i) {
         material_names_.push_back("Material " + std::to_string(i));
@@ -688,6 +756,9 @@ std::uint32_t SceneRuntime::resolveMeshRef(const std::string& ref) {
     }
     if (ref == "Cylinder") {
         return addMesh(ref, createCylinderMesh(context_));
+    }
+    if (ref == "CylinderShell") {
+        return addMesh(ref, createCylinderShellMesh(context_));
     }
     if (ref == "Plane") {
         return addMesh(ref, createPlaneMesh(context_));

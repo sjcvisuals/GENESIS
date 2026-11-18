@@ -50,6 +50,9 @@ public:
                   const GpuTexture* base_color_texture = nullptr);
     void drawMeshBatches(const std::vector<SceneMeshBatch>& batches,
                          const MeshDrawOptions& options = {});
+    // Unreal-style inverted-hull silhouette for selected actors (after mesh/grid draws).
+    void drawSelectionOutlineBatches(const std::vector<SceneMeshBatch>& batches,
+                                     const MeshDrawOptions& options = {});
     // Fluid / compute passes must run outside an active graphics render pass.
     bool canDispatchCompute() const { return !render_pass_active_; }
     VkCommandBuffer currentCommandBuffer() const { return command_buffers_[current_frame_]; }
@@ -100,7 +103,9 @@ private:
     std::unique_ptr<Swapchain> swapchain_;
     std::unique_ptr<GraphicsPipeline> triangle_pipeline_;
     std::unique_ptr<GraphicsPipeline> mesh_pipeline_;
+    std::unique_ptr<GraphicsPipeline> mesh_additive_pipeline_;
     std::unique_ptr<GraphicsPipeline> mesh_depth_pipeline_;
+    std::unique_ptr<GraphicsPipeline> selection_outline_pipeline_;
     std::unique_ptr<GraphicsPipeline> grid_pipeline_;
     std::unique_ptr<BindlessTextures> bindless_textures_;
     std::unique_ptr<DisplayLutBinding> display_lut_;

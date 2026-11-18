@@ -126,10 +126,16 @@ bool AudioReactive::completeLink(OscParamTarget target, const std::string& node_
         binding.max_value = 20.0f;
         break;
     case OscParamTarget::ParticleRate:
-        binding.bias = 8.0f;
-        binding.gain = 40.0f;
+        binding.bias = 20.0f;
+        binding.gain = 160.0f;
         binding.min_value = 0.0f;
-        binding.max_value = 120.0f;
+        binding.max_value = 800.0f;
+        break;
+    case OscParamTarget::ParticleGravityY:
+        binding.bias = 0.4f;
+        binding.gain = 1.5f;
+        binding.min_value = -2.0f;
+        binding.max_value = 3.0f;
         break;
     default:
         binding.bias = 0.0f;
@@ -174,6 +180,28 @@ void AudioReactive::addLavaLampBassPreset(const std::string& fluid_node_path) {
     kick.min_value = 0.06f;
     kick.max_value = 0.32f;
     addBinding(kick);
+}
+
+void AudioReactive::addParticleBassRatePreset(const std::string& particle_node_path) {
+    AudioBinding rate{};
+    rate.channel = AudioFeatureChannel::Bass;
+    rate.target = OscParamTarget::ParticleRate;
+    rate.node_path = particle_node_path;
+    rate.bias = 20.0f;
+    rate.gain = 180.0f;
+    rate.min_value = 0.0f;
+    rate.max_value = 400.0f;
+    addBinding(rate);
+
+    AudioBinding gravity{};
+    gravity.channel = AudioFeatureChannel::Beat;
+    gravity.target = OscParamTarget::ParticleGravityY;
+    gravity.node_path = particle_node_path;
+    gravity.bias = 0.35f;
+    gravity.gain = 1.2f;
+    gravity.min_value = 0.0f;
+    gravity.max_value = 2.5f;
+    addBinding(gravity);
 }
 
 } // namespace genesis

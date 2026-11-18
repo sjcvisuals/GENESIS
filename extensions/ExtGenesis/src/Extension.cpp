@@ -1,13 +1,32 @@
 #include "Extension.h"
 
 #include "Device.h"
+#include "protocol/OscProtocol.hpp"
 #include "rxext.h"
 #include "rxext_util.h"
+
+#include <format>
 
 namespace rxext::genesis_ext {
 
 bool Extension::initialize() noexcept {
     host().log_info("GENESIS RenderBridge extension initialized");
+
+    ::genesis::OscProtocol& osc = ::genesis::sharedOscProtocol();
+    ::genesis::OscProtocol::Settings settings = osc.settings();
+    settings.bind_ip = "0.0.0.0";
+    settings.port = 9000;
+    settings.listening = true;
+    settings.learn_enabled = false;
+    osc.setSettings(settings);
+    std::string error;
+    if (osc.startListening(&error)) {
+        host().log_info(std::format(
+            "GENESIS OSC listening on {}:{} (emit '{}' room '{}')", settings.bind_ip, settings.port,
+            osc.particleEmitSettings().address, osc.roomPersonSettings().address));
+    } else {
+        host().log_error(std::format("GENESIS OSC listen failed: {}", error));
+    }
     return true;
 }
 

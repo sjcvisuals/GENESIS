@@ -82,6 +82,7 @@ private:
     std::unique_ptr<ExternalRenderTarget> target_;
     std::unique_ptr<ExternalSync> sync_;
     std::unique_ptr<GraphicsPipeline> mesh_pipeline_;
+    std::unique_ptr<GraphicsPipeline> mesh_additive_pipeline_;
     std::unique_ptr<GraphicsPipeline> mesh_depth_pipeline_;
     std::unique_ptr<BindlessTextures> bindless_textures_;
     std::unique_ptr<DisplayLutBinding> display_lut_;

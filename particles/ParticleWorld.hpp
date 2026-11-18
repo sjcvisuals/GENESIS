@@ -1,14 +1,21 @@
 #pragma once
 
 #include "particles/ParticleEmitter.hpp"
+#include "particles/ParticleGpuSim.hpp"
 #include "renderer/MeshInstance.hpp"
 #include "scene/Scene.hpp"
 
+#include <array>
 #include <cstdint>
+#include <memory>
+#include <glm/vec3.hpp>
 #include <unordered_map>
 #include <vector>
+#include <volk.h>
 
 namespace genesis {
+
+class VulkanContext;
 
 struct ParticleSimStats {
     std::uint32_t alive = 0;
@@ -16,30 +23,48 @@ struct ParticleSimStats {
     std::uint32_t steps = 0;
 };
 
-// CPU SoA particle world. Deterministic given scene_seed + fixed steps + emitter params.
+struct ParticleViewBasis {
+    glm::vec3 right{1.0f, 0.0f, 0.0f};
+    glm::vec3 up{0.0f, 1.0f, 0.0f};
+    bool valid = false;
+};
+
+// Tugela particle world: CPU spawn + GPU compute motion (with CPU fallback).
 class ParticleWorld {
 public:
     void setSceneSeed(std::uint64_t seed) { scene_seed_ = seed; }
     std::uint64_t sceneSeed() const { return scene_seed_; }
 
-    void clear();
-    void reset(); // clear particles + accumulators; keep seed
+    // Enable GPU compute updates (Soft Circles motion). No-op if shaders missing.
+    void enableGpuCompute(const VulkanContext& context);
+    bool gpuComputeEnabled() const { return gpu_sim_ != nullptr && gpu_sim_->ready(); }
 
-    // Fixed-step simulation. Call `steps` times with `dt` (usually ProductionClock fixed step).
+    void clear();
+    void reset();
+
+    // Fixed-step sim. When GPU is enabled this only advances emitters/spawns and queues
+    // GPU motion updates for flushGpuUpdates().
     void simulate(Scene& scene, std::uint64_t steps, float dt);
 
-    // Seek/rebuild helper: clear and fast-forward absolute production time.
+    // Dispatch queued GPU motion updates into cmd (call after beginFrame, before draw collect).
+    void flushGpuUpdates(VkCommandBuffer cmd, Scene& scene);
+
+    std::uint32_t emitBurstAtWorld(Scene& scene, NodeId emitter_node, const glm::vec3& world_position,
+                                   std::uint32_t count);
+
     void rebuildToTime(Scene& scene, double production_time_seconds, float fixed_dt);
 
     ParticleSimStats stats() const { return stats_; }
 
-    // Append mesh instances for alive particles (uses emitter.render_mesh hint via out tags).
     struct ParticleInstanceBatch {
-        ParticleRenderMesh mesh = ParticleRenderMesh::Cube;
+        ParticleRenderMesh mesh = ParticleRenderMesh::Sprite;
         bool unlit = true;
+        bool additive = true;
+        bool ribbon = false; // soft capsule strip texture (Trail Renderer)
         std::vector<GpuMeshInstance> instances;
     };
-    void collectInstances(const Scene& scene, std::vector<ParticleInstanceBatch>& out) const;
+    void collectInstances(const Scene& scene, std::vector<ParticleInstanceBatch>& out,
+                          const ParticleViewBasis& view = {}) const;
 
     void setFluidWorld(class FluidWorld* world) { fluid_world_ = world; }
 
@@ -52,8 +77,16 @@ private:
         double emit_accumulator = 0.0;
         std::uint64_t next_emit_index = 0;
         bool burst_fired = false;
+        std::uint8_t timed_bursts_fired = 0; // bit per bursts[] entry
         bool finished = false;
+        std::uint32_t alive_count = 0;
+        glm::vec3 last_world_pos{0.0f};
+        glm::vec3 velocity{0.0f};
+        bool has_last_pos = false;
+        double distance_spawn_accumulator = 0.0; // meters × spawn_per_unit
     };
+
+    static constexpr std::uint8_t kMaxTrailPoints = 24;
 
     struct Particle {
         NodeId emitter_node = 0;
@@ -63,20 +96,46 @@ private:
         glm::vec3 position{0.0f};
         glm::vec3 velocity{0.0f};
         float size0 = 0.1f;
-        glm::vec4 color0{1.0f};
-        glm::vec4 color1{1.0f};
-        float size_end_mul = 0.25f;
-        ParticleRenderMesh mesh = ParticleRenderMesh::Cube;
+        float sprite_aspect = 1.0f;
+        float velocity_stretch = 0.0f;
+        ParticleRenderMesh mesh = ParticleRenderMesh::Sprite;
         bool unlit = true;
+        bool additive = true;
         bool world_space = true;
         bool alive = false;
+        // Cached curves snapshot at birth (deterministic over-life if emitter edits mid-flight).
+        ParticleCurve1 size_curve{};
+        ParticleCurveColor color_curve{};
+        // Per-particle hue tint (gentle yellow/green/blue + occasional red).
+        glm::vec3 color_tint{1.0f};
+
+        // Trail Renderer history (oldest at [0], newest at [trail_count-1]).
+        bool trail_enabled = false;
+        std::uint8_t trail_max_segments = 10;
+        float trail_sample_distance = 0.035f;
+        float trail_width = 0.055f;
+        float trail_width_end = 0.0f;
+        float trail_alpha = 0.55f;
+        float trail_lifetime = 0.85f;
+        std::array<glm::vec3, kMaxTrailPoints> trail_pos{};
+        std::uint8_t trail_count = 0;
+        float trail_dist_accum = 0.0f;
+        glm::vec3 trail_last_sample{0.0f};
+        bool trail_has_sample = false;
     };
 
     void syncEmitters(Scene& scene);
-    void stepOnce(Scene& scene, float dt);
+    void stepOnce(Scene& scene, float dt, bool update_particles);
+    void updateParticlesCpu(Scene& scene, float dt);
     void spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, const ParticleEmitter& desc,
-                          const Node& node, std::uint32_t count);
+                          const Node& node, std::uint32_t count,
+                          const glm::vec3* origin_override = nullptr);
+    void recountAlive();
+    void updateTrailsAfterGpu(Scene& scene, float dt);
+    std::vector<GpuParticle> packGpuParticles(Scene& scene) const;
+    void unpackGpuParticles(const std::vector<GpuParticle>& gpu);
     std::size_t allocateParticle();
+    EmitterRuntime* findEmitterRuntime(NodeId id);
 
     std::uint64_t scene_seed_ = 1;
     std::uint64_t global_step_ = 0;
@@ -86,6 +145,9 @@ private:
     std::vector<std::size_t> free_list_;
     ParticleSimStats stats_{};
     class FluidWorld* fluid_world_ = nullptr;
+    std::unique_ptr<ParticleGpuSim> gpu_sim_;
+    std::uint32_t pending_gpu_steps_ = 0;
+    float pending_gpu_dt_ = 0.0f;
 };
 
 } // namespace genesis

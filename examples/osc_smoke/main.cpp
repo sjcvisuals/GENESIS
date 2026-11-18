@@ -1,6 +1,13 @@
-// Headless OSC parser smoke test — validates message + bundle decoding.
+// Headless OSC parser + particle-emit smoke test.
 
 #include "protocol/OscParser.hpp"
+#include "protocol/OscParticleEmit.hpp"
+#include "protocol/OscRoomPerson.hpp"
+
+#if !defined(GENESIS_OSC_SMOKE_LIGHT)
+#include "particles/ParticleWorld.hpp"
+#include "scene/Scene.hpp"
+#endif
 
 #include <cmath>
 #include <cstdint>
@@ -55,6 +62,44 @@ std::vector<std::uint8_t> makeIntMessage() {
     return packet;
 }
 
+std::vector<std::uint8_t> makeParticleEmitXy() {
+    std::vector<std::uint8_t> packet;
+    appendPadded(packet, "/genesis/particles/emit");
+    appendPadded(packet, ",ff");
+    appendFloatBe(packet, 1.5f);
+    appendFloatBe(packet, -0.25f);
+    return packet;
+}
+
+std::vector<std::uint8_t> makeParticleEmitXyCount() {
+    std::vector<std::uint8_t> packet;
+    appendPadded(packet, "/genesis/particles/emit");
+    appendPadded(packet, ",fff");
+    appendFloatBe(packet, 2.0f);
+    appendFloatBe(packet, 3.0f);
+    appendFloatBe(packet, 12.0f);
+    return packet;
+}
+
+std::vector<std::uint8_t> makeRoomPersonXz() {
+    std::vector<std::uint8_t> packet;
+    appendPadded(packet, "/genesis/room/person");
+    appendPadded(packet, ",ff");
+    appendFloatBe(packet, 2.0f);
+    appendFloatBe(packet, 1.0f);
+    return packet;
+}
+
+std::vector<std::uint8_t> makeRoomPersonIdXz() {
+    std::vector<std::uint8_t> packet;
+    appendPadded(packet, "/genesis/room/person");
+    appendPadded(packet, ",iff");
+    appendIntBe(packet, 3);
+    appendFloatBe(packet, 2.0f);
+    appendFloatBe(packet, 1.0f);
+    return packet;
+}
+
 } // namespace
 
 int main() {
@@ -105,7 +150,6 @@ int main() {
     }
 
     {
-        // Intentionally invalid address (missing leading '/').
         std::vector<std::uint8_t> bad;
         appendPadded(bad, "not-an-address");
         appendPadded(bad, ",i");
@@ -117,6 +161,151 @@ int main() {
             ++failures;
         } else {
             std::cout << "OSC invalid-address rejection OK (" << err << ")\n";
+        }
+    }
+
+    {
+        const auto packet = makeParticleEmitXy();
+        std::string err;
+        const auto msg = genesis::parseOscMessage(packet, &err);
+        genesis::OscParticleEmitSettings settings{};
+        genesis::OscParticleEmitEvent event{};
+        if (!msg || !genesis::tryParseOscParticleEmit(*msg, settings, event)) {
+            std::cerr << "particle emit xy parse failed: " << err << '\n';
+            ++failures;
+        } else if (std::abs(event.x - 1.5f) > 1e-5f || std::abs(event.y + 0.25f) > 1e-5f ||
+                   event.count != settings.default_count) {
+            std::cerr << "particle emit xy values mismatch\n";
+            ++failures;
+        } else {
+            const glm::vec3 world = genesis::oscParticleWorldPosition(settings, event);
+            if (std::abs(world.x - 1.5f) > 1e-5f || std::abs(world.z + 0.25f) > 1e-5f) {
+                std::cerr << "particle emit XZ mapping mismatch\n";
+                ++failures;
+            } else {
+                std::cout << "OSC particle emit xy OK → world(" << world.x << "," << world.y << ","
+                          << world.z << ")\n";
+            }
+        }
+    }
+
+    {
+        const auto packet = makeParticleEmitXyCount();
+        std::string err;
+        const auto msg = genesis::parseOscMessage(packet, &err);
+        genesis::OscParticleEmitSettings settings{};
+        genesis::OscParticleEmitEvent event{};
+        if (!msg || !genesis::tryParseOscParticleEmit(*msg, settings, event) || event.count != 12) {
+            std::cerr << "particle emit xy+count parse failed\n";
+            ++failures;
+        } else {
+            std::cout << "OSC particle emit xy+count OK (count=" << event.count << ")\n";
+        }
+    }
+
+    {
+        const auto packet = makeRoomPersonXz();
+        std::string err;
+        const auto msg = genesis::parseOscMessage(packet, &err);
+        genesis::OscRoomPersonSettings settings{};
+        genesis::OscRoomPersonEvent event{};
+        if (!msg || !genesis::tryParseOscRoomPerson(*msg, settings, event)) {
+            std::cerr << "room person xz parse failed: " << err << '\n';
+            ++failures;
+        } else if (std::abs(event.x - 2.0f) > 1e-5f || std::abs(event.z - 1.0f) > 1e-5f) {
+            std::cerr << "room person xz values mismatch\n";
+            ++failures;
+        } else {
+            const genesis::OscRoomPersonPose pose = genesis::oscRoomPersonPose(settings, event);
+            // Person at (2,1) → cylindrical outer wall at room_radius (default 3 m).
+            const float person_r = std::sqrt(event.x * event.x + event.z * event.z);
+            const float wall_r = std::sqrt(pose.wall.x * pose.wall.x + pose.wall.z * pose.wall.z);
+            const float expected_r = settings.room_radius > 0.1f ? settings.room_radius : 3.0f;
+            if (wall_r <= person_r + 1e-3f || std::abs(wall_r - expected_r) > 1e-3f ||
+                std::abs(pose.feet.x - 2.0f) > 1e-5f) {
+                std::cerr << "room person wall ray failed (person_r=" << person_r
+                          << " wall_r=" << wall_r << " expected=" << expected_r << ")\n";
+                ++failures;
+            } else {
+                std::cout << "OSC room person xz OK → feet(" << pose.feet.x << "," << pose.feet.y
+                          << "," << pose.feet.z << ") wall(" << pose.wall.x << "," << pose.wall.y
+                          << "," << pose.wall.z << ")\n";
+            }
+        }
+    }
+
+    {
+        const auto packet = makeRoomPersonIdXz();
+        std::string err;
+        const auto msg = genesis::parseOscMessage(packet, &err);
+        genesis::OscRoomPersonSettings settings{};
+        genesis::OscRoomPersonEvent event{};
+        if (!msg || !genesis::tryParseOscRoomPerson(*msg, settings, event) || event.person_id != 3 ||
+            std::abs(event.x - 2.0f) > 1e-5f || std::abs(event.z - 1.0f) > 1e-5f) {
+            std::cerr << "room person id+xz parse failed\n";
+            ++failures;
+        } else {
+            std::cout << "OSC room person id+xz OK (id=" << event.person_id << ")\n";
+        }
+    }
+
+#if !defined(GENESIS_OSC_SMOKE_LIGHT)
+    {
+        genesis::Scene scene{};
+        const genesis::NodeId root = scene.createEmptyNode("Scene");
+        const genesis::NodeId emitter =
+            scene.createParticleEmitterNode("OSC Particles", root, genesis::makeOscParticleEmitter());
+        scene.updateWorldTransforms();
+
+        genesis::ParticleWorld world_a;
+        genesis::ParticleWorld world_b;
+        world_a.setSceneSeed(42);
+        world_b.setSceneSeed(42);
+
+        const glm::vec3 pos{1.5f, 0.0f, -0.25f};
+        const std::uint32_t spawned_a = world_a.emitBurstAtWorld(scene, emitter, pos, 8);
+        const std::uint32_t spawned_b = world_b.emitBurstAtWorld(scene, emitter, pos, 8);
+        if (spawned_a != 8 || spawned_b != 8) {
+            std::cerr << "emitBurstAtWorld count mismatch: " << spawned_a << " / " << spawned_b << '\n';
+            ++failures;
+        } else if (world_a.stateHash() != world_b.stateHash()) {
+            std::cerr << "dual ParticleWorld stateHash mismatch after OSC-style burst\n";
+            ++failures;
+        } else {
+            std::cout << "OSC particle dual-world determinism OK (hash=" << world_a.stateHash() << ")\n";
+        }
+    }
+#else
+    std::cout << "OSC particle world tests skipped (GENESIS_OSC_SMOKE_LIGHT)\n";
+#endif
+
+    {
+        std::vector<genesis::OscParticleEmitEvent> events;
+        genesis::OscParticleEmitEvent e{};
+        e.sequence = 1;
+        e.x = 1.0f;
+        e.y = 2.0f;
+        e.count = 4;
+        events.push_back(e);
+        std::uint64_t cursor_a = 0;
+        std::uint64_t cursor_b = 0;
+        std::uint32_t seen_a = 0;
+        std::uint32_t seen_b = 0;
+        for (const auto& event : events) {
+            if (event.sequence > cursor_a) {
+                ++seen_a;
+                cursor_a = event.sequence;
+            }
+            if (event.sequence > cursor_b) {
+                ++seen_b;
+                cursor_b = event.sequence;
+            }
+        }
+        if (seen_a != 1 || seen_b != 1 || cursor_a != cursor_b) {
+            std::cerr << "dual-consumer cursor model failed\n";
+            ++failures;
+        } else {
+            std::cout << "OSC particle dual-consumer queue OK\n";
         }
     }
 

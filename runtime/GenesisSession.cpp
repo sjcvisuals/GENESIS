@@ -6,6 +6,7 @@
 #include "scene/Lighting.hpp"
 #include "scene/Scene.hpp"
 
+#include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <spdlog/spdlog.h>
 
@@ -123,6 +124,7 @@ void GenesisSession::render(const glm::dmat4& view,
     const float fluid_dt =
         frame_time.delta_time_seconds > 0.0 ? static_cast<float>(frame_time.delta_time_seconds) : 0.0f;
     if (renderer_->canDispatchCompute()) {
+        scene_->flushParticleGpuUpdates(renderer_->currentCommandBuffer());
         scene_->simulateFluids(renderer_->currentCommandBuffer(), fluid_dt);
     }
 
@@ -132,6 +134,11 @@ void GenesisSession::render(const glm::dmat4& view,
     collect_params.view_proj_col_major = frame_uniforms_.view_proj;
     collect_params.enable_cpu_culling = true;
     collect_params.enable_gpu_culling = false;
+    {
+        const glm::mat3 inv = glm::inverse(glm::mat3(glm::mat4(render_view)));
+        scene_->setParticleViewBasis(glm::normalize(glm::vec3(inv[0])),
+                                     glm::normalize(glm::vec3(inv[1])));
+    }
     collectSceneDrawCommands(*scene_, draw_commands_, &render_stats, collect_params);
     buildDrawBatches(draw_commands_, draw_batches_, &render_stats);
 

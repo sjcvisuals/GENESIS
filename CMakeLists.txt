@@ -30,6 +30,8 @@ genesis_compile_shaders(genesis_shaders
     shaders/mesh_depth.frag
     shaders/grid.vert
     shaders/grid.frag
+    shaders/selection_outline.vert
+    shaders/selection_outline.frag
     shaders/cull_instances.comp
     shaders/finalize_cull.comp
     shaders/fluid_advect.comp
@@ -38,6 +40,7 @@ genesis_compile_shaders(genesis_shaders
     shaders/fluid_gradient.comp
     shaders/fluid_splat.comp
     shaders/fluid_present.comp
+    shaders/particle_update.comp
 )
 
 # -----------------------------------------------------------------------------
@@ -146,6 +149,7 @@ add_library(genesis_engine_runtime STATIC
     animation/AnimationGraph.cpp
     animation/AnimationEvaluator.cpp
     particles/ParticleWorld.cpp
+    particles/ParticleGpuSim.cpp
     particles/FluidGpuGrid.cpp
     particles/FluidWorld.cpp
     assets/GltfLoader.cpp
@@ -242,17 +246,25 @@ add_library(genesis_audio STATIC
 target_include_directories(genesis_audio PUBLIC ${CMAKE_SOURCE_DIR})
 target_link_libraries(genesis_audio PUBLIC genesis_engine_runtime genesis_platform imgui_lib)
 
+# OSC receive + particle emit (no ImGui — safe for ExtGenesis / headless).
 add_library(genesis_protocol STATIC
     protocol/OscParser.cpp
     protocol/OscUdpReceiver.cpp
     protocol/OscProtocol.cpp
-    editor/OscProtocolUi.cpp
+    protocol/OscParticleEmit.cpp
+    protocol/OscRoomPerson.cpp
 )
 target_include_directories(genesis_protocol PUBLIC ${CMAKE_SOURCE_DIR})
-target_link_libraries(genesis_protocol PUBLIC genesis_runtime genesis_audio imgui_lib)
+target_link_libraries(genesis_protocol PUBLIC genesis_runtime)
 if(WIN32)
     target_link_libraries(genesis_protocol PRIVATE ws2_32)
 endif()
+
+add_library(genesis_protocol_ui STATIC
+    editor/OscProtocolUi.cpp
+)
+target_include_directories(genesis_protocol_ui PUBLIC ${CMAKE_SOURCE_DIR})
+target_link_libraries(genesis_protocol_ui PUBLIC genesis_protocol imgui_lib)
 
 # -----------------------------------------------------------------------------
 # Examples
@@ -266,8 +278,14 @@ if(GENESIS_BUILD_EXAMPLES)
     target_link_libraries(genesis_camera PRIVATE genesis_engine)
     add_dependencies(genesis_camera genesis_shaders)
 
-    add_executable(genesis_gltf_viewer examples/gltf_viewer/main.cpp editor/EditorSession.cpp)
-    target_link_libraries(genesis_gltf_viewer PRIVATE genesis_engine genesis_protocol imguizmo_lib)
+    add_executable(genesis_gltf_viewer
+        examples/gltf_viewer/main.cpp
+        editor/EditorSession.cpp
+        editor/EditorTheme.cpp
+        editor/ParticleEmitterUi.cpp
+        editor/TugelaEditor.cpp
+    )
+    target_link_libraries(genesis_gltf_viewer PRIVATE genesis_engine genesis_protocol genesis_protocol_ui genesis_audio imguizmo_lib)
     add_dependencies(genesis_gltf_viewer genesis_shaders)
 
     add_custom_command(TARGET genesis_gltf_viewer POST_BUILD
@@ -352,6 +370,15 @@ if(GENESIS_BUILD_EXAMPLES)
             "$<TARGET_FILE_DIR:genesis_remover_camera_debug>/assets/matting"
         COMMENT "Copying matting assets next to genesis_remover_camera_debug")
 
+    # Header-only Tugela-module authoring smoke (no Vulkan / GPU).
+    add_executable(genesis_particle_smoke examples/particle_smoke/main.cpp)
+    target_include_directories(genesis_particle_smoke PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(genesis_particle_smoke PRIVATE glm::glm)
+
+    # CPU ParticleWorld determinism + sprite batch smoke (links engine runtime).
+    add_executable(genesis_particle_world_smoke examples/particle_smoke/world_main.cpp)
+    target_link_libraries(genesis_particle_world_smoke PRIVATE genesis_engine_runtime)
+
     add_executable(genesis_multiview_player examples/multiview_player/main.cpp)
     target_link_libraries(genesis_multiview_player PRIVATE genesis_engine)
     add_dependencies(genesis_multiview_player genesis_shaders)
@@ -409,6 +436,7 @@ if(GENESIS_BUILD_RENDERBRIDGE_EXT AND WIN32)
 
     target_link_libraries(ExtGenesis PRIVATE
         genesis_runtime
+        genesis_protocol
     )
     if(MSVC AND GENESIS_HAS_ONNXRUNTIME)
         target_link_options(ExtGenesis PRIVATE "/DELAYLOAD:onnxruntime.dll")

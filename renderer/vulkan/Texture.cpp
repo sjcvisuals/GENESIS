@@ -3,8 +3,11 @@
 #include "renderer/vulkan/Buffer.hpp"
 #include "renderer/vulkan/VulkanContext.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <stdexcept>
+#include <vector>
 
 namespace genesis {
 
@@ -242,6 +245,115 @@ GpuTexture GpuTexture::createSolid(const VulkanContext& context, const std::uint
                                    const std::uint8_t g, const std::uint8_t b, const std::uint8_t a) {
     const std::uint8_t pixel[4] = {r, g, b, a};
     return GpuTexture(context, pixel, 1, 1, TextureColorEncoding::Linear);
+}
+
+GpuTexture GpuTexture::createSoftCircleSprite(const VulkanContext& context, const std::uint32_t size) {
+    // Emissive glow disc: sharpish bright core + soft falloff (reads as light, not DoF blur).
+    const std::uint32_t dim = std::max(size, 32u);
+    std::vector<std::uint8_t> rgba(static_cast<std::size_t>(dim) * dim * 4u);
+    constexpr float kCoreSigma = 0.22f; // tight bright core
+    constexpr float kHaloSigma = 0.42f; // controlled soft emission rim
+    for (std::uint32_t y = 0; y < dim; ++y) {
+        for (std::uint32_t x = 0; x < dim; ++x) {
+            const float nx = (static_cast<float>(x) + 0.5f) / static_cast<float>(dim) * 2.0f - 1.0f;
+            const float ny = (static_cast<float>(y) + 0.5f) / static_cast<float>(dim) * 2.0f - 1.0f;
+            const float d2 = nx * nx + ny * ny;
+            float falloff = 0.0f;
+            if (d2 < 1.0f) {
+                const float core = std::exp(-d2 / (2.0f * kCoreSigma * kCoreSigma));
+                const float halo = std::exp(-d2 / (2.0f * kHaloSigma * kHaloSigma));
+                const float edge = 1.0f - d2;
+                const float soft_edge = edge * edge * (3.0f - 2.0f * edge);
+                // Bright core dominates; halo is quieter so additive stays bloom-safe.
+                falloff = std::min(1.0f, (0.72f * core + 0.38f * halo) * soft_edge);
+            }
+            falloff = std::clamp(falloff, 0.0f, 1.0f);
+            // RGB=A — additive self-illumination on black stage.
+            const std::uint8_t v = static_cast<std::uint8_t>(falloff * 255.0f + 0.5f);
+            const std::size_t i = (static_cast<std::size_t>(y) * dim + x) * 4u;
+            rgba[i + 0] = v;
+            rgba[i + 1] = v;
+            rgba[i + 2] = v;
+            rgba[i + 3] = v;
+        }
+    }
+
+    GpuTexture texture(context, rgba.data(), dim, dim, TextureColorEncoding::Linear);
+    // Clamp so the transparent rim does not wrap at UV edges.
+    if (texture.sampler_ != VK_NULL_HANDLE) {
+        vkDestroySampler(texture.device_, texture.sampler_, nullptr);
+        texture.sampler_ = VK_NULL_HANDLE;
+    }
+    texture.sampler_ = createDefaultSampler(texture.device_, true);
+    return texture;
+}
+
+GpuTexture GpuTexture::createSoftRibbonSprite(const VulkanContext& context, const std::uint32_t size) {
+    // Soft comet/wedge ribbon: tip at bottom (V≈0), wide neck at top (V≈1).
+    // One path-aligned quad from trail tip→head reads as a continuous tapering silhouette
+    // (not disc beads or segmented capsules). Soft sides keep the gentle look.
+    const std::uint32_t dim = std::max(size, 64u);
+    std::vector<std::uint8_t> rgba(static_cast<std::size_t>(dim) * dim * 4u);
+            constexpr float kPeak = 0.88f;
+    // Round H.2: tip must stay a faint point — bright yellow tips were blooming into a
+    // second "soft circle" behind the head and reading as anti-comet outliers.
+    constexpr float kTipHalf = 0.045f;
+    constexpr float kNeckHalf = 0.95f;
+    for (std::uint32_t y = 0; y < dim; ++y) {
+        for (std::uint32_t x = 0; x < dim; ++x) {
+            const float nx = (static_cast<float>(x) + 0.5f) / static_cast<float>(dim) * 2.0f - 1.0f;
+            const float ny = (static_cast<float>(y) + 0.5f) / static_cast<float>(dim) * 2.0f - 1.0f;
+            // Mesh UV: local -Y → V=0, local +Y → V=1.
+            // ParticleWorld: model[1] = +along*(tip→head), tip behind travel.
+            // V=0 tip at -Y (behind), V=1 neck at +Y (under soft-circle head).
+            const float u = std::clamp((ny + 1.0f) * 0.5f, 0.0f, 1.0f); // 0=tip/-Y, 1=neck/+Y
+            // Cubic widen so brightness stays under the head; tip stays needle-thin.
+            const float flare = u * u * u;
+            float half_w = kTipHalf + (kNeckHalf - kTipHalf) * flare;
+            if (ny > 0.55f) {
+                const float cy = 0.55f;
+                const float round_r = kNeckHalf;
+                const float d_round = std::sqrt(nx * nx + (ny - cy) * (ny - cy));
+                const float circle_half = std::max(0.0f, round_r - (ny - cy) * 0.15f);
+                half_w = std::min(half_w, circle_half);
+                if (d_round > round_r) {
+                    half_w = 0.0f;
+                }
+            }
+            const float ax = std::abs(nx);
+            float falloff = 0.0f;
+            if (half_w > 1e-4f && ax < half_w) {
+                const float edge = 1.0f - (ax / half_w);
+                const float soft = edge * edge * (3.0f - 2.0f * edge);
+                // Long tip fade: first 35% of length is dim so tip never blooms into a head.
+                const float tip_fade = u < 0.35f ? (u / 0.35f) : 1.0f;
+                const float tip_fade_s = tip_fade * tip_fade;
+                float neck_dissolve = 1.0f;
+                if (ny > 0.88f) {
+                    const float nd = 1.0f - (ny - 0.88f) / 0.12f;
+                    neck_dissolve = nd * nd * (3.0f - 2.0f * nd);
+                }
+                // Brightness rises toward the neck (head); tip stays dim.
+                const float along = 0.35f + 0.65f * flare;
+                falloff = soft * tip_fade_s * neck_dissolve * along * kPeak;
+            }
+            falloff = std::clamp(falloff, 0.0f, 1.0f);
+            const std::uint8_t v = static_cast<std::uint8_t>(falloff * 255.0f + 0.5f);
+            const std::size_t i = (static_cast<std::size_t>(y) * dim + x) * 4u;
+            rgba[i + 0] = v;
+            rgba[i + 1] = v;
+            rgba[i + 2] = v;
+            rgba[i + 3] = v;
+        }
+    }
+
+    GpuTexture texture(context, rgba.data(), dim, dim, TextureColorEncoding::Linear);
+    if (texture.sampler_ != VK_NULL_HANDLE) {
+        vkDestroySampler(texture.device_, texture.sampler_, nullptr);
+        texture.sampler_ = VK_NULL_HANDLE;
+    }
+    texture.sampler_ = createDefaultSampler(texture.device_, true);
+    return texture;
 }
 
 GpuTexture GpuTexture::createFluidDisplayTarget(const VulkanContext& context, const std::uint32_t width,

@@ -5,6 +5,7 @@
 #include "SceneSelectors.h"
 #include "runtime/HostTimingAdapter.hpp"
 #include "runtime/RuntimePaths.hpp"
+#include "protocol/OscProtocol.hpp"
 #include "common/string.h"
 #include "renderer/vulkan/ExternalRenderTarget.hpp"
 #include "renderer/vulkan/ExternalSync.hpp"
@@ -281,6 +282,10 @@ void Input::reloadSceneIfNeeded() {
             loaded_show_index_ = show_index;
             refreshCatalogForLoadedShow();
             applyLoadedPixeraConfig();
+            configureRoomOscIfNeeded(resource);
+            // Fresh per-stream cursors so dual-GPU consumers replay from the shared OSC hub.
+            osc_particle_cursor_ = 0;
+            osc_room_person_cursor_ = 0;
             host().log_info(std::format("GENESIS loaded show '{}'", resource));
         } else {
             host().log_error(std::format("GENESIS failed to load show '{}': {}", resource,
@@ -289,6 +294,23 @@ void Input::reloadSceneIfNeeded() {
     } else {
         host().log_error(std::format("GENESIS could not resolve show '{}'", resource));
     }
+}
+
+void Input::configureRoomOscIfNeeded(const std::string& resource_path) {
+    if (resource_path.find("room_osc_particles") == std::string::npos) {
+        return;
+    }
+    ::genesis::OscProtocol& osc = ::genesis::sharedOscProtocol();
+    ::genesis::OscRoomPersonSettings room = osc.roomPersonSettings();
+    ::genesis::configureRoomOscInstallSettings(room);
+    osc.setRoomPersonSettings(room);
+
+    ::genesis::OscParticleEmitSettings emit = osc.particleEmitSettings();
+    emit.emitter_path = "Scene/Person Pool/Feet 00";
+    emit.track_emitter_position = true;
+    emit.burst_on_message = false;
+    osc.setParticleEmitSettings(emit);
+    host().log_info("GENESIS room OSC person configured for Renderbridge");
 }
 
 void Input::publishTargetTexture() {
@@ -467,6 +489,17 @@ RenderResult Input::render() noexcept try {
     }
 
     actor_bindings_.apply(session_->sceneRuntime());
+
+    // Shared OSC hub: one UDP listen per process, per-stream cursor for dual-GPU.
+    ::genesis::OscProtocol& osc = ::genesis::sharedOscProtocol();
+    if (osc.settings().listening || osc.isListening()) {
+        osc_time_seconds_ = time_ ? time_->value() : osc_time_seconds_;
+        osc.poll(osc_time_seconds_);
+        osc.applyBindings(session_->sceneRuntime());
+        osc.applyParticleEmits(session_->sceneRuntime(), osc_particle_cursor_);
+        osc.applyRoomPerson(session_->sceneRuntime(), osc_room_person_cursor_);
+    }
+
     const ::genesis::HostTimingInput timing =
         ::genesis::hostTimingFromPixeraTimeline(time_->value());
     const ::genesis::GenesisFrameTime frame_time = session_->advanceProductionTime(timing);

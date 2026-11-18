@@ -19,6 +19,7 @@ public:
     float mouseY() const { return mouse_y_; }
     float mouseDeltaX() const { return mouse_delta_x_; }
     float mouseDeltaY() const { return mouse_delta_y_; }
+    float mouseWheelY() const { return mouse_wheel_y_; }
     void resetMouseDelta();
 
     void setMouseCaptured(bool captured);
@@ -36,6 +37,7 @@ private:
     float mouse_y_ = 0.0f;
     float mouse_delta_x_ = 0.0f;
     float mouse_delta_y_ = 0.0f;
+    float mouse_wheel_y_ = 0.0f;
 };
 
 } // namespace genesis

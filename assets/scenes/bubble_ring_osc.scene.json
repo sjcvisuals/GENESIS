@@ -1,0 +1,348 @@
+{
+  "version": 1,
+  "source": "builtin",
+  "nodes": [
+    {
+      "path": "Scene",
+      "name": "Scene",
+      "parent": null,
+      "visible": true,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "path": "Scene/Particle System",
+      "name": "Particle System",
+      "parent": "Scene",
+      "visible": true,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "path": "Scene/Particle System/Soft Circles",
+      "name": "Soft Circles",
+      "parent": "Scene/Particle System",
+      "visible": true,
+      "particle_emitter": {
+        "enabled": true,
+        "looping": true,
+        "world_space": true,
+        "duration": 0.0,
+        "start_delay": 0.0,
+        "rate": 5.0,
+        "burst": 0,
+        "max_particles": 120,
+        "lifetime_min": 4.0,
+        "lifetime_max": 6.0,
+        "speed_min": 0.18,
+        "speed_max": 0.3,
+        "size_min": 0.075,
+        "size_max": 0.1,
+        "size_end_multiplier": 0.45,
+        "color_start": [
+          1.0,
+          0.96,
+          0.78,
+          0.82
+        ],
+        "color_end": [
+          0.55,
+          0.75,
+          1.0,
+          0.0
+        ],
+        "velocity_mode": "cone",
+        "inherit_velocity": 0.0,
+        "force_gravity": true,
+        "gravity": [
+          0.0,
+          0.28,
+          0.0
+        ],
+        "force_drag": true,
+        "drag": 0.22,
+        "force_noise": false,
+        "kill_plane": false,
+        "kill_box": false,
+        "size_over_life": {
+          "keys": [
+            {
+              "t": 0.0,
+              "v": 0.9
+            },
+            {
+              "t": 0.2,
+              "v": 1.0
+            },
+            {
+              "t": 1.0,
+              "v": 0.4
+            }
+          ]
+        },
+        "color_over_life": {
+          "keys": [
+            {
+              "t": 0.0,
+              "v": [
+                1.0,
+                0.94,
+                0.7,
+                0.35
+              ]
+            },
+            {
+              "t": 0.2,
+              "v": [
+                0.9,
+                0.98,
+                0.85,
+                0.8
+              ]
+            },
+            {
+              "t": 1.0,
+              "v": [
+                0.5,
+                0.72,
+                1.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        "spawn_shape": "sphere",
+        "spawn_radius": 0.28,
+        "spawn_box_height": 0.05,
+        "cone_angle_degrees": 5.0,
+        "render_mesh": "sprite",
+        "sprite_aspect": 1.0,
+        "velocity_stretch": 0.0,
+        "trail_enabled": true,
+        "trail_segments": 8,
+        "trail_sample_distance": 0.055,
+        "trail_width": 0.72,
+        "trail_width_end": 0.08,
+        "trail_alpha": 0.72,
+        "trail_lifetime": 2.4,
+        "unlit": true,
+        "additive": true,
+        "seed_override": 0,
+        "fluid_coupled": false
+      },
+      "transform": {
+        "position": [
+          0.0,
+          0.2,
+          0.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "path": "Scene/Particle System/OSC Tracker",
+      "name": "OSC Tracker",
+      "parent": "Scene/Particle System",
+      "visible": true,
+      "particle_emitter": {
+        "enabled": false,
+        "looping": true,
+        "world_space": true,
+        "duration": 0.0,
+        "start_delay": 0.0,
+        "rate": 6.0,
+        "burst": 0,
+        "max_particles": 180,
+        "lifetime_min": 3.0,
+        "lifetime_max": 4.5,
+        "speed_min": 0.26,
+        "speed_max": 0.4,
+        "size_min": 0.065,
+        "size_max": 0.088,
+        "size_end_multiplier": 0.4,
+        "color_start": [
+          0.95,
+          0.97,
+          1.0,
+          0.78
+        ],
+        "color_end": [
+          0.72,
+          0.84,
+          0.96,
+          0.0
+        ],
+        "velocity_mode": "cone",
+        "inherit_velocity": 0.1,
+        "force_gravity": true,
+        "gravity": [
+          0.0,
+          0.45,
+          0.0
+        ],
+        "force_drag": true,
+        "drag": 0.2,
+        "force_noise": false,
+        "kill_plane": false,
+        "kill_box": false,
+        "size_over_life": {
+          "keys": [
+            {
+              "t": 0.0,
+              "v": 0.9
+            },
+            {
+              "t": 0.2,
+              "v": 1.0
+            },
+            {
+              "t": 1.0,
+              "v": 0.4
+            }
+          ]
+        },
+        "color_over_life": {
+          "keys": [
+            {
+              "t": 0.0,
+              "v": [
+                0.92,
+                0.95,
+                1.0,
+                0.3
+              ]
+            },
+            {
+              "t": 0.12,
+              "v": [
+                0.95,
+                0.97,
+                1.0,
+                0.75
+              ]
+            },
+            {
+              "t": 1.0,
+              "v": [
+                0.68,
+                0.8,
+                0.94,
+                0.0
+              ]
+            }
+          ]
+        },
+        "spawn_shape": "point",
+        "spawn_radius": 0.04,
+        "spawn_box_height": 0.06,
+        "cone_angle_degrees": 6.0,
+        "render_mesh": "sprite",
+        "sprite_aspect": 1.0,
+        "velocity_stretch": 0.0,
+        "trail_enabled": false,
+        "trail_segments": 10,
+        "trail_sample_distance": 0.04,
+        "trail_width": 0.6,
+        "trail_width_end": 0.12,
+        "trail_alpha": 0.85,
+        "trail_lifetime": 2.6,
+        "unlit": true,
+        "additive": false,
+        "seed_override": 0,
+        "fluid_coupled": false,
+        "spawn_per_unit": 8.0
+      },
+      "transform": {
+        "position": [
+          0.9,
+          0.15,
+          0.2
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "path": "Scene/Camera",
+      "name": "Camera",
+      "parent": "Scene",
+      "visible": true,
+      "camera": {
+        "fov_y_degrees": 40.0,
+        "near": 0.05,
+        "far": 200.0
+      },
+      "transform": {
+        "position": [
+          2.2,
+          1.1,
+          3.1
+        ],
+        "rotation": [
+          -0.06,
+          0.27,
+          0.02,
+          0.96
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    }
+  ],
+  "materials": [],
+  "active_output_camera": "Scene/Camera"
+}

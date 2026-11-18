@@ -2,6 +2,7 @@
 
 #include "particles/FluidVolume.hpp"
 #include "scene/ScenePath.hpp"
+#include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <glm/gtc/matrix_transform.hpp>
@@ -293,6 +294,8 @@ const char* spawnShapeName(ParticleSpawnShape shape) {
         return "cone";
     case ParticleSpawnShape::Box:
         return "box";
+    case ParticleSpawnShape::Ring:
+        return "ring";
     default:
         return "point";
     }
@@ -302,19 +305,117 @@ ParticleSpawnShape spawnShapeFromName(const std::string& name) {
     if (name == "sphere") return ParticleSpawnShape::Sphere;
     if (name == "cone") return ParticleSpawnShape::Cone;
     if (name == "box") return ParticleSpawnShape::Box;
+    if (name == "ring" || name == "cylinder") return ParticleSpawnShape::Ring;
     return ParticleSpawnShape::Point;
 }
 
+const char* renderMeshName(ParticleRenderMesh mesh) {
+    switch (mesh) {
+    case ParticleRenderMesh::Sphere:
+        return "sphere";
+    case ParticleRenderMesh::Sprite:
+        return "sprite";
+    default:
+        return "cube";
+    }
+}
+
+ParticleRenderMesh renderMeshFromName(const std::string& name) {
+    if (name == "sphere") return ParticleRenderMesh::Sphere;
+    if (name == "sprite" || name == "billboard") return ParticleRenderMesh::Sprite;
+    return ParticleRenderMesh::Cube;
+}
+
+const char* velocityModeName(ParticleVelocityMode mode) {
+    switch (mode) {
+    case ParticleVelocityMode::FromPoint:
+        return "from_point";
+    case ParticleVelocityMode::Random:
+        return "random";
+    case ParticleVelocityMode::HorizontalPlane:
+        return "horizontal_plane";
+    default:
+        return "cone";
+    }
+}
+
+ParticleVelocityMode velocityModeFromName(const std::string& name) {
+    if (name == "from_point") return ParticleVelocityMode::FromPoint;
+    if (name == "random") return ParticleVelocityMode::Random;
+    if (name == "horizontal_plane") return ParticleVelocityMode::HorizontalPlane;
+    return ParticleVelocityMode::Cone;
+}
+
+json curve1ToJson(const ParticleCurve1& c) {
+    json keys = json::array();
+    for (std::uint8_t i = 0; i < c.count && i < ParticleCurve1::kMaxKeys; ++i) {
+        keys.push_back({{"t", c.keys[i].t}, {"v", c.keys[i].v}});
+    }
+    return {{"keys", keys}};
+}
+
+ParticleCurve1 curve1FromJson(const json& j) {
+    ParticleCurve1 c{};
+    if (!j.contains("keys") || !j["keys"].is_array()) {
+        return c;
+    }
+    for (const json& key : j["keys"]) {
+        if (c.count >= ParticleCurve1::kMaxKeys) {
+            break;
+        }
+        c.keys[c.count].t = key.value("t", 0.0f);
+        c.keys[c.count].v = key.value("v", 1.0f);
+        ++c.count;
+    }
+    return c;
+}
+
+json curveColorToJson(const ParticleCurveColor& c) {
+    json keys = json::array();
+    for (std::uint8_t i = 0; i < c.count && i < ParticleCurveColor::kMaxKeys; ++i) {
+        keys.push_back({{"t", c.keys[i].t}, {"v", vec4ToJson(c.keys[i].v)}});
+    }
+    return {{"keys", keys}};
+}
+
+ParticleCurveColor curveColorFromJson(const json& j) {
+    ParticleCurveColor c{};
+    if (!j.contains("keys") || !j["keys"].is_array()) {
+        return c;
+    }
+    for (const json& key : j["keys"]) {
+        if (c.count >= ParticleCurveColor::kMaxKeys) {
+            break;
+        }
+        c.keys[c.count].t = key.value("t", 0.0f);
+        if (key.contains("v")) {
+            c.keys[c.count].v = vec4FromJson(key["v"]);
+        }
+        ++c.count;
+    }
+    return c;
+}
+
 json particleEmitterToJson(const ParticleEmitter& e) {
+    json bursts = json::array();
+    for (std::uint8_t i = 0; i < e.burst_entries && i < e.bursts.size(); ++i) {
+        bursts.push_back({{"time", e.bursts[i].time_seconds}, {"count", e.bursts[i].count}});
+    }
     return json{
         {"enabled", e.enabled},
         {"looping", e.looping},
         {"world_space", e.world_space},
         {"duration", e.duration_seconds},
         {"start_delay", e.start_delay_seconds},
+        {"mod_spawn_rate", e.mod_spawn_rate},
         {"rate", e.rate_per_second},
         {"burst", e.burst_count},
+        {"bursts", bursts},
         {"max_particles", e.max_particles},
+        {"mod_lifetime", e.mod_lifetime},
+        {"mod_velocity", e.mod_velocity},
+        {"mod_size", e.mod_size},
+        {"mod_color", e.mod_color},
         {"lifetime_min", e.lifetime_min},
         {"lifetime_max", e.lifetime_max},
         {"speed_min", e.speed_min},
@@ -324,14 +425,58 @@ json particleEmitterToJson(const ParticleEmitter& e) {
         {"size_end_multiplier", e.size_end_multiplier},
         {"color_start", vec4ToJson(e.color_start)},
         {"color_end", vec4ToJson(e.color_end)},
+        {"velocity_mode", velocityModeName(e.velocity_mode)},
+        {"inherit_velocity", e.inherit_velocity},
+        {"mod_shape", e.mod_shape},
+        {"force_gravity", e.force_gravity},
         {"gravity", vec3ToJson(e.gravity)},
+        {"force_drag", e.force_drag},
         {"drag", e.drag},
+        {"force_point", e.force_point},
+        {"point_force_position", vec3ToJson(e.point_force_position)},
+        {"point_force_strength", e.point_force_strength},
+        {"point_force_softness", e.point_force_softness},
+        {"force_vortex", e.force_vortex},
+        {"vortex_strength", e.vortex_strength},
+        {"vortex_axis", vec3ToJson(e.vortex_axis)},
+        {"vortex_radius", e.vortex_radius},
+        {"force_noise", e.force_noise},
+        {"noise_strength", e.noise_strength},
+        {"noise_frequency", e.noise_frequency},
+        {"force_accel", e.force_accel},
+        {"acceleration", vec3ToJson(e.acceleration)},
+        {"kill_plane", e.kill_plane},
+        {"kill_plane_y", e.kill_plane_y},
+        {"kill_box", e.kill_box},
+        {"kill_box_min", vec3ToJson(e.kill_box_min)},
+        {"kill_box_max", vec3ToJson(e.kill_box_max)},
+        {"mod_size_over_life", e.mod_size_over_life},
+        {"mod_color_over_life", e.mod_color_over_life},
+        {"size_over_life", curve1ToJson(e.size_over_life)},
+        {"color_over_life", curveColorToJson(e.color_over_life)},
+        {"scale_by_speed", e.scale_by_speed},
+        {"scale_by_speed_range_min", e.scale_by_speed_range_min},
+        {"scale_by_speed_range_max", e.scale_by_speed_range_max},
+        {"scale_by_speed_mul_min", e.scale_by_speed_mul_min},
+        {"scale_by_speed_mul_max", e.scale_by_speed_mul_max},
+        {"spawn_per_unit", e.spawn_per_unit},
         {"spawn_shape", spawnShapeName(e.spawn_shape)},
         {"spawn_radius", e.spawn_radius},
         {"spawn_box_height", e.spawn_box_height},
         {"cone_angle_degrees", e.cone_angle_degrees},
-        {"render_mesh", e.render_mesh == ParticleRenderMesh::Sphere ? "sphere" : "cube"},
+        {"mod_sprite", e.mod_sprite},
+        {"render_mesh", renderMeshName(e.render_mesh)},
+        {"sprite_aspect", e.sprite_aspect},
+        {"velocity_stretch", e.velocity_stretch},
+        {"trail_enabled", e.trail_enabled},
+        {"trail_segments", e.trail_segments},
+        {"trail_sample_distance", e.trail_sample_distance},
+        {"trail_width", e.trail_width},
+        {"trail_width_end", e.trail_width_end},
+        {"trail_alpha", e.trail_alpha},
+        {"trail_lifetime", e.trail_lifetime},
         {"unlit", e.unlit},
+        {"additive", e.additive},
         {"seed_override", e.seed_override},
         {"fluid_coupled", e.fluid_coupled},
     };
@@ -344,9 +489,14 @@ ParticleEmitter particleEmitterFromJson(const json& j) {
     e.world_space = j.value("world_space", e.world_space);
     e.duration_seconds = j.value("duration", e.duration_seconds);
     e.start_delay_seconds = j.value("start_delay", e.start_delay_seconds);
+    e.mod_spawn_rate = j.value("mod_spawn_rate", e.mod_spawn_rate);
     e.rate_per_second = j.value("rate", e.rate_per_second);
     e.burst_count = j.value("burst", e.burst_count);
     e.max_particles = j.value("max_particles", e.max_particles);
+    e.mod_lifetime = j.value("mod_lifetime", e.mod_lifetime);
+    e.mod_velocity = j.value("mod_velocity", e.mod_velocity);
+    e.mod_size = j.value("mod_size", e.mod_size);
+    e.mod_color = j.value("mod_color", e.mod_color);
     e.lifetime_min = j.value("lifetime_min", e.lifetime_min);
     e.lifetime_max = j.value("lifetime_max", e.lifetime_max);
     e.speed_min = j.value("speed_min", e.speed_min);
@@ -356,18 +506,75 @@ ParticleEmitter particleEmitterFromJson(const json& j) {
     e.size_end_multiplier = j.value("size_end_multiplier", e.size_end_multiplier);
     if (j.contains("color_start")) e.color_start = vec4FromJson(j["color_start"]);
     if (j.contains("color_end")) e.color_end = vec4FromJson(j["color_end"]);
+    if (j.contains("velocity_mode")) e.velocity_mode = velocityModeFromName(j["velocity_mode"].get<std::string>());
+    e.inherit_velocity = j.value("inherit_velocity", e.inherit_velocity);
+    e.mod_shape = j.value("mod_shape", e.mod_shape);
+    e.force_gravity = j.value("force_gravity", e.force_gravity);
     if (j.contains("gravity")) e.gravity = vec3FromJson(j["gravity"]);
+    e.force_drag = j.value("force_drag", e.force_drag);
     e.drag = j.value("drag", e.drag);
+    e.force_point = j.value("force_point", e.force_point);
+    if (j.contains("point_force_position")) e.point_force_position = vec3FromJson(j["point_force_position"]);
+    e.point_force_strength = j.value("point_force_strength", e.point_force_strength);
+    e.point_force_softness = j.value("point_force_softness", e.point_force_softness);
+    e.force_vortex = j.value("force_vortex", e.force_vortex);
+    e.vortex_strength = j.value("vortex_strength", e.vortex_strength);
+    if (j.contains("vortex_axis")) e.vortex_axis = vec3FromJson(j["vortex_axis"]);
+    e.vortex_radius = j.value("vortex_radius", e.vortex_radius);
+    e.force_noise = j.value("force_noise", e.force_noise);
+    e.noise_strength = j.value("noise_strength", e.noise_strength);
+    e.noise_frequency = j.value("noise_frequency", e.noise_frequency);
+    e.force_accel = j.value("force_accel", e.force_accel);
+    if (j.contains("acceleration")) e.acceleration = vec3FromJson(j["acceleration"]);
+    e.kill_plane = j.value("kill_plane", e.kill_plane);
+    e.kill_plane_y = j.value("kill_plane_y", e.kill_plane_y);
+    e.kill_box = j.value("kill_box", e.kill_box);
+    if (j.contains("kill_box_min")) e.kill_box_min = vec3FromJson(j["kill_box_min"]);
+    if (j.contains("kill_box_max")) e.kill_box_max = vec3FromJson(j["kill_box_max"]);
+    e.mod_size_over_life = j.value("mod_size_over_life", e.mod_size_over_life);
+    e.mod_color_over_life = j.value("mod_color_over_life", e.mod_color_over_life);
+    if (j.contains("size_over_life")) e.size_over_life = curve1FromJson(j["size_over_life"]);
+    if (j.contains("color_over_life")) e.color_over_life = curveColorFromJson(j["color_over_life"]);
+    e.scale_by_speed = j.value("scale_by_speed", e.scale_by_speed);
+    e.scale_by_speed_range_min = j.value("scale_by_speed_range_min", e.scale_by_speed_range_min);
+    e.scale_by_speed_range_max = j.value("scale_by_speed_range_max", e.scale_by_speed_range_max);
+    e.scale_by_speed_mul_min = j.value("scale_by_speed_mul_min", e.scale_by_speed_mul_min);
+    e.scale_by_speed_mul_max = j.value("scale_by_speed_mul_max", e.scale_by_speed_mul_max);
+    e.spawn_per_unit = j.value("spawn_per_unit", e.spawn_per_unit);
     if (j.contains("spawn_shape")) e.spawn_shape = spawnShapeFromName(j["spawn_shape"].get<std::string>());
     e.spawn_radius = j.value("spawn_radius", e.spawn_radius);
     e.spawn_box_height = j.value("spawn_box_height", e.spawn_box_height);
     e.cone_angle_degrees = j.value("cone_angle_degrees", e.cone_angle_degrees);
-    if (j.value("render_mesh", std::string{"cube"}) == "sphere") {
-        e.render_mesh = ParticleRenderMesh::Sphere;
+    e.mod_sprite = j.value("mod_sprite", e.mod_sprite);
+    if (j.contains("render_mesh")) {
+        e.render_mesh = renderMeshFromName(j["render_mesh"].get<std::string>());
     }
+    e.sprite_aspect = j.value("sprite_aspect", e.sprite_aspect);
+    e.velocity_stretch = j.value("velocity_stretch", e.velocity_stretch);
+    e.trail_enabled = j.value("trail_enabled", e.trail_enabled);
+    e.trail_segments = static_cast<std::uint8_t>(
+        std::clamp(j.value("trail_segments", static_cast<int>(e.trail_segments)), 2, 24));
+    e.trail_sample_distance = j.value("trail_sample_distance", e.trail_sample_distance);
+    e.trail_width = j.value("trail_width", e.trail_width);
+    e.trail_width_end = j.value("trail_width_end", e.trail_width_end);
+    e.trail_alpha = j.value("trail_alpha", e.trail_alpha);
+    e.trail_lifetime = j.value("trail_lifetime", e.trail_lifetime);
     e.unlit = j.value("unlit", e.unlit);
+    e.additive = j.value("additive", e.additive);
     e.seed_override = j.value("seed_override", e.seed_override);
     e.fluid_coupled = j.value("fluid_coupled", e.fluid_coupled);
+    if (j.contains("bursts") && j["bursts"].is_array()) {
+        e.burst_entries = 0;
+        for (const json& burst : j["bursts"]) {
+            if (e.burst_entries >= e.bursts.size()) {
+                break;
+            }
+            e.bursts[e.burst_entries].time_seconds = burst.value("time", 0.0f);
+            e.bursts[e.burst_entries].count = burst.value("count", 0u);
+            ++e.burst_entries;
+        }
+    }
+    syncEmitterCurvesFromEndpoints(e);
     return e;
 }
 

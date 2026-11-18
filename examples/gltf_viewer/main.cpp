@@ -9,6 +9,9 @@
 #include "editor/EditorSession.hpp"
 #include "editor/OscProtocolUi.hpp"
 #include "editor/AudioReactiveUi.hpp"
+#include "editor/EditorTheme.hpp"
+#include "editor/ParticleEmitterUi.hpp"
+#include "editor/TugelaEditor.hpp"
 #include "editor/SceneViewport.hpp"
 #include "engine/Application.hpp"
 #include "platform/EditorPaths.hpp"
@@ -25,12 +28,13 @@
 #include "scene/SceneDrawBatch.hpp"
 #include "scene/ScenePicker.hpp"
 #include "scene/ScenePath.hpp"
-#include "particles/FluidVolume.hpp"
+#include "particles/ParticleEmitter.hpp"
 #include "protocol/OscProtocol.hpp"
 #include "audio/AudioReactive.hpp"
 
 #include <SDL3/SDL.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <imgui.h>
 #include <ImGuizmo.h>
@@ -57,8 +61,9 @@
 
 namespace {
 
-constexpr float kGridHalfExtentM = 12.0f;
-constexpr int kGridDivisions = 24;
+// Room-scale meter grid (~6 m install footprint + margin).
+constexpr float kGridHalfExtentM = 24.0f;
+constexpr int kGridDivisions = 48;
 
 struct ExampleLoadOptions {
     bool auto_play_animation = false;
@@ -73,7 +78,13 @@ public:
         setRenderStatsEnabled(true);
         genesis::ensureEditorDataDirs();
         session_.loadRecentList();
-        renderer().setClearColor(0.035f, 0.038f, 0.045f, 1.0f);
+        // Black unlit stage — only self-illuminated particles read as glow (prefs).
+        renderer().setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        color_mgmt_.settings().exposure = 1.15f;
+        color_mgmt_.settings().bloom_strength = 0.04f; // not bloom-as-blur; additive sprites carry glow
+        color_mgmt_.settings().grain_strength = 0.0f;
+        color_mgmt_.settings().vignette_strength = 0.0f;
+        show_grid_ = true;
 
         grid_mesh_ = genesis::createEditorGridMesh(renderer().context(), kGridHalfExtentM, kGridDivisions);
         if (color_mgmt_.lutDirty()) {
@@ -196,7 +207,111 @@ public:
     }
 
 protected:
+    void maybeRunTugelaEditorDemoHook() {
+        const char* mode = std::getenv("GENESIS_TUGELA_EDITOR");
+        if (!mode || mode[0] == '\0') {
+            return;
+        }
+        ++tugela_demo_frames_;
+        if (tugela_demo_frames_ != 40) {
+            return;
+        }
+        genesis::Scene& scene = runtime_.scene();
+        tugela_editor_.open = true;
+        tugela_editor_.tab = genesis::TugelaEditorTab::Graph;
+
+        if (std::optional<genesis::NodeId> id =
+                genesis::findNodeByPath(scene, "Scene/Particle System/Outer Ring")) {
+            selectNode(*id);
+            genesis::tugelaEditorFocusSelection(tugela_editor_, scene, *id);
+            return;
+        }
+        if (std::optional<genesis::NodeId> sys =
+                genesis::findNodeByPath(scene, "Scene/Particle System")) {
+            selectNode(*sys);
+            genesis::tugelaEditorFocusSelection(tugela_editor_, scene, *sys);
+            return;
+        }
+
+        // Empty scene: seed one System actor with Soft Circles + Trail emitters.
+        std::optional<genesis::NodeId> scene_root = genesis::findNodeByPath(scene, "Scene");
+        const genesis::NodeId system = scene.createEmptyNode("Particle System", scene_root);
+        scene.createParticleEmitterNode("Soft Circles", system, genesis::makeGentleCirclesEmitter());
+        genesis::ParticleEmitter trail = genesis::makeGentleSoftEmitter();
+        trail.rate_per_second = 5.0f;
+        trail.trail_enabled = true;
+        trail.force_gravity = true;
+        scene.createParticleEmitterNode("Trail", system, trail);
+        selectNode(system);
+        genesis::tugelaEditorFocusSelection(tugela_editor_, scene, system);
+        markDirty();
+    }
+
+    void maybeRunEdgeDemoHook() {
+        maybeRunTugelaEditorDemoHook();
+        const char* mode = std::getenv("GENESIS_EDGE_DEMO");
+        if (!mode || mode[0] == '\0') {
+            return;
+        }
+        ++edge_demo_frames_;
+        if (edge_demo_frames_ != 45) {
+            return;
+        }
+        const std::string m(mode);
+        if (m == "mesh") {
+            game_view_mode_ = false;
+            show_actor_icons_ = true;
+            addPrimitiveMesh("Cube", genesis::createCubeMesh(renderer().context()));
+            if (genesis::Node* node = runtime_.scene().find(primarySelected())) {
+                if (node->material_resource.has_value()) {
+                    if (genesis::SceneMaterial* mat = runtime_.material(*node->material_resource)) {
+                        // Mid-gray body so the thin white silhouette rim contrasts.
+                        mat->base_color = glm::vec4(0.28f, 0.30f, 0.34f, 1.0f);
+                        mat->emissive = glm::vec3(0.12f, 0.13f, 0.15f);
+                        mat->emissive_strength = 1.0f;
+                        mat->roughness = 0.65f;
+                        mat->metallic = 0.0f;
+                    }
+                }
+                node->local.position = glm::vec3(0.0f, 0.55f, 0.0f);
+                node->local.scale = glm::vec3(0.9f);
+            }
+            runtime_.updateTransforms();
+            focusEditorCameraOnSelection();
+            // Pull camera out so the white silhouette rim reads clearly.
+            placeEditorCameraAt(glm::vec3(2.4f, 1.6f, 2.8f), glm::vec3(0.0f, 0.55f, 0.0f));
+        } else if (m == "emitter") {
+            game_view_mode_ = false;
+            show_actor_icons_ = true;
+            std::optional<genesis::NodeId> id =
+                genesis::findNodeByPath(runtime_.scene(), "Scene/Particle System/Soft Circles");
+            if (!id) {
+                for (const genesis::Node& n : runtime_.scene().nodes) {
+                    if (n.particle_emitter.has_value()) {
+                        id = n.id;
+                        break;
+                    }
+                }
+            }
+            if (id) {
+                selectNode(*id);
+                focusEditorCameraOnSelection();
+                placeEditorCameraAt(glm::vec3(1.8f, 1.4f, 2.2f), glm::vec3(0.0f, 0.2f, 0.0f));
+            }
+        } else if (m == "game") {
+            show_actor_icons_ = true;
+            game_view_mode_ = true;
+            std::optional<genesis::NodeId> id =
+                genesis::findNodeByPath(runtime_.scene(), "Scene/Particle System/Soft Circles");
+            if (id) {
+                selectNode(*id);
+            }
+            placeEditorCameraAt(glm::vec3(1.8f, 1.4f, 2.2f), glm::vec3(0.0f, 0.2f, 0.0f));
+        }
+    }
+
     void onUpdate(float dt) override {
+        maybeRunEdgeDemoHook();
         if (smoke_exit_frames_ >= 0) {
             if (--smoke_exit_frames_ < 0) {
                 exit_confirmed_ = true;
@@ -210,9 +325,12 @@ protected:
         osc_time_ += static_cast<double>(dt);
         osc_protocol_.poll(osc_time_);
         osc_protocol_.applyBindings(runtime_);
+        osc_protocol_.applyParticleEmits(runtime_, osc_particle_cursor_);
+        osc_protocol_.applyRoomPerson(runtime_, osc_room_person_cursor_);
         audio_reactive_.tick(runtime_, dt);
         runtime_.updateTransforms();
-        runtime_.tickParticles(dt);
+        // Allow catch-up on slow software GPUs so gentle rise/trails stay readable.
+        runtime_.tickParticles(dt, 0.01f, 24);
         last_frame_dt_ = dt;
         handleEditorShortcuts();
 
@@ -221,63 +339,31 @@ protected:
             show_exit_confirm_ = true;
         }
 
-        // Start fly when RMB begins over the viewport; keep flying while RMB is held
-        // even after relative-mouse capture moves the cursor off the hover rect.
-        if (input().mouseButtonDown(SDL_BUTTON_RIGHT) && !ImGuizmo::IsUsing()) {
-            if (fly_camera_active_ || viewport_hovered_ || viewport_.contains(input().mouseX(), input().mouseY())) {
-                fly_camera_active_ = true;
-            }
-        } else {
-            fly_camera_active_ = false;
-        }
-
-        if (fly_camera_active_) {
-            use_editor_output_ = true;
-            input().setMouseCaptured(window().handle(), true);
-            const float sensitivity = 0.0025f;
-            editor_camera_.yaw_radians += input().mouseDeltaX() * sensitivity;
-            editor_camera_.pitch_radians += input().mouseDeltaY() * sensitivity;
-            editor_camera_.pitch_radians = glm::clamp(editor_camera_.pitch_radians, -1.4f, 1.4f);
-            editor_camera_.rebuildRotationFromYawPitch();
-
-            const float speed = (input().keyDown(SDL_SCANCODE_LSHIFT) ? 6.0f : 2.5f);
-            glm::vec3 move(0.0f);
-            if (input().keyDown(SDL_SCANCODE_W)) move += editor_camera_.forward();
-            if (input().keyDown(SDL_SCANCODE_S)) move -= editor_camera_.forward();
-            if (input().keyDown(SDL_SCANCODE_D)) move += editor_camera_.right();
-            if (input().keyDown(SDL_SCANCODE_A)) move -= editor_camera_.right();
-            if (input().keyDown(SDL_SCANCODE_E)) move += glm::vec3(0.0f, 1.0f, 0.0f);
-            if (input().keyDown(SDL_SCANCODE_Q)) move -= glm::vec3(0.0f, 1.0f, 0.0f);
-            if (glm::length(move) > 0.0f) {
-                editor_camera_.transform.position += glm::normalize(move) * speed * dt;
-            }
-        } else {
-            input().setMouseCaptured(window().handle(), false);
-
-            // W/E/R switch tools even over the viewport; RMB+WASD is reserved for fly above.
-            const bool typing = ImGui::GetIO().WantTextInput;
-            if (!ImGuizmo::IsUsing() && !typing) {
-                if (input().keyPressed(SDL_SCANCODE_W)) gizmo_operation_ = ImGuizmo::TRANSLATE;
-                if (input().keyPressed(SDL_SCANCODE_E)) gizmo_operation_ = ImGuizmo::ROTATE;
-                if (input().keyPressed(SDL_SCANCODE_R)) gizmo_operation_ = ImGuizmo::SCALE;
-            }
-        }
+        updateEditorCameraNavigation(dt);
 
         const float aspect = refreshOutputAspect();
         const glm::mat4 vp = outputViewProjection(renderAspect());
-        const genesis::FrameUniforms frame =
+        genesis::FrameUniforms frame =
             genesis::buildFrameUniforms(runtime_.scene(), &vp[0][0], outputCameraPosition(),
                                         &color_mgmt_.settings(), look_time_seconds_);
+        // Particle look demos: pure black unlit stage (no ambient wash / fog fill).
+        frame.ibl_intensity = 0.0f;
+        frame.ambient_sky[0] = 0.0f;
+        frame.ambient_sky[1] = 0.0f;
+        frame.ambient_sky[2] = 0.0f;
+        frame.ambient_ground[0] = 0.0f;
+        frame.ambient_ground[1] = 0.0f;
+        frame.ambient_ground[2] = 0.0f;
+        frame.fog_density = 0.0f;
+        frame.fog_color[0] = 0.0f;
+        frame.fog_color[1] = 0.0f;
+        frame.fog_color[2] = 0.0f;
         renderer().setFrameUniforms(frame);
         look_time_seconds_ += last_frame_dt_;
     }
 
     void onDraw() override {
         runtime_.updateTransforms();
-        if (renderer().canDispatchCompute()) {
-            runtime_.simulateFluids(renderer().currentCommandBuffer(), last_frame_dt_);
-        }
-
         if (show_viewport_ && viewport_.w > 1.0f && viewport_.h > 1.0f) {
             renderer().setViewportDrawRegion(viewport_.x, viewport_.y, viewport_.w, viewport_.h);
         } else {
@@ -292,7 +378,15 @@ protected:
         collect_params.enable_cpu_culling = true;
         collect_params.enable_gpu_culling = false;
         runtime_.collectDrawCommands(draw_commands_, &render_stats, collect_params);
-        runtime_.appendFluidDrawCommands(draw_commands_);
+        {
+            // Camera-facing sprite basis for Tugela soft circles.
+            const glm::mat4 view = outputViewMatrix();
+            const glm::mat3 inv = glm::inverse(glm::mat3(view));
+            runtime_.setParticleViewBasis(glm::normalize(glm::vec3(inv[0])),
+                                         glm::normalize(glm::vec3(inv[1])));
+        }
+        // GPU particle motion flush (immediate compute submit) before collecting sprites.
+        runtime_.flushParticleGpuUpdates(VK_NULL_HANDLE);
         runtime_.appendParticleDrawCommands(draw_commands_);
         render_stats.draw_calls = static_cast<std::uint32_t>(draw_commands_.size());
         // Recount triangles roughly including particles.
@@ -325,11 +419,13 @@ protected:
         }
 
         if (show_grid_) {
-            // Soft graphite procedural grid (fragment-shaded ground plane).
+            // Cool readable lines on black unlit stage (1 m major / 0.25 m minor).
             const genesis::GridDrawPushConstants grid_pc =
-                genesis::makeGridDrawPushConstants(nullptr, 0.42f, 0.45f, 0.50f, 0.55f);
+                genesis::makeGridDrawPushConstants(nullptr, 0.38f, 0.48f, 0.52f, 0.72f);
             renderer().drawGrid(grid_mesh_, grid_pc);
         }
+
+        drawSelectionEdgeOutlines(draw_options, &vp[0][0]);
 
         last_culled_nodes_ = render_stats.culled_mesh_nodes;
     }
@@ -349,6 +445,7 @@ protected:
         drawMenuBar(scene);
         if (show_hierarchy_) drawHierarchyPanel(scene);
         if (show_inspector_) drawInspectorPanel(scene);
+        drawTugelaEditor(scene);
         if (show_toolbar_) drawToolbarPanel(scene);
         if (show_viewport_help_) drawViewportHelpPanel();
         if (show_timeline_) drawTimelinePanel();
@@ -374,6 +471,7 @@ protected:
 
             handleViewportSelection(scene);
             drawSelectionOverlays(scene);
+            drawActorIcons(scene);
         } else {
             viewport_.w = 0.0f;
             viewport_.h = 0.0f;
@@ -409,6 +507,59 @@ private:
         if (input().keyPressed(SDL_SCANCODE_F)) {
             focusEditorCameraOnSelection();
         }
+        // Unreal-like G: toggle game view (hides actor icons / editor helpers).
+        if (input().keyPressed(SDL_SCANCODE_G) && !ctrl) {
+            game_view_mode_ = !game_view_mode_;
+        }
+        // T: toggle lean Tugela Editor pop-out (systems / emitters / curves).
+        if (input().keyPressed(SDL_SCANCODE_T) && !ctrl) {
+            tugela_editor_.open = !tugela_editor_.open;
+            if (tugela_editor_.open) {
+                if (const genesis::NodeId id = primarySelected()) {
+                    genesis::tugelaEditorFocusSelection(tugela_editor_, runtime_.scene(), id);
+                }
+            }
+        }
+        // Demo / QA hotkeys for edge-selection screenshots (black-stage visible cube).
+        if (input().keyPressed(SDL_SCANCODE_F6)) {
+            addPrimitiveMesh("Cube", genesis::createCubeMesh(renderer().context()));
+            if (genesis::Node* node = runtime_.scene().find(primarySelected())) {
+                if (node->material_resource.has_value()) {
+                    if (genesis::SceneMaterial* mat = runtime_.material(*node->material_resource)) {
+                        mat->base_color = glm::vec4(0.55f, 0.58f, 0.62f, 1.0f);
+                        mat->emissive = glm::vec3(0.35f, 0.37f, 0.40f);
+                        mat->emissive_strength = 1.0f;
+                        mat->roughness = 0.55f;
+                    }
+                }
+                node->local.position = glm::vec3(0.0f, 0.5f, 0.0f);
+                node->local.scale = glm::vec3(0.85f);
+            }
+            runtime_.updateTransforms();
+            focusEditorCameraOnSelection();
+        }
+        if (input().keyPressed(SDL_SCANCODE_F7)) {
+            std::optional<genesis::NodeId> id =
+                genesis::findNodeByPath(runtime_.scene(), "Scene/Particle System/Soft Circles");
+            if (!id) {
+                for (const genesis::Node& n : runtime_.scene().nodes) {
+                    if (n.particle_emitter.has_value() &&
+                        n.name.find("Soft Circles") != std::string::npos) {
+                        id = n.id;
+                        break;
+                    }
+                }
+            }
+            if (id) {
+                selectNode(*id);
+                focusEditorCameraOnSelection();
+            } else {
+                spdlog::warn("F7: Soft Circles emitter not found");
+            }
+        }
+        if (input().keyPressed(SDL_SCANCODE_F8)) {
+            clearSelection();
+        }
         if (!selection_.empty() && !ImGuizmo::IsUsing()) {
             if (input().keyPressed(SDL_SCANCODE_DELETE)) {
                 queueDeleteSelectedNodes();
@@ -417,99 +568,7 @@ private:
     }
 
     void initEditorStyle() {
-        ImGuiStyle& style = ImGui::GetStyle();
-
-        // Quiet, dense chrome — more Linear/Figma than classic DCC toolbars.
-        style.WindowRounding = 10.0f;
-        style.ChildRounding = 8.0f;
-        style.FrameRounding = 6.0f;
-        style.GrabRounding = 6.0f;
-        style.PopupRounding = 8.0f;
-        style.ScrollbarRounding = 8.0f;
-        style.TabRounding = 6.0f;
-        style.WindowBorderSize = 0.0f;
-        style.ChildBorderSize = 0.0f;
-        style.PopupBorderSize = 0.0f;
-        style.FrameBorderSize = 0.0f;
-        style.TabBorderSize = 0.0f;
-        style.WindowPadding = ImVec2(14.0f, 12.0f);
-        style.FramePadding = ImVec2(10.0f, 6.0f);
-        style.ItemSpacing = ImVec2(10.0f, 8.0f);
-        style.ItemInnerSpacing = ImVec2(8.0f, 5.0f);
-        style.IndentSpacing = 16.0f;
-        style.ScrollbarSize = 10.0f;
-        style.GrabMinSize = 10.0f;
-        style.WindowTitleAlign = ImVec2(0.0f, 0.5f);
-        style.ButtonTextAlign = ImVec2(0.5f, 0.5f);
-
-        ImVec4* colors = style.Colors;
-
-        // Near-black canvas with cool charcoal panels and a single teal accent.
-        const ImVec4 bg_app(0.055f, 0.057f, 0.062f, 1.0f);
-        const ImVec4 bg_panel(0.090f, 0.094f, 0.102f, 0.97f);
-        const ImVec4 bg_elevated(0.118f, 0.124f, 0.134f, 1.0f);
-        const ImVec4 bg_input(0.070f, 0.074f, 0.082f, 1.0f);
-        const ImVec4 border(0.160f, 0.168f, 0.180f, 1.0f);
-        const ImVec4 text(0.920f, 0.930f, 0.945f, 1.0f);
-        const ImVec4 text_muted(0.480f, 0.500f, 0.540f, 1.0f);
-        const ImVec4 accent(0.220f, 0.760f, 0.700f, 1.0f);       // teal
-        const ImVec4 accent_hover(0.280f, 0.820f, 0.760f, 1.0f);
-        const ImVec4 accent_dim(0.140f, 0.420f, 0.400f, 1.0f);
-        const ImVec4 accent_soft(0.220f, 0.760f, 0.700f, 0.18f);
-
-        colors[ImGuiCol_Text] = text;
-        colors[ImGuiCol_TextDisabled] = text_muted;
-        colors[ImGuiCol_WindowBg] = bg_panel;
-        colors[ImGuiCol_ChildBg] = bg_app;
-        colors[ImGuiCol_PopupBg] = bg_elevated;
-        colors[ImGuiCol_Border] = border;
-        colors[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-        colors[ImGuiCol_FrameBg] = bg_input;
-        colors[ImGuiCol_FrameBgHovered] = ImVec4(0.100f, 0.110f, 0.120f, 1.0f);
-        colors[ImGuiCol_FrameBgActive] = ImVec4(0.120f, 0.135f, 0.145f, 1.0f);
-        colors[ImGuiCol_TitleBg] = bg_app;
-        colors[ImGuiCol_TitleBgActive] = bg_app;
-        colors[ImGuiCol_TitleBgCollapsed] = bg_app;
-        colors[ImGuiCol_MenuBarBg] = bg_app;
-        colors[ImGuiCol_ScrollbarBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-        colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.22f, 0.24f, 0.26f, 1.0f);
-        colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.30f, 0.33f, 0.36f, 1.0f);
-        colors[ImGuiCol_ScrollbarGrabActive] = accent_dim;
-        colors[ImGuiCol_CheckMark] = accent;
-        colors[ImGuiCol_SliderGrab] = accent;
-        colors[ImGuiCol_SliderGrabActive] = accent_hover;
-        colors[ImGuiCol_Button] = bg_elevated;
-        colors[ImGuiCol_ButtonHovered] = ImVec4(0.160f, 0.175f, 0.190f, 1.0f);
-        colors[ImGuiCol_ButtonActive] = accent_dim;
-        colors[ImGuiCol_Header] = accent_soft;
-        colors[ImGuiCol_HeaderHovered] = ImVec4(0.220f, 0.760f, 0.700f, 0.28f);
-        colors[ImGuiCol_HeaderActive] = ImVec4(0.220f, 0.760f, 0.700f, 0.40f);
-        colors[ImGuiCol_Separator] = ImVec4(0.140f, 0.148f, 0.160f, 1.0f);
-        colors[ImGuiCol_SeparatorHovered] = accent_dim;
-        colors[ImGuiCol_SeparatorActive] = accent;
-        colors[ImGuiCol_ResizeGrip] = ImVec4(0.22f, 0.24f, 0.26f, 0.4f);
-        colors[ImGuiCol_ResizeGripHovered] = accent_dim;
-        colors[ImGuiCol_ResizeGripActive] = accent;
-        colors[ImGuiCol_Tab] = bg_app;
-        colors[ImGuiCol_TabHovered] = bg_elevated;
-        colors[ImGuiCol_TabSelected] = bg_panel;
-        colors[ImGuiCol_TabSelectedOverline] = accent;
-        colors[ImGuiCol_TabDimmed] = bg_app;
-        colors[ImGuiCol_TabDimmedSelected] = bg_panel;
-        colors[ImGuiCol_DockingPreview] = ImVec4(0.220f, 0.760f, 0.700f, 0.35f);
-        colors[ImGuiCol_DockingEmptyBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-        colors[ImGuiCol_PlotLines] = accent;
-        colors[ImGuiCol_PlotHistogram] = accent;
-        colors[ImGuiCol_TableHeaderBg] = bg_elevated;
-        colors[ImGuiCol_TableBorderStrong] = border;
-        colors[ImGuiCol_TableBorderLight] = ImVec4(0.120f, 0.128f, 0.140f, 1.0f);
-        colors[ImGuiCol_TableRowBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-        colors[ImGuiCol_TableRowBgAlt] = ImVec4(1.0f, 1.0f, 1.0f, 0.02f);
-        colors[ImGuiCol_TextSelectedBg] = accent_soft;
-        colors[ImGuiCol_DragDropTarget] = accent;
-        colors[ImGuiCol_NavCursor] = accent;
-        colors[ImGuiCol_NavWindowingHighlight] = accent;
-        colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.02f, 0.02f, 0.03f, 0.55f);
+        genesis::applyGenesisEditorTheme();
     }
 
     void drawMenuBar(genesis::Scene& scene) {
@@ -565,6 +624,45 @@ private:
                 ImGui::EndMenu();
             }
             ImGui::Separator();
+            if (ImGui::BeginMenu("Examples")) {
+                if (ImGui::MenuItem("Tugela Soft Circles + OSC")) {
+                    const std::filesystem::path example =
+                        genesis::resolveAssetPath("assets/scenes/bubble_ring_osc.scene.json");
+                    try {
+                        loadSceneDocument(example);
+                        genesis::OscParticleEmitSettings emit = osc_protocol_.particleEmitSettings();
+                        emit.emitter_path = "Scene/Particle System/OSC Tracker";
+                        emit.track_emitter_position = true;
+                        emit.burst_on_message = false;
+                        emit.plane_height = 0.15f;
+                        osc_protocol_.setParticleEmitSettings(emit);
+                    } catch (const std::exception& ex) {
+                        spdlog::error("Open example failed: {}", ex.what());
+                    }
+                }
+                if (ImGui::MenuItem("Room OSC Particles")) {
+                    const std::filesystem::path example =
+                        genesis::resolveAssetPath("assets/scenes/room_osc_particles.scene.json");
+                    try {
+                        loadSceneDocument(example);
+                        genesis::OscRoomPersonSettings room = osc_protocol_.roomPersonSettings();
+                        genesis::configureRoomOscInstallSettings(room);
+                        osc_protocol_.setRoomPersonSettings(room);
+                        genesis::OscParticleEmitSettings emit = osc_protocol_.particleEmitSettings();
+                        emit.emitter_path = "Scene/Person Pool/Feet 00";
+                        emit.track_emitter_position = true;
+                        emit.burst_on_message = false;
+                        osc_protocol_.setParticleEmitSettings(emit);
+                        if (!osc_protocol_.isListening()) {
+                            osc_protocol_.startListening();
+                        }
+                    } catch (const std::exception& ex) {
+                        spdlog::error("Open room OSC example failed: {}", ex.what());
+                    }
+                }
+                ImGui::EndMenu();
+            }
+            ImGui::Separator();
             if (ImGui::MenuItem("Exit")) {
                 if (session_.dirty) {
                     show_exit_confirm_ = true;
@@ -583,6 +681,10 @@ private:
         if (ImGui::BeginMenu("View")) {
             ImGui::MenuItem("Hierarchy", nullptr, &show_hierarchy_);
             ImGui::MenuItem("Inspector", nullptr, &show_inspector_);
+            ImGui::MenuItem("Tugela Editor", "T", &tugela_editor_.open);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Particle System → Emitter modules, timings, lean curves.");
+            }
             ImGui::MenuItem("Viewport", nullptr, &show_viewport_);
             ImGui::MenuItem("Toolbar", nullptr, &show_toolbar_);
             ImGui::MenuItem("Shortcuts", nullptr, &show_viewport_help_);
@@ -591,6 +693,13 @@ private:
             ImGui::MenuItem("Audio", nullptr, &show_audio_);
             ImGui::MenuItem("Animation Graph", nullptr, &show_animation_graph_);
             ImGui::MenuItem("Show Grid", nullptr, &show_grid_);
+            ImGui::BeginDisabled(game_view_mode_);
+            ImGui::MenuItem("Actor Icons", nullptr, &show_actor_icons_);
+            ImGui::EndDisabled();
+            ImGui::MenuItem("Game View", "G", &game_view_mode_);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Hide actor icons (Unreal-style game / show-flags).");
+            }
             ImGui::Separator();
             ImGui::MenuItem("Performance / Debug", nullptr, &show_debug_window_);
             ImGui::Separator();
@@ -621,17 +730,18 @@ private:
     void drawHierarchyPanel(genesis::Scene& scene) {
         ImGui::Begin("Hierarchy", &show_hierarchy_);
 
-        ImGui::TextDisabled("SCENE");
-        ImGui::Spacing();
+        genesis::drawEditorSectionLabel("Create");
 
         const float full = ImGui::GetContentRegionAvail().x;
         const float gap = ImGui::GetStyle().ItemSpacing.x;
         const float half = (full - gap) * 0.5f;
 
         auto createBtn = [&](const char* label, float width, auto&& fn) {
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 5.0f);
             if (ImGui::Button(label, ImVec2(width, 0))) {
                 fn();
             }
+            ImGui::PopStyleVar();
         };
 
         createBtn("Empty", half, [&] {
@@ -667,49 +777,69 @@ private:
         createBtn("Spot Light", half, [&] {
             addLightNode("Spot Light", genesis::SceneLightType::Spot);
         });
+
+        genesis::drawEditorSectionLabel("Particles · Tugela");
+        createBtn("Particle System", half, [&] {
+            // One System actor holding Soft Circles + Trail emitters (multi-emitter).
+            std::optional<genesis::NodeId> scene_root =
+                genesis::findNodeByPath(scene, "Scene");
+            const genesis::NodeId system =
+                scene.createEmptyNode("Particle System", scene_root);
+            scene.createParticleEmitterNode("Soft Circles", system,
+                                            genesis::makeGentleCirclesEmitter());
+            genesis::ParticleEmitter trail = genesis::makeGentleSoftEmitter();
+            trail.rate_per_second = 5.0f;
+            trail.trail_enabled = true;
+            scene.createParticleEmitterNode("Trail", system, trail);
+            selectNode(system);
+            tugela_editor_.open = true;
+            genesis::tugelaEditorFocusSelection(tugela_editor_, scene, system);
+            markDirty();
+        });
         ImGui::SameLine();
-        createBtn("Particles", half, [&] {
-            genesis::ParticleEmitter emitter = genesis::makeDefaultParticleEmitter();
-            emitter.burst_count = 24;
-            // If a fluid volume is selected, parent under it and enable coupling so
-            // particles ride the lava-lamp velocity field by default.
+        createBtn("Emitter", half, [&] {
+            // Add under selected System (or parent of selected emitter), else default path.
             std::optional<genesis::NodeId> parent;
-            if (selection_.size() == 1) {
-                if (const genesis::Node* sel = scene.find(selection_.front())) {
-                    if (sel->particle_fluid.has_value()) {
-                        parent = sel->id;
-                        emitter.fluid_coupled = true;
-                        emitter.world_space = true;
-                        emitter.gravity = glm::vec3(0.0f, -0.35f, 0.0f);
-                        emitter.rate_per_second = 28.0f;
-                        emitter.lifetime_min = 1.5f;
-                        emitter.lifetime_max = 3.0f;
-                        emitter.spawn_radius = 0.08f;
+            if (const genesis::NodeId sel = primarySelected()) {
+                if (const genesis::Node* n = scene.find(sel)) {
+                    if (genesis::isParticleSystemNode(scene, *n)) {
+                        parent = sel;
+                    } else if (n->particle_emitter.has_value() && n->parent.has_value()) {
+                        parent = *n->parent;
                     }
                 }
             }
-            selectNode(scene.createParticleEmitterNode("Particle Emitter", parent, emitter));
+            if (!parent.has_value()) {
+                parent = genesis::findNodeByPath(scene, "Scene/Particle System");
+            }
+            if (!parent.has_value()) {
+                std::optional<genesis::NodeId> scene_root =
+                    genesis::findNodeByPath(scene, "Scene");
+                parent = scene.createEmptyNode("Particle System", scene_root);
+            }
+            selectNode(scene.createParticleEmitterNode("Emitter", parent,
+                                                       genesis::makeGentleCirclesEmitter()));
             markDirty();
         });
-        if (ImGui::Button("Fluid Volume", ImVec2(full, 0))) {
-            const genesis::NodeId id =
-                scene.createFluidVolumeNode("Lava Lamp", std::nullopt, genesis::makeLavaLampFluidVolume());
-            if (genesis::Node* node = scene.find(id)) {
-                // Lift so the tall lamp sits above the grid and is easy to see.
-                node->local.position = glm::vec3(0.0f, 0.55f, 0.0f);
+        createBtn("OSC Tracker", half, [&] {
+            std::optional<genesis::NodeId> system =
+                genesis::findNodeByPath(scene, "Scene/Particle System");
+            if (!system.has_value()) {
+                std::optional<genesis::NodeId> scene_root =
+                    genesis::findNodeByPath(scene, "Scene");
+                system = scene.createEmptyNode("Particle System", scene_root);
             }
-            selectNode(id);
+            selectNode(scene.createParticleEmitterNode("OSC Tracker", system,
+                                                       genesis::makeOscTrackerBubbleEmitter()));
             markDirty();
-            // Ensure world matrices exist before framing (create does not refresh them).
-            runtime_.updateTransforms();
-            focusEditorCameraOnSelection();
-        }
+            genesis::OscParticleEmitSettings emit = osc_protocol_.particleEmitSettings();
+            emit.emitter_path = "Scene/Particle System/OSC Tracker";
+            emit.track_emitter_position = true;
+            emit.burst_on_message = false;
+            osc_protocol_.setParticleEmitSettings(emit);
+        });
 
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-        ImGui::TextDisabled("ACTIONS");
-        ImGui::Spacing();
+        genesis::drawEditorSectionLabel("Actions");
 
         ImGui::BeginDisabled(selection_.empty());
         if (ImGui::Button("Duplicate", ImVec2(half, 0))) {
@@ -731,29 +861,31 @@ private:
         }
         ImGui::EndDisabled();
 
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-        ImGui::TextDisabled("OUTLINER");
-        ImGui::Spacing();
+        genesis::drawEditorSectionLabel("Outliner");
 
         auto drawNode = [&](auto&& self, genesis::NodeId id) -> void {
             const genesis::Node* n = scene.find(id);
             if (!n) return;
 
-            ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanFullWidth |
+            ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth |
+                                       ImGuiTreeNodeFlags_FramePadding |
                                        ImGuiTreeNodeFlags_DefaultOpen;
-            if (n->children.empty()) flags |= ImGuiTreeNodeFlags_Leaf;
+            if (n->children.empty()) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet;
             if (isSelected(id)) flags |= ImGuiTreeNodeFlags_Selected;
 
             std::string label = n->name;
-            if (n->mesh_resource.has_value()) label += "   M";
-            if (n->camera.has_value()) label += "   C";
-            if (n->light.has_value()) label += "   L";
-            if (n->particle_fluid.has_value()) label += "   F";
-            if (n->particle_emitter.has_value()) label += "   P";
+            if (n->mesh_resource.has_value()) label += "  · M";
+            if (n->camera.has_value()) label += "  · C";
+            if (n->light.has_value()) label += "  · L";
+            if (const char* badge = genesis::particleHierarchyBadge(scene, *n);
+                badge[0] != '\0') {
+                label += "  · ";
+                label += badge;
+            }
 
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 3.0f));
             const bool open = ImGui::TreeNodeEx((void*)(uintptr_t)n->id, flags, "%s", label.c_str());
+            ImGui::PopStyleVar();
             if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) {
                 const bool additive = ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift;
                 if (additive) {
@@ -832,29 +964,45 @@ private:
     }
 
     void drawAudioPanel(genesis::Scene& scene) {
-        std::string fluid_path;
+        std::string particle_path;
         if (selection_.size() == 1) {
             if (const genesis::Node* n = scene.find(selection_.front())) {
-                if (n->particle_fluid.has_value()) {
-                    fluid_path = genesis::nodePath(scene, n->id);
+                if (n->particle_emitter.has_value()) {
+                    particle_path = genesis::nodePath(scene, n->id);
                 }
             }
         }
-        genesis::drawAudioReactivePanel(audio_reactive_, &show_audio_, fluid_path);
+        genesis::drawAudioReactivePanel(audio_reactive_, &show_audio_, particle_path);
+    }
+
+    void drawTugelaEditor(genesis::Scene& scene) {
+        genesis::OscLinkUiContext link_ctx{&osc_protocol_};
+        genesis::AudioLinkUiContext audio_link_ctx{&audio_reactive_};
+        genesis::ParticleEmitterUiContext particle_ui{};
+        particle_ui.scene = &scene;
+        particle_ui.osc = &link_ctx;
+        particle_ui.audio = &audio_link_ctx;
+        particle_ui.mark_dirty = [this]() { markDirty(); };
+        particle_ui.reset_particles = [this]() { runtime_.resetParticles(); };
+        particle_ui.select_node = [this](genesis::NodeId id) { selectNode(id); };
+        particle_ui.stats = [this]() {
+            const auto s = runtime_.particleWorld().stats();
+            return genesis::ParticleWorldStatsLite{s.alive, s.emitters, s.steps};
+        };
+        genesis::drawTugelaEditorWindow(tugela_editor_, particle_ui);
     }
 
     void drawInspectorPanel(genesis::Scene& scene) {
         ImGui::Begin("Inspector", &show_inspector_);
 
-        ImGui::TextColored(ImVec4(0.55f, 0.70f, 0.95f, 1.0f), "INSPECTOR");
-        ImGui::Separator();
-
         if (selection_.empty()) {
+            genesis::drawEditorSectionLabel("Inspector");
             ImGui::TextWrapped("Select an actor in the viewport or outliner.");
             ImGui::Spacing();
             ImGui::TextDisabled("LMB pick / drag marquee");
-            ImGui::TextDisabled("Shift/Ctrl multi  |  RMB+WASD fly  |  W/E/R gizmo");
+            ImGui::TextDisabled("Alt+LMB orbit · MMB pan · Alt+RMB dolly · RMB fly");
         } else if (genesis::Node* n = scene.find(primarySelected())) {
+            genesis::drawEditorSectionLabel(n->name.c_str());
             const std::string node_path = genesis::nodePath(scene, n->id);
             genesis::OscLinkUiContext link_ctx{&osc_protocol_};
             genesis::AudioLinkUiContext audio_link_ctx{&audio_reactive_};
@@ -876,8 +1024,8 @@ private:
                 n->name = name_buf;
                 markDirty();
             }
-            ImGui::Separator();
-            ImGui::TextUnformatted("Transform");
+            ImGui::TextDisabled("Transform");
+            ImGui::Spacing();
 
             bool changed = false;
             if (ImGui::Checkbox("Visible", &n->visible)) changed = true;
@@ -960,8 +1108,23 @@ private:
             drawMaterialInspector(*n, node_path, link_ctx);
             drawCameraInspector(scene, *n, node_path, link_ctx);
             drawLightInspector(*n, node_path, link_ctx);
-            drawParticleEmitterInspector(*n, node_path, link_ctx);
-            drawFluidVolumeInspector(*n, node_path, link_ctx, audio_link_ctx);
+
+            genesis::ParticleEmitterUiContext particle_ui{};
+            particle_ui.scene = &scene;
+            particle_ui.osc = &link_ctx;
+            particle_ui.audio = &audio_link_ctx;
+            particle_ui.mark_dirty = [this]() { markDirty(); };
+            particle_ui.reset_particles = [this]() { runtime_.resetParticles(); };
+            particle_ui.select_node = [this](genesis::NodeId id) { selectNode(id); };
+            particle_ui.stats = [this]() {
+                const auto s = runtime_.particleWorld().stats();
+                return genesis::ParticleWorldStatsLite{s.alive, s.emitters, s.steps};
+            };
+            if (n->particle_emitter.has_value()) {
+                genesis::drawParticleEmitterInspector(*n, node_path, particle_ui);
+            } else if (genesis::isParticleSystemNode(scene, *n)) {
+                genesis::drawParticleSystemInspector(*n, particle_ui);
+            }
         } else {
             ImGui::TextUnformatted("Selected node not found.");
         }
@@ -1319,161 +1482,6 @@ private:
         }
     }
 
-    void drawParticleEmitterInspector(genesis::Node& n, const std::string& node_path,
-                                      genesis::OscLinkUiContext& link_ctx) {
-        if (!n.particle_emitter.has_value()) {
-            return;
-        }
-        ImGui::Separator();
-        ImGui::TextUnformatted("Particle Emitter");
-        genesis::ParticleEmitter& e = *n.particle_emitter;
-        bool dirty = false;
-        dirty |= ImGui::Checkbox("Enabled", &e.enabled);
-        ImGui::SameLine();
-        dirty |= ImGui::Checkbox("Looping", &e.looping);
-        dirty |= ImGui::Checkbox("World space", &e.world_space);
-        dirty |= ImGui::Checkbox("Fluid coupled", &e.fluid_coupled);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Advect particles using a parent Fluid Volume velocity field.");
-        }
-        dirty |= ImGui::Checkbox("Unlit", &e.unlit);
-        dirty |= ImGui::DragFloat("Rate / s", &e.rate_per_second, 1.0f, 0.0f, 5000.0f);
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::ParticleRate, node_path, 0,
-                                   "particle_rate");
-        int burst = static_cast<int>(e.burst_count);
-        if (ImGui::DragInt("Burst", &burst, 1, 0, 100000)) {
-            e.burst_count = static_cast<std::uint32_t>(std::max(burst, 0));
-            dirty = true;
-        }
-        int max_p = static_cast<int>(e.max_particles);
-        if (ImGui::DragInt("Max particles", &max_p, 1, 1, 16384)) {
-            e.max_particles = static_cast<std::uint32_t>(std::max(max_p, 1));
-            dirty = true;
-        }
-        dirty |= ImGui::DragFloatRange2("Lifetime", &e.lifetime_min, &e.lifetime_max, 0.01f, 0.01f, 60.0f);
-        dirty |= ImGui::DragFloatRange2("Speed", &e.speed_min, &e.speed_max, 0.01f, 0.0f, 100.0f);
-        dirty |= ImGui::DragFloatRange2("Size", &e.size_min, &e.size_max, 0.001f, 0.001f, 10.0f);
-        dirty |= ImGui::DragFloat("Size end mul", &e.size_end_multiplier, 0.01f, 0.0f, 2.0f);
-        dirty |= ImGui::ColorEdit4("Color start", &e.color_start.x);
-        dirty |= ImGui::ColorEdit4("Color end", &e.color_end.x);
-        dirty |= ImGui::DragFloat3("Gravity", &e.gravity.x, 0.05f);
-        dirty |= ImGui::DragFloat("Drag", &e.drag, 0.01f, 0.0f, 10.0f);
-
-        const char* shapes[] = {"Point", "Sphere", "Cone", "Box"};
-        int shape = static_cast<int>(e.spawn_shape);
-        if (ImGui::Combo("Spawn shape", &shape, shapes, 4)) {
-            e.spawn_shape = static_cast<genesis::ParticleSpawnShape>(shape);
-            dirty = true;
-        }
-        dirty |= ImGui::DragFloat("Spawn radius", &e.spawn_radius, 0.01f, 0.0f, 50.0f);
-        dirty |= ImGui::DragFloat("Cone angle", &e.cone_angle_degrees, 0.5f, 0.0f, 89.0f);
-
-        const char* meshes[] = {"Cube", "Sphere"};
-        int mesh = static_cast<int>(e.render_mesh);
-        if (ImGui::Combo("Render mesh", &mesh, meshes, 2)) {
-            e.render_mesh = static_cast<genesis::ParticleRenderMesh>(mesh);
-            dirty = true;
-        }
-
-        const auto stats = runtime_.particleWorld().stats();
-        ImGui::TextDisabled("Alive %u  |  Emitters %u  |  Steps %u", stats.alive, stats.emitters,
-                            stats.steps);
-        if (ImGui::Button("Restart Particles")) {
-            runtime_.resetParticles();
-        }
-
-        if (dirty) {
-            markDirty();
-        }
-    }
-
-    void drawFluidVolumeInspector(genesis::Node& n, const std::string& node_path,
-                                  genesis::OscLinkUiContext& link_ctx,
-                                  genesis::AudioLinkUiContext& audio_link_ctx) {
-        if (!n.particle_fluid.has_value()) {
-            return;
-        }
-        ImGui::Separator();
-        ImGui::TextDisabled("GPU Fluid");
-        ImGui::TextDisabled("3D volumetric sim — kept light for realtime.");
-        genesis::FluidVolume& f = *n.particle_fluid;
-        bool dirty = false;
-        dirty |= ImGui::Checkbox("Enabled", &f.enabled);
-        int grid = static_cast<int>(f.grid_resolution);
-        if (ImGui::SliderInt("Grid resolution", &grid, 24, 64)) {
-            f.grid_resolution = static_cast<std::uint32_t>(grid);
-            dirty = true;
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Cubic N³ voxels. 40 is the realtime default; 64 is the soft ceiling.");
-        }
-        dirty |= ImGui::DragFloat3("Extent (m)", &f.extent_meters.x, 0.05f, 0.1f, 32.0f);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Width × Height × Depth of the 3D fluid volume (meters).");
-        }
-        dirty |= ImGui::DragFloat("Velocity dissipation", &f.velocity_dissipation, 0.001f, 0.9f, 1.0f);
-        dirty |= ImGui::DragFloat("Density dissipation", &f.density_dissipation, 0.001f, 0.9f, 1.0f);
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::FluidDensityDissipation, node_path, 0,
-                                   "fld_dens_diss");
-        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::FluidDensityDissipation,
-                                     node_path, 0, "fld_dens_diss");
-        int pressure = static_cast<int>(f.pressure_iterations);
-        if (ImGui::SliderInt("Pressure iterations", &pressure, 4, 16)) {
-            f.pressure_iterations = static_cast<std::uint32_t>(pressure);
-            dirty = true;
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Jacobi projection passes. 8 is usually enough; each pass is a full N³ dispatch.");
-        }
-        dirty |= ImGui::Checkbox("Drive particles", &f.drive_particles);
-        ImGui::Separator();
-        ImGui::TextUnformatted("Ink source");
-        dirty |= ImGui::Checkbox("Source enabled", &f.source_enabled);
-        dirty |= ImGui::DragFloat3("Source UVW", &f.source_uvw.x, 0.01f, 0.0f, 1.0f);
-        dirty |= ImGui::DragFloat("Source radius", &f.source_radius, 0.005f, 0.001f, 0.5f);
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::FluidSourceRadius, node_path, 0,
-                                   "fld_src_r");
-        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::FluidSourceRadius, node_path, 0,
-                                     "fld_src_r");
-        dirty |= ImGui::DragFloat("Source density", &f.source_density, 0.05f, 0.0f, 8.0f);
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::FluidSourceDensity, node_path, 0,
-                                   "fld_src_d");
-        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::FluidSourceDensity, node_path, 0,
-                                     "fld_src_d");
-        dirty |= ImGui::DragFloat3("Source velocity", &f.source_velocity.x, 0.05f, -20.0f, 20.0f);
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::FluidSourceVelocityY, node_path, 0,
-                                   "fld_src_vy");
-        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::FluidSourceVelocityY, node_path,
-                                     0, "fld_src_vy");
-        ImGui::Separator();
-        ImGui::TextUnformatted("Secondary source");
-        dirty |= ImGui::Checkbox("Source 2 enabled", &f.source2_enabled);
-        dirty |= ImGui::DragFloat3("Source 2 UVW", &f.source2_uvw.x, 0.01f, 0.0f, 1.0f);
-        dirty |= ImGui::DragFloat("Source 2 radius", &f.source2_radius, 0.005f, 0.001f, 0.5f);
-        dirty |= ImGui::DragFloat("Source 2 density", &f.source2_density, 0.05f, 0.0f, 8.0f);
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::FluidSource2Density, node_path, 0,
-                                   "fld_src2_d");
-        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::FluidSource2Density, node_path,
-                                     0, "fld_src2_d");
-        dirty |= ImGui::DragFloat3("Source 2 velocity", &f.source2_velocity.x, 0.05f, -20.0f, 20.0f);
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::FluidSource2VelocityY, node_path, 0,
-                                   "fld_src2_vy");
-        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::FluidSource2VelocityY,
-                                     node_path, 0, "fld_src2_vy");
-        dirty |= ImGui::Checkbox("Animate sources", &f.animate_sources);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Gentle wobble so blobs rise, merge, and split like a lava lamp.");
-        }
-        dirty |= ImGui::ColorEdit4("Dye color", &f.dye_color.x);
-        genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::FluidDyeColorR, node_path, 0,
-                                   "fld_dye_r");
-        genesis::drawAudioLinkButton(audio_link_ctx, genesis::OscParamTarget::FluidDyeColorR, node_path, 0,
-                                     "fld_dye_r");
-        if (dirty) {
-            markDirty();
-        }
-    }
-
     void drawToolbarPanel(genesis::Scene& scene) {
         ImGui::Begin("Toolbar", &show_toolbar_);
 
@@ -1496,6 +1504,11 @@ private:
 
         ImGui::SameLine(0.0f, 16.0f);
         ImGui::Checkbox("Grid", &show_grid_);
+        ImGui::SameLine(0.0f, 12.0f);
+        ImGui::Checkbox("Game", &game_view_mode_);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Game View (G) — hide actor icons");
+        }
 
         ImGui::SameLine(0.0f, 20.0f);
         if (!selection_.empty() && scene.find(primarySelected())) {
@@ -1519,11 +1532,18 @@ private:
 
     void drawViewportHelpPanel() {
         ImGui::Begin("Shortcuts", &show_viewport_help_);
-        ImGui::TextDisabled("NAVIGATION");
-        ImGui::BulletText("RMB + WASD / QE — fly");
-        ImGui::BulletText("F — frame selection");
+        ImGui::TextDisabled("NAVIGATION (Unreal-like, slowed)");
+        ImGui::BulletText("Alt + LMB — orbit around pivot");
+        ImGui::BulletText("MMB / Alt + MMB — pan (slow)");
+        ImGui::BulletText("Alt + RMB / wheel — dolly");
+        ImGui::BulletText("RMB + WASD / QE — fly look");
+        ImGui::BulletText("F — frame selection (sets orbit pivot)");
+        ImGui::BulletText("Grid — 1 m major / 0.25 m minor");
+        ImGui::BulletText("G — Game View (hide actor icons)");
         ImGui::Spacing();
         ImGui::TextDisabled("SELECTION");
+        ImGui::BulletText("Meshes — thin white silhouette outline");
+        ImGui::BulletText("Emitters / lights / cameras — viewport icons");
         ImGui::BulletText("LMB — select / marquee");
         ImGui::BulletText("Shift / Ctrl + LMB — multi");
         ImGui::BulletText("Delete — remove (children reparent)");
@@ -1926,7 +1946,8 @@ private:
 
     void handleViewportSelection(genesis::Scene& scene) {
         (void)scene;
-        if (fly_camera_active_) {
+        const bool alt_nav = ImGui::GetIO().KeyAlt;
+        if (fly_camera_active_ || navigating_active_ || alt_nav) {
             marquee_ = {};
             return;
         }
@@ -2028,13 +2049,77 @@ private:
     }
 
     void drawSelectionOverlays(genesis::Scene& scene) {
+        (void)scene;
+        // Mesh silhouette is a 3D inverted-hull pass. Icons are drawn separately.
+        // Marquee only — no AABB/cyan screen boxes.
         ImDrawList* draw = ImGui::GetForegroundDrawList();
         if (marquee_.active && marquee_.dragging) {
-            draw->AddRectFilled(marquee_.start, marquee_.current, IM_COL32(56, 194, 178, 28));
-            draw->AddRect(marquee_.start, marquee_.current, IM_COL32(56, 194, 178, 200), 0.0f, 0, 1.25f);
+            draw->AddRectFilled(marquee_.start, marquee_.current, IM_COL32(240, 240, 245, 28));
+            draw->AddRect(marquee_.start, marquee_.current, IM_COL32(240, 240, 245, 200), 0.0f, 0,
+                          1.25f);
         }
+    }
 
-        if (selection_.empty() || viewport_.w < 2.0f) {
+    static bool projectWorldPointToScreen(const glm::mat4& view_proj, const glm::vec3& world,
+                                          float viewport_w, float viewport_h, float& out_x,
+                                          float& out_y) {
+        const glm::vec4 clip = view_proj * glm::vec4(world, 1.0f);
+        if (std::abs(clip.w) <= 1e-5f || clip.w < 0.0f) {
+            return false;
+        }
+        const float inv_w = 1.0f / clip.w;
+        const float ndc_x = clip.x * inv_w;
+        const float ndc_y = clip.y * inv_w;
+        out_x = (ndc_x * 0.5f + 0.5f) * viewport_w;
+        out_y = (1.0f - ndc_y) * 0.5f * viewport_h;
+        return out_x >= -40.0f && out_y >= -40.0f && out_x <= viewport_w + 40.0f &&
+               out_y <= viewport_h + 40.0f;
+    }
+
+    enum class ActorIconKind { Emitter, Light, Camera };
+
+    static void drawOneActorIcon(ImDrawList* draw, ImVec2 center, float radius, ActorIconKind kind,
+                                 bool selected) {
+        const ImU32 fill =
+            kind == ActorIconKind::Emitter   ? IM_COL32(70, 170, 210, selected ? 230 : 160)
+            : kind == ActorIconKind::Light   ? IM_COL32(230, 190, 70, selected ? 235 : 165)
+                                             : IM_COL32(150, 160, 180, selected ? 230 : 155);
+        const ImU32 edge = selected ? IM_COL32(255, 255, 255, 255) : IM_COL32(20, 22, 26, 200);
+        draw->AddCircleFilled(center, radius, fill, 20);
+        draw->AddCircle(center, radius, edge, 20, selected ? 2.0f : 1.25f);
+
+        if (kind == ActorIconKind::Emitter) {
+            // Soft concentric rings — Tugela emitter billboard cue.
+            draw->AddCircle(center, radius * 0.55f, IM_COL32(255, 255, 255, selected ? 220 : 140), 16,
+                            1.25f);
+            draw->AddCircle(center, radius * 0.28f, IM_COL32(255, 255, 255, selected ? 200 : 120), 12,
+                            1.0f);
+        } else if (kind == ActorIconKind::Light) {
+            // Simple radial ticks.
+            for (int i = 0; i < 6; ++i) {
+                const float a = static_cast<float>(i) * 1.04719755f;
+                const ImVec2 d(std::cos(a), std::sin(a));
+                draw->AddLine(ImVec2(center.x + d.x * radius * 0.35f, center.y + d.y * radius * 0.35f),
+                              ImVec2(center.x + d.x * radius * 0.85f, center.y + d.y * radius * 0.85f),
+                              IM_COL32(40, 36, 20, selected ? 230 : 170), 1.4f);
+            }
+        } else {
+            // Camera body + lens.
+            draw->AddRectFilled(ImVec2(center.x - radius * 0.45f, center.y - radius * 0.28f),
+                                ImVec2(center.x + radius * 0.15f, center.y + radius * 0.28f),
+                                IM_COL32(30, 32, 38, 220), 2.0f);
+            draw->AddTriangleFilled(ImVec2(center.x + radius * 0.1f, center.y - radius * 0.22f),
+                                    ImVec2(center.x + radius * 0.55f, center.y),
+                                    ImVec2(center.x + radius * 0.1f, center.y + radius * 0.22f),
+                                    IM_COL32(30, 32, 38, 220));
+        }
+        if (selected) {
+            draw->AddCircle(center, radius + 3.0f, IM_COL32(255, 255, 255, 180), 22, 1.5f);
+        }
+    }
+
+    void drawActorIcons(genesis::Scene& scene) {
+        if (game_view_mode_ || !show_actor_icons_ || !show_viewport_ || viewport_.w < 2.0f) {
             return;
         }
 
@@ -2042,33 +2127,118 @@ private:
         const float aspect = renderAspect();
         const glm::mat4 view_proj =
             genesis::projectionForImGuizmo(outputProjectionMatrix(aspect)) * outputViewMatrix();
-        genesis::ScenePickParams params{};
+        ImDrawList* draw = ImGui::GetForegroundDrawList();
+        constexpr float kIconRadius = 11.0f;
 
-        for (const genesis::NodeId id : selection_) {
-            const genesis::Node* node = scene.find(id);
-            if (!node) {
+        for (const genesis::Node& node : scene.nodes) {
+            if (!node.visible) {
                 continue;
             }
-            const genesis::Mesh* mesh = nullptr;
-            if (node->mesh_resource.has_value()) {
-                mesh = runtime_.mesh(*node->mesh_resource);
-            }
-            glm::vec3 aabb_min{};
-            glm::vec3 aabb_max{};
-            if (!genesis::nodeWorldPickAabb(*node, mesh, params, aabb_min, aabb_max)) {
+            ActorIconKind kind{};
+            if (node.particle_emitter.has_value()) {
+                kind = ActorIconKind::Emitter;
+            } else if (node.light.has_value()) {
+                kind = ActorIconKind::Light;
+            } else if (node.camera.has_value()) {
+                kind = ActorIconKind::Camera;
+            } else {
                 continue;
             }
-            genesis::ScreenRect rect{};
-            if (!genesis::projectWorldAabbToScreen(view_proj, aabb_min, aabb_max, viewport_.w, viewport_.h,
-                                                    rect)) {
+
+            const glm::vec3 world = glm::vec3(node.world[3]);
+            float sx = 0.0f;
+            float sy = 0.0f;
+            if (!projectWorldPointToScreen(view_proj, world, viewport_.w, viewport_.h, sx, sy)) {
                 continue;
             }
-            const ImVec2 a(viewport_.x + rect.min_x, viewport_.y + rect.min_y);
-            const ImVec2 b(viewport_.x + rect.max_x, viewport_.y + rect.max_y);
-            const bool primary = id == primarySelected();
-            draw->AddRect(a, b, primary ? IM_COL32(56, 194, 178, 220) : IM_COL32(56, 194, 178, 120), 3.0f,
-                          0, primary ? 1.5f : 1.0f);
+            const ImVec2 center(viewport_.x + sx, viewport_.y + sy);
+            drawOneActorIcon(draw, center, kIconRadius, kind, isSelected(node.id));
         }
+    }
+
+    static genesis::MeshMaterialPushConstants makeOutlineMaterial(bool primary) {
+        genesis::MeshMaterialPushConstants mat{};
+        // Thin white Unreal-style silhouette — not amber, not a filled wash.
+        mat.base_color[0] = 1.0f;
+        mat.base_color[1] = 1.0f;
+        mat.base_color[2] = 1.0f;
+        mat.base_color[3] = primary ? 0.95f : 0.55f;
+        // Expand scale (meters of shell per meter of camera distance).
+        mat.material_params[0] = 0.006f;
+        mat.material_params[2] = 0.0f;
+        return mat;
+    }
+
+    void drawSelectionEdgeOutlines(const genesis::MeshDrawOptions& draw_options,
+                                   const float* view_proj_col_major) {
+        if (selection_.empty() || !show_viewport_ || viewport_.w < 2.0f) {
+            return;
+        }
+
+        genesis::Scene& scene = runtime_.scene();
+        runtime_.updateTransforms();
+
+        std::vector<genesis::SceneMeshBatch> outline_batches;
+        outline_batches.reserve(selection_.size());
+
+        auto append_instance = [&](const genesis::Mesh* mesh, const glm::mat4& model,
+                                   genesis::NodeId id) {
+            if (!mesh || !mesh->vertex_buffer || !mesh->index_buffer || mesh->index_count == 0) {
+                return;
+            }
+            const bool primary = id == primarySelected();
+            genesis::SceneMeshBatch* batch = nullptr;
+            for (genesis::SceneMeshBatch& existing : outline_batches) {
+                if (existing.mesh == mesh &&
+                    existing.material.base_color[3] == (primary ? 0.95f : 0.55f)) {
+                    batch = &existing;
+                    break;
+                }
+            }
+            if (!batch) {
+                outline_batches.push_back({});
+                batch = &outline_batches.back();
+                batch->mesh = mesh;
+                batch->material = makeOutlineMaterial(primary);
+            }
+            genesis::GpuMeshInstance instance{};
+            genesis::fillGpuMeshInstance(instance, model, mesh->local_aabb_min, mesh->local_aabb_max);
+            batch->instances.push_back(instance);
+            batch->node_ids.push_back(id);
+        };
+
+        // Mesh / fluid actors only — never particle sprites, never helper spheres/boxes.
+        std::unordered_set<genesis::NodeId> outlined;
+        for (const genesis::SceneDrawCommand& cmd : draw_commands_) {
+            if (cmd.node_id == 0 || !isSelected(cmd.node_id) || !cmd.mesh) {
+                continue;
+            }
+            // Skip GPU particle instances (node_id is 0 above; belt-and-suspenders for future tagging).
+            append_instance(cmd.mesh, cmd.model, cmd.node_id);
+            outlined.insert(cmd.node_id);
+        }
+        for (const genesis::NodeId id : selection_) {
+            if (outlined.count(id) != 0) {
+                continue;
+            }
+            const genesis::Node* node = scene.find(id);
+            if (!node || !node->mesh_resource.has_value()) {
+                continue;
+            }
+            if (const genesis::Mesh* mesh = runtime_.mesh(*node->mesh_resource)) {
+                append_instance(mesh, node->world, id);
+            }
+        }
+
+        if (outline_batches.empty()) {
+            return;
+        }
+
+        genesis::MeshDrawOptions opts = draw_options;
+        opts.view_proj_col_major = view_proj_col_major;
+        opts.enable_gpu_cull = false;
+        opts.enable_depth_prepass = false;
+        renderer().drawSelectionOutlineBatches(outline_batches, opts);
     }
 
     bool isSelected(const genesis::NodeId id) const {
@@ -2176,6 +2346,7 @@ private:
         if (id != 0) {
             selection_.push_back(id);
             syncReparentFromSelection(id);
+            genesis::tugelaEditorFocusSelection(tugela_editor_, runtime_.scene(), id);
         }
         rot_edit_node_ = 0;
     }
@@ -2414,14 +2585,140 @@ private:
         return editor_camera_.transform.position;
     }
 
-    void resetEditorCamera() {
-        const glm::vec3 target(0.0f, 0.7f, 0.0f);
-        const glm::vec3 eye(4.2f, 2.55f, 5.4f);
+    void placeEditorCameraAt(const glm::vec3& eye, const glm::vec3& pivot) {
+        camera_pivot_ = pivot;
         editor_camera_.transform.position = eye;
-        editor_camera_.setRotation(genesis::cameraRotationFromLookAt(eye, target));
+        editor_camera_.setRotation(genesis::cameraRotationFromLookAt(eye, pivot));
         genesis::extractYawPitchFromForward(editor_camera_.forward(), editor_camera_.yaw_radians,
                                             editor_camera_.pitch_radians);
-        editor_camera_.fov_y_radians = glm::radians(42.0f);
+    }
+
+    float editorCameraPivotDistance() const {
+        return std::max(glm::length(editor_camera_.transform.position - camera_pivot_), 0.35f);
+    }
+
+    void applyEditorCameraOrbit(const float dx, const float dy) {
+        // Unreal-like Alt+LMB orbit around pivot (slower than stock UE feel).
+        constexpr float kOrbit = 0.0032f;
+        editor_camera_.yaw_radians -= dx * kOrbit;
+        editor_camera_.pitch_radians -= dy * kOrbit;
+        editor_camera_.pitch_radians = glm::clamp(editor_camera_.pitch_radians, -1.45f, 1.45f);
+        editor_camera_.rebuildRotationFromYawPitch();
+        const float dist = editorCameraPivotDistance();
+        editor_camera_.transform.position = camera_pivot_ - editor_camera_.forward() * dist;
+    }
+
+    void applyEditorCameraPan(const float dx, const float dy) {
+        // Unreal Alt+MMB / MMB track — intentionally slow for install-scale work.
+        const float dist = editorCameraPivotDistance();
+        const float pan_scale = dist * 0.00055f;
+        const glm::vec3 delta = (-editor_camera_.right() * dx + editor_camera_.up() * dy) * pan_scale;
+        editor_camera_.transform.position += delta;
+        camera_pivot_ += delta;
+    }
+
+    void applyEditorCameraDolly(const float amount) {
+        // Positive amount dollies in toward pivot (Unreal Alt+RMB / wheel).
+        float dist = editorCameraPivotDistance();
+        dist = std::clamp(dist * std::exp(-amount * 0.12f), 0.35f, 120.0f);
+        editor_camera_.rebuildRotationFromYawPitch();
+        editor_camera_.transform.position = camera_pivot_ - editor_camera_.forward() * dist;
+    }
+
+    void updateEditorCameraNavigation(const float dt) {
+        const bool typing = ImGui::GetIO().WantTextInput;
+        const bool alt = input().keyDown(SDL_SCANCODE_LALT) || input().keyDown(SDL_SCANCODE_RALT);
+        const bool over_viewport =
+            viewport_hovered_ || viewport_.contains(input().mouseX(), input().mouseY());
+        const bool lmb = input().mouseButtonDown(SDL_BUTTON_LEFT);
+        const bool mmb = input().mouseButtonDown(SDL_BUTTON_MIDDLE);
+        const bool rmb = input().mouseButtonDown(SDL_BUTTON_RIGHT);
+        const float dx = input().mouseDeltaX();
+        const float dy = input().mouseDeltaY();
+        const float wheel = input().mouseWheelY();
+
+        // Unreal Maya-style: Alt+LMB orbit, Alt+MMB (or MMB) pan, Alt+RMB dolly.
+        const bool orbiting = alt && lmb && !ImGuizmo::IsUsing();
+        const bool panning = (mmb || (alt && mmb)) && !ImGuizmo::IsUsing();
+        const bool dollying = alt && rmb && !ImGuizmo::IsUsing();
+        const bool navigating = orbiting || panning || dollying;
+
+        if (navigating && (navigating_active_ || over_viewport)) {
+            navigating_active_ = true;
+            use_editor_output_ = true;
+            runtime_.scene().active_output_camera.reset();
+            input().setMouseCaptured(window().handle(), true);
+            fly_camera_active_ = false;
+
+            if (orbiting) {
+                applyEditorCameraOrbit(dx, dy);
+            } else if (panning) {
+                applyEditorCameraPan(dx, dy);
+            } else if (dollying) {
+                // Drag up/right → dolly in (match Unreal Alt+RMB feel, slowed).
+                applyEditorCameraDolly((dx + dy) * 0.045f);
+            }
+        } else {
+            navigating_active_ = false;
+        }
+
+        // Mouse wheel dolly when pointer is over the viewport (not captured by ImGui widgets).
+        if (over_viewport && !ImGui::GetIO().WantCaptureMouse && std::abs(wheel) > 0.0f &&
+            !ImGuizmo::IsUsing()) {
+            use_editor_output_ = true;
+            runtime_.scene().active_output_camera.reset();
+            applyEditorCameraDolly(wheel * 0.85f);
+        }
+
+        // RMB fly look (no Alt) — slower / less twitchy than before.
+        if (!alt && rmb && !ImGuizmo::IsUsing()) {
+            if (fly_camera_active_ || over_viewport) {
+                fly_camera_active_ = true;
+            }
+        } else if (!rmb || alt) {
+            fly_camera_active_ = false;
+        }
+
+        if (fly_camera_active_ && !navigating_active_) {
+            use_editor_output_ = true;
+            input().setMouseCaptured(window().handle(), true);
+            constexpr float kLook = 0.00155f;
+            editor_camera_.yaw_radians += dx * kLook;
+            editor_camera_.pitch_radians += dy * kLook;
+            editor_camera_.pitch_radians = glm::clamp(editor_camera_.pitch_radians, -1.4f, 1.4f);
+            editor_camera_.rebuildRotationFromYawPitch();
+
+            const float speed = (input().keyDown(SDL_SCANCODE_LSHIFT) ? 3.2f : 1.35f);
+            glm::vec3 move(0.0f);
+            if (input().keyDown(SDL_SCANCODE_W)) move += editor_camera_.forward();
+            if (input().keyDown(SDL_SCANCODE_S)) move -= editor_camera_.forward();
+            if (input().keyDown(SDL_SCANCODE_D)) move += editor_camera_.right();
+            if (input().keyDown(SDL_SCANCODE_A)) move -= editor_camera_.right();
+            if (input().keyDown(SDL_SCANCODE_E)) move += glm::vec3(0.0f, 1.0f, 0.0f);
+            if (input().keyDown(SDL_SCANCODE_Q)) move -= glm::vec3(0.0f, 1.0f, 0.0f);
+            if (glm::length(move) > 0.0f) {
+                const glm::vec3 step = glm::normalize(move) * speed * dt;
+                editor_camera_.transform.position += step;
+                camera_pivot_ += step;
+            }
+        } else if (!navigating_active_) {
+            input().setMouseCaptured(window().handle(), false);
+
+            // W/E/R switch tools even over the viewport; RMB+WASD is reserved for fly above.
+            if (!ImGuizmo::IsUsing() && !typing && !alt) {
+                if (input().keyPressed(SDL_SCANCODE_W)) gizmo_operation_ = ImGuizmo::TRANSLATE;
+                if (input().keyPressed(SDL_SCANCODE_E)) gizmo_operation_ = ImGuizmo::ROTATE;
+                if (input().keyPressed(SDL_SCANCODE_R)) gizmo_operation_ = ImGuizmo::SCALE;
+            }
+        }
+    }
+
+    void resetEditorCamera() {
+        // Calm three-quarter view for soft rising circles + trails.
+        const glm::vec3 target(0.0f, 0.85f, 0.0f);
+        const glm::vec3 eye(2.55f, 1.55f, 3.35f);
+        placeEditorCameraAt(eye, target);
+        editor_camera_.fov_y_radians = glm::radians(40.0f);
         editor_camera_.near_plane = 0.1f;
         editor_camera_.far_plane = 250.0f;
     }
@@ -2461,11 +2758,7 @@ private:
             offset = glm::normalize(offset);
         }
 
-        editor_camera_.transform.position = target + offset * focus_distance;
-        editor_camera_.setRotation(
-            genesis::cameraRotationFromLookAt(editor_camera_.transform.position, target));
-        genesis::extractYawPitchFromForward(editor_camera_.forward(), editor_camera_.yaw_radians,
-                                            editor_camera_.pitch_radians);
+        placeEditorCameraAt(target + offset * focus_distance, target);
         use_editor_output_ = true;
         runtime_.scene().active_output_camera.reset();
     }
@@ -2490,19 +2783,64 @@ private:
         runtime_.updateTransforms();
     }
 
+    void configureRoomOscDemoIfNeeded() {
+        const std::string path = session_.document_path.filename().string();
+        if (path.find("room_osc_particles") == std::string::npos) {
+            return;
+        }
+        genesis::OscRoomPersonSettings room = osc_protocol_.roomPersonSettings();
+        genesis::configureRoomOscInstallSettings(room);
+        osc_protocol_.setRoomPersonSettings(room);
+        genesis::OscParticleEmitSettings emit = osc_protocol_.particleEmitSettings();
+        emit.emitter_path = "Scene/Person Pool/Feet 00";
+        emit.track_emitter_position = true;
+        emit.burst_on_message = false;
+        osc_protocol_.setParticleEmitSettings(emit);
+        if (!osc_protocol_.isListening()) {
+            std::string err;
+            if (!osc_protocol_.startListening(&err) && !err.empty()) {
+                spdlog::warn("Room OSC listen failed: {}", err);
+            }
+        }
+    }
+
     void syncEditorAfterDocumentLoad() {
         use_editor_output_ = true;
         orientSceneOutputCameras(runtime_.scene());
         resetEditorCamera();
+        configureRoomOscDemoIfNeeded();
 
-        // Auto-frame the first Fluid Volume so lava-lamp / splash demos open usable.
-        for (const genesis::Node& node : runtime_.scene().nodes) {
-            if (!node.particle_fluid.has_value()) {
-                continue;
+        // Auto-frame: room install gets a fixed overview so the 6 m wall + dual rings read;
+        // other demos still frame the Soft Circles / Outer Ring emitter.
+        const bool room_demo = session_.document_path.filename().string().find("room_osc_particles") !=
+                               std::string::npos;
+        if (room_demo) {
+            camera_pivot_ = glm::vec3(0.0f, 0.9f, 0.0f);
+            placeEditorCameraAt(glm::vec3(9.5f, 5.5f, 11.0f), camera_pivot_);
+            // Particles-only install: frame the outer ring emitter (no room/tank meshes).
+            if (std::optional<genesis::NodeId> ring =
+                    genesis::findNodeByPath(runtime_.scene(), "Scene/Particle System/Outer Ring")) {
+                selectNode(*ring);
             }
-            selectNode(node.id);
-            focusEditorCameraOnSelection();
-            break;
+        } else {
+            genesis::NodeId focus = 0;
+            for (const genesis::Node& node : runtime_.scene().nodes) {
+                if (!node.particle_emitter.has_value()) {
+                    continue;
+                }
+                if (focus == 0) {
+                    focus = node.id;
+                }
+                if (node.name == "Outer Ring" || node.name == "Ambient Field" ||
+                    node.name == "Soft Circles") {
+                    focus = node.id;
+                    break;
+                }
+            }
+            if (focus != 0) {
+                selectNode(focus);
+                focusEditorCameraOnSelection();
+            }
         }
     }
 
@@ -2511,11 +2849,13 @@ private:
     genesis::ColorManagement color_mgmt_;
     genesis::Mesh grid_mesh_{};
     genesis::Camera editor_camera_{};
+    glm::vec3 camera_pivot_{0.0f, 0.85f, 0.0f};
     genesis::ViewportRect viewport_{};
     bool use_editor_output_ = true;
     float output_aspect_ = 1.0f;
     bool viewport_hovered_ = false;
     bool fly_camera_active_ = false;
+    bool navigating_active_ = false;
     bool ui_style_initialized_ = false;
     std::vector<genesis::NodeId> selection_;
     std::vector<genesis::NodeId> pending_delete_;
@@ -2550,9 +2890,14 @@ private:
     bool show_protocol_ = false;
     bool show_audio_ = false;
     bool show_animation_graph_ = false;
+    genesis::TugelaEditorState tugela_editor_{};
     bool auto_key_ = false;
     bool show_debug_window_ = false;
     bool show_grid_ = true;
+    bool show_actor_icons_ = true;
+    bool game_view_mode_ = false; // Unreal-like: hide actor icons when true
+    int edge_demo_frames_ = 0;
+    int tugela_demo_frames_ = 0;
 
     bool show_new_scene_confirm_ = false;
     bool show_open_confirm_ = false;
@@ -2563,6 +2908,8 @@ private:
     genesis::OscProtocol osc_protocol_{};
     genesis::AudioReactive audio_reactive_{};
     double osc_time_ = 0.0;
+    std::uint64_t osc_particle_cursor_ = 0;
+    std::uint64_t osc_room_person_cursor_ = 0;
     float last_frame_dt_ = 1.0f / 60.0f;
     float look_time_seconds_ = 0.0f;
 };
