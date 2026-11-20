@@ -70,7 +70,7 @@ out/ExtGenesis/assets/
 out/ExtGenesis/scenes/
 ```
 
-Matte-only cutout module (no scenes): `out/ExtGenesisRemover/ExtGenesisRemover.dll`.
+Matte-only cutout module (no scenes): see [`sjcvisuals/GenesisRemover`](https://github.com/sjcvisuals/GenesisRemover).
 
 ## Layer setup (after the DLL is loaded)
 

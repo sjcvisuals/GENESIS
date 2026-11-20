@@ -30,7 +30,7 @@ struct RemoverFrameDebug {
 };
 
 // Headless Pixera-style remover: shared video in → matte → exportable RGBA out.
-// Used by ExtGenesis Remover mode and ExtGenesisRemover.
+// Used by ExtGenesis Background Remover mode (product DLL lives in GenesisRemover).
 //
 // Lifecycle is staged so PIXERA timeline placement can succeed before ONNX/video_in:
 //   1) construct          → VulkanContext only

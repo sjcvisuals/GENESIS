@@ -37,7 +37,7 @@ After `BUILD-AND-RUN.bat` (WIP Debug):
 |--------|------|
 | Editor | `out/Editor/genesis_gltf_viewer.exe` |
 | Pixera scene DLL | `out/ExtGenesis/ExtGenesis.dll` |
-| Pixera cutout DLL | `out/ExtGenesisRemover/ExtGenesisRemover.dll` |
+| Pixera cutout DLL | Moved to `sjcvisuals/GenesisRemover` |
 
 `build/` is the CMake cache only — do not use it for day-to-day testing.
 
