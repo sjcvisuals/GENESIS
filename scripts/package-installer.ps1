@@ -1,15 +1,37 @@
-# Build binaries and produce GenesisSetup.exe (Inno Setup).
+# Build binaries and produce GenesisSetup-*.exe (Inno Setup wizard).
+# Optional secondary artifact: portable zip for advanced users.
 param(
     [switch]$BuildOnly,
     [switch]$SkipBuild,
+    [switch]$SkipPortableZip,
     [ValidateSet("Release", "Debug")]
-    [string]$Configuration = "Release"
+    [string]$Configuration = "Release",
+    [string]$BuildDir = "",
+    [string]$Version = ""
 )
 
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-$BuildDir = Join-Path $RepoRoot "build"
+if (-not $BuildDir) {
+    $BuildDir = Join-Path $RepoRoot "build"
+}
+
+function Get-GenesisVersion {
+    param([string]$Root)
+    $cmake = Join-Path $Root "CMakeLists.txt"
+    $match = Select-String -Path $cmake -Pattern 'project\s*\(\s*GENESIS\s+VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)' |
+        Select-Object -First 1
+    if (-not $match) {
+        throw "Could not read GENESIS VERSION from CMakeLists.txt"
+    }
+    return $match.Matches[0].Groups[1].Value
+}
+
+if (-not $Version) {
+    $Version = Get-GenesisVersion -Root $RepoRoot
+}
+
 $CMake = "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
 if (-not (Test-Path $CMake)) {
     $CMake = "C:\Program Files\Microsoft Visual Studio\2022\Professional\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
@@ -27,7 +49,6 @@ if (Test-Path $VulkanRoot) {
     $env:VULKAN_SDK = $VulkanRoot
 }
 
-$version = "0.1.1"
 $packageTargets = @(
     "genesis_gltf_viewer",
     "genesis_player",
@@ -40,7 +61,7 @@ $packageTargets = @(
 Push-Location $RepoRoot
 try {
     if (-not $SkipBuild) {
-        Write-Host "Configuring GENESIS ($Configuration)..."
+        Write-Host "Configuring GENESIS ($Configuration, v$Version)..."
         & $CMake -B $BuildDir -DCMAKE_BUILD_TYPE=$Configuration
         Write-Host "Building installer targets: $($packageTargets -join ', ')..."
         & $CMake --build $BuildDir --config $Configuration --target @packageTargets
@@ -71,20 +92,41 @@ Staged files are ready at: $BuildDir\package\staging
     }
 
     $stagingDir = Join-Path $BuildDir "package\staging"
-    Write-Host "Compiling installer with Inno Setup (v$version)..."
-    & $Iscc (Join-Path $RepoRoot "installer\Genesis.iss") "/DStagingDir=$stagingDir" "/DMyAppVersion=$version"
+    $packageDir = Join-Path $BuildDir "package"
+    New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+
+    Write-Host "Compiling installer with Inno Setup (v$Version)..."
+    & $Iscc (Join-Path $RepoRoot "installer\Genesis.iss") "/DStagingDir=$stagingDir" "/DMyAppVersion=$Version"
     if ($LASTEXITCODE -ne 0) {
         throw "Inno Setup compilation failed with exit code $LASTEXITCODE"
     }
 
-    $installer = Join-Path $BuildDir "package\GenesisSetup-$version.exe"
-    if (Test-Path $installer) {
-        $sizeMb = [math]::Round((Get-Item $installer).Length / 1MB, 2)
-        Write-Host ""
-        Write-Host "Installer ready: $installer ($sizeMb MB)"
-    } else {
+    $installer = Join-Path $packageDir "GenesisSetup-$Version.exe"
+    if (-not (Test-Path $installer)) {
         throw "Installer output not found at $installer"
     }
+    $sizeMb = [math]::Round((Get-Item $installer).Length / 1MB, 2)
+
+    $portableZip = $null
+    if (-not $SkipPortableZip) {
+        $portableZip = Join-Path $packageDir "GENESIS-$Version-windows-x64-portable.zip"
+        if (Test-Path $portableZip) {
+            Remove-Item -Path $portableZip -Force
+        }
+        Write-Host "Creating portable zip (secondary / advanced)..."
+        Compress-Archive -Path (Join-Path $stagingDir "*") -DestinationPath $portableZip -CompressionLevel Optimal
+    }
+
+    Write-Host ""
+    Write-Host "========================================"
+    Write-Host "  Primary (ship this):  $installer ($sizeMb MB)"
+    if ($portableZip -and (Test-Path $portableZip)) {
+        $zipMb = [math]::Round((Get-Item $portableZip).Length / 1MB, 2)
+        Write-Host "  Portable (optional):  $portableZip ($zipMb MB)"
+    }
+    Write-Host "========================================"
+    Write-Host "Attach GenesisSetup-$Version.exe to the GitHub Release."
+    Write-Host "End-user steps: docs\install-windows.md"
 }
 finally {
     Pop-Location

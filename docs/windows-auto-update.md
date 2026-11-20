@@ -1,6 +1,8 @@
 # Windows packaging & auto-update (WinSparkle)
 
-GENESIS ships on Windows as **`GenesisSetup-<version>.exe`** (Inno Setup) and uses **[WinSparkle](https://winsparkle.org)** for Adobe-like software updates: check feed → download → install with progress → relaunch.
+GENESIS ships on Windows as **`GenesisSetup-<version>.exe`** (Inno Setup wizard) and uses **[WinSparkle](https://winsparkle.org)** for Adobe-like software updates: check feed → download → install with progress → relaunch.
+
+**End-user install steps:** [install-windows.md](install-windows.md) (Download Setup → Run → Done).
 
 ## Versioning
 
@@ -8,19 +10,22 @@ GENESIS ships on Windows as **`GenesisSetup-<version>.exe`** (Inno Setup) and us
 |--------|--------|
 | CMake `project(GENESIS VERSION …)` | `0.1.1` (see root `CMakeLists.txt`) |
 | Generated `platform/Version.hpp` | `GENESIS_VERSION_STRING` |
-| Inno `MyAppVersion` / `scripts/package-installer.ps1` | keep in sync with CMake |
+| `scripts/package-installer.ps1` | reads version from CMakeLists.txt automatically |
+| Inno `MyAppVersion` | passed as `/DMyAppVersion=` from the packaging script |
 | WinSparkle `ProductVersion` | VERSIONINFO in `genesis_version.rc` + `win_sparkle_set_app_details` |
 
-Bump **all** of these together when cutting a release.
+Bump the CMake `VERSION` when cutting a release; packaging picks it up.
 
 ## Build installer (Windows)
 
 ```powershell
-.\scripts\package-installer.ps1          # Release build + stage + Inno Setup
+.\scripts\package-installer.ps1          # Release build + stage + Inno Setup + portable zip
 .\scripts\package-installer.ps1 -BuildOnly   # stage only
+.\scripts\package-installer.ps1 -SkipPortableZip
 ```
 
-Output: `build\package\GenesisSetup-0.1.1.exe`  
+Output (primary): `build\package\GenesisSetup-<version>.exe`  
+Secondary: `build\package\GENESIS-<version>-windows-x64-portable.zip`  
 Editor payload includes `WinSparkle.dll` next to `genesis_gltf_viewer.exe` when `GENESIS_ENABLE_WINSPARKLE=ON` (default on Windows).
 
 ## Update feed (appcast)

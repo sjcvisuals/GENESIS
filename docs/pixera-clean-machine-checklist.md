@@ -6,7 +6,7 @@ Run on a Windows machine **without** Visual Studio, Vulkan SDK, or the GENESIS s
 
 **Option A — installer (recommended)**
 
-Run `build\package\GenesisSetup-0.1.0.exe`, select the components you need, and complete the wizard.
+Run `build\package\GenesisSetup-*.exe` (or download it from [GitHub Releases](https://github.com/sjcvisuals/GENESIS/releases)), leave **Full installation** selected unless you need less, and complete the wizard. See [install-windows.md](install-windows.md).
 
 **Option B — manual copy**
 

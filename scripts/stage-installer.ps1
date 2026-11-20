@@ -103,12 +103,29 @@ foreach ($ws in $wsDllCandidates) {
 }
 Copy-Shaders -DestinationRoot $editorStage
 Copy-FilteredTree -Source $assetsSource -Destination (Join-Path $editorStage "assets")
-Copy-Item -Path (Join-Path $RepoRoot "deploy\README-editor.txt") -Destination (Join-Path $editorStage "README.txt") -Force
-# Updater readme for support
+$editorReadme = @"
+GENESIS Editor
+==============
+
+Open genesis_gltf_viewer.exe to create and edit scenes.
+
+Keep this folder together (shaders\, assets\, and WinSparkle.dll must
+stay next to the program). Shortcuts created by Setup already point here.
+
+Software updates
+----------------
+In GENESIS: Help → Check for Updates…
+Or download a newer Setup from the GENESIS Releases page on GitHub.
+"@
+Set-Content -Path (Join-Path $editorStage "README.txt") -Value $editorReadme -Encoding UTF8
 $updateNote = @"
-GENESIS uses WinSparkle for software updates.
-Help → Check for Updates… checks the online appcast feed.
-See docs/windows-auto-update.md
+Keeping GENESIS up to date
+==========================
+
+• Inside the Editor: Help → Check for Updates…
+• Or download the latest GenesisSetup-*.exe from GitHub Releases
+
+You do not need to install Visual Studio, CMake, or SDKs to update.
 "@
 Set-Content -Path (Join-Path $editorStage "UPDATES.txt") -Value $updateNote -Encoding UTF8
 
@@ -122,25 +139,15 @@ Copy-Item -Path $DeterminismExe -Destination $playerStage -Force
 Copy-Shaders -DestinationRoot $playerStage
 Copy-FilteredTree -Source $assetsSource -Destination (Join-Path $playerStage "assets")
 $playerReadme = @"
-Genesis Player — playback tools
-================================
+GENESIS Playback tools
+======================
 
-Tools in this folder (not the editor):
+  genesis_player.exe              Preview a scene on this computer
+  genesis_multiview_player.exe    Multi-output / topology preview
+  genesis_topology_validate.exe   Check topology files
+  genesis_determinism_harness.exe Advanced timing replay
 
-  genesis_player.exe              Standalone scene preview
-  genesis_multiview_player.exe    Multi-output topology simulation
-  genesis_topology_validate.exe   Validate .topology.json files
-  genesis_determinism_harness.exe CPU timing/determinism replay
-
-Example multi-view (from this folder):
-
-  .\genesis_multiview_player.exe assets\topology\examples\one_machine_one_gpu_four_4k50.topology.json demo --frames 5
-
-Example topology validate:
-
-  .\genesis_topology_validate.exe assets\topology\examples\*.topology.json
-
-The editor (single-monitor authoring) is installed separately under GENESIS\Editor.
+The Editor (scene authoring) lives in the sibling Editor folder.
 "@
 Set-Content -Path (Join-Path $playerStage "README.txt") -Value $playerReadme -Encoding UTF8
 

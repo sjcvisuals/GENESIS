@@ -1,18 +1,3 @@
-GENESIS Setup
-
-Components
-----------
-* Editor  — single-monitor scene authoring
-* Player  — scene preview, multi-view topology simulation, topology validation
-* PIXERA  — ExtGenesis RenderBridge extension (data\rxExt\ExtGenesis)
-
-Notes
------
-* Multi-output / production topology tools install with Player, not the Editor.
-* Prefer Debug editor builds from the source tree for active development if the
-  installed Release editor misbehaves; Player and PIXERA tools are intended for
-  the installer Release payload.
-* After installing PIXERA extension, restart PIXERA / reload the generic extension
-  layer so it picks up the new ExtGenesis.dll.
-* Software updates: the Editor uses WinSparkle (Help → Check for Updates…).
-  Host a signed HTTPS appcast — see docs/windows-auto-update.md.
+; Deprecated — the wizard now uses WELCOME.txt (plain-language intro).
+; Kept so older docs/links do not 404; do not wire this into Genesis.iss.
+See WELCOME.txt

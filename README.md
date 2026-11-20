@@ -2,13 +2,22 @@
 
 Realtime 3D renderer for live events, virtual production, and media server workflows.
 
-## Requirements
+## Install (Windows)
 
-- Windows + Visual Studio 2022 (**Desktop development with C++**)
-- CMake (comes with VS)
+1. Download **`GenesisSetup-*.exe`** from [Releases](https://github.com/sjcvisuals/GENESIS/releases).
+2. Run the Setup wizard.
+3. Open **GENESIS** from the Start menu.
+
+Full one-pager: [docs/install-windows.md](docs/install-windows.md).
+
+## Requirements (using the installer)
+
+- Windows 10/11 x64
 - GPU with a Vulkan driver
 
-## Day-to-day (WIP)
+## Day-to-day (developers / WIP)
+
+You need Visual Studio 2022 (**Desktop development with C++**) and CMake.
 
 Double-click this file in the repo root:
 
@@ -32,7 +41,8 @@ In the editor: **File → Examples**.
 In PIXERA: browse to the DLL inside `out\ExtGenesis\` or `out\ExtGenesisRemover\` (keep the sibling folders next to the DLL).
 
 Background remover details: [docs/video-bg-remover.md](docs/video-bg-remover.md).  
-Pixera scene bridge: [docs/pixera-integration.md](docs/pixera-integration.md).
+Pixera scene bridge: [docs/pixera-integration.md](docs/pixera-integration.md).  
+Windows auto-update (WinSparkle): [docs/windows-auto-update.md](docs/windows-auto-update.md).
 
 ## Milestone status
 
@@ -52,13 +62,11 @@ Core vertical slice (scene runtime, editor, serialization, profiling) is complet
 - [ ] Shadow mapping
 - [ ] HDRI / IBL
 
-## Shipping (later)
-
-Installer packaging is separate from WIP testing:
+## Shipping (maintainers)
 
 ```powershell
 .\scripts\package-installer.ps1
 ```
 
-Output: `build\package\GenesisSetup-0.1.0.exe`  
-The wizard can install the PIXERA extension under `<PIXERA>\data\rxExt\ExtGenesis\`.
+Primary output: `build\package\GenesisSetup-<version>.exe`  
+Attach that file to the GitHub Release. Checklist: [docs/install-windows.md](docs/install-windows.md#release-checklist-maintainers).
