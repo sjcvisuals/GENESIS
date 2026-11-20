@@ -54,6 +54,10 @@ public:
     const std::vector<OscBinding>& bindings() const { return bindings_; }
     const std::vector<OscParticleEmitEvent>& particleEmitEvents() const { return particle_events_; }
     const std::vector<OscRoomPersonEvent>& roomPersonEvents() const { return room_person_events_; }
+    // Occupied-slot wall-ray samples for editor debug draw (updated by applyRoomPerson).
+    const std::array<OscWallRayDebugSample, kRoomPersonSlotCapacity>& wallRayDebugSamples() const {
+        return wall_ray_debug_;
+    }
 
     void clearLearned();
     void removeBinding(std::size_t index);
@@ -92,6 +96,7 @@ private:
     std::vector<OscParticleEmitEvent> particle_events_;
     std::vector<OscRoomPersonEvent> room_person_events_;
     std::array<OscRoomPersonSlot, kRoomPersonSlotCapacity> room_person_slots_{};
+    std::array<OscWallRayDebugSample, kRoomPersonSlotCapacity> wall_ray_debug_{};
     double last_poll_seconds_ = 0.0;
     std::unordered_map<std::string, std::vector<OscArg>> last_values_;
 

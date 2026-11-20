@@ -222,7 +222,7 @@ int main() {
             const float wall_r = std::sqrt(pose.wall.x * pose.wall.x + pose.wall.z * pose.wall.z);
             const float expected_r = settings.room_radius > 0.1f ? settings.room_radius : 3.0f;
             if (wall_r <= person_r + 1e-3f || std::abs(wall_r - expected_r) > 1e-3f ||
-                std::abs(pose.feet.x - 2.0f) > 1e-5f) {
+                std::abs(pose.feet.x - 2.0f) > 1e-5f || pose.used_plane_hit) {
                 std::cerr << "room person wall ray failed (person_r=" << person_r
                           << " wall_r=" << wall_r << " expected=" << expected_r << ")\n";
                 ++failures;
@@ -231,6 +231,45 @@ int main() {
                           << "," << pose.feet.z << ") wall(" << pose.wall.x << "," << pose.wall.y
                           << "," << pose.wall.z << ")\n";
             }
+        }
+    }
+
+    {
+        // Vertical wall plane at x = 4 m; person at (2,0,0) → hit at (4, wall_y, 0).
+        genesis::OscRoomPersonSettings settings{};
+        settings.wall_ray_mode = genesis::WallRaySpawnMode::PreferPlaneThenDistance;
+        settings.room_radius = 3.0f;
+        settings.wall_spawn_height = 0.12f;
+        genesis::OscRoomPersonEvent event{};
+        event.x = 2.0f;
+        event.z = 0.0f;
+        genesis::WallPlane plane{};
+        plane.point = glm::vec3(4.0f, 0.0f, 0.0f);
+        plane.normal = glm::vec3(-1.0f, 0.0f, 0.0f);
+        const genesis::OscRoomPersonPose pose =
+            genesis::oscRoomPersonPose(settings, event, &plane);
+        if (!pose.used_plane_hit || std::abs(pose.wall.x - 4.0f) > 1e-3f ||
+            std::abs(pose.wall.z) > 1e-3f ||
+            std::abs(pose.wall.y - settings.wall_spawn_height) > 1e-3f) {
+            std::cerr << "room person plane hit failed wall=(" << pose.wall.x << "," << pose.wall.y
+                      << "," << pose.wall.z << ") used_plane=" << pose.used_plane_hit << "\n";
+            ++failures;
+        } else {
+            std::cout << "OSC room person plane hit OK → wall(" << pose.wall.x << "," << pose.wall.y
+                      << "," << pose.wall.z << ")\n";
+        }
+
+        // Fixed-distance mode ignores plane even when provided.
+        settings.wall_ray_mode = genesis::WallRaySpawnMode::FixedDistance;
+        const genesis::OscRoomPersonPose fixed =
+            genesis::oscRoomPersonPose(settings, event, &plane);
+        const float fixed_r =
+            std::sqrt(fixed.wall.x * fixed.wall.x + fixed.wall.z * fixed.wall.z);
+        if (fixed.used_plane_hit || std::abs(fixed_r - 3.0f) > 1e-3f) {
+            std::cerr << "room person fixed-distance ignore-plane failed\n";
+            ++failures;
+        } else {
+            std::cout << "OSC room person fixed-distance OK (ignores plane)\n";
         }
     }
 

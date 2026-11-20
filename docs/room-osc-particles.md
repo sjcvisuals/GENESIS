@@ -15,7 +15,8 @@ Dual-ring cylindrical room soft-particle demo driven by OSC person tracking. Par
 | **Outer ring** | **~6 m diameter** (radius 3 m) | Soft Circles **rise / float upward** |
 | **Middle / tank ring** | **~2 m diameter** (radius 1 m) | Soft Circles flow **outward on the floor** (no rise) |
 | **Walk donut** | Between ~1 m and ~3 m radius | People track in this annulus |
-| **Outer wall (math)** | radius 3 m | Center→person ray hit for wall emitters |
+| **Outer wall (math)** | radius 3 m | Center→person ray at fixed distance (default) |
+| **Wall plane (optional)** | user-placed Plane | Center→person ray ↔ plane collision for wall spawn |
 
 ### Tugela hierarchy
 
@@ -49,7 +50,9 @@ Listen defaults: **UDP `0.0.0.0:9000`** (Protocol panel).
 
 1. Map person **id** → pool slot (max 10 active).
 2. Move that slot’s **Feet** emitter to the person (horizontal cylinder drift).
-3. Cast center→person to **room_radius** (3 m) and move **Wall** there (particles rise).
+3. Cast center→person for the **Wall** emitter:
+   - **Fixed distance** (default): hit at `room_radius` (~3 m).
+   - **Plane collision** / **Prefer plane → distance**: intersect optional scene Plane (`Scene/Wall Plane` by default; mesh faces +Y — rotate upright for a wall). Miss falls back to fixed distance.
 4. If no messages for `slot_idle_seconds` (~0.75 s), park both emitters at origin.
 
 ### `/genesis/particles/emit` (still supported)
@@ -63,6 +66,9 @@ Generic XY tracker emit. On the room example it defaults to `Scene/Person Pool/F
 - `max_persons` — active slots (default 10; capacity 20)
 - `slot_idle_seconds` — park timeout
 - `room_radius` / `tank_radius` — 3 m / 1 m
+- `wall_ray_mode` — Fixed distance | Plane collision | Prefer plane → distance
+- `wall_plane_path` — Hierarchy path to Plane actor (default `Scene/Wall Plane`)
+- `debug_draw_wall_ray` — viewport line + hit marker (off by default)
 - optional bursts (off by default; continuous emitter rate preferred)
 
 ## Demo media

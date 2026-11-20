@@ -472,6 +472,7 @@ protected:
             handleViewportSelection(scene);
             drawSelectionOverlays(scene);
             drawActorIcons(scene);
+            drawWallRayDebug();
         } else {
             viewport_.w = 0.0f;
             viewport_.h = 0.0f;
@@ -2156,6 +2157,62 @@ private:
         }
     }
 
+    void drawWallRayDebug() {
+        const genesis::OscRoomPersonSettings& room = osc_protocol_.roomPersonSettings();
+        if (!room.debug_draw_wall_ray || game_view_mode_ || !show_viewport_ || viewport_.w < 2.0f) {
+            return;
+        }
+
+        const float aspect = renderAspect();
+        const glm::mat4 view_proj =
+            genesis::projectionForImGuizmo(outputProjectionMatrix(aspect)) * outputViewMatrix();
+        ImDrawList* draw = ImGui::GetForegroundDrawList();
+
+        auto project = [&](const glm::vec3& world, ImVec2& out) -> bool {
+            float sx = 0.0f;
+            float sy = 0.0f;
+            if (!projectWorldPointToScreen(view_proj, world, viewport_.w, viewport_.h, sx, sy)) {
+                return false;
+            }
+            out = ImVec2(viewport_.x + sx, viewport_.y + sy);
+            return true;
+        };
+
+        for (const genesis::OscWallRayDebugSample& sample : osc_protocol_.wallRayDebugSamples()) {
+            if (!sample.active) {
+                continue;
+            }
+            ImVec2 c{};
+            ImVec2 p{};
+            ImVec2 w{};
+            const bool ok_c = project(sample.center, c);
+            const bool ok_p = project(sample.person, p);
+            const bool ok_w = project(sample.wall, w);
+            const ImU32 line_col =
+                sample.used_plane_hit ? IM_COL32(120, 210, 160, 220) : IM_COL32(210, 180, 90, 210);
+            const ImU32 hit_col =
+                sample.used_plane_hit ? IM_COL32(90, 230, 150, 240) : IM_COL32(240, 200, 80, 230);
+            if (ok_c && ok_p) {
+                draw->AddLine(c, p, line_col, 1.75f);
+            }
+            if (ok_p && ok_w) {
+                draw->AddLine(p, w, line_col, 1.75f);
+            } else if (ok_c && ok_w) {
+                draw->AddLine(c, w, line_col, 1.5f);
+            }
+            if (ok_c) {
+                draw->AddCircleFilled(c, 4.0f, IM_COL32(200, 200, 210, 220), 10);
+            }
+            if (ok_p) {
+                draw->AddCircleFilled(p, 4.5f, IM_COL32(120, 180, 220, 230), 10);
+            }
+            if (ok_w) {
+                draw->AddCircleFilled(w, 6.0f, hit_col, 14);
+                draw->AddCircle(w, 9.0f, hit_col, 16, 1.5f);
+            }
+        }
+    }
+
     static genesis::MeshMaterialPushConstants makeOutlineMaterial(bool primary) {
         genesis::MeshMaterialPushConstants mat{};
         // Thin white Unreal-style silhouette — not amber, not a filled wash.
@@ -2788,8 +2845,39 @@ private:
         if (path.find("room_osc_particles") == std::string::npos) {
             return;
         }
+        // Room install: surface OSC + wall-ray controls (skip panel when capturing viewport demos).
+        const bool hide_protocol =
+            (std::getenv("GENESIS_WALL_RAY_HIDE_PROTOCOL") != nullptr);
+        show_protocol_ = !hide_protocol;
         genesis::OscRoomPersonSettings room = osc_protocol_.roomPersonSettings();
         genesis::configureRoomOscInstallSettings(room);
+        // Opt-in editor debug: GENESIS_WALL_RAY_DEBUG=1 (still off for Renderbridge / default).
+        if (const char* dbg = std::getenv("GENESIS_WALL_RAY_DEBUG");
+            dbg != nullptr && dbg[0] != '\0' && dbg[0] != '0') {
+            room.debug_draw_wall_ray = true;
+        }
+        // Opt-in plane collide demo: place upright Wall Plane + PreferPlaneThenDistance.
+        if (const char* plane_demo = std::getenv("GENESIS_WALL_RAY_PLANE");
+            plane_demo != nullptr && plane_demo[0] != '\0' && plane_demo[0] != '0') {
+            genesis::Scene& scene = runtime_.scene();
+            std::optional<genesis::NodeId> scene_root = genesis::findNodeByPath(scene, "Scene");
+            if (!genesis::findNodeByPath(scene, room.wall_plane_path)) {
+                const std::uint32_t mesh_id =
+                    runtime_.addMesh("WallPlane", genesis::createPlaneMesh(renderer().context(), 4.0f));
+                genesis::NodeId plane_id =
+                    scene.createMeshNode("Wall Plane", mesh_id, scene_root);
+                if (genesis::Node* plane = scene.find(plane_id)) {
+                    // Stand on X=4 facing -X (local +Y → world -X).
+                    plane->local.position = glm::vec3(4.0f, 1.5f, 0.0f);
+                    plane->local.rotation =
+                        glm::angleAxis(glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+                    plane->local.scale = glm::vec3(1.0f);
+                }
+                runtime_.updateTransforms();
+            }
+            room.wall_ray_mode = genesis::WallRaySpawnMode::PreferPlaneThenDistance;
+            room.wall_plane_path = "Scene/Wall Plane";
+        }
         osc_protocol_.setRoomPersonSettings(room);
         genesis::OscParticleEmitSettings emit = osc_protocol_.particleEmitSettings();
         emit.emitter_path = "Scene/Person Pool/Feet 00";

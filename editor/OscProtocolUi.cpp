@@ -11,6 +11,7 @@
 namespace genesis {
 
 void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
+    ImGui::SetNextWindowSize(ImVec2(440.0f, 620.0f), ImGuiCond_FirstUseEver);
     ImGui::Begin("Protocol", open);
 
     ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.65f, 1.0f), "OSC");
@@ -152,7 +153,7 @@ void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
     ImGui::TextWrapped(
         "Send /genesis/room/person with Int32 id + x,z (`,iff`) for up to 10 people. "
         "Each ID drives Feet + Wall Tugela emitters; idle pairs park at world origin. "
-        "Wall hit = center→person ray at outer radius (~3 m).");
+        "Wall spawn: fixed outer radius (~3 m) and/or collision with a scene Plane.");
     OscRoomPersonSettings room = protocol.roomPersonSettings();
     bool room_dirty = false;
     room_dirty |= ImGui::Checkbox("Enable room person", &room.enabled);
@@ -173,6 +174,35 @@ void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
     // Keep legacy AABB fields aligned with the cylindrical outer radius.
     room.room_half_x = room.room_radius;
     room.room_half_z = room.room_radius;
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.75f, 0.85f, 0.55f, 1.0f), "Wall ray spawn");
+    int mode = static_cast<int>(room.wall_ray_mode);
+    if (ImGui::Combo("Spawn mode", &mode,
+                     "Fixed distance\0Plane collision\0Prefer plane → distance\0")) {
+        room.wall_ray_mode = static_cast<WallRaySpawnMode>(mode);
+        room_dirty = true;
+    }
+    char plane_path[160]{};
+    std::snprintf(plane_path, sizeof(plane_path), "%s", room.wall_plane_path.c_str());
+    if (ImGui::InputText("Wall plane path", plane_path, sizeof(plane_path))) {
+        room.wall_plane_path = plane_path;
+        room_dirty = true;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Hierarchy path to a Plane actor (mesh faces +Y). Rotate upright for a wall. "
+            "Create via Hierarchy → Plane.");
+    }
+    room_dirty |=
+        ImGui::DragFloat("Ray max distance (m)", &room.wall_ray_max_distance, 0.1f, 1.0f, 80.0f);
+    room_dirty |= ImGui::Checkbox("Debug draw wall ray", &room.debug_draw_wall_ray);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Viewport overlay: center → person → wall + hit marker. Off by default.");
+    }
+    ImGui::Separator();
+
     room_dirty |= ImGui::Checkbox("Burst at feet", &room.burst_at_feet);
     room_dirty |= ImGui::Checkbox("Burst along ray", &room.burst_along_ray);
     room_dirty |= ImGui::Checkbox("Burst at wall", &room.burst_at_wall);
