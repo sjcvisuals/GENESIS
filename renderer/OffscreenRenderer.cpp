@@ -44,6 +44,8 @@ OffscreenRenderer::OffscreenRenderer(const OffscreenRendererConfig& config) : ow
     createSyncObjects();
     createCommandBuffers();
     createMeshPipeline();
+    debug_hud_ = std::make_unique<DebugHudOverlay>();
+    debug_hud_->init(*context_, target_->renderPass(), target_->extent());
 
     spdlog::info("OffscreenRenderer initialized ({}x{})", config.width, config.height);
 }
@@ -65,6 +67,8 @@ OffscreenRenderer::OffscreenRenderer(VulkanContext& shared_context, const std::u
     createSyncObjects();
     createCommandBuffers();
     createMeshPipeline();
+    debug_hud_ = std::make_unique<DebugHudOverlay>();
+    debug_hud_->init(*context_, target_->renderPass(), target_->extent());
 
     spdlog::info("OffscreenRenderer shared output initialized ({}x{})", width, height);
 }
@@ -74,6 +78,7 @@ OffscreenRenderer::~OffscreenRenderer() {
         vkDeviceWaitIdle(context_->device());
     }
 
+    debug_hud_.reset();
     mesh_pipeline_.reset();
     mesh_additive_pipeline_.reset();
     mesh_depth_pipeline_.reset();
@@ -107,6 +112,9 @@ void OffscreenRenderer::resize(std::uint32_t width, std::uint32_t height) {
     }
     target_->recreate(width, height);
     recreatePipelines();
+    if (debug_hud_) {
+        debug_hud_->init(*context_, target_->renderPass(), target_->extent());
+    }
 }
 
 void OffscreenRenderer::createCommandPool() {
@@ -423,6 +431,15 @@ void OffscreenRenderer::drawMeshBatches(const std::vector<SceneMeshBatch>& batch
     } else {
         draw_group(additive_batches, *mesh_pipeline_, false);
     }
+}
+
+void OffscreenRenderer::drawPerfHud(const PerfDebugSnapshot& snap) {
+    if (!debug_hud_ || !debug_hud_->ready()) {
+        return;
+    }
+    ensureRenderPass();
+    VkCommandBuffer cmd = command_buffers_[current_frame_];
+    debug_hud_->draw(cmd, snap);
 }
 
 void OffscreenRenderer::endFrame(VkSemaphore wait_host_finished) {

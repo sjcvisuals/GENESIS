@@ -1,8 +1,10 @@
 #pragma once
 
+#include "renderer/DebugHudOverlay.hpp"
 #include "renderer/FrameUniforms.hpp"
 #include "renderer/MeshBatchDrawer.hpp"
 #include "renderer/MeshDrawPushConstants.hpp"
+#include "runtime/PerfDebug.hpp"
 #include "scene/SceneDrawBatch.hpp"
 
 #include <volk.h>
@@ -53,6 +55,8 @@ public:
                   const GpuTexture* base_color_texture = nullptr);
     void drawMeshBatches(const std::vector<SceneMeshBatch>& batches,
                          const MeshDrawOptions& options = {});
+    // Optional screen-space perf HUD (must be called before endFrame while pass may be open).
+    void drawPerfHud(const PerfDebugSnapshot& snap);
     void endFrame(VkSemaphore wait_host_finished = VK_NULL_HANDLE);
     void waitFrameComplete();
 
@@ -87,6 +91,7 @@ private:
     std::unique_ptr<BindlessTextures> bindless_textures_;
     std::unique_ptr<DisplayLutBinding> display_lut_;
     std::unique_ptr<MeshBatchDrawer> mesh_batch_drawer_;
+    std::unique_ptr<DebugHudOverlay> debug_hud_;
     std::unique_ptr<Buffer> frame_ubo_;
 
     VkDescriptorSetLayout frame_set_layout_ = VK_NULL_HANDLE;

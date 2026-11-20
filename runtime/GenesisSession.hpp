@@ -1,6 +1,7 @@
 #pragma once
 
 #include "runtime/GenesisFrameTime.hpp"
+#include "runtime/PerfDebug.hpp"
 #include "runtime/RuntimeScene.hpp"
 #include "renderer/OffscreenRenderer.hpp"
 #include "color/ColorManagement.hpp"
@@ -51,6 +52,11 @@ public:
     const ColorManagementSettings& lookSettings() const { return look_settings_; }
     void applyLookSettings();
 
+    // When true, burn the performance HUD into the offscreen / Renderbridge output.
+    void setShowPerfOnOutput(bool enabled) { show_perf_on_output_ = enabled; }
+    bool showPerfOnOutput() const { return show_perf_on_output_; }
+    const PerfDebugSnapshot& lastPerfSnapshot() const { return perf_snap_; }
+
     OffscreenRenderer& renderer() { return *renderer_; }
     const OffscreenRenderer& renderer() const { return *renderer_; }
     SceneRuntime& sceneRuntime() { return *scene_; }
@@ -73,6 +79,9 @@ private:
     std::string last_load_error_;
     ProductionClock production_clock_{};
     GenesisFrameTime current_frame_time_{};
+    bool show_perf_on_output_ = false;
+    PerfFrameClock perf_clock_{};
+    PerfDebugSnapshot perf_snap_{};
 };
 
 } // namespace genesis

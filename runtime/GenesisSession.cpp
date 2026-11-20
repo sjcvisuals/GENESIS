@@ -6,6 +6,8 @@
 #include "scene/Lighting.hpp"
 #include "scene/Scene.hpp"
 
+#include <cstdio>
+#include <cstdlib>
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <spdlog/spdlog.h>
@@ -22,6 +24,10 @@ GenesisSession::GenesisSession(const OffscreenRendererConfig& config) {
     // PIXERA-friendly Rec.709 display by default; cinematic bloom/vignette/grain still apply.
     look_settings_.display = DisplayColorSpace::Rec709;
     applyLookSettings();
+    if (const char* env = std::getenv("GENESIS_PERF_ON_OUTPUT");
+        env != nullptr && env[0] != '\0' && env[0] != '0') {
+        show_perf_on_output_ = true;
+    }
 }
 
 GenesisSession::~GenesisSession() = default;
@@ -101,6 +107,7 @@ void GenesisSession::render(const glm::dmat4& view,
                             const GenesisFrameTime& frame_time,
                             bool use_scene_camera) {
     current_frame_time_ = frame_time;
+    perf_clock_.beginFrame();
 
     glm::dmat4 render_view = view;
     glm::dmat4 render_projection = projection;
@@ -127,6 +134,7 @@ void GenesisSession::render(const glm::dmat4& view,
         scene_->flushParticleGpuUpdates(renderer_->currentCommandBuffer());
         scene_->simulateFluids(renderer_->currentCommandBuffer(), fluid_dt);
     }
+    perf_clock_.markUpdateEnd();
 
     draw_commands_.clear();
     SceneRenderStats render_stats{};
@@ -148,6 +156,22 @@ void GenesisSession::render(const glm::dmat4& view,
     draw_options.enable_gpu_cull = false;
     draw_options.enable_depth_prepass = true;
     renderer_->drawMeshBatches(draw_batches_, draw_options);
+    perf_clock_.markDrawEnd();
+
+    perf_snap_.draw_calls = render_stats.draw_calls;
+    perf_snap_.triangles = render_stats.triangles;
+    perf_snap_.visible_mesh_nodes = render_stats.visible_mesh_nodes;
+    perf_snap_.scene_nodes = render_stats.scene_nodes;
+    perf_snap_.active_lights = render_stats.active_lights;
+    fillPerfDebugParticles(perf_snap_, scene_->particleWorld());
+    perf_snap_.width = width_;
+    perf_snap_.height = height_;
+    std::snprintf(perf_snap_.gpu_name, sizeof(perf_snap_.gpu_name), "%s", renderer_->deviceName());
+    perf_clock_.endFrame(perf_snap_);
+
+    if (show_perf_on_output_) {
+        renderer_->drawPerfHud(perf_snap_);
+    }
 
     renderer_->endFrame(renderer_->sync().hostFinishedSemaphore());
 }

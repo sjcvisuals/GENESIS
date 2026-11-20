@@ -63,6 +63,10 @@ Input::Input(std::uint64_t adapter_luid, ValueSet settings)
     actor_bindings_.registerSceneParameters(*this, show_select_, use_scene_camera_, reload_scene_,
                                               position_param_);
 
+    show_perf_debug_ = add_parameter<ParameterBool>("show_perf_debug", false);
+    show_perf_debug_->set_property(PropertyNames::name, "Show Perf Debug");
+    show_perf_debug_->set_property(PropertyNames::group_name, "Debug");
+
     view_matrix_ = add_parameter<ParameterMatrix4>("view_matrix");
     view_matrix_->set_property(PropertyNames::purpose, PurposeNames::ViewMatrix);
     view_matrix_->set_property(PropertyNames::name, "View Matrix");
@@ -498,6 +502,10 @@ RenderResult Input::render() noexcept try {
         osc.applyBindings(session_->sceneRuntime());
         osc.applyParticleEmits(session_->sceneRuntime(), osc_particle_cursor_);
         osc.applyRoomPerson(session_->sceneRuntime(), osc_room_person_cursor_);
+    }
+
+    if (show_perf_debug_) {
+        session_->setShowPerfOnOutput(show_perf_debug_->value());
     }
 
     const ::genesis::HostTimingInput timing =

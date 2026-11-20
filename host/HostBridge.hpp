@@ -4,6 +4,7 @@
 #include "host/HostSceneCommand.hpp"
 #include "host/HostTypes.hpp"
 #include "runtime/GenesisFrameTime.hpp"
+#include "runtime/PerfDebug.hpp"
 #include "runtime/RuntimeScene.hpp"
 #include "renderer/FrameUniforms.hpp"
 #include "color/ColorManagement.hpp"
@@ -84,6 +85,8 @@ private:
     ColorManagement color_mgmt_{};
     ProductionClock production_clock_{};
     GenesisFrameTime current_frame_time_{};
+    PerfFrameClock perf_clock_{};
+    PerfDebugSnapshot perf_snap_{};
     bool stats_overlay_ = false;
 };
 
