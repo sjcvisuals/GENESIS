@@ -11,3 +11,8 @@ For playback / topology / PIXERA multi-output simulation, use tools under:
 
 Working directory for shortcuts must remain this Editor folder so shaders\
 and assets\ resolve correctly.
+
+Software updates
+----------------
+Help → Check for Updates… uses WinSparkle (WinSparkle.dll must sit next to
+this exe). See docs/windows-auto-update.md for the appcast feed and signing.

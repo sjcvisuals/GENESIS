@@ -1,6 +1,8 @@
 #include "engine/Application.hpp"
 
+#include "platform/AutoUpdate.hpp"
 #include "platform/FileDialog.hpp"
+#include "platform/Version.hpp"
 
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
@@ -11,7 +13,7 @@ namespace genesis {
 
 Application::Application(const ApplicationConfig& config) {
     spdlog::set_level(spdlog::level::info);
-    spdlog::info("GENESIS starting");
+    spdlog::info("GENESIS starting (v{})", GENESIS_VERSION_STRING);
 
     WindowConfig window_config{};
     window_config.title = config.title;
@@ -20,9 +22,17 @@ Application::Application(const ApplicationConfig& config) {
     window_ = std::make_unique<Window>(window_config);
     renderer_ = std::make_unique<Renderer>(*window_);
     renderer_->enableImGuiLayoutPersistence();
+
+    // WinSparkle / update feed — after the main window exists so UI can attach.
+    AutoUpdateConfig update_cfg{};
+    update_cfg.check_on_startup = true;
+    AutoUpdate::instance().configure(update_cfg);
+    AutoUpdate::instance().init();
 }
 
-Application::~Application() = default;
+Application::~Application() {
+    AutoUpdate::instance().shutdown();
+}
 
 void Application::pollEvents() {
     SDL_Event event{};

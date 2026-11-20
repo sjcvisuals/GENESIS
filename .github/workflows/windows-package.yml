@@ -1,0 +1,88 @@
+# Windows packaging + WinSparkle auto-update wiring.
+# Produces GenesisSetup-*.exe when Inno Setup is available on the runner.
+# Does not publish a signed update feed — see docs/windows-auto-update.md.
+
+name: Windows package
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "cmake/WinSparkle.cmake"
+      - "platform/AutoUpdate.*"
+      - "platform/Version.hpp.in"
+      - "platform/genesis_version.rc.in"
+      - "installer/**"
+      - "scripts/package-installer.ps1"
+      - "scripts/stage-installer.ps1"
+      - "scripts/publish-appcast.ps1"
+      - "docs/windows-auto-update.md"
+      - ".github/workflows/windows-package.yml"
+  pull_request:
+    paths:
+      - "cmake/WinSparkle.cmake"
+      - "platform/AutoUpdate.*"
+      - "installer/**"
+      - "scripts/package-installer.ps1"
+      - "scripts/stage-installer.ps1"
+      - "docs/windows-auto-update.md"
+      - ".github/workflows/windows-package.yml"
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Vulkan SDK
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          version: 1.4.309.0
+          cache: true
+
+      - name: Configure (MSVC)
+        shell: pwsh
+        run: |
+          # Default VS generator on the runner image (VS2022 or newer).
+          cmake -B build -A x64 `
+            -DGENESIS_ENABLE_WINSPARKLE=ON `
+            -DGENESIS_UPDATE_APPCAST_URL=https://updates.example.com/genesis/appcast.xml
+
+      - name: Build packaging targets
+        shell: pwsh
+        run: |
+          $targets = @(
+            "genesis_gltf_viewer",
+            "genesis_player",
+            "genesis_multiview_player",
+            "genesis_topology_validate",
+            "genesis_determinism_harness",
+            "ExtGenesis"
+          )
+          cmake --build build --config Release -j --target @targets
+
+      - name: Verify WinSparkle.dll next to editor
+        shell: pwsh
+        run: |
+          $dll = Get-ChildItem -Path build -Recurse -Filter WinSparkle.dll -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $dll) { throw "WinSparkle.dll missing — auto-update packaging failed" }
+          Write-Host "Found $($dll.FullName)"
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+
+      - name: Stage + compile GenesisSetup.exe
+        shell: pwsh
+        run: |
+          .\scripts\package-installer.ps1 -SkipBuild
+          Get-ChildItem build\package\GenesisSetup-*.exe | ForEach-Object { Write-Host $_.FullName; $_.Length }
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GenesisSetup
+          path: build/package/GenesisSetup-*.exe
+          if-no-files-found: warn

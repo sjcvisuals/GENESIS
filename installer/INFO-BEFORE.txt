@@ -14,3 +14,5 @@ Notes
   the installer Release payload.
 * After installing PIXERA extension, restart PIXERA / reload the generic extension
   layer so it picks up the new ExtGenesis.dll.
+* Software updates: the Editor uses WinSparkle (Help → Check for Updates…).
+  Host a signed HTTPS appcast — see docs/windows-auto-update.md.

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(GENESIS VERSION 0.1.0 LANGUAGES CXX)
+project(GENESIS VERSION 0.1.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,6 +13,20 @@ include(cmake/VulkanSetup.cmake)
 include(cmake/Dependencies.cmake)
 include(cmake/CompileShaders.cmake)
 include(cmake/OnnxRuntime.cmake)
+include(cmake/WinSparkle.cmake)
+
+configure_file(
+    "${CMAKE_SOURCE_DIR}/platform/Version.hpp.in"
+    "${CMAKE_BINARY_DIR}/generated/platform/Version.hpp"
+    @ONLY
+)
+if(WIN32)
+    configure_file(
+        "${CMAKE_SOURCE_DIR}/platform/genesis_version.rc.in"
+        "${CMAKE_BINARY_DIR}/generated/platform/genesis_version.rc"
+        @ONLY
+    )
+endif()
 
 add_library(genesis_vulkan INTERFACE)
 target_include_directories(genesis_vulkan INTERFACE "${GENESIS_VULKAN_INCLUDE_DIR}")
@@ -53,6 +67,7 @@ add_library(genesis_platform_core STATIC
 target_include_directories(genesis_platform_core PUBLIC
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/third_party
+    ${CMAKE_BINARY_DIR}/generated
 )
 target_link_libraries(genesis_platform_core PUBLIC
     SDL3::SDL3-static
@@ -61,6 +76,7 @@ target_link_libraries(genesis_platform_core PUBLIC
 )
 target_compile_definitions(genesis_platform_core PUBLIC
     GENESIS_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders/spv"
+    GENESIS_HAS_WINSPARKLE=$<BOOL:${GENESIS_HAS_WINSPARKLE}>
 )
 
 add_library(genesis_platform STATIC
@@ -69,16 +85,21 @@ add_library(genesis_platform STATIC
     platform/ImGuiLayer.cpp
     platform/EditorPaths.cpp
     platform/FileDialog.cpp
+    platform/AutoUpdate.cpp
 )
 target_include_directories(genesis_platform PUBLIC
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/third_party
+    ${CMAKE_BINARY_DIR}/generated
 )
 target_link_libraries(genesis_platform PUBLIC
     genesis_platform_core
     imgui_lib
     genesis_vulkan
 )
+if(GENESIS_HAS_WINSPARKLE)
+    target_link_libraries(genesis_platform PUBLIC winsparkle)
+endif()
 
 # -----------------------------------------------------------------------------
 # Renderer — core (offscreen + shared Vulkan) vs windowed (editor / player)
@@ -285,6 +306,11 @@ if(GENESIS_BUILD_EXAMPLES)
         editor/ParticleEmitterUi.cpp
         editor/TugelaEditor.cpp
     )
+    if(WIN32)
+        target_sources(genesis_gltf_viewer PRIVATE
+            "${CMAKE_BINARY_DIR}/generated/platform/genesis_version.rc"
+        )
+    endif()
     target_link_libraries(genesis_gltf_viewer PRIVATE genesis_engine genesis_protocol genesis_protocol_ui genesis_audio imguizmo_lib)
     add_dependencies(genesis_gltf_viewer genesis_shaders)
 
@@ -294,6 +320,14 @@ if(GENESIS_BUILD_EXAMPLES)
             "$<TARGET_FILE_DIR:genesis_gltf_viewer>/assets"
         COMMENT "Copying assets next to genesis_gltf_viewer"
     )
+    if(GENESIS_HAS_WINSPARKLE AND DEFINED GENESIS_WINSPARKLE_DLL)
+        add_custom_command(TARGET genesis_gltf_viewer POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${GENESIS_WINSPARKLE_DLL}"
+                "$<TARGET_FILE_DIR:genesis_gltf_viewer>/WinSparkle.dll"
+            COMMENT "Copying WinSparkle.dll next to genesis_gltf_viewer"
+        )
+    endif()
 
     add_executable(genesis_bridge_host examples/bridge_host/main.cpp)
     target_link_libraries(genesis_bridge_host PRIVATE genesis_engine)
