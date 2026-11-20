@@ -168,6 +168,7 @@ MultiViewFrameMetrics MultiViewSession::renderAllOutputs(const glm::dmat4& host_
         collect_params.view_proj_col_major = frame_uniforms.view_proj;
         collect_params.enable_cpu_culling = true;
         collect_params.enable_gpu_culling = false;
+        collect_params.game_output = true; // output path: honor Hidden in Game
         scene_->collectDrawCommands(draw_commands_, &render_stats, collect_params);
         buildDrawBatches(draw_commands_, draw_batches_, &render_stats);
 

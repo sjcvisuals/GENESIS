@@ -694,6 +694,7 @@ SceneDocument SceneSerializer::buildDocument(const Scene& scene, const std::stri
         entry.local = node.local;
         entry.visible = node.visible;
         entry.pickable = node.pickable;
+        entry.hidden_in_game = node.hidden_in_game;
         if (node.mesh_resource.has_value() && *node.mesh_resource < mesh_names.size()) {
             entry.mesh_ref = mesh_names[*node.mesh_resource];
         }
@@ -742,6 +743,7 @@ json SceneSerializer::documentToJson(const SceneDocument& document) {
             {"name", node.name},
             {"visible", node.visible},
             {"pickable", node.pickable},
+            {"hidden_in_game", node.hidden_in_game},
             {"transform", transformToJson(node.local)},
         };
         if (node.parent_path.has_value()) {
@@ -814,6 +816,7 @@ SceneDocument SceneSerializer::loadFromJson(const json& root) {
             if (entry.contains("pickable")) {
                 node.pickable = entry["pickable"].get<bool>();
             }
+            node.hidden_in_game = entry.value("hidden_in_game", false);
             if (entry.contains("transform")) node.local = transformFromJson(entry["transform"]);
             if (entry.contains("parent") && !entry["parent"].is_null()) {
                 node.parent_path = entry["parent"].get<std::string>();

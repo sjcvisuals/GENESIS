@@ -27,6 +27,9 @@ struct Node {
     glm::mat4 world{1.0f};
     bool visible = true;
     bool pickable = true;
+    // Unreal-like: shown in editor, omitted from Game View / Renderbridge output.
+    // Does not affect collisions / wall-ray plane hits.
+    bool hidden_in_game = false;
 
     // Runtime mesh resource index (owned by application mesh pool).
     std::optional<std::uint32_t> mesh_resource;

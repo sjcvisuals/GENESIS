@@ -506,6 +506,9 @@ void SceneRuntime::collectDrawCommands(std::vector<SceneDrawCommand>& out,
     }
 
     for (const Node& node : scene_.nodes) {
+        if (params.game_output && node.hidden_in_game) {
+            continue;
+        }
         if (node.light.has_value() && node.light->enabled && node.visible) {
             ++stats.active_lights;
         }
@@ -660,6 +663,7 @@ void SceneRuntime::applyNodeEntry(const NodeId id, const SceneDocumentNode& entr
     node->local = entry.local;
     node->visible = entry.visible;
     node->pickable = entry.pickable;
+    node->hidden_in_game = entry.hidden_in_game;
 
     if (entry.mesh_ref.has_value()) {
         node->has_mesh = true;

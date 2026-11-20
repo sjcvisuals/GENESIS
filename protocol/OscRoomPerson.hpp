@@ -28,6 +28,13 @@ namespace genesis {
 
 inline constexpr std::size_t kRoomPersonSlotCapacity = 20;
 
+// How the center→person wall spawn is resolved.
+enum class WallRaySpawnMode : std::uint8_t {
+    FixedDistance = 0,           // Math cylinder at room_radius (default / current install).
+    PlaneCollision = 1,          // Scene plane hit only; falls back to fixed distance on miss.
+    PreferPlaneThenDistance = 2, // Try plane path first, else fixed distance.
+};
+
 struct OscRoomPersonSettings {
     bool enabled = true;
     std::string address = "/genesis/room/person";
@@ -38,6 +45,8 @@ struct OscRoomPersonSettings {
     std::string feet_emitter_path = "Scene/Person Pool/Feet 00";
     std::string wall_emitter_path = "Scene/Person Pool/Wall 00";
     std::string ray_emitter_path = "Scene/Particle System/Center Ray";
+    // Optional scene Plane actor (mesh faces +Y). Rotate upright for a wall.
+    std::string wall_plane_path = "Scene/Wall Plane";
 
     // Active person slots (design toward capacity 20).
     std::uint32_t max_persons = 10;
@@ -53,6 +62,11 @@ struct OscRoomPersonSettings {
     glm::vec3 room_center{0.0f, 0.0f, 0.0f};
     float feet_height = 0.05f;
     float wall_spawn_height = 0.12f;
+    // Max ray length when testing plane collision (meters).
+    float wall_ray_max_distance = 20.0f;
+    WallRaySpawnMode wall_ray_mode = WallRaySpawnMode::FixedDistance;
+    // Viewport overlay: center→person→wall line + hit marker. Off for Renderbridge.
+    bool debug_draw_wall_ray = false;
 
     bool track_feet_emitter = true;
     bool track_wall_emitter = true;
@@ -66,6 +80,16 @@ struct OscRoomPersonSettings {
     std::uint32_t ray_samples = 0;
     std::uint32_t ray_burst_each = 2;
     std::uint32_t max_burst = 48;
+};
+
+// Last applied wall-ray samples for editor debug draw (not serialized).
+struct OscWallRayDebugSample {
+    std::int32_t person_id = -1;
+    glm::vec3 center{0.0f};
+    glm::vec3 person{0.0f};
+    glm::vec3 wall{0.0f};
+    bool used_plane_hit = false;
+    bool active = false;
 };
 
 struct OscRoomPersonEvent {
@@ -83,6 +107,18 @@ struct OscRoomPersonPose {
     glm::vec3 feet{0.0f};
     glm::vec3 wall{0.0f};
     glm::vec3 center{0.0f};
+    bool used_plane_hit = false;
+};
+
+// Infinite or finite rectangle. Plane mesh faces +Y; after transform, normal =
+// world +Y. Finite hits use tangent (+X) / bitangent (+Z) half-extents.
+struct WallPlane {
+    glm::vec3 point{0.0f};
+    glm::vec3 normal{0.0f, 1.0f, 0.0f};
+    glm::vec3 tangent{1.0f, 0.0f, 0.0f};
+    glm::vec3 bitangent{0.0f, 0.0f, 1.0f};
+    float half_u = 1.0e6f; // meters along tangent (∞ ≈ open)
+    float half_v = 1.0e6f; // meters along bitangent
 };
 
 struct OscRoomPersonSlot {
@@ -120,14 +156,27 @@ inline void configureRoomOscInstallSettings(OscRoomPersonSettings& room) {
     room.burst_at_wall = false;
     room.burst_along_ray = false;
     room.ray_samples = 0;
+    room.wall_ray_mode = WallRaySpawnMode::FixedDistance;
+    room.wall_plane_path = "Scene/Wall Plane";
+    room.wall_ray_max_distance = 20.0f;
+    room.debug_draw_wall_ray = false;
 }
 
 bool tryParseOscRoomPerson(const OscMessage& message, const OscRoomPersonSettings& settings,
                            OscRoomPersonEvent& out_event);
 
-// Ray from room center through the person to the cylindrical outer wall (3 m default).
+// Fixed-distance cylinder hit (room_radius) from room center through person XZ.
 OscRoomPersonPose oscRoomPersonPose(const OscRoomPersonSettings& settings,
                                     const OscRoomPersonEvent& event);
+
+// Same as above, optionally intersecting an infinite wall plane (mesh +Y → world normal).
+OscRoomPersonPose oscRoomPersonPose(const OscRoomPersonSettings& settings,
+                                    const OscRoomPersonEvent& event,
+                                    const WallPlane* wall_plane);
+
+// Ray (origin, dir unit) vs infinite plane. Returns false if parallel / behind / beyond max_t.
+bool intersectRayPlane(const glm::vec3& origin, const glm::vec3& dir, const WallPlane& plane,
+                       float max_t, glm::vec3& out_hit, float* out_t = nullptr);
 
 inline ParticleEmitter makeRoomOuterRingEmitter() {
     ParticleEmitter e = makeGentleSoftEmitter();

@@ -106,7 +106,7 @@ private:
         // Cached curves snapshot at birth (deterministic over-life if emitter edits mid-flight).
         ParticleCurve1 size_curve{};
         ParticleCurveColor color_curve{};
-        // Per-particle hue tint (gentle yellow/green/blue + occasional red).
+        // Per-particle hue tint (gentle yellow→green→blue mix).
         glm::vec3 color_tint{1.0f};
 
         // Trail Renderer history (oldest at [0], newest at [trail_count-1]).

@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <glm/geometric.hpp>
+#include <glm/mat3x3.hpp>
 #include <memory>
 
 namespace genesis {
@@ -306,6 +308,39 @@ std::uint32_t OscProtocol::applyRoomPerson(SceneRuntime& runtime, std::uint64_t&
                              [] { return makeRoomWallTraceEmitter(); }, "Wall");
     }
 
+    // Optional single wall plane: Plane mesh faces +Y; world axes from node transform.
+    // Only the node at wall_plane_path is used — no multi-plane fan / clutter.
+    std::optional<WallPlane> wall_plane;
+    if (room_person_.wall_ray_mode != WallRaySpawnMode::FixedDistance &&
+        !room_person_.wall_plane_path.empty()) {
+        runtime.updateTransforms();
+        if (const std::optional<NodeId> plane_id =
+                findNodeByPath(runtime.scene(), room_person_.wall_plane_path)) {
+            if (const Node* plane_node = runtime.scene().find(*plane_id); plane_node &&
+                plane_node->has_mesh) {
+                WallPlane plane{};
+                plane.point = glm::vec3(plane_node->world[3]);
+                const glm::mat3 rot(plane_node->world);
+                const glm::vec3 n = rot * glm::vec3(0.0f, 1.0f, 0.0f);
+                const glm::vec3 tu = rot * glm::vec3(1.0f, 0.0f, 0.0f);
+                const glm::vec3 tv = rot * glm::vec3(0.0f, 0.0f, 1.0f);
+                const float nlen = glm::length(n);
+                const float ulen = glm::length(tu);
+                const float vlen = glm::length(tv);
+                if (nlen > 1e-4f && ulen > 1e-4f && vlen > 1e-4f) {
+                    plane.normal = n / nlen;
+                    plane.tangent = tu / ulen;
+                    plane.bitangent = tv / vlen;
+                    // createPlaneMesh unit half-extent = 0.5; scale → world half-size.
+                    plane.half_u = 0.5f * ulen;
+                    plane.half_v = 0.5f * vlen;
+                    wall_plane = plane;
+                }
+            }
+        }
+    }
+    const WallPlane* plane_ptr = wall_plane ? &*wall_plane : nullptr;
+
     auto set_emitter_active = [&](NodeId id, bool active) {
         if (Node* node = runtime.scene().find(id); node && node->particle_emitter.has_value()) {
             node->particle_emitter->enabled = active;
@@ -330,6 +365,7 @@ std::uint32_t OscProtocol::applyRoomPerson(SceneRuntime& runtime, std::uint64_t&
         set_emitter_active(feet_id, false);
         set_emitter_active(wall_id, false);
         room_person_slots_[slot] = OscRoomPersonSlot{};
+        wall_ray_debug_[slot] = OscWallRayDebugSample{};
     };
 
     auto find_slot_for_id = [&](std::int32_t person_id) -> std::size_t {
@@ -363,7 +399,7 @@ std::uint32_t OscProtocol::applyRoomPerson(SceneRuntime& runtime, std::uint64_t&
             continue;
         }
 
-        const OscRoomPersonPose pose = oscRoomPersonPose(room_person_, event);
+        const OscRoomPersonPose pose = oscRoomPersonPose(room_person_, event, plane_ptr);
         const std::size_t slot = find_slot_for_id(event.person_id);
         room_person_slots_[slot].occupied = true;
         room_person_slots_[slot].person_id = event.person_id;
@@ -389,6 +425,14 @@ std::uint32_t OscProtocol::applyRoomPerson(SceneRuntime& runtime, std::uint64_t&
         }
         set_emitter_active(feet_id, true);
         set_emitter_active(wall_id, true);
+
+        OscWallRayDebugSample& dbg = wall_ray_debug_[slot];
+        dbg.person_id = event.person_id;
+        dbg.center = glm::vec3(pose.center.x, room_person_.wall_spawn_height, pose.center.z);
+        dbg.person = pose.feet;
+        dbg.wall = pose.wall;
+        dbg.used_plane_hit = pose.used_plane_hit;
+        dbg.active = true;
 
         const std::uint32_t scale =
             event.count > 0 ? event.count

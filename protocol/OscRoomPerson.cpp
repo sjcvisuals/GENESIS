@@ -83,7 +83,34 @@ bool tryParseOscRoomPerson(const OscMessage& message, const OscRoomPersonSetting
     return true;
 }
 
-OscRoomPersonPose oscRoomPersonPose(const OscRoomPersonSettings& settings,
+bool intersectRayPlane(const glm::vec3& origin, const glm::vec3& dir, const WallPlane& plane,
+                       float max_t, glm::vec3& out_hit, float* out_t) {
+    const float denom = glm::dot(plane.normal, dir);
+    if (std::fabs(denom) < 1e-6f) {
+        return false;
+    }
+    const float t = glm::dot(plane.point - origin, plane.normal) / denom;
+    if (t < 1e-4f || t > max_t) {
+        return false;
+    }
+    const glm::vec3 hit = origin + dir * t;
+    // Finite panel: reject hits outside the Plane actor's rectangle.
+    const glm::vec3 rel = hit - plane.point;
+    const float u = glm::dot(rel, plane.tangent);
+    const float v = glm::dot(rel, plane.bitangent);
+    if (std::fabs(u) > plane.half_u + 1e-4f || std::fabs(v) > plane.half_v + 1e-4f) {
+        return false;
+    }
+    out_hit = hit;
+    if (out_t) {
+        *out_t = t;
+    }
+    return true;
+}
+
+namespace {
+
+OscRoomPersonPose poseFixedDistance(const OscRoomPersonSettings& settings,
                                     const OscRoomPersonEvent& event) {
     OscRoomPersonPose pose{};
     pose.center = settings.room_center;
@@ -105,6 +132,47 @@ OscRoomPersonPose oscRoomPersonPose(const OscRoomPersonSettings& settings,
         radius = std::max(0.1f, std::min(settings.room_half_x, settings.room_half_z));
     }
     pose.wall = glm::vec3(c.x + d.x * radius, settings.wall_spawn_height, c.y + d.y * radius);
+    pose.used_plane_hit = false;
+    return pose;
+}
+
+} // namespace
+
+OscRoomPersonPose oscRoomPersonPose(const OscRoomPersonSettings& settings,
+                                    const OscRoomPersonEvent& event) {
+    return oscRoomPersonPose(settings, event, nullptr);
+}
+
+OscRoomPersonPose oscRoomPersonPose(const OscRoomPersonSettings& settings,
+                                    const OscRoomPersonEvent& event,
+                                    const WallPlane* wall_plane) {
+    OscRoomPersonPose pose = poseFixedDistance(settings, event);
+    const bool try_plane =
+        wall_plane != nullptr &&
+        (settings.wall_ray_mode == WallRaySpawnMode::PlaneCollision ||
+         settings.wall_ray_mode == WallRaySpawnMode::PreferPlaneThenDistance);
+    if (!try_plane) {
+        return pose;
+    }
+
+    // Horizontal center→person ray at wall spawn height (matches cylinder install framing).
+    const glm::vec3 origin(settings.room_center.x, settings.wall_spawn_height,
+                           settings.room_center.z);
+    glm::vec3 dir(pose.feet.x - origin.x, 0.0f, pose.feet.z - origin.z);
+    const float len = glm::length(dir);
+    if (len < 1e-4f) {
+        dir = glm::vec3(1.0f, 0.0f, 0.0f);
+    } else {
+        dir /= len;
+    }
+
+    const float max_t = std::max(0.5f, settings.wall_ray_max_distance);
+    glm::vec3 hit{};
+    if (intersectRayPlane(origin, dir, *wall_plane, max_t, hit)) {
+        pose.wall = hit;
+        pose.used_plane_hit = true;
+    }
+    // Miss → keep fixed-distance wall (PlaneCollision and PreferPlane share this fallback).
     return pose;
 }
 
