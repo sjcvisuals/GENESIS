@@ -89,9 +89,28 @@ $topologySource = Join-Path $assetsSource "topology"
 $editorStage = Join-Path $StageRoot "Editor"
 New-Item -ItemType Directory -Force -Path $editorStage | Out-Null
 Copy-Item -Path $EditorExe -Destination $editorStage -Force
+# WinSparkle auto-updater DLL (fetched by CMake on Windows builds)
+$wsDllCandidates = @(
+    (Join-Path $BuildDir "_deps\winsparkle-0.8.3\x64\Release\WinSparkle.dll"),
+    (Join-Path (Split-Path -Parent $EditorExe) "WinSparkle.dll")
+)
+foreach ($ws in $wsDllCandidates) {
+    if (Test-Path $ws) {
+        Copy-Item -Path $ws -Destination (Join-Path $editorStage "WinSparkle.dll") -Force
+        Write-Host "Staged WinSparkle.dll from $ws"
+        break
+    }
+}
 Copy-Shaders -DestinationRoot $editorStage
 Copy-FilteredTree -Source $assetsSource -Destination (Join-Path $editorStage "assets")
 Copy-Item -Path (Join-Path $RepoRoot "deploy\README-editor.txt") -Destination (Join-Path $editorStage "README.txt") -Force
+# Updater readme for support
+$updateNote = @"
+GENESIS uses WinSparkle for software updates.
+Help → Check for Updates… checks the online appcast feed.
+See docs/windows-auto-update.md
+"@
+Set-Content -Path (Join-Path $editorStage "UPDATES.txt") -Value $updateNote -Encoding UTF8
 
 # Player (playback + topology tools — multi-output path)
 $playerStage = Join-Path $StageRoot "Player"

@@ -14,7 +14,9 @@
 #include "editor/TugelaEditor.hpp"
 #include "editor/SceneViewport.hpp"
 #include "engine/Application.hpp"
+#include "platform/AutoUpdate.hpp"
 #include "platform/EditorPaths.hpp"
+#include "platform/Version.hpp"
 #include "platform/FileDialog.hpp"
 #include "platform/Paths.hpp"
 #include "renderer/GridDrawPushConstants.hpp"
@@ -453,6 +455,24 @@ protected:
         if (show_audio_) drawAudioPanel(scene);
         if (show_animation_graph_) drawAnimationGraphPanel();
         if (show_debug_window_) drawDebugWindow();
+        genesis::AutoUpdate::instance().drawDemoUi(&show_update_ui_);
+        if (show_about_) {
+            ImGui::SetNextWindowSize(ImVec2(420.0f, 0.0f), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowPos(ImVec2(220.0f, 120.0f), ImGuiCond_FirstUseEver);
+            if (ImGui::Begin("About GENESIS", &show_about_, ImGuiWindowFlags_AlwaysAutoResize)) {
+                ImGui::TextUnformatted("GENESIS");
+                ImGui::Text("Version %s", GENESIS_VERSION_STRING);
+                ImGui::Separator();
+                ImGui::TextWrapped(
+                    "Realtime render engine for live events and PIXERA. "
+                    "Windows builds use WinSparkle for software updates.");
+                ImGui::TextDisabled("Update feed: %s", genesis::AutoUpdate::instance().appcastUrl().c_str());
+                if (ImGui::Button("Close", ImVec2(120, 0))) {
+                    show_about_ = false;
+                }
+            }
+            ImGui::End();
+        }
 
         drawFileModals(scene);
 
@@ -675,6 +695,22 @@ private:
 
         if (ImGui::BeginMenu("Color")) {
             drawColorMenu();
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("Help")) {
+            if (ImGui::MenuItem("Check for Updates…")) {
+                show_update_ui_ = true;
+                genesis::AutoUpdate::instance().checkWithUi();
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Check the online update feed (WinSparkle on Windows — Adobe-like download & install).");
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("About GENESIS")) {
+                show_about_ = true;
+            }
             ImGui::EndMenu();
         }
 
@@ -2893,6 +2929,8 @@ private:
     genesis::TugelaEditorState tugela_editor_{};
     bool auto_key_ = false;
     bool show_debug_window_ = false;
+    bool show_update_ui_ = false;
+    bool show_about_ = false;
     bool show_grid_ = true;
     bool show_actor_icons_ = true;
     bool game_view_mode_ = false; // Unreal-like: hide actor icons when true
