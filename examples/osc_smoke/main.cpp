@@ -271,6 +271,29 @@ int main() {
         } else {
             std::cout << "OSC room person fixed-distance OK (ignores plane)\n";
         }
+
+        // Finite panel miss → fall back to fixed distance.
+        settings.wall_ray_mode = genesis::WallRaySpawnMode::PreferPlaneThenDistance;
+        plane.half_u = 0.25f;
+        plane.half_v = 0.25f;
+        plane.tangent = glm::vec3(0.0f, 1.0f, 0.0f);
+        plane.bitangent = glm::vec3(0.0f, 0.0f, 1.0f);
+        // Ray hits x=4 at (4, 0.12, 0) which is outside the tiny 0.5×0.5 panel centered at
+        // (4,0,0) when measuring Y/Z — actually hit y=0.12,z=0 is inside if half is 0.25.
+        // Offset person so hit is far on Z.
+        event.z = 2.0f;
+        event.x = 2.0f;
+        const genesis::OscRoomPersonPose miss =
+            genesis::oscRoomPersonPose(settings, event, &plane);
+        const float miss_r =
+            std::sqrt(miss.wall.x * miss.wall.x + miss.wall.z * miss.wall.z);
+        if (miss.used_plane_hit || std::abs(miss_r - 3.0f) > 1e-3f) {
+            std::cerr << "room person finite-plane miss fallback failed used="
+                      << miss.used_plane_hit << " r=" << miss_r << "\n";
+            ++failures;
+        } else {
+            std::cout << "OSC room person finite-plane miss → fixed-distance OK\n";
+        }
     }
 
     {

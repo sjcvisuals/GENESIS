@@ -110,9 +110,15 @@ struct OscRoomPersonPose {
     bool used_plane_hit = false;
 };
 
+// Infinite or finite rectangle. Plane mesh faces +Y; after transform, normal =
+// world +Y. Finite hits use tangent (+X) / bitangent (+Z) half-extents.
 struct WallPlane {
     glm::vec3 point{0.0f};
     glm::vec3 normal{0.0f, 1.0f, 0.0f};
+    glm::vec3 tangent{1.0f, 0.0f, 0.0f};
+    glm::vec3 bitangent{0.0f, 0.0f, 1.0f};
+    float half_u = 1.0e6f; // meters along tangent (∞ ≈ open)
+    float half_v = 1.0e6f; // meters along bitangent
 };
 
 struct OscRoomPersonSlot {

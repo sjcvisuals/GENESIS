@@ -93,7 +93,15 @@ bool intersectRayPlane(const glm::vec3& origin, const glm::vec3& dir, const Wall
     if (t < 1e-4f || t > max_t) {
         return false;
     }
-    out_hit = origin + dir * t;
+    const glm::vec3 hit = origin + dir * t;
+    // Finite panel: reject hits outside the Plane actor's rectangle.
+    const glm::vec3 rel = hit - plane.point;
+    const float u = glm::dot(rel, plane.tangent);
+    const float v = glm::dot(rel, plane.bitangent);
+    if (std::fabs(u) > plane.half_u + 1e-4f || std::fabs(v) > plane.half_v + 1e-4f) {
+        return false;
+    }
+    out_hit = hit;
     if (out_t) {
         *out_t = t;
     }

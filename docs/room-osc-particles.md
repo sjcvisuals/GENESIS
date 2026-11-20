@@ -16,7 +16,7 @@ Dual-ring cylindrical room soft-particle demo driven by OSC person tracking. Par
 | **Middle / tank ring** | **~2 m diameter** (radius 1 m) | Soft Circles flow **outward on the floor** (no rise) |
 | **Walk donut** | Between ~1 m and ~3 m radius | People track in this annulus |
 | **Outer wall (math)** | radius 3 m | Center→person ray at fixed distance (default) |
-| **Wall plane (optional)** | user-placed Plane | Center→person ray ↔ plane collision for wall spawn |
+| **Wall plane (optional)** | **one** user-placed Plane | Center→person ray ↔ that panel; miss → fixed radius |
 
 ### Tugela hierarchy
 

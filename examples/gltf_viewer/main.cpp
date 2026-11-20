@@ -2856,27 +2856,58 @@ private:
             dbg != nullptr && dbg[0] != '\0' && dbg[0] != '0') {
             room.debug_draw_wall_ray = true;
         }
-        // Opt-in plane collide demo: place upright Wall Plane + PreferPlaneThenDistance.
+        // Opt-in: exactly one upright Wall Plane + PreferPlaneThenDistance (no plane clutter).
         if (const char* plane_demo = std::getenv("GENESIS_WALL_RAY_PLANE");
             plane_demo != nullptr && plane_demo[0] != '\0' && plane_demo[0] != '0') {
             genesis::Scene& scene = runtime_.scene();
             std::optional<genesis::NodeId> scene_root = genesis::findNodeByPath(scene, "Scene");
+            room.wall_plane_path = "Scene/Wall Plane";
+            // Drop any stray Plane* mesh actors under Scene so demos stay a single hit panel.
+            std::vector<genesis::NodeId> stray_planes;
+            for (const genesis::Node& node : scene.nodes) {
+                if (!node.has_mesh || !node.parent.has_value()) {
+                    continue;
+                }
+                if (scene_root && *node.parent != *scene_root) {
+                    continue;
+                }
+                if (node.name == "Wall Plane") {
+                    continue;
+                }
+                if (node.name.rfind("Plane", 0) == 0) {
+                    stray_planes.push_back(node.id);
+                }
+            }
+            for (genesis::NodeId id : stray_planes) {
+                scene.deleteNode(id);
+            }
             if (!genesis::findNodeByPath(scene, room.wall_plane_path)) {
+                // Unit plane (±0.5); scale → ~3 m tall × 6 m wide panel at x=4 facing -X.
                 const std::uint32_t mesh_id =
-                    runtime_.addMesh("WallPlane", genesis::createPlaneMesh(renderer().context(), 4.0f));
-                genesis::NodeId plane_id =
-                    scene.createMeshNode("Wall Plane", mesh_id, scene_root);
+                    runtime_.addMesh("WallPlane", genesis::createPlaneMesh(renderer().context(), 0.5f));
+                genesis::SceneMaterial mat{};
+                mat.base_color = glm::vec4(0.35f, 0.38f, 0.42f, 1.0f);
+                mat.metallic = 0.0f;
+                mat.roughness = 0.9f;
+                // Readable fill on the black unlit stage — one panel, not a black void.
+                mat.emissive = glm::vec3(0.28f, 0.30f, 0.33f);
+                mat.emissive_strength = 1.35f;
+                const std::uint32_t mat_id = runtime_.addMaterial("WallPlane Material", mat);
+                const genesis::NodeId plane_id =
+                    scene.createMeshNode("Wall Plane", mesh_id, scene_root, mat_id);
                 if (genesis::Node* plane = scene.find(plane_id)) {
-                    // Stand on X=4 facing -X (local +Y → world -X).
                     plane->local.position = glm::vec3(4.0f, 1.5f, 0.0f);
                     plane->local.rotation =
                         glm::angleAxis(glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-                    plane->local.scale = glm::vec3(1.0f);
+                    // local X → height, local Z → width after Z-90° rotation.
+                    plane->local.scale = glm::vec3(3.0f, 1.0f, 6.0f);
                 }
                 runtime_.updateTransforms();
+                spdlog::info("Wall ray demo: created single Scene/Wall Plane (node {})", plane_id);
+            } else {
+                spdlog::info("Wall ray demo: reusing Scene/Wall Plane");
             }
             room.wall_ray_mode = genesis::WallRaySpawnMode::PreferPlaneThenDistance;
-            room.wall_plane_path = "Scene/Wall Plane";
         }
         osc_protocol_.setRoomPersonSettings(room);
         genesis::OscParticleEmitSettings emit = osc_protocol_.particleEmitSettings();
@@ -2902,7 +2933,18 @@ private:
         // other demos still frame the Soft Circles / Outer Ring emitter.
         const bool room_demo = session_.document_path.filename().string().find("room_osc_particles") !=
                                std::string::npos;
-        if (room_demo) {
+        const bool wall_plane_demo = (std::getenv("GENESIS_WALL_RAY_PLANE") != nullptr &&
+                                      std::getenv("GENESIS_WALL_RAY_PLANE")[0] != '\0' &&
+                                      std::getenv("GENESIS_WALL_RAY_PLANE")[0] != '0');
+        if (room_demo && wall_plane_demo) {
+            // Frame the single hit panel + ray (not the default dual-ring overview).
+            if (std::optional<genesis::NodeId> plane =
+                    genesis::findNodeByPath(runtime_.scene(), "Scene/Wall Plane")) {
+                selectNode(*plane);
+            }
+            camera_pivot_ = glm::vec3(2.0f, 1.2f, 0.0f);
+            placeEditorCameraAt(glm::vec3(9.0f, 3.8f, 8.0f), camera_pivot_);
+        } else if (room_demo) {
             camera_pivot_ = glm::vec3(0.0f, 0.9f, 0.0f);
             placeEditorCameraAt(glm::vec3(9.5f, 5.5f, 11.0f), camera_pivot_);
             // Particles-only install: frame the outer ring emitter (no room/tank meshes).

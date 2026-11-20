@@ -308,21 +308,32 @@ std::uint32_t OscProtocol::applyRoomPerson(SceneRuntime& runtime, std::uint64_t&
                              [] { return makeRoomWallTraceEmitter(); }, "Wall");
     }
 
-    // Optional wall plane: Plane mesh faces +Y; world normal = rotated local +Y.
+    // Optional single wall plane: Plane mesh faces +Y; world axes from node transform.
+    // Only the node at wall_plane_path is used — no multi-plane fan / clutter.
     std::optional<WallPlane> wall_plane;
     if (room_person_.wall_ray_mode != WallRaySpawnMode::FixedDistance &&
         !room_person_.wall_plane_path.empty()) {
         runtime.updateTransforms();
         if (const std::optional<NodeId> plane_id =
                 findNodeByPath(runtime.scene(), room_person_.wall_plane_path)) {
-            if (const Node* plane_node = runtime.scene().find(*plane_id)) {
+            if (const Node* plane_node = runtime.scene().find(*plane_id); plane_node &&
+                plane_node->has_mesh) {
                 WallPlane plane{};
                 plane.point = glm::vec3(plane_node->world[3]);
                 const glm::mat3 rot(plane_node->world);
                 const glm::vec3 n = rot * glm::vec3(0.0f, 1.0f, 0.0f);
+                const glm::vec3 tu = rot * glm::vec3(1.0f, 0.0f, 0.0f);
+                const glm::vec3 tv = rot * glm::vec3(0.0f, 0.0f, 1.0f);
                 const float nlen = glm::length(n);
-                if (nlen > 1e-4f) {
+                const float ulen = glm::length(tu);
+                const float vlen = glm::length(tv);
+                if (nlen > 1e-4f && ulen > 1e-4f && vlen > 1e-4f) {
                     plane.normal = n / nlen;
+                    plane.tangent = tu / ulen;
+                    plane.bitangent = tv / vlen;
+                    // createPlaneMesh unit half-extent = 0.5; scale → world half-size.
+                    plane.half_u = 0.5f * ulen;
+                    plane.half_v = 0.5f * vlen;
                     wall_plane = plane;
                 }
             }
