@@ -2881,33 +2881,55 @@ private:
             for (genesis::NodeId id : stray_planes) {
                 scene.deleteNode(id);
             }
-            if (!genesis::findNodeByPath(scene, room.wall_plane_path)) {
-                // Unit plane (±0.5); scale → ~3 m tall × 6 m wide panel at x=4 facing -X.
+            auto place_compact_wall_plane = [&](genesis::Node& plane) {
+                // Just outside the 2 m walk ring, facing -X; ~2.2 m tall × ~1 m wide.
+                plane.local.position = glm::vec3(2.35f, 1.1f, 0.0f);
+                plane.local.rotation =
+                    glm::angleAxis(glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+                // local X → height, local Z → width after Z-90° rotation.
+                plane.local.scale = glm::vec3(2.2f, 1.0f, 1.0f);
+            };
+            if (const std::optional<genesis::NodeId> existing =
+                    genesis::findNodeByPath(scene, room.wall_plane_path)) {
+                if (genesis::Node* plane = scene.find(*existing)) {
+                    place_compact_wall_plane(*plane);
+                    runtime_.updateTransforms();
+                    spdlog::info("Wall ray demo: resized Scene/Wall Plane for natural hits");
+                }
+            } else {
+                // Compact panel near center: only a small +X sector of the donut hits;
+                // most of a circle walk falls back to fixed room_radius.
                 const std::uint32_t mesh_id =
                     runtime_.addMesh("WallPlane", genesis::createPlaneMesh(renderer().context(), 0.5f));
                 genesis::SceneMaterial mat{};
                 mat.base_color = glm::vec4(0.35f, 0.38f, 0.42f, 1.0f);
                 mat.metallic = 0.0f;
                 mat.roughness = 0.9f;
-                // Readable fill on the black unlit stage — one panel, not a black void.
                 mat.emissive = glm::vec3(0.28f, 0.30f, 0.33f);
                 mat.emissive_strength = 1.35f;
                 const std::uint32_t mat_id = runtime_.addMaterial("WallPlane Material", mat);
                 const genesis::NodeId plane_id =
                     scene.createMeshNode("Wall Plane", mesh_id, scene_root, mat_id);
                 if (genesis::Node* plane = scene.find(plane_id)) {
-                    plane->local.position = glm::vec3(4.0f, 1.5f, 0.0f);
-                    plane->local.rotation =
-                        glm::angleAxis(glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-                    // local X → height, local Z → width after Z-90° rotation.
-                    plane->local.scale = glm::vec3(3.0f, 1.0f, 6.0f);
+                    place_compact_wall_plane(*plane);
                 }
                 runtime_.updateTransforms();
-                spdlog::info("Wall ray demo: created single Scene/Wall Plane (node {})", plane_id);
-            } else {
-                spdlog::info("Wall ray demo: reusing Scene/Wall Plane");
+                spdlog::info("Wall ray demo: created compact Scene/Wall Plane (node {})", plane_id);
             }
             room.wall_ray_mode = genesis::WallRaySpawnMode::PreferPlaneThenDistance;
+        }
+        // Prefer green/yellow/blue gradual palette on room emitters (drop rainbow/red pops).
+        {
+            const genesis::ParticleEmitter palette = genesis::makeGentleSoftEmitter();
+            for (genesis::Node& node : runtime_.scene().nodes) {
+                if (!node.particle_emitter.has_value()) {
+                    continue;
+                }
+                genesis::ParticleEmitter& e = *node.particle_emitter;
+                e.color_start = palette.color_start;
+                e.color_end = palette.color_end;
+                e.color_over_life = palette.color_over_life;
+            }
         }
         osc_protocol_.setRoomPersonSettings(room);
         genesis::OscParticleEmitSettings emit = osc_protocol_.particleEmitSettings();

@@ -243,20 +243,23 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
         } else {
             p.color_curve = ParticleCurveColor::linear(glm::vec4(1.0f), glm::vec4(1.0f, 1.0f, 1.0f, 0.0f));
         }
-        // Gentle palette: yellow → green → blue, with the odd soft red mixed in.
+        // Gentle palette: gradual yellow → green → blue (no rainbow / red pops).
         {
             const float u =
                 particleRandom01(seed, runtime.node_id, emit_index, kChanColor);
             if (!desc.mod_color) {
                 p.color_tint = glm::vec3(1.0f);
-            } else if (u < 0.30f) {
-                p.color_tint = glm::vec3(1.0f, 0.78f, 0.18f); // soft yellow
-            } else if (u < 0.55f) {
-                p.color_tint = glm::vec3(0.32f, 1.0f, 0.4f); // soft green
-            } else if (u < 0.85f) {
-                p.color_tint = glm::vec3(0.3f, 0.68f, 1.0f); // soft blue/cyan
             } else {
-                p.color_tint = glm::vec3(1.0f, 0.32f, 0.3f); // odd soft red (~15%)
+                constexpr glm::vec3 kYellow(1.0f, 0.82f, 0.22f);
+                constexpr glm::vec3 kGreen(0.35f, 0.95f, 0.45f);
+                constexpr glm::vec3 kBlue(0.32f, 0.70f, 1.0f);
+                if (u < 0.5f) {
+                    const float t = u * 2.0f;
+                    p.color_tint = glm::mix(kYellow, kGreen, t);
+                } else {
+                    const float t = (u - 0.5f) * 2.0f;
+                    p.color_tint = glm::mix(kGreen, kBlue, t);
+                }
             }
         }
         p.trail_enabled = desc.trail_enabled;
