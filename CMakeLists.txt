@@ -632,7 +632,8 @@ if(GENESIS_BUILD_REMOVER_EXT AND WIN32)
 endif()
 
 # -----------------------------------------------------------------------------
-# Windows installer (Inno Setup — run scripts/package-installer.ps1)
+# Windows installer (Inno Setup wizard — run scripts/package-installer.ps1)
+# Primary artifact: GenesisSetup-<version>.exe  (see docs/install-windows.md)
 # -----------------------------------------------------------------------------
 if(WIN32)
     add_custom_target(GenesisInstaller

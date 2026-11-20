@@ -1,0 +1,16 @@
+Welcome to GENESIS
+
+This installer sets up GENESIS on your computer — the same way you would
+install other creative software.
+
+What you get
+------------
+  • GENESIS Editor — create and edit scenes
+  • Playback tools — preview scenes on this machine
+  • PIXERA extension — optional; only if you use PIXERA media servers
+
+You can change the install location on the next screens. When setup
+finishes, GENESIS is ready to open from the Start menu.
+
+Need help later? Updates are available from Help → Check for Updates…
+inside the Editor, or from the GENESIS Releases page on GitHub.

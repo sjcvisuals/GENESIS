@@ -1,6 +1,6 @@
 # Windows packaging + WinSparkle auto-update wiring.
-# Produces GenesisSetup-*.exe when Inno Setup is available on the runner.
-# Does not publish a signed update feed — see docs/windows-auto-update.md.
+# Produces GenesisSetup-*.exe (primary) and optional portable zip when Inno Setup is available.
+# Does not publish a signed update feed — see docs/windows-auto-update.md / docs/install-windows.md.
 
 name: Windows package
 
@@ -17,6 +17,7 @@ on:
       - "scripts/stage-installer.ps1"
       - "scripts/publish-appcast.ps1"
       - "docs/windows-auto-update.md"
+      - "docs/install-windows.md"
       - ".github/workflows/windows-package.yml"
   pull_request:
     paths:
@@ -26,6 +27,7 @@ on:
       - "scripts/package-installer.ps1"
       - "scripts/stage-installer.ps1"
       - "docs/windows-auto-update.md"
+      - "docs/install-windows.md"
       - ".github/workflows/windows-package.yml"
 
 jobs:
@@ -78,11 +80,20 @@ jobs:
         shell: pwsh
         run: |
           .\scripts\package-installer.ps1 -SkipBuild
-          Get-ChildItem build\package\GenesisSetup-*.exe | ForEach-Object { Write-Host $_.FullName; $_.Length }
+          Get-ChildItem build\package\GenesisSetup-*.exe | ForEach-Object { Write-Host "SETUP" $_.FullName $_.Length }
+          Get-ChildItem build\package\GENESIS-*-portable.zip -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host "PORTABLE" $_.FullName $_.Length }
 
-      - name: Upload installer artifact
+      - name: Upload installer artifact (primary)
         uses: actions/upload-artifact@v4
         with:
           name: GenesisSetup
           path: build/package/GenesisSetup-*.exe
+          if-no-files-found: warn
+
+      - name: Upload portable zip (secondary)
+        uses: actions/upload-artifact@v4
+        with:
+          name: GENESIS-portable
+          path: build/package/GENESIS-*-windows-x64-portable.zip
           if-no-files-found: warn
