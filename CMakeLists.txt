@@ -46,6 +46,8 @@ genesis_compile_shaders(genesis_shaders
     shaders/grid.frag
     shaders/selection_outline.vert
     shaders/selection_outline.frag
+    shaders/debug_hud.vert
+    shaders/debug_hud.frag
     shaders/cull_instances.comp
     shaders/finalize_cull.comp
     shaders/fluid_advect.comp
@@ -106,6 +108,7 @@ endif()
 # -----------------------------------------------------------------------------
 add_library(genesis_renderer_core STATIC
     renderer/OffscreenRenderer.cpp
+    renderer/DebugHudOverlay.cpp
     renderer/MeshBatchDrawer.cpp
     renderer/BindlessTextures.cpp
     renderer/DisplayLutBinding.cpp
@@ -228,6 +231,7 @@ add_library(genesis_runtime STATIC
     runtime/GenesisSession.cpp
     runtime/GenesisFrameTime.cpp
     runtime/HostTimingAdapter.cpp
+    runtime/PerfDebug.cpp
     runtime/ScenePlaybackPipeline.cpp
     runtime/SceneStateHash.cpp
     runtime/DeterministicAnimation.cpp
@@ -248,6 +252,7 @@ add_library(genesis_engine STATIC
     host/HostBridge.cpp
     host/HostFrameTiming.cpp
     host/MultiViewHostSession.cpp
+    editor/PerfDebugUi.cpp
 )
 target_include_directories(genesis_engine PUBLIC ${CMAKE_SOURCE_DIR})
 target_link_libraries(genesis_engine PUBLIC

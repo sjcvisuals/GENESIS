@@ -11,10 +11,12 @@
 #include "editor/AudioReactiveUi.hpp"
 #include "editor/EditorTheme.hpp"
 #include "editor/ParticleEmitterUi.hpp"
+#include "editor/PerfDebugUi.hpp"
 #include "editor/TugelaEditor.hpp"
 #include "editor/SceneViewport.hpp"
 #include "engine/Application.hpp"
 #include "platform/AutoUpdate.hpp"
+#include "runtime/PerfDebug.hpp"
 #include "platform/EditorPaths.hpp"
 #include "platform/Version.hpp"
 #include "platform/FileDialog.hpp"
@@ -455,6 +457,18 @@ protected:
         if (show_protocol_) drawProtocolPanel();
         if (show_audio_) drawAudioPanel(scene);
         if (show_animation_graph_) drawAnimationGraphPanel();
+        if (!perf_env_applied_) {
+            perf_env_applied_ = true;
+            if (const char* env = std::getenv("GENESIS_PERF_OVERLAY");
+                env != nullptr && env[0] != '\0' && env[0] != '0') {
+                show_perf_overlay_ = true;
+                show_debug_window_ = true;
+            }
+            if (const char* env = std::getenv("GENESIS_PERF_ON_OUTPUT");
+                env != nullptr && env[0] != '\0' && env[0] != '0') {
+                show_perf_on_output_ = true;
+            }
+        }
         if (show_debug_window_) drawDebugWindow();
         genesis::AutoUpdate::instance().drawDemoUi(&show_update_ui_);
         if (show_about_) {
@@ -473,6 +487,10 @@ protected:
                 }
             }
             ImGui::End();
+        }
+        if (show_perf_overlay_) {
+            genesis::PerfDebugSnapshot snap = makePerfSnapshot();
+            genesis::drawPerfDebugOverlayWindow(snap, &show_perf_overlay_);
         }
 
         drawFileModals(scene);
@@ -532,6 +550,10 @@ private:
         // Unreal-like G: toggle game view (hides actor icons / editor helpers).
         if (input().keyPressed(SDL_SCANCODE_G) && !ctrl) {
             game_view_mode_ = !game_view_mode_;
+        }
+        // P: toggle detailed performance overlay.
+        if (input().keyPressed(SDL_SCANCODE_P) && !ctrl) {
+            show_perf_overlay_ = !show_perf_overlay_;
         }
         // T: toggle lean Tugela Editor pop-out (systems / emitters / curves).
         if (input().keyPressed(SDL_SCANCODE_T) && !ctrl) {
@@ -739,6 +761,15 @@ private:
                 ImGui::SetTooltip("Hide actor icons (Unreal-style game / show-flags).");
             }
             ImGui::Separator();
+            ImGui::MenuItem("Performance Overlay", "P", &show_perf_overlay_);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Detailed FPS / particle / GPU overlay.");
+            }
+            ImGui::MenuItem("Show Perf on Output", nullptr, &show_perf_on_output_);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Burn the same overlay into Pixera Renderbridge / offscreen output.");
+            }
             ImGui::MenuItem("Performance / Debug", nullptr, &show_debug_window_);
             ImGui::Separator();
             if (ImGui::MenuItem("Reset Window Layout")) {
@@ -1586,6 +1617,7 @@ private:
         ImGui::BulletText("F — frame selection (sets orbit pivot)");
         ImGui::BulletText("Grid — 1 m major / 0.25 m minor");
         ImGui::BulletText("G — Game View (hide icons + Hidden in Game actors)");
+        ImGui::BulletText("P — Performance overlay (FPS / particles / GPU)");
         ImGui::Spacing();
         ImGui::TextDisabled("SELECTION");
         ImGui::BulletText("Meshes — thin white silhouette outline");
@@ -1864,22 +1896,42 @@ private:
         ImGui::End();
     }
 
+    genesis::PerfDebugSnapshot makePerfSnapshot() {
+        genesis::PerfDebugSnapshot snap{};
+        snap.fps = timer().fps();
+        genesis::fillPerfDebugFromFrameStats(snap, frameStats());
+        genesis::fillPerfDebugParticles(snap, runtime_.particleWorld());
+        snap.width = static_cast<std::uint32_t>(std::max(window().width(), 0));
+        snap.height = static_cast<std::uint32_t>(std::max(window().height(), 0));
+        std::snprintf(snap.gpu_name, sizeof(snap.gpu_name), "%s", renderer().deviceName());
+        return snap;
+    }
+
     void drawDebugWindow() {
         ImGui::Begin("Performance / Debug", &show_debug_window_);
 
-        ImGui::Text("FPS: %.1f", timer().fps());
-        ImGui::Text("Frame: %.3f ms", frameStats().frame_ms);
-        ImGui::Text("  Update: %.3f ms", frameStats().update_ms);
-        ImGui::Text("  UI: %.3f ms", frameStats().imgui_ms);
-        ImGui::Text("  Draw: %.3f ms", frameStats().draw_ms);
+        genesis::drawPerfDebugControls(show_perf_overlay_, show_perf_on_output_);
         ImGui::Separator();
-        ImGui::Text("Draw calls: %u", frameStats().draw_calls);
-        ImGui::Text("Triangles: %u", frameStats().triangles);
-        ImGui::Text("Visible meshes: %u", frameStats().visible_mesh_nodes);
-        ImGui::Text("Scene nodes: %u", frameStats().scene_nodes);
-        ImGui::Text("Active lights: %u", frameStats().active_lights);
-        ImGui::Text("GPU: %s", renderer().deviceName());
-        ImGui::Text("Resolution: %d x %d", window().width(), window().height());
+
+        const genesis::PerfDebugSnapshot snap = makePerfSnapshot();
+        ImGui::Text("FPS: %.1f", snap.fps);
+        ImGui::Text("Frame: %.3f ms", snap.frame_ms);
+        ImGui::Text("  Update: %.3f ms", snap.update_ms);
+        ImGui::Text("  UI: %.3f ms", snap.imgui_ms);
+        ImGui::Text("  Draw: %.3f ms", snap.draw_ms);
+        ImGui::Separator();
+        ImGui::Text("Draw calls: %u", snap.draw_calls);
+        ImGui::Text("Triangles: %u", snap.triangles);
+        ImGui::Text("Visible meshes: %u", snap.visible_mesh_nodes);
+        ImGui::Text("Scene nodes: %u", snap.scene_nodes);
+        ImGui::Text("Active lights: %u", snap.active_lights);
+        ImGui::Separator();
+        ImGui::Text("Particles alive: %u", snap.particles_alive);
+        ImGui::Text("Emitters: %u", snap.particle_emitters);
+        ImGui::Text("Sim steps: %u (%s)", snap.particle_steps, snap.particle_gpu ? "GPU" : "CPU");
+        ImGui::Separator();
+        ImGui::Text("GPU: %s", snap.gpu_name);
+        ImGui::Text("Resolution: %u x %u", snap.width, snap.height);
         ImGui::Separator();
         ImGui::TextWrapped("Projects: %s", genesis::editorProjectsDir().string().c_str());
         ImGui::TextWrapped("Layout: %s", genesis::editorLayoutIniPath().string().c_str());
@@ -3097,6 +3149,9 @@ private:
     bool show_debug_window_ = false;
     bool show_update_ui_ = false;
     bool show_about_ = false;
+    bool show_perf_overlay_ = false;
+    bool show_perf_on_output_ = false;
+    bool perf_env_applied_ = false;
     bool show_grid_ = true;
     bool show_actor_icons_ = true;
     bool game_view_mode_ = false; // Unreal-like: hide icons + Hidden in Game actors

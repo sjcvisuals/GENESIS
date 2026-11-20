@@ -67,6 +67,7 @@ private:
     ParameterInt* show_select_ = nullptr;
     ParameterBool* use_scene_camera_ = nullptr;
     ParameterBool* reload_scene_ = nullptr;
+    ParameterBool* show_perf_debug_ = nullptr;
     ActorBindings actor_bindings_;
     SceneParameterCatalog parameter_catalog_;
     std::filesystem::path module_dir_;

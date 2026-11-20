@@ -1,9 +1,11 @@
 #include "host/HostBridge.hpp"
 
+#include "editor/PerfDebugUi.hpp"
 #include "platform/Paths.hpp"
 #include "platform/Window.hpp"
 #include "renderer/Renderer.hpp"
 #include "runtime/HostTimingAdapter.hpp"
+#include "runtime/PerfDebug.hpp"
 #include "runtime/ScenePlaybackPipeline.hpp"
 #include "host/HostFrameTiming.hpp"
 #include "runtime/RuntimeScene.hpp"
@@ -12,6 +14,7 @@
 
 #include <imgui.h>
 #include <spdlog/spdlog.h>
+#include <cstdio>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <cstring>
@@ -276,6 +279,7 @@ void HostBridge::beginFrame(const HostFrameInput& input) {
         window_->clearResizedFlag();
     }
 
+    perf_clock_.beginFrame();
     current_frame_time_ = adaptHostFrameInput(production_clock_, input);
     tickScenePlayback(*scene_, current_frame_time_);
 
@@ -292,6 +296,7 @@ void HostBridge::renderScene() {
         scene_->flushParticleGpuUpdates(renderer_->currentCommandBuffer());
         scene_->simulateFluids(renderer_->currentCommandBuffer(), fluid_dt);
     }
+    perf_clock_.markUpdateEnd();
 
     SceneRenderStats render_stats{};
     SceneDrawCollectParams collect_params{};
@@ -313,9 +318,20 @@ void HostBridge::renderScene() {
     draw_options.enable_gpu_cull = false;
     draw_options.enable_depth_prepass = true;
     renderer_->drawMeshBatches(draw_batches_, draw_options);
+    perf_clock_.markDrawEnd();
 }
 
 void HostBridge::endFrame() {
+    fillPerfDebugFromFrameStats(perf_snap_, frame_stats_);
+    fillPerfDebugParticles(perf_snap_, scene_->particleWorld());
+    perf_snap_.width = window_->width() > 0 ? static_cast<std::uint32_t>(window_->width()) : 0u;
+    perf_snap_.height = window_->height() > 0 ? static_cast<std::uint32_t>(window_->height()) : 0u;
+    std::snprintf(perf_snap_.gpu_name, sizeof(perf_snap_.gpu_name), "%s", deviceName());
+    perf_clock_.endFrame(perf_snap_);
+    frame_stats_.frame_ms = perf_snap_.frame_ms;
+    frame_stats_.update_ms = perf_snap_.update_ms;
+    frame_stats_.draw_ms = perf_snap_.draw_ms;
+
     renderer_->beginUiFrame();
     if (stats_overlay_) {
         drawStatsOverlay();
@@ -324,15 +340,7 @@ void HostBridge::endFrame() {
 }
 
 void HostBridge::drawStatsOverlay() {
-    ImGui::SetNextWindowPos(ImVec2(12.0f, 12.0f), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowBgAlpha(0.85f);
-    ImGui::Begin("HostBridge", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::Text("GPU: %s", deviceName());
-    ImGui::Text("Draw calls: %u", frame_stats_.draw_calls);
-    ImGui::Text("Triangles: %u", frame_stats_.triangles);
-    ImGui::Text("Nodes: %u", frame_stats_.scene_nodes);
-    ImGui::Text("Lights: %u", frame_stats_.active_lights);
-    ImGui::End();
+    drawPerfDebugOverlayWindow(perf_snap_);
 }
 
 } // namespace genesis
