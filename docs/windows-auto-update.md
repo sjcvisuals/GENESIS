@@ -61,7 +61,7 @@ On non-Windows (or `GENESIS_UPDATE_UI_DEMO=1`), the same menu opens an ImGui **S
 
 ## CI
 
-GitHub Actions workflow [`.github/workflows/windows-package.yml`](../.github/workflows/windows-package.yml) builds on `windows-latest`, verifies `WinSparkle.dll`, stages the installer tree, and (when Inno Setup installs via Chocolatey) uploads `GenesisSetup-*.exe` as an artifact.
+GitHub Actions workflow [`.github/workflows/windows-package.yml`](../.github/workflows/windows-package.yml) builds on `windows-latest` (Vulkan SDK via `humbletim/install-vulkan-sdk@v1.2`), verifies `WinSparkle.dll`, stages the installer tree, and (when Inno Setup installs via Chocolatey) uploads `GenesisSetup-*.exe` as an artifact.
 
 That artifact is **not** a signed release. Production still needs:
 
