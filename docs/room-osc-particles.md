@@ -68,12 +68,14 @@ Generic XY tracker emit. On the room example it defaults to `Scene/Person Pool/F
 - `room_radius` / `tank_radius` — 3 m / 1 m
 - `wall_ray_mode` — Fixed distance | Plane collision | Prefer plane → distance
 - `wall_plane_path` — Hierarchy path to Plane actor (default `Scene/Wall Plane`)
-- `debug_draw_wall_ray` — viewport line + hit marker (off by default)
+- `debug_draw_wall_ray` — viewport line + hit marker (off by default; editor-only)
 - optional bursts (off by default; continuous emitter rate preferred)
+
+**Hidden in Game:** actors expose an Unreal-like flag (Inspector → Hidden in Game; hierarchy badge `· HG`). Editor view draws them; Game View (`G`) and Pixera Renderbridge output skip their meshes. Collisions still run — the demo Wall Plane defaults Hidden in Game so wall particles hit/spawn while the plane stays invisible on output.
 
 ## Demo media
 
-Store: `/cursor/stores/bc-bfd4a606-4e38-4cd5-93d8-8ae247b97bf2/media/person_emit_*`
+Store: `/cursor/stores/bc-bfd4a606-4e38-4cd5-93d8-8ae247b97bf2/media/` — `person_emit_*`, `hidden_in_game_{editor,game}.png`
 
 ## Renderbridge notes
 

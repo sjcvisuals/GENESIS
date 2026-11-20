@@ -134,6 +134,7 @@ void GenesisSession::render(const glm::dmat4& view,
     collect_params.view_proj_col_major = frame_uniforms_.view_proj;
     collect_params.enable_cpu_culling = true;
     collect_params.enable_gpu_culling = false;
+    collect_params.game_output = true; // Pixera Renderbridge: honor Hidden in Game
     {
         const glm::mat3 inv = glm::inverse(glm::mat3(glm::mat4(render_view)));
         scene_->setParticleViewBasis(glm::normalize(glm::vec3(inv[0])),

@@ -41,6 +41,8 @@ struct SceneDrawCollectParams {
     const float* view_proj_col_major = nullptr;
     bool enable_cpu_culling = true;
     bool enable_gpu_culling = true;
+    // When true (Game View / Pixera Renderbridge), skip actors with hidden_in_game.
+    bool game_output = false;
 };
 
 struct SceneRenderStats {

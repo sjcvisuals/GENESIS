@@ -21,6 +21,7 @@ struct SceneDocumentNode {
     Transform local{};
     bool visible = true;
     bool pickable = true;
+    bool hidden_in_game = false;
 
     std::optional<std::string> mesh_ref;
     std::optional<std::string> material_ref;

@@ -377,6 +377,7 @@ protected:
         collect_params.view_proj_col_major = &vp[0][0];
         collect_params.enable_cpu_culling = true;
         collect_params.enable_gpu_culling = false;
+        collect_params.game_output = game_view_mode_; // Unreal-like Hidden in Game preview
         runtime_.collectDrawCommands(draw_commands_, &render_stats, collect_params);
         {
             // Camera-facing sprite basis for Tugela soft circles.
@@ -878,6 +879,7 @@ private:
             if (n->mesh_resource.has_value()) label += "  · M";
             if (n->camera.has_value()) label += "  · C";
             if (n->light.has_value()) label += "  · L";
+            if (n->hidden_in_game) label += "  · HG";
             if (const char* badge = genesis::particleHierarchyBadge(scene, *n);
                 badge[0] != '\0') {
                 label += "  · ";
@@ -1032,6 +1034,12 @@ private:
             if (ImGui::Checkbox("Visible", &n->visible)) changed = true;
             genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::NodeVisible, node_path, 0,
                                        "visible");
+            if (ImGui::Checkbox("Hidden in Game", &n->hidden_in_game)) changed = true;
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Unreal-like: shown in editor, hidden in Game View (G) and Pixera Renderbridge "
+                    "output. Collisions still apply (e.g. Wall Plane hits).");
+            }
             if (n->camera.has_value()) {
                 ImGui::BeginDisabled();
                 bool camera_pickable = false;
@@ -1508,7 +1516,8 @@ private:
         ImGui::SameLine(0.0f, 12.0f);
         ImGui::Checkbox("Game", &game_view_mode_);
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Game View (G) — hide actor icons");
+            ImGui::SetTooltip(
+                "Game View (G) — hide actor icons and Hidden in Game actors (preview output)");
         }
 
         ImGui::SameLine(0.0f, 20.0f);
@@ -1540,7 +1549,7 @@ private:
         ImGui::BulletText("RMB + WASD / QE — fly look");
         ImGui::BulletText("F — frame selection (sets orbit pivot)");
         ImGui::BulletText("Grid — 1 m major / 0.25 m minor");
-        ImGui::BulletText("G — Game View (hide actor icons)");
+        ImGui::BulletText("G — Game View (hide icons + Hidden in Game actors)");
         ImGui::Spacing();
         ImGui::TextDisabled("SELECTION");
         ImGui::BulletText("Meshes — thin white silhouette outline");
@@ -2282,6 +2291,9 @@ private:
             if (!node || !node->mesh_resource.has_value()) {
                 continue;
             }
+            if (game_view_mode_ && node->hidden_in_game) {
+                continue;
+            }
             if (const genesis::Mesh* mesh = runtime_.mesh(*node->mesh_resource)) {
                 append_instance(mesh, node->world, id);
             }
@@ -2888,6 +2900,8 @@ private:
                     glm::angleAxis(glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
                 // local X → height, local Z → width after Z-90° rotation.
                 plane.local.scale = glm::vec3(2.2f, 1.0f, 1.0f);
+                // Collisions still run; mesh omitted from Game View / Renderbridge.
+                plane.hidden_in_game = true;
             };
             if (const std::optional<genesis::NodeId> existing =
                     genesis::findNodeByPath(scene, room.wall_plane_path)) {
@@ -3047,7 +3061,7 @@ private:
     bool show_debug_window_ = false;
     bool show_grid_ = true;
     bool show_actor_icons_ = true;
-    bool game_view_mode_ = false; // Unreal-like: hide actor icons when true
+    bool game_view_mode_ = false; // Unreal-like: hide icons + Hidden in Game actors
     int edge_demo_frames_ = 0;
     int tugela_demo_frames_ = 0;
 
