@@ -25,22 +25,21 @@ Double-click this file in the repo root:
 BUILD-AND-RUN.bat
 ```
 
-That builds the editor (**Debug**) and Pixera DLLs (**Release** — required for PIXERA to load them), puts everything in `out\`, and launches the editor.
+That builds the editor (**Debug**) and the Pixera scene DLL (**Release** — required for PIXERA to load it), puts everything in `out\`, and launches the editor.
 
 ```
 out\
   Editor\genesis_gltf_viewer.exe     <- editor (launched for you)
   ExtGenesis\ExtGenesis.dll          <- Pixera scene bridge
-  ExtGenesisRemover\ExtGenesisRemover.dll  <- Pixera background cutout only
 ```
 
-Ignore `build\` - that is only the CMake cache. Test from `out\` only.  
-For Remover, keep `onnxruntime.dll` + `assets\matting\` next to the DLL.
+Ignore `build\` - that is only the CMake cache. Test from `out\` only.
 
 In the editor: **File → Examples**.  
-In PIXERA: browse to the DLL inside `out\ExtGenesis\` or `out\ExtGenesisRemover\` (keep the sibling folders next to the DLL).
+In PIXERA: browse to the DLL inside `out\ExtGenesis\` (keep sibling folders next to the DLL).
 
-Background remover details: [docs/video-bg-remover.md](docs/video-bg-remover.md).  
+Background remover (in-editor / ExtGenesis mode): [docs/video-bg-remover.md](docs/video-bg-remover.md).  
+Free PIXERA cutout product (**Genesis Remover** / `ExtGenesisRemover`): [`sjcvisuals/GenesisRemover`](https://github.com/sjcvisuals/GenesisRemover).  
 Pixera scene bridge: [docs/pixera-integration.md](docs/pixera-integration.md).  
 Windows auto-update (WinSparkle): [docs/windows-auto-update.md](docs/windows-auto-update.md).
 
@@ -51,9 +50,9 @@ Core vertical slice (scene runtime, editor, serialization, profiling) is complet
 ### Host integration (RenderBridge path)
 
 - [x] `ExtGenesis` — PIXERA scene / actor RenderBridge DLL
-- [x] `ExtGenesisRemover` — matte-only PIXERA DLL (background cutout)
 - [x] `OffscreenRenderer` + external Vulkan render target (shared texture export)
 - [x] `HostBridge` — dev harness (SDL window, not the shipping PIXERA path)
+- Remover product DLL moved to [`sjcvisuals/GenesisRemover`](https://github.com/sjcvisuals/GenesisRemover)
 
 ### Rendering
 

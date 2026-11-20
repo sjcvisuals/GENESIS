@@ -1,7 +1,7 @@
 @echo off
 REM ============================================================
 REM  GENESIS — double-click this to build + run the editor (WIP)
-REM  Also builds Pixera ExtGenesis + ExtGenesisRemover DLLs.
+REM  Also builds the Pixera ExtGenesis DLL.
 REM  Outputs land in the out\ folder next to this file.
 REM ============================================================
 cd /d "%~dp0"

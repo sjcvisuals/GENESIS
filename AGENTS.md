@@ -22,4 +22,5 @@ On Linux VMs with `libvulkan-dev` installed, `cmake/VulkanSetup.cmake` prefers `
 - ONNX Runtime: CMake option `GENESIS_ENABLE_ONNXRUNTIME` (default ON) downloads into `third_party/onnxruntime-*` (gitignored)
 - Editor needs a display (`DISPLAY=:1` with XFCE/lavapipe in the cloud snapshot).
 
-See `docs/video-bg-remover.md` for live video / background remover + Genesis Remover status.
+See `docs/video-bg-remover.md` for ExtGenesis Background Remover / shared matte.
+Free Remover product: `sjcvisuals/GenesisRemover` (separate repo).
