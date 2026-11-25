@@ -136,25 +136,81 @@ std::optional<OscMessage> parseOscMessage(std::span<const std::uint8_t> data, st
     return message;
 }
 
-std::vector<OscMessage> parseOscPackets(std::span<const std::uint8_t> data, std::string* out_error) {
-    std::vector<OscMessage> messages;
+namespace {
+
+void appendDebugMessage(OscParseResult& result, const OscMessage& message, int depth) {
+    OscDebugLogEntry entry{};
+    entry.nest_depth = depth;
+    entry.kind = OscDebugKind::Message;
+    entry.address = message.address;
+    entry.type_tags = oscTypeTagsFromArgs(message.args);
+    for (const OscArg& arg : message.args) {
+        entry.arg_preview.push_back(oscArgToString(arg));
+    }
+    result.debug_log.push_back(std::move(entry));
+}
+
+void parseOscPacketDetailedInto(std::span<const std::uint8_t> data, int depth, OscParseResult& result,
+                                std::string* out_error) {
     if (data.empty()) {
-        return messages;
+        OscDebugLogEntry entry{};
+        entry.nest_depth = depth;
+        entry.kind = OscDebugKind::Error;
+        entry.address = "(error)";
+        entry.note = "Empty OSC packet";
+        result.debug_log.push_back(std::move(entry));
+        if (out_error && out_error->empty()) {
+            *out_error = "Empty OSC packet";
+        }
+        return;
     }
 
     if (data[0] == '#') {
         std::size_t offset = 0;
         std::string header;
         if (!readPaddedString(data, offset, header) || header != "#bundle") {
+            OscDebugLogEntry entry{};
+            entry.nest_depth = depth;
+            entry.kind = OscDebugKind::Error;
+            entry.address = "(error)";
+            entry.note = "Invalid OSC bundle header";
+            result.debug_log.push_back(std::move(entry));
             if (out_error) *out_error = "Invalid OSC bundle header";
-            return messages;
+            return;
         }
         if (offset + 8 > data.size()) {
+            OscDebugLogEntry entry{};
+            entry.nest_depth = depth;
+            entry.kind = OscDebugKind::Error;
+            entry.address = "#bundle";
+            entry.note = "Truncated OSC bundle timetag";
+            result.debug_log.push_back(std::move(entry));
             if (out_error) *out_error = "Truncated OSC bundle timetag";
-            return messages;
+            return;
         }
-        offset += 8;
 
+        const std::uint32_t hi = readUInt32Be(data, offset);
+        offset += 4;
+        const std::uint32_t lo = readUInt32Be(data, offset);
+        offset += 4;
+        const std::uint64_t tag = (static_cast<std::uint64_t>(hi) << 32) | lo;
+
+        OscDebugLogEntry bundle{};
+        bundle.nest_depth = depth;
+        bundle.kind = OscDebugKind::Bundle;
+        bundle.address = "#bundle";
+        if (tag == 1) {
+            bundle.note = "timetag=immediate";
+        } else {
+            char buf[48];
+            std::snprintf(buf, sizeof(buf), "timetag=0x%016llx",
+                          static_cast<unsigned long long>(tag));
+            bundle.note = buf;
+        }
+        const std::size_t bundle_index = result.debug_log.size();
+        result.debug_log.push_back(std::move(bundle));
+
+        int element_count = 0;
         while (offset + 4 <= data.size()) {
             std::int32_t element_size = 0;
             if (!readInt32(data, offset, element_size) || element_size <= 0) {
@@ -162,28 +218,57 @@ std::vector<OscMessage> parseOscPackets(std::span<const std::uint8_t> data, std:
             }
             const std::size_t element_size_u = static_cast<std::size_t>(element_size);
             if (offset + element_size_u > data.size()) {
+                OscDebugLogEntry entry{};
+                entry.nest_depth = depth + 1;
+                entry.kind = OscDebugKind::Error;
+                entry.address = "(error)";
+                entry.note = "Truncated OSC bundle element";
+                result.debug_log.push_back(std::move(entry));
                 if (out_error) *out_error = "Truncated OSC bundle element";
                 break;
             }
 
             const std::span<const std::uint8_t> element(data.data() + offset, element_size_u);
             offset += element_size_u;
+            ++element_count;
 
             std::string element_error;
-            std::vector<OscMessage> nested = parseOscPackets(element, &element_error);
-            if (!nested.empty()) {
-                messages.insert(messages.end(), nested.begin(), nested.end());
-            } else if (!element_error.empty() && messages.empty() && out_error) {
+            parseOscPacketDetailedInto(element, depth + 1, result, &element_error);
+            if (!element_error.empty() && out_error && out_error->empty()) {
                 *out_error = element_error;
             }
         }
-        return messages;
+
+        result.debug_log[bundle_index].note +=
+            std::string("  elements=") + std::to_string(element_count);
+        return;
     }
 
-    if (std::optional<OscMessage> message = parseOscMessage(data, out_error)) {
-        messages.push_back(std::move(*message));
+    std::string message_error;
+    if (std::optional<OscMessage> message = parseOscMessage(data, &message_error)) {
+        appendDebugMessage(result, *message, depth);
+        result.messages.push_back(std::move(*message));
+    } else {
+        OscDebugLogEntry entry{};
+        entry.nest_depth = depth;
+        entry.kind = OscDebugKind::Error;
+        entry.address = "(error)";
+        entry.note = message_error.empty() ? "Failed to parse OSC message" : message_error;
+        result.debug_log.push_back(std::move(entry));
+        if (out_error) *out_error = entry.note;
     }
-    return messages;
+}
+
+} // namespace
+
+std::vector<OscMessage> parseOscPackets(std::span<const std::uint8_t> data, std::string* out_error) {
+    return parseOscPacketDetailed(data, out_error).messages;
+}
+
+OscParseResult parseOscPacketDetailed(std::span<const std::uint8_t> data, std::string* out_error) {
+    OscParseResult result{};
+    parseOscPacketDetailedInto(data, 0, result, out_error);
+    return result;
 }
 
 std::string oscArgToString(const OscArg& arg) {
@@ -204,6 +289,31 @@ std::string oscArgToString(const OscArg& arg) {
     }
 }
 
+std::string oscTypeTagsFromArgs(const std::vector<OscArg>& args) {
+    std::string tags = ",";
+    tags.reserve(1 + args.size());
+    for (const OscArg& arg : args) {
+        switch (arg.type) {
+        case OscArgType::Int32:
+            tags.push_back('i');
+            break;
+        case OscArgType::Float32:
+            tags.push_back('f');
+            break;
+        case OscArgType::String:
+            tags.push_back('s');
+            break;
+        case OscArgType::Bool:
+            tags.push_back(arg.boolean ? 'T' : 'F');
+            break;
+        default:
+            tags.push_back('?');
+            break;
+        }
+    }
+    return tags;
+}
+
 float oscArgAsFloat(const OscArg& arg) {
     switch (arg.type) {
     case OscArgType::Int32:
@@ -215,6 +325,61 @@ float oscArgAsFloat(const OscArg& arg) {
     default:
         return 0.0f;
     }
+}
+
+std::string formatOscDebugLogEntry(const OscDebugLogEntry& entry) {
+    std::string line;
+    line.reserve(128);
+    char head[96];
+    std::snprintf(head, sizeof(head), "[%s] t=%.3f pkt=%llu d=%d ",
+                  entry.wall_clock.empty() ? "-" : entry.wall_clock.c_str(), entry.time_seconds,
+                  static_cast<unsigned long long>(entry.packet_seq), entry.nest_depth);
+    line += head;
+    for (int i = 0; i < entry.nest_depth; ++i) {
+        line += "  ";
+    }
+    switch (entry.kind) {
+    case OscDebugKind::Bundle:
+        line += "BUNDLE ";
+        line += entry.address;
+        if (!entry.note.empty()) {
+            line += "  ";
+            line += entry.note;
+        }
+        break;
+    case OscDebugKind::Error:
+        line += "ERROR ";
+        line += entry.note.empty() ? entry.address : entry.note;
+        break;
+    case OscDebugKind::Message:
+    default:
+        line += "MSG ";
+        line += entry.address;
+        if (!entry.type_tags.empty()) {
+            line += "  ";
+            line += entry.type_tags;
+        }
+        if (!entry.arg_preview.empty()) {
+            line += "  args=[";
+            for (std::size_t i = 0; i < entry.arg_preview.size(); ++i) {
+                if (i > 0) line += ", ";
+                line += entry.arg_preview[i];
+            }
+            line += "]";
+        }
+        break;
+    }
+    return line;
+}
+
+std::string formatOscDebugLog(const std::vector<OscDebugLogEntry>& entries) {
+    std::string out;
+    out.reserve(entries.size() * 96);
+    for (const OscDebugLogEntry& entry : entries) {
+        out += formatOscDebugLogEntry(entry);
+        out += '\n';
+    }
+    return out;
 }
 
 } // namespace genesis

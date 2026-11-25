@@ -464,6 +464,9 @@ protected:
         if (show_viewport_help_) drawViewportHelpPanel();
         if (show_timeline_) drawTimelinePanel();
         if (show_protocol_) drawProtocolPanel();
+        if (show_osc_debug_log_) {
+            genesis::drawOscDebugLogPanel(osc_protocol_, &show_osc_debug_log_);
+        }
         if (show_audio_) drawAudioPanel(scene);
         if (show_animation_graph_) drawAnimationGraphPanel();
         if (!perf_env_applied_) {
@@ -776,6 +779,10 @@ private:
             ImGui::MenuItem("Shortcuts", nullptr, &show_viewport_help_);
             ImGui::MenuItem("Timeline", nullptr, &show_timeline_);
             ImGui::MenuItem("Protocol", nullptr, &show_protocol_);
+            ImGui::MenuItem("OSC Debug Log", nullptr, &show_osc_debug_log_);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Raw incoming OSC packets / bundles (copyable ring buffer).");
+            }
             ImGui::MenuItem("Audio", nullptr, &show_audio_);
             ImGui::MenuItem("Animation Graph", nullptr, &show_animation_graph_);
             ImGui::BeginDisabled(game_view_mode_);
@@ -3302,6 +3309,7 @@ private:
     bool show_viewport_help_ = false;
     bool show_timeline_ = false;
     bool show_protocol_ = false;
+    bool show_osc_debug_log_ = false;
     bool show_audio_ = false;
     bool show_animation_graph_ = false;
     genesis::TugelaEditorState tugela_editor_{};

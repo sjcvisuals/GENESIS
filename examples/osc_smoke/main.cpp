@@ -100,6 +100,34 @@ std::vector<std::uint8_t> makeRoomPersonIdXz() {
     return packet;
 }
 
+std::vector<std::uint8_t> makeNestedBundle() {
+    // Outer #bundle containing /a and an inner #bundle with /b.
+    const auto msg_a = makeIntMessage();
+    std::vector<std::uint8_t> msg_b;
+    appendPadded(msg_b, "/bundle/child");
+    appendPadded(msg_b, ",f");
+    appendFloatBe(msg_b, 0.5f);
+
+    std::vector<std::uint8_t> inner;
+    appendPadded(inner, "#bundle");
+    for (int i = 0; i < 8; ++i) {
+        inner.push_back(i == 7 ? 1 : 0); // immediate timetag
+    }
+    appendIntBe(inner, static_cast<std::int32_t>(msg_b.size()));
+    inner.insert(inner.end(), msg_b.begin(), msg_b.end());
+
+    std::vector<std::uint8_t> outer;
+    appendPadded(outer, "#bundle");
+    for (int i = 0; i < 8; ++i) {
+        outer.push_back(i == 7 ? 1 : 0);
+    }
+    appendIntBe(outer, static_cast<std::int32_t>(msg_a.size()));
+    outer.insert(outer.end(), msg_a.begin(), msg_a.end());
+    appendIntBe(outer, static_cast<std::int32_t>(inner.size()));
+    outer.insert(outer.end(), inner.begin(), inner.end());
+    return outer;
+}
+
 } // namespace
 
 int main() {
@@ -134,6 +162,40 @@ int main() {
             ++failures;
         } else {
             std::cout << "OSC packet decode OK\n";
+        }
+    }
+
+    {
+        const auto packet = makeNestedBundle();
+        std::string err;
+        const genesis::OscParseResult detailed = genesis::parseOscPacketDetailed(packet, &err);
+        if (detailed.messages.size() != 2) {
+            std::cerr << "nested bundle expected 2 messages, got " << detailed.messages.size()
+                      << ": " << err << '\n';
+            ++failures;
+        } else {
+            bool saw_outer = false;
+            bool saw_inner = false;
+            bool saw_child_depth2 = false;
+            for (const genesis::OscDebugLogEntry& e : detailed.debug_log) {
+                if (e.kind == genesis::OscDebugKind::Bundle && e.nest_depth == 0) {
+                    saw_outer = true;
+                }
+                if (e.kind == genesis::OscDebugKind::Bundle && e.nest_depth == 1) {
+                    saw_inner = true;
+                }
+                if (e.kind == genesis::OscDebugKind::Message && e.nest_depth == 2 &&
+                    e.address == "/bundle/child") {
+                    saw_child_depth2 = true;
+                }
+            }
+            if (!saw_outer || !saw_inner || !saw_child_depth2) {
+                std::cerr << "nested bundle debug nesting mismatch\n";
+                ++failures;
+            } else {
+                std::cout << "OSC nested bundle debug log OK (" << detailed.debug_log.size()
+                          << " rows)\n";
+            }
         }
     }
 
