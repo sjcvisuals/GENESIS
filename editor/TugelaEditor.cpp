@@ -201,12 +201,45 @@ TugelaModuleKind stageForStack(TugelaStackMod mod) {
     }
 }
 
+std::uint32_t optionalBitFor(TugelaStackMod mod) {
+    switch (mod) {
+    case TugelaStackMod::Burst:
+        return kStackBurst;
+    case TugelaStackMod::Gravity:
+        return kStackGravity;
+    case TugelaStackMod::Drag:
+        return kStackDrag;
+    case TugelaStackMod::PointForce:
+        return kStackPointForce;
+    case TugelaStackMod::Vortex:
+        return kStackVortex;
+    case TugelaStackMod::Noise:
+        return kStackNoise;
+    case TugelaStackMod::Accel:
+        return kStackAccel;
+    case TugelaStackMod::KillPlane:
+        return kStackKillPlane;
+    case TugelaStackMod::ScaleBySpeed:
+        return kStackScaleBySpeed;
+    case TugelaStackMod::Trail:
+        return kStackTrail;
+    case TugelaStackMod::OscDrive:
+        return kStackOscDrive;
+    default:
+        return 0;
+    }
+}
+
+bool isOptionalStackMod(TugelaStackMod mod) {
+    return optionalBitFor(mod) != 0;
+}
+
 bool stackEnabled(TugelaStackMod mod, const ParticleEmitter& e) {
     switch (mod) {
     case TugelaStackMod::SpawnRate:
         return e.mod_spawn_rate && e.rate_per_second > 0.0f;
     case TugelaStackMod::Burst:
-        return e.burst_count > 0 || e.burst_entries > 0;
+        return particleStackHas(e.module_enabled, kStackBurst);
     case TugelaStackMod::Shape:
         return e.mod_shape;
     case TugelaStackMod::Lifetime:
@@ -218,19 +251,19 @@ bool stackEnabled(TugelaStackMod mod, const ParticleEmitter& e) {
     case TugelaStackMod::Color:
         return e.mod_color;
     case TugelaStackMod::Gravity:
-        return e.force_gravity;
+        return particleStackHas(e.module_enabled, kStackGravity);
     case TugelaStackMod::Drag:
-        return e.force_drag;
+        return particleStackHas(e.module_enabled, kStackDrag);
     case TugelaStackMod::PointForce:
-        return e.force_point;
+        return particleStackHas(e.module_enabled, kStackPointForce);
     case TugelaStackMod::Vortex:
-        return e.force_vortex;
+        return particleStackHas(e.module_enabled, kStackVortex);
     case TugelaStackMod::Noise:
-        return e.force_noise;
+        return particleStackHas(e.module_enabled, kStackNoise);
     case TugelaStackMod::Accel:
-        return e.force_accel;
+        return particleStackHas(e.module_enabled, kStackAccel);
     case TugelaStackMod::KillPlane:
-        return e.kill_plane;
+        return particleStackHas(e.module_enabled, kStackKillPlane);
     case TugelaStackMod::KillBox:
         return e.kill_box;
     case TugelaStackMod::FluidCoupled:
@@ -240,15 +273,15 @@ bool stackEnabled(TugelaStackMod mod, const ParticleEmitter& e) {
     case TugelaStackMod::ColorOverLife:
         return e.mod_color_over_life && e.color_over_life.count > 0;
     case TugelaStackMod::ScaleBySpeed:
-        return e.scale_by_speed;
+        return particleStackHas(e.module_enabled, kStackScaleBySpeed);
     case TugelaStackMod::Sprite:
         return e.mod_sprite;
     case TugelaStackMod::Mesh:
         return e.mod_mesh;
     case TugelaStackMod::Trail:
-        return e.trail_enabled;
+        return particleStackHas(e.module_enabled, kStackTrail);
     case TugelaStackMod::OscDrive:
-        return e.osc_drive;
+        return particleStackHas(e.module_enabled, kStackOscDrive);
     case TugelaStackMod::SpawnByDistance:
         return e.spawn_per_unit > 0.0f;
     default:
@@ -271,8 +304,6 @@ bool stackPresent(TugelaStackMod mod, const ParticleEmitter& e) {
     case TugelaStackMod::Mesh:
         return true; // always listed under Render — Mesh was the hidden Sphere fallback
     case TugelaStackMod::Burst:
-        return e.burst_count > 0 || e.burst_entries > 0;
-    case TugelaStackMod::SpawnByDistance:
     case TugelaStackMod::Gravity:
     case TugelaStackMod::Drag:
     case TugelaStackMod::PointForce:
@@ -280,14 +311,48 @@ bool stackPresent(TugelaStackMod mod, const ParticleEmitter& e) {
     case TugelaStackMod::Noise:
     case TugelaStackMod::Accel:
     case TugelaStackMod::KillPlane:
-    case TugelaStackMod::KillBox:
-    case TugelaStackMod::FluidCoupled:
     case TugelaStackMod::ScaleBySpeed:
     case TugelaStackMod::Trail:
-    case TugelaStackMod::OscDrive:
-        return stackEnabled(mod, e); // optional — only when added/enabled
+    case TugelaStackMod::OscDrive: {
+        const std::uint32_t bit = optionalBitFor(mod);
+        return bit != 0 && particleStackHas(e.module_stack, bit);
+    }
+    // Directory modules without stack bits yet — presence tracks the classic runtime flag.
+    case TugelaStackMod::SpawnByDistance:
+        return e.spawn_per_unit > 0.0f;
+    case TugelaStackMod::KillBox:
+        return e.kill_box;
+    case TugelaStackMod::FluidCoupled:
+        return e.fluid_coupled;
     default:
         return false;
+    }
+}
+
+void seedOptionalDefaults(TugelaStackMod mod, ParticleEmitter& e) {
+    switch (mod) {
+    case TugelaStackMod::Burst:
+        if (e.burst_count == 0 && e.burst_entries == 0) {
+            e.burst_count = 32;
+        }
+        break;
+    case TugelaStackMod::PointForce:
+        if (std::fabs(e.point_force_strength) < 1e-6f) {
+            e.point_force_strength = 4.0f;
+        }
+        break;
+    case TugelaStackMod::Vortex:
+        if (std::fabs(e.vortex_strength) < 1e-6f) {
+            e.vortex_strength = 2.0f;
+        }
+        break;
+    case TugelaStackMod::Noise:
+        if (e.noise_strength < 1e-6f) {
+            e.noise_strength = 0.15f;
+        }
+        break;
+    default:
+        break;
     }
 }
 
@@ -299,16 +364,6 @@ void setStackEnabled(TugelaStackMod mod, ParticleEmitter& e, bool on) {
             e.rate_per_second = 0.0f;
         } else if (e.rate_per_second <= 0.0f) {
             e.rate_per_second = 14.0f;
-        }
-        break;
-    case TugelaStackMod::Burst:
-        if (on) {
-            if (e.burst_count == 0 && e.burst_entries == 0) {
-                e.burst_count = 32;
-            }
-        } else {
-            e.burst_count = 0;
-            e.burst_entries = 0;
         }
         break;
     case TugelaStackMod::Shape:
@@ -325,36 +380,6 @@ void setStackEnabled(TugelaStackMod mod, ParticleEmitter& e, bool on) {
         break;
     case TugelaStackMod::Color:
         e.mod_color = on;
-        break;
-    case TugelaStackMod::Gravity:
-        e.force_gravity = on;
-        break;
-    case TugelaStackMod::Drag:
-        e.force_drag = on;
-        break;
-    case TugelaStackMod::PointForce:
-        e.force_point = on;
-        if (on && std::fabs(e.point_force_strength) < 1e-6f) {
-            e.point_force_strength = 4.0f;
-        }
-        break;
-    case TugelaStackMod::Vortex:
-        e.force_vortex = on;
-        if (on && std::fabs(e.vortex_strength) < 1e-6f) {
-            e.vortex_strength = 2.0f;
-        }
-        break;
-    case TugelaStackMod::Noise:
-        e.force_noise = on;
-        if (on && e.noise_strength < 1e-6f) {
-            e.noise_strength = 0.15f;
-        }
-        break;
-    case TugelaStackMod::Accel:
-        e.force_accel = on;
-        break;
-    case TugelaStackMod::KillPlane:
-        e.kill_plane = on;
         break;
     case TugelaStackMod::KillBox:
         e.kill_box = on;
@@ -383,9 +408,6 @@ void setStackEnabled(TugelaStackMod mod, ParticleEmitter& e, bool on) {
             e.color_over_life = ParticleCurveColor::linear(e.color_start, e.color_end);
         }
         break;
-    case TugelaStackMod::ScaleBySpeed:
-        e.scale_by_speed = on;
-        break;
     case TugelaStackMod::Sprite:
         e.mod_sprite = on;
         // Do not fall back to Sphere — that hid a Mesh path Spencer could not toggle off.
@@ -399,15 +421,45 @@ void setStackEnabled(TugelaStackMod mod, ParticleEmitter& e, bool on) {
             }
         }
         break;
+    case TugelaStackMod::Burst:
+    case TugelaStackMod::Gravity:
+    case TugelaStackMod::Drag:
+    case TugelaStackMod::PointForce:
+    case TugelaStackMod::Vortex:
+    case TugelaStackMod::Noise:
+    case TugelaStackMod::Accel:
+    case TugelaStackMod::KillPlane:
+    case TugelaStackMod::ScaleBySpeed:
     case TugelaStackMod::Trail:
-        e.trail_enabled = on;
+    case TugelaStackMod::OscDrive: {
+        const std::uint32_t bit = optionalBitFor(mod);
+        if (bit == 0) {
+            break;
+        }
+        // Add/enable keeps the leaf on the stack; disable only clears module_enabled.
+        particleStackSet(e.module_stack, bit, true);
+        particleStackSet(e.module_enabled, bit, on);
+        if (on) {
+            seedOptionalDefaults(mod, e);
+        }
+        syncOptionalStackFlags(e);
         break;
-    case TugelaStackMod::OscDrive:
-        e.osc_drive = on;
-        break;
+    }
     default:
         break;
     }
+}
+
+void removeFromStack(TugelaStackMod mod, ParticleEmitter& e) {
+    const std::uint32_t bit = optionalBitFor(mod);
+    if (bit == 0) {
+        // Core modules: disable only (always listed).
+        setStackEnabled(mod, e, false);
+        return;
+    }
+    particleStackSet(e.module_stack, bit, false);
+    particleStackSet(e.module_enabled, bit, false);
+    syncOptionalStackFlags(e);
 }
 
 void collectStageStack(TugelaModuleKind stage, const ParticleEmitter& e,
@@ -478,9 +530,16 @@ NodeId resolveSystemForNode(Scene& scene, NodeId id) {
     return 0;
 }
 
-void mark(ParticleEmitterUiContext& ctx) {
+void mark(ParticleEmitterUiContext& ctx, bool rebuild = false) {
     if (ctx.mark_dirty) {
         ctx.mark_dirty();
+    }
+    if (rebuild) {
+        if (ctx.reset_particles) {
+            ctx.reset_particles();
+        }
+    } else if (ctx.apply_particles) {
+        ctx.apply_particles();
     }
 }
 
@@ -643,8 +702,9 @@ bool selectableRow(const char* label, bool selected, const char* badge) {
 }
 
 void drawStackModuleInspector(ParticleEmitter& e, TugelaStackMod mod, ParticleEmitterUiContext& ctx,
-                              const std::string& node_path) {
+                              const std::string& node_path, TugelaEditorState* state) {
     bool dirty = false;
+    bool removed = false;
     ImGui::TextColored(kAccent, "%s", stackLabel(mod));
     ImGui::SameLine(0.0f, 8.0f);
     ImGui::TextColored(kMuted, "%s", stackEnabled(mod, e) ? "enabled" : "disabled");
@@ -667,8 +727,39 @@ void drawStackModuleInspector(ParticleEmitter& e, TugelaStackMod mod, ParticleEm
                 }
             }
         }
+        if (isOptionalStackMod(mod) && stackPresent(mod, e)) {
+            ImGui::SameLine(0.0f, 12.0f);
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.28f, 0.10f, 0.10f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.40f, 0.14f, 0.14f, 1.0f));
+            if (ImGui::SmallButton("Remove")) {
+                removeFromStack(mod, e);
+                removed = true;
+                dirty = true;
+                if (mod == TugelaStackMod::OscDrive && ctx.osc && ctx.osc->protocol) {
+                    OscParticleEmitSettings emit = ctx.osc->protocol->particleEmitSettings();
+                    if (emit.emitter_path == node_path) {
+                        emit.enabled = false;
+                        ctx.osc->protocol->setParticleEmitSettings(emit);
+                    }
+                }
+            }
+            ImGui::PopStyleColor(2);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Remove from stack (disable keeps the module listed)");
+            }
+        }
     }
     ImGui::Spacing();
+    if (removed) {
+        if (state) {
+            // Fall back to a stage core leaf so the inspector isn't orphaned.
+            state->focus_stack = TugelaStackMod::SpawnRate;
+            state->focus_module = TugelaModuleKind::Spawn;
+        }
+        syncEmitterCurvesFromEndpoints(e);
+        mark(ctx);
+        return;
+    }
 
     switch (mod) {
     case TugelaStackMod::SpawnRate:
@@ -825,9 +916,12 @@ void drawStackModuleInspector(ParticleEmitter& e, TugelaStackMod mod, ParticleEm
             e.trail_segments = static_cast<std::uint8_t>(std::clamp(segs, 2, 24));
             dirty = true;
         }
+        dirty |= ImGui::DragFloat("Sample distance", &e.trail_sample_distance, 0.001f, 0.01f, 0.5f);
         dirty |= ImGui::DragFloat("Width (head)", &e.trail_width, 0.001f, 0.01f, 1.0f);
         dirty |= ImGui::DragFloat("Width (tip)", &e.trail_width_end, 0.001f, 0.0f, 1.0f);
         dirty |= ImGui::DragFloat("Trail alpha", &e.trail_alpha, 0.01f, 0.0f, 1.0f);
+        dirty |= ImGui::DragFloat("Trail lifetime feel", &e.trail_lifetime, 0.01f, 0.05f, 8.0f);
+        ImGui::TextDisabled("Edits apply to living particles immediately.");
         break;
     }
     case TugelaStackMod::OscDrive: {
@@ -1039,7 +1133,7 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
                 if (pointInRect(mouse, ImVec2(c0.x - 2.0f, c0.y - 2.0f),
                                 ImVec2(c1.x + 2.0f, c1.y + 2.0f))) {
                     setStackEnabled(mod, e, !en);
-                    mark(ctx);
+                    mark(ctx); // live-apply trail / forces without full restart
                 }
                 picked = true;
             }
@@ -1083,7 +1177,7 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
                 setStackEnabled(mod, e, true);
                 state.focus_stack = mod;
                 state.focus_module = popup_stage;
-                mark(ctx);
+                mark(ctx); // apply enable to living particles (esp. Trail)
                 ++added;
             }
         }
@@ -1223,15 +1317,12 @@ void drawAddEmitterButtons(Scene& scene, NodeId system_id, ParticleEmitterUiCont
     auto add = [&](const char* name, const ParticleEmitter& preset) {
         system->is_particle_system = true;
         const NodeId id = scene.createParticleEmitterNode(name, system_id, preset);
-        mark(ctx);
+        mark(ctx, true); // rebuild so new emitter clocks + particles sync
         state.focus_emitter = id;
         state.focus_system = system_id;
         if (ctx.select_node) {
             // Hierarchy shows Systems only — keep selection on the System actor.
             ctx.select_node(system_id);
-        }
-        if (ctx.reset_particles) {
-            ctx.reset_particles();
         }
     };
     // Full-width stacked buttons — side-by-side thirds crush labels at UI scale 2.
@@ -1241,15 +1332,20 @@ void drawAddEmitterButtons(Scene& scene, NodeId system_id, ParticleEmitterUiCont
     if (ImGui::Button("Trail", ImVec2(-1.0f, 0))) {
         ParticleEmitter trail = makeGentleSoftEmitter();
         trail.rate_per_second = 6.0f;
-        trail.trail_enabled = true;
-        trail.force_gravity = true;
+        particleStackSet(trail.module_stack, kStackTrail, true);
+        particleStackSet(trail.module_enabled, kStackTrail, true);
+        particleStackSet(trail.module_stack, kStackGravity, true);
+        particleStackSet(trail.module_enabled, kStackGravity, true);
+        syncOptionalStackFlags(trail);
         add("Trail", trail);
     }
     if (ImGui::Button("Circles + Trail", ImVec2(-1.0f, 0))) {
         add("Soft Circles", makeGentleCirclesEmitter());
         ParticleEmitter trail = makeGentleSoftEmitter();
         trail.rate_per_second = 5.0f;
-        trail.trail_enabled = true;
+        particleStackSet(trail.module_stack, kStackTrail, true);
+        particleStackSet(trail.module_enabled, kStackTrail, true);
+        syncOptionalStackFlags(trail);
         add("Trail", trail);
     }
 }
@@ -1288,6 +1384,37 @@ void drawRemoveFocusedEmitter(Scene& scene, TugelaEditorState& state, ParticleEm
     ImGui::PopStyleColor(3);
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Delete this emitter from the System. Add templates below to restore.");
+    }
+}
+
+void drawRemoveFocusedEmitter(Scene& scene, TugelaEditorState& state, ParticleEmitterUiContext& ctx) {
+    if (state.focus_emitter == 0 || state.focus_system == 0) {
+        return;
+    }
+    const Node* emitter = scene.find(state.focus_emitter);
+    if (!emitter || !emitter->particle_emitter.has_value()) {
+        return;
+    }
+    ImGui::Spacing();
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.28f, 0.10f, 0.10f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.40f, 0.14f, 0.14f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.22f, 0.08f, 0.08f, 1.0f));
+    if (ImGui::Button("Remove Emitter", ImVec2(-1.0f, 0))) {
+        const NodeId removed = state.focus_emitter;
+        const NodeId system_id = state.focus_system;
+        scene.deleteNode(removed);
+        std::vector<NodeId> remaining;
+        collectEmitters(scene, system_id, remaining);
+        state.focus_emitter = remaining.empty() ? 0 : remaining.front();
+        state.focus_system = system_id;
+        if (ctx.select_node) {
+            ctx.select_node(system_id);
+        }
+        mark(ctx, true); // cull orphan particles + resync emitter runtimes
+    }
+    ImGui::PopStyleColor(3);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Delete this emitter from the System.");
     }
 }
 
@@ -1475,7 +1602,8 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
             ImGui::TextColored(kMuted, "%s  ·  %s", stageLabel(state.focus_module),
                                stackLabel(state.focus_stack));
             ImGui::Spacing();
-            drawStackModuleInspector(*emitter->particle_emitter, state.focus_stack, ctx, path);
+            drawStackModuleInspector(*emitter->particle_emitter, state.focus_stack, ctx, path,
+                                     &state);
             ImGui::EndChild();
         } else {
             ImGui::TextDisabled("Select a stack module to edit parameters.");

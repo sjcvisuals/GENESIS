@@ -480,6 +480,8 @@ json particleEmitterToJson(const ParticleEmitter& e) {
         {"trail_width_end", e.trail_width_end},
         {"trail_alpha", e.trail_alpha},
         {"trail_lifetime", e.trail_lifetime},
+        {"module_stack", e.module_stack},
+        {"module_enabled", e.module_enabled},
         {"unlit", e.unlit},
         {"additive", e.additive},
         {"seed_override", e.seed_override},
@@ -586,6 +588,16 @@ ParticleEmitter particleEmitterFromJson(const json& j) {
             e.bursts[e.burst_entries].count = burst.value("count", 0u);
             ++e.burst_entries;
         }
+    }
+    if (j.contains("module_stack")) {
+        e.module_stack = j.value("module_stack", e.module_stack);
+        e.module_enabled = j.value("module_enabled", e.module_stack);
+        syncOptionalStackFlags(e);
+    } else {
+        // Legacy scenes: rebuild optional stack from classic enable flags.
+        e.module_stack = 0;
+        e.module_enabled = 0;
+        inferOptionalModuleStack(e);
     }
     syncEmitterCurvesFromEndpoints(e);
     return e;

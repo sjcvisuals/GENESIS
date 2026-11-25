@@ -41,6 +41,34 @@ struct ParticleBurst {
     std::uint32_t count = 0;
 };
 
+// Optional Tugela graph-stack membership / enable (disable ≠ remove).
+// Core modules (Spawn Rate, Shape, Lifetime, …) use their own mod_* flags.
+enum ParticleOptionalStack : std::uint32_t {
+    kStackBurst = 1u << 0,
+    kStackGravity = 1u << 1,
+    kStackDrag = 1u << 2,
+    kStackPointForce = 1u << 3,
+    kStackVortex = 1u << 4,
+    kStackNoise = 1u << 5,
+    kStackAccel = 1u << 6,
+    kStackKillPlane = 1u << 7,
+    kStackScaleBySpeed = 1u << 8,
+    kStackTrail = 1u << 9,
+    kStackOscDrive = 1u << 10,
+};
+
+inline bool particleStackHas(std::uint32_t mask, std::uint32_t bit) {
+    return (mask & bit) != 0;
+}
+
+inline void particleStackSet(std::uint32_t& mask, std::uint32_t bit, bool on) {
+    if (on) {
+        mask |= bit;
+    } else {
+        mask &= ~bit;
+    }
+}
+
 // Authoring data stored on a scene node. Simulation state lives in ParticleWorld.
 struct ParticleEmitter {
     // --- Emitter state (Tugela Emitter Properties) ---
@@ -157,6 +185,12 @@ struct ParticleEmitter {
     float trail_alpha = 0.55f;            // trail opacity multiplier vs particle color
     float trail_lifetime = 0.85f;         // conceptual trail length in seconds (fade with age)
 
+    // Optional module graph: present on stack (module_stack) vs armed (module_enabled).
+    // Disabling clears only module_enabled (+ mirrored runtime flags); Remove clears both.
+    // Defaults match force_gravity / force_drag defaults below.
+    std::uint32_t module_stack = kStackGravity | kStackDrag;
+    std::uint32_t module_enabled = kStackGravity | kStackDrag;
+
     std::uint64_t seed_override = 0;
     bool fluid_coupled = false;
 };
@@ -173,6 +207,59 @@ inline ParticleRenderMesh resolveParticleHeadMesh(const ParticleEmitter& e) {
         return ParticleRenderMesh::Sphere;
     }
     return ParticleRenderMesh::None;
+}
+
+// Push module_enabled bits into classic runtime flags the sim already reads.
+inline void syncOptionalStackFlags(ParticleEmitter& e) {
+    e.force_gravity = particleStackHas(e.module_enabled, kStackGravity);
+    e.force_drag = particleStackHas(e.module_enabled, kStackDrag);
+    e.force_point = particleStackHas(e.module_enabled, kStackPointForce);
+    e.force_vortex = particleStackHas(e.module_enabled, kStackVortex);
+    e.force_noise = particleStackHas(e.module_enabled, kStackNoise);
+    e.force_accel = particleStackHas(e.module_enabled, kStackAccel);
+    e.kill_plane = particleStackHas(e.module_enabled, kStackKillPlane);
+    e.scale_by_speed = particleStackHas(e.module_enabled, kStackScaleBySpeed);
+    e.trail_enabled = particleStackHas(e.module_enabled, kStackTrail);
+    e.osc_drive = particleStackHas(e.module_enabled, kStackOscDrive);
+}
+
+// Legacy scenes / presets that only set classic flags — build stack masks once.
+inline void inferOptionalModuleStack(ParticleEmitter& e) {
+    if (e.module_stack != 0 || e.module_enabled != 0) {
+        return;
+    }
+    auto add = [&](std::uint32_t bit, bool on) {
+        if (!on) {
+            return;
+        }
+        e.module_stack |= bit;
+        e.module_enabled |= bit;
+    };
+    add(kStackBurst, e.burst_count > 0 || e.burst_entries > 0);
+    add(kStackGravity, e.force_gravity);
+    add(kStackDrag, e.force_drag);
+    add(kStackPointForce, e.force_point);
+    add(kStackVortex, e.force_vortex);
+    add(kStackNoise, e.force_noise);
+    add(kStackAccel, e.force_accel);
+    add(kStackKillPlane, e.kill_plane);
+    add(kStackScaleBySpeed, e.scale_by_speed);
+    add(kStackTrail, e.trail_enabled);
+    add(kStackOscDrive, e.osc_drive);
+}
+
+inline bool optionalBurstArmed(const ParticleEmitter& e) {
+    // Armed when the Burst leaf is enabled on the stack (counts may stay authored while muted).
+    return particleStackHas(e.module_enabled, kStackBurst);
+}
+
+// Details-panel / non-graph toggles: arm or mute an optional leaf without wiping authored values.
+inline void setOptionalModuleArmed(ParticleEmitter& e, std::uint32_t bit, bool on) {
+    particleStackSet(e.module_enabled, bit, on);
+    if (on) {
+        particleStackSet(e.module_stack, bit, true);
+    }
+    syncOptionalStackFlags(e);
 }
 
 inline void syncEmitterCurvesFromEndpoints(ParticleEmitter& e) {
@@ -232,6 +319,9 @@ inline ParticleEmitter makeGentleSoftEmitter() {
     e.trail_width_end = 0.1f;         // authored tip feel (wedge texture owns silhouette)
     e.trail_alpha = 0.95f;
     e.trail_lifetime = 3.0f;
+    particleStackSet(e.module_stack, kStackTrail, true);
+    particleStackSet(e.module_enabled, kStackTrail, true);
+    syncOptionalStackFlags(e);
     syncEmitterCurvesFromEndpoints(e);
     e.color_over_life.count = 3;
     e.color_over_life.keys[0] = {0.0f, glm::vec4(0.95f, 0.88f, 0.35f, 0.35f)}; // yellow birth
@@ -248,6 +338,8 @@ inline ParticleEmitter makeGentleSoftEmitter() {
 inline ParticleEmitter makeGentleCirclesEmitter() {
     ParticleEmitter e = makeGentleSoftEmitter();
     e.trail_enabled = false;
+    particleStackSet(e.module_stack, kStackTrail, false);
+    particleStackSet(e.module_enabled, kStackTrail, false);
     e.rate_per_second = 14.0f;
     return e;
 }
@@ -283,6 +375,9 @@ inline ParticleEmitter makeOscTrackerBubbleEmitter() {
     e.trail_width_end = 0.12f;
     e.trail_alpha = 0.85f;
     e.trail_lifetime = 2.6f;
+    particleStackSet(e.module_stack, kStackTrail, true);
+    particleStackSet(e.module_enabled, kStackTrail, true);
+    syncOptionalStackFlags(e);
     syncEmitterCurvesFromEndpoints(e);
     e.color_over_life.count = 3;
     e.color_over_life.keys[0] = {0.0f, glm::vec4(0.9f, 0.94f, 1.0f, 0.22f)};
