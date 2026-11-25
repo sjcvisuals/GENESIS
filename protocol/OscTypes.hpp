@@ -104,7 +104,28 @@ struct OscLearnedMessage {
     double last_seen_seconds = 0.0;
 };
 
+// Ring-buffer row for Protocol → Incoming Debug Log (raw packets / bundles).
+enum class OscDebugKind : std::uint8_t {
+    Message,
+    Bundle,
+    Error,
+};
+
+struct OscDebugLogEntry {
+    double time_seconds = 0.0;
+    std::uint64_t packet_seq = 0;
+    int nest_depth = 0;
+    OscDebugKind kind = OscDebugKind::Message;
+    std::string address;                 // OSC path, "#bundle", or "(error)"
+    std::string type_tags;               // e.g. ",iff" (messages only)
+    std::vector<std::string> arg_preview;
+    std::string note;                    // bundle element count / parse error text
+    std::string wall_clock;              // local time string for copy/export
+};
+
 const char* oscParamTargetLabel(OscParamTarget target);
 std::string oscBindingTargetSummary(const OscBinding& binding);
+std::string formatOscDebugLogEntry(const OscDebugLogEntry& entry);
+std::string formatOscDebugLog(const std::vector<OscDebugLogEntry>& entries);
 
 } // namespace genesis

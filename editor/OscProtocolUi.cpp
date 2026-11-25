@@ -1,28 +1,30 @@
 #include "editor/OscProtocolUi.hpp"
 
 #include "protocol/OscParser.hpp"
-#include "protocol/OscRoomPerson.hpp"
 
 #include <imgui.h>
 
 #include <algorithm>
 #include <cstdio>
+#include <string>
+#include <vector>
 
 namespace genesis {
 
-void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
-    ImGui::SetNextWindowSize(ImVec2(440.0f, 620.0f), ImGuiCond_FirstUseEver);
-    ImGui::Begin("Protocol", open);
+namespace {
 
-    ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.65f, 1.0f), "OSC");
-    ImGui::Separator();
+void applyTypedPort(OscProtocol& protocol, OscProtocol::Settings& settings, const char* port_buf) {
+    int port = 0;
+    if (std::sscanf(port_buf, "%d", &port) != 1) {
+        return;
+    }
+    settings.port = static_cast<std::uint16_t>(std::clamp(port, 1, 65535));
+    protocol.setSettings(settings);
+}
 
-    ImGui::TextWrapped(
-        "Bind IP is the local network interface to listen on, not the sender address. "
-        "Use 0.0.0.0 unless you only want loopback (127.0.0.1) or one NIC.");
-    ImGui::Spacing();
-
+void drawListenControls(OscProtocol& protocol) {
     OscProtocol::Settings settings = protocol.settings();
+
     char ip_buf[64]{};
     std::snprintf(ip_buf, sizeof(ip_buf), "%s", settings.bind_ip.c_str());
     ImGui::SetNextItemWidth(140.0f);
@@ -35,18 +37,31 @@ void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
         protocol.setSettings(settings);
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("0.0.0.0 = all interfaces\n127.0.0.1 = this PC only (local)");
+        ImGui::SetTooltip("0.0.0.0 = all interfaces\n127.0.0.1 = this PC only");
     }
 
     ImGui::SameLine();
+    // Typed port (no +/- steppers) — commit on Enter / focus-loss.
+    static char port_buf[16]{};
+    static std::uint16_t port_buf_synced = 0;
+    if (port_buf_synced != settings.port || port_buf[0] == '\0') {
+        std::snprintf(port_buf, sizeof(port_buf), "%u", static_cast<unsigned>(settings.port));
+        port_buf_synced = settings.port;
+    }
     ImGui::SetNextItemWidth(90.0f);
-    int port = static_cast<int>(settings.port);
-    if (ImGui::InputInt("Port", &port)) {
-        settings.port = static_cast<std::uint16_t>(std::clamp(port, 1, 65535));
-        protocol.setSettings(settings);
+    ImGui::InputText("Port", port_buf, sizeof(port_buf), ImGuiInputTextFlags_CharsDecimal);
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+        applyTypedPort(protocol, settings, port_buf);
+        port_buf_synced = protocol.settings().port;
+        std::snprintf(port_buf, sizeof(port_buf), "%u",
+                      static_cast<unsigned>(protocol.settings().port));
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Type UDP port 1–65535, then Enter or click away.");
     }
 
-    if (ImGui::Checkbox("Learn incoming addresses", &settings.learn_enabled)) {
+    settings = protocol.settings();
+    if (ImGui::Checkbox("Learn addresses", &settings.learn_enabled)) {
         protocol.setSettings(settings);
     }
 
@@ -58,7 +73,7 @@ void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
             protocol.stopListening();
         }
         ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "Listening on %s:%u",
+        ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "Listening %s:%u",
                            protocol.settings().bind_ip.c_str(), protocol.settings().port);
     } else {
         ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.35f, 1.0f), "Not listening");
@@ -86,163 +101,34 @@ void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
         ImGui::EndPopup();
     }
 
-    ImGui::TextDisabled("%s", "Position uses cm, scale uses %, rotation uses degrees.");
-    ImGui::TextDisabled("UDP packets: %llu   parsed messages: %llu   parse errors: %llu",
+    ImGui::TextDisabled("packets %llu · messages %llu · errors %llu",
                         static_cast<unsigned long long>(protocol.totalPackets()),
                         static_cast<unsigned long long>(protocol.totalMessages()),
                         static_cast<unsigned long long>(protocol.parseErrors()));
-    if (protocol.isListening() && protocol.totalPackets() == 0) {
-        ImGui::TextWrapped(
-            "No UDP packets yet. Send OSC to this computer's IP on port %u. "
-            "If sending from the same PC, use 127.0.0.1 and listen on 0.0.0.0 or 127.0.0.1.",
-            protocol.settings().port);
-    } else if (protocol.totalPackets() > 0 && protocol.learnedMessages().empty()) {
-        ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.35f, 1.0f),
-                           "Packets received but no OSC addresses learned yet. Check parse error above.");
-    }
+}
 
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.55f, 0.75f, 0.95f, 1.0f), "Drive emitter from OSC XY");
-    ImGui::TextWrapped(
-        "Point at any emitter inside a Particle System (Hierarchy path). "
-        "Floats x,y move that emitter and can burst. Continuous spawn uses the emitter Rate. "
-        "Prefer linking individual params via Learned Messages → Link, or add OSC Drive in Tugela.");
-
-    OscParticleEmitSettings emit = protocol.particleEmitSettings();
-    bool emit_dirty = false;
-    emit_dirty |= ImGui::Checkbox("Enable XY drive", &emit.enabled);
-    emit_dirty |= ImGui::Checkbox("Track emitter position", &emit.track_emitter_position);
-    emit_dirty |= ImGui::Checkbox("Burst on each message", &emit.burst_on_message);
-    char addr_buf[128]{};
-    std::snprintf(addr_buf, sizeof(addr_buf), "%s", emit.address.c_str());
-    if (ImGui::InputText("Emit address", addr_buf, sizeof(addr_buf))) {
-        emit.address = addr_buf;
-        emit_dirty = true;
-    }
-    char path_buf[128]{};
-    std::snprintf(path_buf, sizeof(path_buf), "%s", emit.emitter_path.c_str());
-    if (ImGui::InputText("Emitter path", path_buf, sizeof(path_buf))) {
-        emit.emitter_path = path_buf;
-        emit_dirty = true;
-    }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip(
-            "Example: Scene/Particle System/Soft Circles\n"
-            "Set from Tugela → OSC Drive on the emitter.");
-    }
-    int plane = static_cast<int>(emit.plane);
-    if (ImGui::Combo("XY plane", &plane, "XZ (floor)\0XY (screen)\0")) {
-        emit.plane = static_cast<OscParticlePlane>(plane);
-        emit_dirty = true;
-    }
-    emit_dirty |= ImGui::DragFloat("Scale", &emit.scale, 0.01f, 0.001f, 100.0f, "%.3f");
-    emit_dirty |= ImGui::DragFloat2("Offset", &emit.offset.x, 0.01f);
-    emit_dirty |= ImGui::DragFloat("Plane height", &emit.plane_height, 0.01f);
-    int default_count = static_cast<int>(emit.default_count);
-    if (ImGui::InputInt("Burst count", &default_count)) {
-        emit.default_count = static_cast<std::uint32_t>(std::clamp(default_count, 1, 256));
-        emit_dirty = true;
-    }
-    if (emit_dirty) {
-        protocol.setParticleEmitSettings(emit);
-    }
-    ImGui::TextDisabled("Particle emit messages: %llu",
-                        static_cast<unsigned long long>(protocol.totalParticleEmits()));
-    if (ImGui::Button("Clear particle emit queue")) {
-        protocol.clearParticleEmits();
-    }
-
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.75f, 0.85f, 0.55f, 1.0f), "Room person (pooled feet + wall)");
-    ImGui::TextWrapped(
-        "Send /genesis/room/person with Int32 id + x,z (`,iff`) for up to 10 people. "
-        "Each ID drives Feet + Wall Tugela emitters; idle pairs park at world origin. "
-        "Wall spawn: fixed outer radius (~3 m) and/or collision with a scene Plane.");
-    OscRoomPersonSettings room = protocol.roomPersonSettings();
-    bool room_dirty = false;
-    room_dirty |= ImGui::Checkbox("Enable room person", &room.enabled);
-    char room_addr[128]{};
-    std::snprintf(room_addr, sizeof(room_addr), "%s", room.address.c_str());
-    if (ImGui::InputText("Room address", room_addr, sizeof(room_addr))) {
-        room.address = room_addr;
-        room_dirty = true;
-    }
-    int max_persons = static_cast<int>(room.max_persons);
-    if (ImGui::SliderInt("Max persons", &max_persons, 1, static_cast<int>(kRoomPersonSlotCapacity))) {
-        room.max_persons = static_cast<std::uint32_t>(max_persons);
-        room_dirty = true;
-    }
-    room_dirty |= ImGui::DragFloat("Slot idle (s)", &room.slot_idle_seconds, 0.05f, 0.1f, 5.0f);
-    room_dirty |= ImGui::DragFloat("Outer room radius (m)", &room.room_radius, 0.05f, 0.5f, 40.0f);
-    room_dirty |= ImGui::DragFloat("Tank radius (m)", &room.tank_radius, 0.05f, 0.25f, 20.0f);
-    // Keep legacy AABB fields aligned with the cylindrical outer radius.
-    room.room_half_x = room.room_radius;
-    room.room_half_z = room.room_radius;
-
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.75f, 0.85f, 0.55f, 1.0f), "Wall ray spawn");
-    int mode = static_cast<int>(room.wall_ray_mode);
-    if (ImGui::Combo("Spawn mode", &mode,
-                     "Fixed distance\0Plane collision\0Prefer plane → distance\0")) {
-        room.wall_ray_mode = static_cast<WallRaySpawnMode>(mode);
-        room_dirty = true;
-    }
-    char plane_path[160]{};
-    std::snprintf(plane_path, sizeof(plane_path), "%s", room.wall_plane_path.c_str());
-    if (ImGui::InputText("Wall plane path", plane_path, sizeof(plane_path))) {
-        room.wall_plane_path = plane_path;
-        room_dirty = true;
-    }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip(
-            "Hierarchy path to a Plane actor (mesh faces +Y). Rotate upright for a wall. "
-            "Create via Hierarchy → Plane.");
-    }
-    room_dirty |=
-        ImGui::DragFloat("Ray max distance (m)", &room.wall_ray_max_distance, 0.1f, 1.0f, 80.0f);
-    room_dirty |= ImGui::Checkbox("Debug draw wall ray", &room.debug_draw_wall_ray);
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Viewport overlay: center → person → wall + hit marker. Off by default.");
-    }
-    ImGui::Separator();
-
-    room_dirty |= ImGui::Checkbox("Burst at feet", &room.burst_at_feet);
-    room_dirty |= ImGui::Checkbox("Burst along ray", &room.burst_along_ray);
-    room_dirty |= ImGui::Checkbox("Burst at wall", &room.burst_at_wall);
-    if (room_dirty) {
-        protocol.setRoomPersonSettings(room);
-    }
-    ImGui::TextDisabled("Room person updates: %llu",
-                        static_cast<unsigned long long>(protocol.totalRoomPersonUpdates()));
-    if (ImGui::Button("Clear room person queue")) {
-        protocol.clearRoomPersonEvents();
-    }
-
+void drawLearnedAndBindings(OscProtocol& protocol) {
     if (protocol.isAwaitingParameterLink()) {
-        ImGui::Spacing();
         ImGui::TextColored(ImVec4(0.95f, 0.85f, 0.35f, 1.0f),
-                           "Link mode: choose a parameter in the Inspector.");
+                           "Link mode: pick a parameter in Inspector / Tugela.");
         ImGui::Text("OSC %s  arg[%d]", protocol.pendingLinkAddress().c_str(),
                     protocol.pendingLinkArgIndex());
         if (ImGui::Button("Cancel Link")) {
             protocol.cancelLink();
         }
+        ImGui::Spacing();
     }
 
-    ImGui::Spacing();
-    ImGui::Separator();
     ImGui::TextUnformatted("Learned Messages");
-    if (ImGui::Button("Clear Learned")) {
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Clear##learned")) {
         protocol.clearLearned();
     }
 
     const ImGuiTableFlags table_flags =
         ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersInnerV |
         ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp;
-    if (ImGui::BeginTable("##OscLearned", 3, table_flags, ImVec2(0.0f, 180.0f))) {
+    if (ImGui::BeginTable("##OscLearned", 3, table_flags, ImVec2(0.0f, 140.0f))) {
         ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.55f);
         ImGui::TableSetupColumn("Values", ImGuiTableColumnFlags_WidthStretch, 0.30f);
         ImGui::TableSetupColumn("Link", ImGuiTableColumnFlags_WidthFixed, 52.0f);
@@ -264,7 +150,7 @@ void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
                     if (arg > 0) preview += ", ";
                     preview += entry.arg_preview[arg];
                 }
-                ImGui::TextWrapped("%s", preview.c_str());
+                ImGui::TextUnformatted(preview.c_str());
             }
 
             ImGui::TableSetColumnIndex(2);
@@ -291,16 +177,16 @@ void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
     }
 
     ImGui::Spacing();
-    ImGui::Separator();
     ImGui::TextUnformatted("Bindings");
-    if (ImGui::Button("Clear Bindings")) {
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Clear##bindings")) {
         protocol.clearBindings();
     }
 
     const std::vector<OscBinding>& bindings = protocol.bindings();
     if (bindings.empty()) {
         ImGui::TextDisabled("No OSC bindings yet.");
-    } else if (ImGui::BeginTable("##OscBindings", 3, table_flags, ImVec2(0.0f, 140.0f))) {
+    } else if (ImGui::BeginTable("##OscBindings", 3, table_flags, ImVec2(0.0f, 100.0f))) {
         ImGui::TableSetupColumn("OSC", ImGuiTableColumnFlags_WidthStretch, 0.35f);
         ImGui::TableSetupColumn("Target", ImGuiTableColumnFlags_WidthStretch, 0.50f);
         ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 28.0f);
@@ -313,7 +199,7 @@ void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
             ImGui::Text("%s [%d]", binding.address.c_str(), binding.arg_index);
 
             ImGui::TableSetColumnIndex(1);
-            ImGui::TextWrapped("%s", oscBindingTargetSummary(binding).c_str());
+            ImGui::TextUnformatted(oscBindingTargetSummary(binding).c_str());
 
             ImGui::TableSetColumnIndex(2);
             const std::string remove_id = std::string("X##osc_bind_") + std::to_string(i);
@@ -324,7 +210,153 @@ void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
         }
         ImGui::EndTable();
     }
+}
 
+void drawOscDebugLogControls(OscProtocol& protocol, float log_height) {
+    bool capture = protocol.debugLogEnabled();
+    if (ImGui::Checkbox("Capture", &capture)) {
+        protocol.setDebugLogEnabled(capture);
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("%zu / %zu", protocol.debugLog().size(), protocol.debugLogCapacity());
+
+    ImGui::SameLine();
+    int capacity = static_cast<int>(protocol.debugLogCapacity());
+    ImGui::SetNextItemWidth(72.0f);
+    if (ImGui::InputInt("##RingSize", &capacity, 0, 0)) {
+        protocol.setDebugLogCapacity(static_cast<std::size_t>(std::clamp(capacity, 32, 4096)));
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Ring buffer size (rows).");
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Copy All")) {
+        ImGui::SetClipboardText(protocol.exportDebugLog().c_str());
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Copy Last 50")) {
+        const std::vector<OscDebugLogEntry>& all = protocol.debugLog();
+        const std::size_t start = all.size() > 50 ? all.size() - 50 : 0;
+        std::vector<OscDebugLogEntry> slice(all.begin() + static_cast<std::ptrdiff_t>(start),
+                                            all.end());
+        ImGui::SetClipboardText(formatOscDebugLog(slice).c_str());
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Clear Log")) {
+        protocol.clearDebugLog();
+    }
+
+    const ImGuiTableFlags table_flags =
+        ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersInnerV |
+        ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Resizable;
+    if (ImGui::BeginTable("##OscDebugLog", 5, table_flags, ImVec2(0.0f, log_height))) {
+        ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, 88.0f);
+        ImGui::TableSetupColumn("Pkt", ImGuiTableColumnFlags_WidthFixed, 44.0f);
+        ImGui::TableSetupColumn("D", ImGuiTableColumnFlags_WidthFixed, 28.0f);
+        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.45f);
+        ImGui::TableSetupColumn("Args / note", ImGuiTableColumnFlags_WidthStretch, 0.55f);
+        ImGui::TableHeadersRow();
+
+        const std::vector<OscDebugLogEntry>& log = protocol.debugLog();
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(log.size()));
+        while (clipper.Step()) {
+            for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+                const OscDebugLogEntry& entry = log[static_cast<std::size_t>(row)];
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TextUnformatted(entry.wall_clock.empty() ? "-" : entry.wall_clock.c_str());
+
+                ImGui::TableSetColumnIndex(1);
+                ImGui::Text("%llu", static_cast<unsigned long long>(entry.packet_seq));
+
+                ImGui::TableSetColumnIndex(2);
+                ImGui::Text("%d", entry.nest_depth);
+
+                ImGui::TableSetColumnIndex(3);
+                std::string addr;
+                for (int d = 0; d < entry.nest_depth; ++d) {
+                    addr += "· ";
+                }
+                if (entry.kind == OscDebugKind::Bundle) {
+                    addr += "#bundle";
+                    ImGui::TextColored(ImVec4(0.75f, 0.85f, 0.45f, 1.0f), "%s", addr.c_str());
+                } else if (entry.kind == OscDebugKind::Error) {
+                    addr += entry.address;
+                    ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s", addr.c_str());
+                } else {
+                    addr += entry.address;
+                    ImGui::TextUnformatted(addr.c_str());
+                }
+
+                ImGui::TableSetColumnIndex(4);
+                if (entry.kind == OscDebugKind::Message) {
+                    std::string preview = entry.type_tags;
+                    if (!entry.arg_preview.empty()) {
+                        if (!preview.empty()) preview += "  ";
+                        for (std::size_t i = 0; i < entry.arg_preview.size(); ++i) {
+                            if (i > 0) preview += ", ";
+                            preview += entry.arg_preview[i];
+                        }
+                    }
+                    if (preview.empty()) {
+                        ImGui::TextDisabled("(no args)");
+                    } else {
+                        ImGui::TextUnformatted(preview.c_str());
+                    }
+                } else if (!entry.note.empty()) {
+                    ImGui::TextUnformatted(entry.note.c_str());
+                } else {
+                    ImGui::TextDisabled("—");
+                }
+
+                if (ImGui::TableGetHoveredColumn() >= 0 &&
+                    ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                    ImGui::SetClipboardText(formatOscDebugLogEntry(entry).c_str());
+                }
+            }
+        }
+        ImGui::EndTable();
+    }
+    ImGui::TextDisabled("Depth = bundle nesting. Double-click row to copy.");
+}
+
+} // namespace
+
+void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
+    ImGui::SetNextWindowSize(ImVec2(520.0f, 680.0f), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Protocol", open)) {
+        ImGui::End();
+        return;
+    }
+
+    ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.65f, 1.0f), "OSC");
+    ImGui::Separator();
+    drawListenControls(protocol);
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    drawLearnedAndBindings(protocol);
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.55f, 0.75f, 0.95f, 1.0f), "Incoming Debug Log");
+    drawOscDebugLogControls(protocol, 220.0f);
+
+    ImGui::End();
+}
+
+void drawOscDebugLogPanel(OscProtocol& protocol, bool* open) {
+    ImGui::SetNextWindowSize(ImVec2(640.0f, 420.0f), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("OSC Debug Log", open)) {
+        ImGui::End();
+        return;
+    }
+    ImGui::TextWrapped(
+        "Raw incoming OSC (including bundles). Copy All to share format / how messages were separated.");
+    ImGui::Separator();
+    drawOscDebugLogControls(protocol, ImGui::GetContentRegionAvail().y - 8.0f);
     ImGui::End();
 }
 

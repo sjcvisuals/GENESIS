@@ -5,7 +5,10 @@
 #include "scene/ScenePath.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <ctime>
 #include <functional>
 #include <glm/geometric.hpp>
 #include <glm/mat3x3.hpp>
@@ -126,11 +129,15 @@ void OscProtocol::poll(double now_seconds) {
         return;
     }
 
-    total_packets_ += static_cast<std::uint64_t>(count);
     for (const std::vector<std::uint8_t>& packet : packets) {
+        ++total_packets_;
+        const std::uint64_t packet_seq = total_packets_;
         std::string error;
-        const std::vector<OscMessage> messages = parseOscPackets(packet, &error);
-        if (messages.empty()) {
+        OscParseResult parsed = parseOscPacketDetailed(packet, &error);
+        if (debug_log_enabled_) {
+            pushDebugEntries(std::move(parsed.debug_log), now_seconds, packet_seq);
+        }
+        if (parsed.messages.empty()) {
             if (!error.empty()) {
                 last_error_ = error;
                 ++parse_errors_;
@@ -138,9 +145,9 @@ void OscProtocol::poll(double now_seconds) {
             continue;
         }
 
-        total_messages_ += messages.size();
+        total_messages_ += parsed.messages.size();
         last_error_.clear();
-        for (const OscMessage& message : messages) {
+        for (const OscMessage& message : parsed.messages) {
             ingestMessage(message, now_seconds);
         }
     }
@@ -491,6 +498,60 @@ std::uint32_t OscProtocol::applyRoomPerson(SceneRuntime& runtime, std::uint64_t&
         runtime.updateTransforms();
     }
     return spawned_total;
+}
+
+void OscProtocol::setDebugLogCapacity(std::size_t capacity) {
+    debug_log_capacity_ = std::clamp<std::size_t>(capacity, 32, 4096);
+    if (debug_log_.size() > debug_log_capacity_) {
+        const std::size_t drop = debug_log_.size() - debug_log_capacity_;
+        debug_log_.erase(debug_log_.begin(),
+                         debug_log_.begin() + static_cast<std::ptrdiff_t>(drop));
+    }
+}
+
+void OscProtocol::clearDebugLog() {
+    debug_log_.clear();
+}
+
+std::string OscProtocol::exportDebugLog() const {
+    return formatOscDebugLog(debug_log_);
+}
+
+std::string OscProtocol::formatWallClockNow() {
+    using clock = std::chrono::system_clock;
+    const auto now = clock::now();
+    const std::time_t t = clock::to_time_t(now);
+    std::tm local{};
+#if defined(_WIN32)
+    localtime_s(&local, &t);
+#else
+    localtime_r(&t, &local);
+#endif
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) %
+                    1000;
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%02d:%02d:%02d.%03d", local.tm_hour, local.tm_min, local.tm_sec,
+                  static_cast<int>(ms.count()));
+    return buf;
+}
+
+void OscProtocol::pushDebugEntries(std::vector<OscDebugLogEntry> entries, double now_seconds,
+                                   std::uint64_t packet_seq) {
+    if (entries.empty()) {
+        return;
+    }
+    const std::string wall = formatWallClockNow();
+    for (OscDebugLogEntry& entry : entries) {
+        entry.time_seconds = now_seconds;
+        entry.packet_seq = packet_seq;
+        entry.wall_clock = wall;
+        debug_log_.push_back(std::move(entry));
+    }
+    if (debug_log_.size() > debug_log_capacity_) {
+        const std::size_t drop = debug_log_.size() - debug_log_capacity_;
+        debug_log_.erase(debug_log_.begin(),
+                         debug_log_.begin() + static_cast<std::ptrdiff_t>(drop));
+    }
 }
 
 void OscProtocol::clearLearned() {

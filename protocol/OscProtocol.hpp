@@ -65,6 +65,15 @@ public:
     void clearParticleEmits();
     void clearRoomPersonEvents();
 
+    // Incoming OSC debug log (ring buffer of recent packets / nested bundles).
+    bool debugLogEnabled() const { return debug_log_enabled_; }
+    void setDebugLogEnabled(bool enabled) { debug_log_enabled_ = enabled; }
+    std::size_t debugLogCapacity() const { return debug_log_capacity_; }
+    void setDebugLogCapacity(std::size_t capacity);
+    const std::vector<OscDebugLogEntry>& debugLog() const { return debug_log_; }
+    void clearDebugLog();
+    std::string exportDebugLog() const;
+
     bool isAwaitingParameterLink() const { return pending_link_.has_value(); }
     const std::string& pendingLinkAddress() const { return pending_link_address_; }
     int pendingLinkArgIndex() const { return pending_link_arg_index_; }
@@ -86,6 +95,9 @@ private:
     void storeLastValues(const OscMessage& message);
     void ingestParticleEmit(const OscMessage& message);
     void ingestRoomPerson(const OscMessage& message, double now_seconds);
+    void pushDebugEntries(std::vector<OscDebugLogEntry> entries, double now_seconds,
+                          std::uint64_t packet_seq);
+    static std::string formatWallClockNow();
 
     Settings settings_{};
     OscParticleEmitSettings particle_emit_{};
@@ -117,6 +129,10 @@ private:
     std::uint64_t next_room_person_sequence_ = 1;
     std::uint64_t total_room_person_updates_ = 0;
     bool settings_dirty_ = false;
+
+    bool debug_log_enabled_ = true;
+    std::size_t debug_log_capacity_ = 512;
+    std::vector<OscDebugLogEntry> debug_log_;
 };
 
 // Process-wide OSC hub for multi-stream hosts (ExtGenesis: one listen, N GPU sessions).
