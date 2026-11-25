@@ -961,12 +961,43 @@ private:
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Delete", ImVec2(half, 0))) {
-            queueDeleteSelectedNodes();
+        {
+            char delete_label[48];
+            if (selection_.size() > 1) {
+                std::snprintf(delete_label, sizeof(delete_label), "Delete (%zu)", selection_.size());
+            } else {
+                std::snprintf(delete_label, sizeof(delete_label), "Delete");
+            }
+            if (ImGui::Button(delete_label, ImVec2(half, 0))) {
+                queueDeleteSelectedNodes();
+            }
+            if (ImGui::IsItemHovered() && selection_.size() > 1) {
+                ImGui::SetTooltip("Delete all %zu selected actors (Shift+click to range-select).",
+                                  selection_.size());
+            }
         }
         ImGui::EndDisabled();
 
         genesis::drawEditorSectionLabel("Outliner");
+        ImGui::TextDisabled("Click · Shift+click range · Ctrl+click toggle · Delete");
+
+        // Flat DFS order matching the tree draw — used for Shift+click range select.
+        std::vector<genesis::NodeId> outliner_order;
+        outliner_order.reserve(scene.nodes.size());
+        auto collectOrder = [&](auto&& self, genesis::NodeId id) -> void {
+            if (!scene.find(id)) {
+                return;
+            }
+            outliner_order.push_back(id);
+            if (const genesis::Node* n = scene.find(id)) {
+                for (const genesis::NodeId child : n->children) {
+                    self(self, child);
+                }
+            }
+        };
+        for (const genesis::NodeId root : scene.roots) {
+            collectOrder(collectOrder, root);
+        }
 
         auto drawNode = [&](auto&& self, genesis::NodeId id) -> void {
             const genesis::Node* n = scene.find(id);
@@ -993,11 +1024,15 @@ private:
             const bool open = ImGui::TreeNodeEx((void*)(uintptr_t)n->id, flags, "%s", label.c_str());
             ImGui::PopStyleVar();
             if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) {
-                const bool additive = ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift;
-                if (additive) {
+                const ImGuiIO& io = ImGui::GetIO();
+                if (io.KeyShift) {
+                    selectHierarchyRange(outliner_order, id);
+                } else if (io.KeyCtrl) {
                     toggleSelected(id);
+                    hierarchy_anchor_ = id;
                 } else {
                     selectNode(id);
+                    hierarchy_anchor_ = id;
                 }
             }
             if (ImGui::BeginPopupContextItem("HierarchyNodeMenu")) {
@@ -1659,8 +1694,9 @@ private:
         ImGui::BulletText("Meshes — thin white silhouette outline");
         ImGui::BulletText("Emitters / lights / cameras — viewport icons");
         ImGui::BulletText("LMB — select / marquee");
-        ImGui::BulletText("Shift / Ctrl + LMB — multi");
-        ImGui::BulletText("Delete — remove (children reparent)");
+        ImGui::BulletText("Shift+LMB — range select (outliner)");
+        ImGui::BulletText("Ctrl+LMB — add / remove from selection");
+        ImGui::BulletText("Delete — remove all selected (children reparent)");
         ImGui::Spacing();
         ImGui::TextDisabled("TRANSFORM");
         ImGui::BulletText("W / E / R — move, rotate, scale");
@@ -2444,6 +2480,7 @@ private:
 
     void clearSelection() {
         selection_.clear();
+        hierarchy_anchor_ = 0;
         rot_edit_node_ = 0;
     }
 
@@ -2538,8 +2575,11 @@ private:
         selection_.clear();
         if (id != 0) {
             selection_.push_back(id);
+            hierarchy_anchor_ = id;
             syncReparentFromSelection(id);
             genesis::tugelaEditorFocusSelection(tugela_editor_, runtime_.scene(), id);
+        } else {
+            hierarchy_anchor_ = 0;
         }
         rot_edit_node_ = 0;
     }
@@ -2549,6 +2589,7 @@ private:
             return;
         }
         selection_.push_back(id);
+        hierarchy_anchor_ = id;
         syncReparentFromSelection(id);
         rot_edit_node_ = 0;
     }
@@ -2564,7 +2605,45 @@ private:
             selection_.push_back(id);
             syncReparentFromSelection(id);
         }
+        hierarchy_anchor_ = id;
         rot_edit_node_ = 0;
+    }
+
+    // Shift+click: select contiguous outliner rows from hierarchy_anchor_ → clicked (inclusive).
+    void selectHierarchyRange(const std::vector<genesis::NodeId>& order, genesis::NodeId clicked) {
+        if (clicked == 0 || order.empty()) {
+            return;
+        }
+        genesis::NodeId anchor = hierarchy_anchor_;
+        if (anchor == 0 || !isSelected(anchor)) {
+            if (!selection_.empty()) {
+                anchor = selection_.back();
+            } else {
+                selectNode(clicked);
+                return;
+            }
+        }
+
+        auto index_of = [&](genesis::NodeId id) -> int {
+            const auto it = std::find(order.begin(), order.end(), id);
+            return it == order.end() ? -1 : static_cast<int>(it - order.begin());
+        };
+        const int a = index_of(anchor);
+        const int b = index_of(clicked);
+        if (a < 0 || b < 0) {
+            selectNode(clicked);
+            return;
+        }
+        const int lo = std::min(a, b);
+        const int hi = std::max(a, b);
+        std::vector<genesis::NodeId> range;
+        range.reserve(static_cast<std::size_t>(hi - lo + 1));
+        for (int i = lo; i <= hi; ++i) {
+            range.push_back(order[static_cast<std::size_t>(i)]);
+        }
+        setSelection(std::move(range));
+        // Keep the original anchor so further Shift+clicks extend from the same start.
+        hierarchy_anchor_ = anchor;
     }
 
     void syncReparentFromSelection(const genesis::NodeId id) {
@@ -2591,6 +2670,7 @@ private:
         session_.document_path = genesis::uniqueProjectPath("Untitled Scene");
         session_.dirty = true;
         selection_.clear();
+        hierarchy_anchor_ = 0;
         use_editor_output_ = true;
         // Room-person OSC must not re-seed Person Pool / Feet+Wall emitters into a blank scene.
         {
@@ -3158,6 +3238,7 @@ private:
     bool navigating_active_ = false;
     bool ui_style_initialized_ = false;
     std::vector<genesis::NodeId> selection_;
+    genesis::NodeId hierarchy_anchor_ = 0; // Shift+click range pivot in the outliner
     std::vector<genesis::NodeId> pending_delete_;
     struct MarqueeState {
         bool active = false;
