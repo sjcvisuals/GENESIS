@@ -943,6 +943,11 @@ private:
         });
         createBtn("Plane", half, [&] {
             addPrimitiveMesh("Plane", genesis::createPlaneMesh(renderer().context()));
+            // Sit just above the editor meter grid so the new slab doesn't z-fight it.
+            if (genesis::Node* n = runtime_.scene().find(primarySelected())) {
+                n->local.position.y = 0.01f;
+                runtime_.updateTransforms();
+            }
         });
         ImGui::SameLine();
         createBtn("Camera", half, [&] {

@@ -280,14 +280,67 @@ Mesh createCylinderShellMesh(const VulkanContext& context, float radius, float h
 Mesh createPlaneMesh(const VulkanContext& context, float half_extent, float uv_tiles) {
     const float h = half_extent;
     const float uv = std::max(uv_tiles, 0.01f);
-    // +Y facing; uv_tiles > 1 repeats seamless PBR maps across large floors.
-    std::vector<MeshVertexPNU> vertices = {
-        vtx(-h, 0.0f, h, 0.0f, 1.0f, 0.0f, 0.0f, uv),
-        vtx(h, 0.0f, h, 0.0f, 1.0f, 0.0f, uv, uv),
-        vtx(h, 0.0f, -h, 0.0f, 1.0f, 0.0f, uv, 0.0f),
-        vtx(-h, 0.0f, -h, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f),
+    // Closed thin slab (not a zero-thickness quad). A single-sided quad makes the
+    // inverted-hull selection outline expand into a second filled shell that reads
+    // as "two planes" when the actor is selected (auto-select on Create → Plane).
+    // ~1 cm thickness keeps floors/walls looking planar while giving real side faces
+    // for a thin white silhouette rim. Top surface stays on y=0 so GroundPlane /
+    // Wall Plane transforms keep the same contact plane as before.
+    constexpr float kHalfThickness = 0.005f;
+    const float y0 = 0.0f;
+    const float y1 = -2.0f * kHalfThickness;
+
+    std::vector<MeshVertexPNU> vertices;
+    std::vector<std::uint32_t> indices;
+    vertices.reserve(24);
+    indices.reserve(36);
+
+    auto face = [&](float nx, float ny, float nz, MeshVertexPNU v0, MeshVertexPNU v1, MeshVertexPNU v2,
+                    MeshVertexPNU v3) {
+        v0.nx = nx;
+        v0.ny = ny;
+        v0.nz = nz;
+        v1.nx = nx;
+        v1.ny = ny;
+        v1.nz = nz;
+        v2.nx = nx;
+        v2.ny = ny;
+        v2.nz = nz;
+        v3.nx = nx;
+        v3.ny = ny;
+        v3.nz = nz;
+        const std::uint32_t base = static_cast<std::uint32_t>(vertices.size());
+        vertices.push_back(v0);
+        vertices.push_back(v1);
+        vertices.push_back(v2);
+        vertices.push_back(v3);
+        indices.push_back(base);
+        indices.push_back(base + 1);
+        indices.push_back(base + 2);
+        indices.push_back(base);
+        indices.push_back(base + 2);
+        indices.push_back(base + 3);
     };
-    std::vector<std::uint32_t> indices = {0, 1, 2, 0, 2, 3};
+
+    // +Y (top) — primary surface; uv_tiles > 1 repeats seamless PBR maps on floors.
+    face(0, 1, 0, vtx(-h, y0, h, 0, 1, 0, 0.0f, uv), vtx(h, y0, h, 0, 1, 0, uv, uv),
+         vtx(h, y0, -h, 0, 1, 0, uv, 0.0f), vtx(-h, y0, -h, 0, 1, 0, 0.0f, 0.0f));
+    // -Y (bottom)
+    face(0, -1, 0, vtx(-h, y1, -h, 0, -1, 0, 0.0f, 0.0f), vtx(h, y1, -h, 0, -1, 0, uv, 0.0f),
+         vtx(h, y1, h, 0, -1, 0, uv, uv), vtx(-h, y1, h, 0, -1, 0, 0.0f, uv));
+    // +Z
+    face(0, 0, 1, vtx(-h, y1, h, 0, 0, 1, 0.0f, 1.0f), vtx(h, y1, h, 0, 0, 1, 1.0f, 1.0f),
+         vtx(h, y0, h, 0, 0, 1, 1.0f, 0.0f), vtx(-h, y0, h, 0, 0, 1, 0.0f, 0.0f));
+    // -Z
+    face(0, 0, -1, vtx(h, y1, -h, 0, 0, -1, 0.0f, 1.0f), vtx(-h, y1, -h, 0, 0, -1, 1.0f, 1.0f),
+         vtx(-h, y0, -h, 0, 0, -1, 1.0f, 0.0f), vtx(h, y0, -h, 0, 0, -1, 0.0f, 0.0f));
+    // +X
+    face(1, 0, 0, vtx(h, y1, h, 1, 0, 0, 0.0f, 1.0f), vtx(h, y1, -h, 1, 0, 0, 1.0f, 1.0f),
+         vtx(h, y0, -h, 1, 0, 0, 1.0f, 0.0f), vtx(h, y0, h, 1, 0, 0, 0.0f, 0.0f));
+    // -X
+    face(-1, 0, 0, vtx(-h, y1, -h, -1, 0, 0, 0.0f, 1.0f), vtx(-h, y1, h, -1, 0, 0, 1.0f, 1.0f),
+         vtx(-h, y0, h, -1, 0, 0, 1.0f, 0.0f), vtx(-h, y0, -h, -1, 0, 0, 0.0f, 0.0f));
+
     return uploadMesh(context, vertices, indices);
 }
 
