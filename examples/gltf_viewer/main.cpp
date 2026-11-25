@@ -557,19 +557,24 @@ private:
             }
         }
 
+        // File shortcuts must work while panels have focus (WantCaptureKeyboard),
+        // but never while typing into a text/numeric field.
+        if (!io.WantTextInput) {
+            if (ctrl && input().keyPressed(SDL_SCANCODE_S)) {
+                saveCurrentDocument();
+            }
+            if (ctrl && input().keyPressed(SDL_SCANCODE_O)) {
+                requestOpenScene();
+            }
+            if (ctrl && input().keyPressed(SDL_SCANCODE_N)) {
+                requestNewScene();
+            }
+        }
+
         if (io.WantCaptureKeyboard) {
             return;
         }
 
-        if (ctrl && input().keyPressed(SDL_SCANCODE_S)) {
-            saveCurrentDocument();
-        }
-        if (ctrl && input().keyPressed(SDL_SCANCODE_O)) {
-            requestOpenScene();
-        }
-        if (ctrl && input().keyPressed(SDL_SCANCODE_N)) {
-            requestNewScene();
-        }
         if (input().keyPressed(SDL_SCANCODE_F)) {
             focusEditorCameraOnSelection();
         }
@@ -2077,55 +2082,61 @@ private:
     void drawFileModals(genesis::Scene& scene) {
         (void)scene;
 
+        // Keep OpenPopup armed until the modal actually appears (ImGui can defer a frame).
         if (show_new_scene_confirm_) {
-            ImGui::OpenPopup("Discard Changes?");
-            show_new_scene_confirm_ = false;
+            ImGui::OpenPopup("New Scene?");
         }
         if (show_open_confirm_) {
             ImGui::OpenPopup("Open Scene?");
-            show_open_confirm_ = false;
         }
         if (show_exit_confirm_) {
             ImGui::OpenPopup("Exit GENESIS?");
-            show_exit_confirm_ = false;
         }
 
-        if (ImGui::BeginPopupModal("Discard Changes?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::TextUnformatted("Discard unsaved changes and create a new scene?");
-            if (ImGui::Button("Discard")) {
-                newBlankScene();
+        auto drawUnsavedButtons = [&](auto&& on_save, auto&& on_dont_save) {
+            // Size to the longest label so ui_scale=2 never clips "Don't Save".
+            const float btn_w = std::max({ImGui::CalcTextSize("Save").x, ImGui::CalcTextSize("Don't Save").x,
+                                          ImGui::CalcTextSize("Cancel").x}) +
+                               ImGui::GetStyle().FramePadding.x * 2.0f + 8.0f;
+            if (ImGui::Button("Save", ImVec2(btn_w, 0))) {
                 ImGui::CloseCurrentPopup();
+                on_save();
             }
             ImGui::SameLine();
-            if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+            if (ImGui::Button("Don't Save", ImVec2(btn_w, 0))) {
+                ImGui::CloseCurrentPopup();
+                on_dont_save();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(btn_w, 0))) {
+                ImGui::CloseCurrentPopup();
+            }
+        };
+
+        if (ImGui::BeginPopupModal("New Scene?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            show_new_scene_confirm_ = false;
+            ImGui::TextUnformatted("Save changes before creating a new scene?");
+            drawUnsavedButtons([&] { saveThen(PendingAfterSave::NewScene); },
+                               [&] { newBlankScene(); });
             ImGui::EndPopup();
         }
 
         if (ImGui::BeginPopupModal("Open Scene?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::TextUnformatted("Discard unsaved changes and open another scene?");
-            if (ImGui::Button("Open...")) {
-                ImGui::CloseCurrentPopup();
-                openSceneDialog();
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+            show_open_confirm_ = false;
+            ImGui::TextUnformatted("Save changes before opening another scene?");
+            drawUnsavedButtons([&] { saveThen(PendingAfterSave::OpenScene); },
+                               [&] { openSceneDialog(); });
             ImGui::EndPopup();
         }
 
         if (ImGui::BeginPopupModal("Exit GENESIS?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            show_exit_confirm_ = false;
             ImGui::TextUnformatted("Save changes before exiting?");
-            if (ImGui::Button("Save")) {
-                ImGui::CloseCurrentPopup();
-                saveAndExit();
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Don't Save")) {
-                exit_confirmed_ = true;
-                window().setShouldClose(true);
-                ImGui::CloseCurrentPopup();
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+            drawUnsavedButtons([&] { saveThen(PendingAfterSave::Exit); },
+                               [&] {
+                                   exit_confirmed_ = true;
+                                   window().setShouldClose(true);
+                               });
             ImGui::EndPopup();
         }
     }
@@ -2176,6 +2187,12 @@ private:
 
     void handleViewportSelection(genesis::Scene& scene) {
         (void)scene;
+        // Modals (Save / Don't Save / Cancel) must own the click — don't let the
+        // same mouse release fall through into viewport deselect.
+        if (ImGui::GetTopMostPopupModal() != nullptr) {
+            marquee_ = {};
+            return;
+        }
         const bool alt_nav = ImGui::GetIO().KeyAlt;
         if (fly_camera_active_ || navigating_active_ || alt_nav) {
             marquee_ = {};
@@ -2779,7 +2796,28 @@ private:
             default_path);
     }
 
-    void saveSceneAsDialog(bool exit_after_save = false) {
+    enum class PendingAfterSave { None, Exit, NewScene, OpenScene };
+
+    void runPendingAfterSave() {
+        const PendingAfterSave next = pending_after_save_;
+        pending_after_save_ = PendingAfterSave::None;
+        switch (next) {
+        case PendingAfterSave::Exit:
+            exit_confirmed_ = true;
+            window().setShouldClose(true);
+            break;
+        case PendingAfterSave::NewScene:
+            newBlankScene();
+            break;
+        case PendingAfterSave::OpenScene:
+            openSceneDialog();
+            break;
+        case PendingAfterSave::None:
+            break;
+        }
+    }
+
+    void saveSceneAsDialog() {
         std::filesystem::path default_path = session_.document_path;
         if (default_path.empty() || session_.isBundledScenePath(default_path)) {
             default_path = genesis::uniqueProjectPath("Untitled Scene");
@@ -2791,8 +2829,10 @@ private:
              {"GNS Package", "gns"},
              {"JSON Scene", "json"},
              {"All Files", "*"}},
-            [this, exit_after_save](std::filesystem::path path) {
+            [this](std::filesystem::path path) {
                 if (path.empty()) {
+                    // User cancelled Save As — abandon the pending close/new/open action.
+                    pending_after_save_ = PendingAfterSave::None;
                     return;
                 }
                 if (!path.has_extension()) {
@@ -2801,44 +2841,33 @@ private:
                 try {
                     session_.saveDocument(runtime_, path);
                     updateWindowTitle();
-                    if (exit_after_save) {
-                        exit_confirmed_ = true;
-                        window().setShouldClose(true);
-                    }
+                    runPendingAfterSave();
                 } catch (const std::exception& ex) {
                     spdlog::error("Save scene failed: {}", ex.what());
+                    pending_after_save_ = PendingAfterSave::None;
                 }
             },
             default_path);
     }
 
-    void saveAndExit() {
+    void saveThen(PendingAfterSave next) {
+        pending_after_save_ = next;
         if (session_.requiresSaveAs()) {
-            saveSceneAsDialog(true);
+            saveSceneAsDialog();
             return;
         }
         try {
             session_.saveDocument(runtime_, session_.document_path);
             updateWindowTitle();
-            exit_confirmed_ = true;
-            window().setShouldClose(true);
+            runPendingAfterSave();
         } catch (const std::exception& ex) {
             spdlog::error("Save scene failed: {}", ex.what());
+            pending_after_save_ = PendingAfterSave::None;
         }
     }
 
     void saveCurrentDocument() {
-        if (session_.requiresSaveAs()) {
-            saveSceneAsDialog(false);
-            return;
-        }
-
-        try {
-            session_.saveDocument(runtime_, session_.document_path);
-            updateWindowTitle();
-        } catch (const std::exception& ex) {
-            spdlog::error("Save scene failed: {}", ex.what());
-        }
+        saveThen(PendingAfterSave::None);
     }
 
     float refreshOutputAspect() {
@@ -3361,6 +3390,7 @@ private:
     bool show_open_confirm_ = false;
     bool show_exit_confirm_ = false;
     bool exit_confirmed_ = false;
+    PendingAfterSave pending_after_save_ = PendingAfterSave::None;
     int smoke_exit_frames_ = -1;
 
     genesis::OscProtocol osc_protocol_{};
