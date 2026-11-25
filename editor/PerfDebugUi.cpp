@@ -32,9 +32,9 @@ void drawPerfDebugOverlayWindow(const PerfDebugSnapshot& snap, bool* open) {
     ImGui::Text("Sim steps   %u  (%s)", snap.particle_steps, snap.particle_gpu ? "GPU" : "CPU");
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip(
-            "Fixed 10 ms particle steps per engine frame (wall-clock dt).\n"
-            "At 50 FPS expect ~2 steps/frame. Oscillating 1↔3 = beat hitch\n"
-            "(often coarse FPS-cap sleep). View → Cap FPS to A/B.");
+            "Fixed 10 ms particle steps from wall-clock engine dt.\n"
+            "Frame 0.00 ms + frozen FPS used to mean 1 ms timer quantization\n"
+            "(particles pulsed while FPS never 'dropped'). Cap FPS A/B still useful.");
     }
     ImGui::Separator();
     ImGui::TextWrapped("GPU  %s", snap.gpu_name[0] ? snap.gpu_name : "(unknown)");
