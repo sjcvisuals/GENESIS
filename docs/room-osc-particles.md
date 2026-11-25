@@ -7,6 +7,7 @@ Dual-ring cylindrical room soft-particle demo driven by OSC person tracking. Par
 - Package: `assets/scenes/room_osc_particles.gns`
 - Document: `assets/scenes/room_osc_particles.scene.json`
 - Editor: **File → Examples → Room OSC Particles**
+- Lean single-person demo: **File → Examples → Medusa** (`assets/scenes/medusa.scene.json`) — dual rings + one Wall Plane, `max_persons = 1`, Prefer plane → distance, line-trace debug on
 
 ### Geometry (install scale)
 

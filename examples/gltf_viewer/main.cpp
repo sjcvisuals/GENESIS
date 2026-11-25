@@ -730,6 +730,26 @@ private:
                         spdlog::error("Open room OSC example failed: {}", ex.what());
                     }
                 }
+                if (ImGui::MenuItem("Medusa")) {
+                    const std::filesystem::path example =
+                        genesis::resolveAssetPath("assets/scenes/medusa.scene.json");
+                    try {
+                        loadSceneDocument(example);
+                        genesis::OscRoomPersonSettings room = osc_protocol_.roomPersonSettings();
+                        genesis::configureMedusaExampleSettings(room);
+                        osc_protocol_.setRoomPersonSettings(room);
+                        genesis::OscParticleEmitSettings emit = osc_protocol_.particleEmitSettings();
+                        emit.emitter_path = "Scene/Person Pool/Feet 00";
+                        emit.track_emitter_position = true;
+                        emit.burst_on_message = false;
+                        osc_protocol_.setParticleEmitSettings(emit);
+                        if (!osc_protocol_.isListening()) {
+                            osc_protocol_.startListening();
+                        }
+                    } catch (const std::exception& ex) {
+                        spdlog::error("Open Medusa example failed: {}", ex.what());
+                    }
+                }
                 ImGui::EndMenu();
             }
             ImGui::Separator();
@@ -3099,23 +3119,32 @@ private:
 
     void configureRoomOscDemoIfNeeded() {
         const std::string path = session_.document_path.filename().string();
-        if (path.find("room_osc_particles") == std::string::npos) {
+        const bool room_demo = path.find("room_osc_particles") != std::string::npos;
+        const bool medusa_demo = path.find("medusa.scene") != std::string::npos;
+        if (!room_demo && !medusa_demo) {
             return;
         }
-        // Room install: surface OSC + wall-ray controls (skip panel when capturing viewport demos).
+        // Room / Medusa: surface OSC + wall-ray controls (skip panel when capturing viewport demos).
         const bool hide_protocol =
             (std::getenv("GENESIS_WALL_RAY_HIDE_PROTOCOL") != nullptr);
         show_protocol_ = !hide_protocol;
         genesis::OscRoomPersonSettings room = osc_protocol_.roomPersonSettings();
-        genesis::configureRoomOscInstallSettings(room);
+        if (medusa_demo) {
+            genesis::configureMedusaExampleSettings(room);
+        } else {
+            genesis::configureRoomOscInstallSettings(room);
+        }
         // Opt-in editor debug: GENESIS_WALL_RAY_DEBUG=1 (still off for Renderbridge / default).
+        // Medusa enables line-trace debug by default via configureMedusaExampleSettings.
         if (const char* dbg = std::getenv("GENESIS_WALL_RAY_DEBUG");
             dbg != nullptr && dbg[0] != '\0' && dbg[0] != '0') {
             room.debug_draw_wall_ray = true;
         }
-        // Opt-in: exactly one upright Wall Plane + PreferPlaneThenDistance (no plane clutter).
-        if (const char* plane_demo = std::getenv("GENESIS_WALL_RAY_PLANE");
-            plane_demo != nullptr && plane_demo[0] != '\0' && plane_demo[0] != '0') {
+        // Opt-in (Room) or always-on (Medusa): one upright Wall Plane + PreferPlaneThenDistance.
+        const bool plane_env = (std::getenv("GENESIS_WALL_RAY_PLANE") != nullptr &&
+                                std::getenv("GENESIS_WALL_RAY_PLANE")[0] != '\0' &&
+                                std::getenv("GENESIS_WALL_RAY_PLANE")[0] != '0');
+        if (medusa_demo || plane_env) {
             genesis::Scene& scene = runtime_.scene();
             std::optional<genesis::NodeId> scene_root = genesis::findNodeByPath(scene, "Scene");
             room.wall_plane_path = "Scene/Wall Plane";
@@ -3210,14 +3239,16 @@ private:
         resetEditorCamera();
         configureRoomOscDemoIfNeeded();
 
-        // Auto-frame: room install gets a fixed overview so the 6 m wall + dual rings read;
+        // Auto-frame: room / Medusa get a fixed overview so the 6 m wall + dual rings read;
         // other demos still frame the Soft Circles / Outer Ring emitter.
-        const bool room_demo = session_.document_path.filename().string().find("room_osc_particles") !=
-                               std::string::npos;
-        const bool wall_plane_demo = (std::getenv("GENESIS_WALL_RAY_PLANE") != nullptr &&
+        const std::string loaded = session_.document_path.filename().string();
+        const bool room_demo = loaded.find("room_osc_particles") != std::string::npos;
+        const bool medusa_demo = loaded.find("medusa.scene") != std::string::npos;
+        const bool wall_plane_demo = medusa_demo ||
+                                     (std::getenv("GENESIS_WALL_RAY_PLANE") != nullptr &&
                                       std::getenv("GENESIS_WALL_RAY_PLANE")[0] != '\0' &&
                                       std::getenv("GENESIS_WALL_RAY_PLANE")[0] != '0');
-        if (room_demo && wall_plane_demo) {
+        if ((room_demo || medusa_demo) && wall_plane_demo) {
             // Frame the single hit panel + ray (not the default dual-ring overview).
             if (std::optional<genesis::NodeId> plane =
                     genesis::findNodeByPath(runtime_.scene(), "Scene/Wall Plane")) {
@@ -3225,7 +3256,7 @@ private:
             }
             camera_pivot_ = glm::vec3(2.0f, 1.2f, 0.0f);
             placeEditorCameraAt(glm::vec3(9.0f, 3.8f, 8.0f), camera_pivot_);
-        } else if (room_demo) {
+        } else if (room_demo || medusa_demo) {
             camera_pivot_ = glm::vec3(0.0f, 0.9f, 0.0f);
             placeEditorCameraAt(glm::vec3(9.5f, 5.5f, 11.0f), camera_pivot_);
             // Particles-only install: frame the outer ring emitter (no room/tank meshes).
