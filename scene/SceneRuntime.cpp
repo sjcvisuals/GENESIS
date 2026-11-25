@@ -2,6 +2,7 @@
 
 #include "scene/Frustum.hpp"
 #include "scene/MeshBounds.hpp"
+#include "scene/SceneVisibility.hpp"
 
 #include "animation/AnimationAuthoring.hpp"
 #include "animation/AnimationEvaluator.hpp"
@@ -305,7 +306,7 @@ void SceneRuntime::simulateFluids(VkCommandBuffer cmd, const float dt_seconds) {
     particle_world_.setFluidWorld(&fluid_world_);
 }
 
-void SceneRuntime::appendFluidDrawCommands(std::vector<SceneDrawCommand>& out) {
+void SceneRuntime::appendFluidDrawCommands(std::vector<SceneDrawCommand>& out, bool game_output) {
     if (!fluid_box_mesh_id_.has_value()) {
         fluid_box_mesh_id_ = addMesh("FluidBox", createFluidDisplayBoxMesh(context_));
     }
@@ -327,6 +328,10 @@ void SceneRuntime::appendFluidDrawCommands(std::vector<SceneDrawCommand>& out) {
 
     for (const FluidDrawItem& item : fluid_world_.drawItems()) {
         if (!item.display_texture) {
+            continue;
+        }
+        if (const Node* node = scene_.find(item.node_id);
+            !node || !isNodeDrawnInView(scene_, *node, game_output)) {
             continue;
         }
         SceneDrawCommand cmd{};
@@ -361,7 +366,8 @@ void SceneRuntime::setParticleViewBasis(const glm::vec3& camera_right, const glm
     particle_view_basis_.valid = true;
 }
 
-void SceneRuntime::appendParticleDrawCommands(std::vector<SceneDrawCommand>& out) {
+void SceneRuntime::appendParticleDrawCommands(std::vector<SceneDrawCommand>& out,
+                                              bool game_output) {
     if (!particle_cube_mesh_id_.has_value()) {
         particle_cube_mesh_id_ = addMesh("ParticleCube", createCubeMesh(context_));
     }
@@ -396,7 +402,7 @@ void SceneRuntime::appendParticleDrawCommands(std::vector<SceneDrawCommand>& out
     }
 
     std::vector<ParticleWorld::ParticleInstanceBatch> batches;
-    particle_world_.collectInstances(scene_, batches, particle_view_basis_);
+    particle_world_.collectInstances(scene_, batches, particle_view_basis_, game_output);
 
     SceneMaterial lit{};
     lit.base_color = glm::vec4(1.0f);
@@ -509,13 +515,11 @@ void SceneRuntime::collectDrawCommands(std::vector<SceneDrawCommand>& out,
     }
 
     for (const Node& node : scene_.nodes) {
-        if (params.game_output && node.hidden_in_game) {
-            continue;
-        }
-        if (node.light.has_value() && node.light->enabled && node.visible) {
+        const bool drawn = isNodeDrawnInView(scene_, node, params.game_output);
+        if (node.light.has_value() && node.light->enabled && drawn) {
             ++stats.active_lights;
         }
-        if (!node.visible || !node.mesh_resource.has_value()) continue;
+        if (!drawn || !node.mesh_resource.has_value()) continue;
         const std::uint32_t mesh_id = *node.mesh_resource;
         if (mesh_id >= meshes_.size()) continue;
 

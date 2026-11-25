@@ -2,6 +2,7 @@
 
 #include "scene/MeshBounds.hpp"
 #include "scene/Scene.hpp"
+#include "scene/SceneVisibility.hpp"
 #include "renderer/Mesh.hpp"
 
 #include <glm/glm.hpp>
@@ -23,6 +24,8 @@ struct PickRay {
 struct ScenePickParams {
     bool meshes_only = false;
     bool exclude_cameras = false;
+    // Match draw gate: Game View / output skips Hidden in Game (and invisible) actors.
+    bool game_output = false;
     float bounds_slack_m = 0.002f;
     float min_thin_extent_m = 0.01f;
 };
@@ -118,8 +121,9 @@ inline bool nodeWorldPickAabb(const Node& node, const Mesh* mesh, const ScenePic
     return true;
 }
 
-inline bool isScenePickCandidate(const Node& node, const ScenePickParams& params) {
-    if (!node.visible || !node.pickable) {
+inline bool isScenePickCandidate(const Scene& scene, const Node& node,
+                                 const ScenePickParams& params) {
+    if (!node.pickable || !isNodeDrawnInView(scene, node, params.game_output)) {
         return false;
     }
     if (params.exclude_cameras && node.camera.has_value()) {
@@ -141,7 +145,7 @@ inline std::optional<ScenePickResult> pickNodeAtRay(const Scene& scene,
     constexpr float kDistanceEpsilon = 1e-4f;
 
     for (const Node& node : scene.nodes) {
-        if (!isScenePickCandidate(node, params)) {
+        if (!isScenePickCandidate(scene, node, params)) {
             continue;
         }
 
@@ -267,7 +271,7 @@ inline void pickNodesInScreenRect(const Scene& scene, const std::deque<Mesh>& me
     }
 
     for (const Node& node : scene.nodes) {
-        if (!isScenePickCandidate(node, params)) {
+        if (!isScenePickCandidate(scene, node, params)) {
             continue;
         }
 

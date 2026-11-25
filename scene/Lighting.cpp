@@ -1,6 +1,7 @@
 #include "scene/Lighting.hpp"
 
 #include "color/ColorManagement.hpp"
+#include "scene/SceneVisibility.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -55,7 +56,8 @@ void writeVec4(float* out, float x, float y, float z, float w) {
 
 FrameUniforms buildFrameUniforms(const Scene& scene, const float* view_proj_col_major,
                                  const glm::vec3& camera_position,
-                                 const ColorManagementSettings* color, float time_seconds) {
+                                 const ColorManagementSettings* color, float time_seconds,
+                                 bool game_output) {
     FrameUniforms u{};
     std::memcpy(u.view_proj, view_proj_col_major, sizeof(u.view_proj));
     u.camera_pos[0] = camera_position.x;
@@ -74,7 +76,8 @@ FrameUniforms buildFrameUniforms(const Scene& scene, const float* view_proj_col_
 
     int count = 0;
     for (const Node& node : scene.nodes) {
-        if (!node.visible || !node.light.has_value() || !node.light->enabled) continue;
+        if (!node.light.has_value() || !node.light->enabled) continue;
+        if (!isNodeDrawnInView(scene, node, game_output)) continue;
         if (count >= 8) break;
         writeLight(u.lights[count], *node.light, node.world);
         ++count;

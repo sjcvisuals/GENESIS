@@ -380,6 +380,11 @@ if(GENESIS_BUILD_EXAMPLES)
     target_include_directories(genesis_particle_smoke PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(genesis_particle_smoke PRIVATE glm::glm)
 
+    # Header-only actor visibility precedence smoke (no Vulkan / GPU).
+    add_executable(genesis_visibility_smoke examples/visibility_smoke/main.cpp)
+    target_include_directories(genesis_visibility_smoke PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(genesis_visibility_smoke PRIVATE genesis_engine_runtime)
+
     # CPU ParticleWorld determinism + sprite batch smoke (links engine runtime).
     add_executable(genesis_particle_world_smoke examples/particle_smoke/world_main.cpp)
     target_link_libraries(genesis_particle_world_smoke PRIVATE genesis_engine_runtime)

@@ -25,10 +25,12 @@ struct Node {
 
     Transform local{};
     glm::mat4 world{1.0f};
+    // Inspector "Visible": hide everywhere (editor + Game View + output). Cascades to children.
+    // See scene/SceneVisibility.hpp — selection never overrides this.
     bool visible = true;
     bool pickable = true;
-    // Unreal-like: shown in editor, omitted from Game View / Renderbridge output.
-    // Does not affect collisions / wall-ray plane hits.
+    // Unreal-like: still shown in the editor; omitted when game_output (Game View / Renderbridge).
+    // Cascades to children. Visible=off always wins. Collisions / wall-ray hits still apply.
     bool hidden_in_game = false;
 
     // Runtime mesh resource index (owned by application mesh pool).
