@@ -26,10 +26,13 @@ enum class TugelaModuleKind : std::uint8_t {
 };
 
 // Leaf modules shown inside stage nodes (Niagara-like stack entries).
+// Keep in sync with ParticleEmitter runtime flags — every supported module must
+// appear under stageForStack() and in the stage "+" add directory.
 enum class TugelaStackMod : std::uint8_t {
     SpawnRate = 0,
     Burst,
     Shape,
+    SpawnByDistance, // spawn_per_unit (meters traveled)
     Lifetime,
     Velocity,
     Size,
@@ -41,6 +44,8 @@ enum class TugelaStackMod : std::uint8_t {
     Noise,
     Accel,
     KillPlane,
+    KillBox,
+    FluidCoupled,
     SizeOverLife,
     ColorOverLife,
     ScaleBySpeed,
