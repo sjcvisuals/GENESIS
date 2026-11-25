@@ -2027,6 +2027,13 @@ private:
         ImGui::Text("Particles alive: %u", snap.particles_alive);
         ImGui::Text("Emitters: %u", snap.particle_emitters);
         ImGui::Text("Sim steps: %u (%s)", snap.particle_steps, snap.particle_gpu ? "GPU" : "CPU");
+        ImGui::TextDisabled("Fixed 10 ms steps · high-res wall-clock dt · ~2/frame @ 50 FPS");
+        ImGui::Text("FPS cap: %s @ %.0f", prefs_.fps_cap_enabled ? "ON" : "OFF", prefs_.fps_cap);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Particles follow the editor frame loop (not a separate clock).\n"
+                "If Frame reads 0.00 ms while FPS is huge/frozen, dt was quantized.");
+        }
         ImGui::Separator();
         ImGui::Text("GPU: %s", snap.gpu_name);
         ImGui::Text("Resolution: %u x %u", snap.width, snap.height);
