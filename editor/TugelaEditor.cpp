@@ -7,6 +7,7 @@
 #include "scene/ScenePath.hpp"
 
 #include <algorithm>
+#include <cfloat>
 #include <cstdio>
 #include <cmath>
 #include <string>
@@ -64,6 +65,28 @@ TugelaMetrics makeMetrics() {
     m.curve_plot_h = std::max(48.0f, f * 2.4f);
     m.color_bar_h = std::max(16.0f, f * 0.9f);
     return m;
+}
+
+TugelaMetrics scaleGraphMetrics(TugelaMetrics m, float zoom) {
+    const float z = std::clamp(zoom, 0.35f, 2.5f);
+    m.font *= z;
+    m.stage_w *= z;
+    m.stage_gap_x *= z;
+    m.stage_header_h *= z;
+    m.stack_row_h *= z;
+    m.stage_pad *= z;
+    m.emitter_lane_gap *= z;
+    m.checkbox *= z;
+    m.pad *= z;
+    return m;
+}
+
+void graphAddText(ImDrawList* draw, const ImVec2& pos, ImU32 col, const char* text, float font_px) {
+    draw->AddText(ImGui::GetFont(), font_px, pos, col, text);
+}
+
+float graphTextWidth(const char* text, float font_px) {
+    return ImGui::GetFont()->CalcTextSizeA(font_px, FLT_MAX, 0.0f, text).x;
 }
 
 const char* stageLabel(TugelaModuleKind kind) {
@@ -805,12 +828,13 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
     (void)row_index;
     const float x0 = canvas_origin.x + state.graph_pan_x;
 
-    draw->AddText(ImVec2(x0, y - name_gap), IM_COL32(140, 150, 160, 255),
-                  emitter_node.name.c_str());
+    graphAddText(draw, ImVec2(x0, y - name_gap), IM_COL32(140, 150, 160, 255),
+                 emitter_node.name.c_str(), m.font);
     if (!e.enabled) {
-        draw->AddText(
-            ImVec2(x0 + ImGui::CalcTextSize(emitter_node.name.c_str()).x + m.pad, y - name_gap),
-            IM_COL32(120, 90, 90, 220), "off");
+        graphAddText(
+            draw,
+            ImVec2(x0 + graphTextWidth(emitter_node.name.c_str(), m.font) + m.pad, y - name_gap),
+            IM_COL32(120, 90, 90, 220), "off", m.font);
     }
 
     ImVec2 prev_center{};
@@ -843,8 +867,8 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
                             6.0f, ImDrawFlags_RoundCornersTop);
         const float header_text_y =
             p0.y + (m.stage_header_h - m.font) * 0.5f;
-        draw->AddText(ImVec2(p0.x + m.pad, header_text_y), IM_COL32(220, 230, 235, 255),
-                      stageLabel(stage));
+        graphAddText(draw, ImVec2(p0.x + m.pad, header_text_y), IM_COL32(220, 230, 235, 255),
+                     stageLabel(stage), m.font);
 
         // "+ Add" affordance for optional modules
         std::vector<TugelaStackMod> addable;
@@ -857,10 +881,11 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
             draw->AddRectFilled(add_p0, add_p1,
                                 add_hov ? IM_COL32(50, 90, 100, 255) : IM_COL32(36, 48, 54, 255),
                                 3.0f);
-            const ImVec2 plus_sz = ImGui::CalcTextSize("+");
-            draw->AddText(ImVec2(add_p0.x + (add_btn - plus_sz.x) * 0.5f,
-                                 add_p0.y + (add_btn - plus_sz.y) * 0.5f),
-                          IM_COL32(180, 220, 230, 255), "+");
+            const float plus_w = graphTextWidth("+", m.font);
+            graphAddText(draw,
+                         ImVec2(add_p0.x + (add_btn - plus_w) * 0.5f,
+                                add_p0.y + (add_btn - m.font) * 0.5f),
+                         IM_COL32(180, 220, 230, 255), "+", m.font);
             if (allow_pick && add_hov && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
                 popup_stage = stage;
                 open_add_popup = true;
@@ -904,9 +929,9 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
             }
 
             const float label_y = r0.y + (r1.y - r0.y - m.font) * 0.5f;
-            draw->AddText(ImVec2(c1.x + 6.0f, label_y),
-                          en ? IM_COL32(220, 230, 235, 255) : IM_COL32(110, 118, 125, 255),
-                          stackLabel(mod));
+            graphAddText(draw, ImVec2(c1.x + m.pad * 0.6f, label_y),
+                         en ? IM_COL32(220, 230, 235, 255) : IM_COL32(110, 118, 125, 255),
+                         stackLabel(mod), m.font);
 
             if (hov) {
                 ImGui::SetTooltip("%s · click select · click □ enable/disable", stackLabel(mod));
@@ -930,8 +955,8 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
         }
 
         if (stack.empty()) {
-            draw->AddText(ImVec2(p0.x + m.pad, p0.y + m.stage_header_h + m.stage_pad),
-                          IM_COL32(100, 110, 120, 200), "empty · + to add");
+            graphAddText(draw, ImVec2(p0.x + m.pad, p0.y + m.stage_header_h + m.stage_pad),
+                         IM_COL32(100, 110, 120, 200), "empty · + to add", m.font);
         }
 
         const ImVec2 center((p0.x + p1.x) * 0.5f, p0.y + h * 0.5f);
@@ -973,12 +998,15 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
 void drawModuleGraph(TugelaEditorState& state, Scene& scene, const std::vector<NodeId>& emitters,
                      ParticleEmitterUiContext& ctx, const TugelaMetrics& m) {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.018f, 0.019f, 0.022f, 1.0f));
-    ImGui::BeginChild("tugela_graph_canvas", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
+    ImGui::BeginChild("tugela_graph_canvas", ImVec2(0.0f, 0.0f),
+                      ImGuiChildFlags_Borders,
+                      ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoScrollbar);
 
     ImGui::TextColored(kAccent, "Module graph");
     ImGui::Spacing();
     ImGui::PushTextWrapPos(0.0f);
-    ImGui::TextColored(kMuted, "Stack shows added modules · □ enable/disable · + adds forces");
+    ImGui::TextColored(kMuted,
+                       "Stack · □ enable · + add · scroll zoom · MMB / LMB-drag pan");
     ImGui::PopTextWrapPos();
     ImGui::Spacing();
 
@@ -992,11 +1020,32 @@ void drawModuleGraph(TugelaEditorState& state, Scene& scene, const std::vector<N
     const bool canvas_hovered = ImGui::IsItemHovered();
     const bool canvas_active = ImGui::IsItemActive();
 
+    // Scroll-wheel zoom toward cursor (same wheel that dollies the 3D viewport elsewhere).
+    if (canvas_hovered) {
+        const float wheel = ImGui::GetIO().MouseWheel;
+        if (std::abs(wheel) > 0.0f) {
+            const float old_zoom = std::clamp(state.graph_zoom, 0.35f, 2.5f);
+            const float new_zoom =
+                std::clamp(old_zoom * std::exp(wheel * 0.12f), 0.35f, 2.5f);
+            if (std::abs(new_zoom - old_zoom) > 1e-5f) {
+                const ImVec2 mouse = ImGui::GetIO().MousePos;
+                const float mx = mouse.x - canvas_p0.x;
+                const float my = mouse.y - canvas_p0.y;
+                const float ratio = new_zoom / old_zoom;
+                state.graph_pan_x = mx - (mx - state.graph_pan_x) * ratio;
+                state.graph_pan_y = my - (my - state.graph_pan_y) * ratio;
+                state.graph_zoom = new_zoom;
+            }
+        }
+    }
+
+    const TugelaMetrics gm = scaleGraphMetrics(m, state.graph_zoom);
+
     ImDrawList* draw = ImGui::GetWindowDrawList();
     draw->AddRectFilled(canvas_p0, ImVec2(canvas_p0.x + canvas_size.x, canvas_p0.y + canvas_size.y),
                         IM_COL32(14, 15, 17, 255), 4.0f);
 
-    const float grid_step = std::max(28.0f, m.font * 1.6f);
+    const float grid_step = std::max(28.0f, gm.font * 1.6f);
     for (float gx = std::fmod(state.graph_pan_x, grid_step); gx < canvas_size.x; gx += grid_step) {
         draw->AddLine(ImVec2(canvas_p0.x + gx, canvas_p0.y),
                       ImVec2(canvas_p0.x + gx, canvas_p0.y + canvas_size.y),
@@ -1012,9 +1061,9 @@ void drawModuleGraph(TugelaEditorState& state, Scene& scene, const std::vector<N
                        true);
 
     if (emitters.empty()) {
-        draw->AddText(ImVec2(canvas_p0.x + m.pad * 2.0f, canvas_p0.y + m.pad * 2.0f),
-                      IM_COL32(120, 130, 140, 255),
-                      "Add emitters to this System to build the graph.");
+        graphAddText(draw, ImVec2(canvas_p0.x + gm.pad * 2.0f, canvas_p0.y + gm.pad * 2.0f),
+                     IM_COL32(120, 130, 140, 255),
+                     "Add emitters to this System to build the graph.", gm.font);
     }
 
     bool picked_node = false;
@@ -1031,7 +1080,7 @@ void drawModuleGraph(TugelaEditorState& state, Scene& scene, const std::vector<N
         float row_h = 0.0f;
         ImGui::PushID(static_cast<int>(id));
         picked_node |= drawEmitterGraphRow(state, *n, row, ctx, draw, canvas_p0, row_h,
-                                           canvas_hovered, m);
+                                           canvas_hovered, gm);
         ImGui::PopID();
         state.graph_pan_y = saved_pan_y;
         lane_y += row_h;
@@ -1257,7 +1306,8 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
 
     if (state.tab == TugelaEditorTab::Graph) {
         const float graph_h = std::max(m.font * 12.0f, ImGui::GetContentRegionAvail().y * 0.55f);
-        ImGui::BeginChild("graph_wrap", ImVec2(0.0f, graph_h), ImGuiChildFlags_None);
+        ImGui::BeginChild("graph_wrap", ImVec2(0.0f, graph_h), ImGuiChildFlags_None,
+                          ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoScrollbar);
         drawModuleGraph(state, scene, emitters, ctx, m);
         ImGui::EndChild();
 

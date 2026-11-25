@@ -510,10 +510,9 @@ protected:
         if (show_viewport_) {
             ImVec2 rect_min{};
             ImVec2 rect_max{};
-            bool viewport_input_active = false;
             genesis::drawViewportInputOverlay(
                 dockspace_id_, show_viewport_, rect_min, rect_max, viewport_hovered_,
-                viewport_input_active, [&]() { drawViewportGizmo(scene); });
+                viewport_input_active_, [&]() { drawViewportGizmo(scene); });
             viewport_.x = rect_min.x;
             viewport_.y = rect_min.y;
             viewport_.w = std::max(rect_max.x - rect_min.x, 1.0f);
@@ -528,6 +527,7 @@ protected:
             viewport_.w = 0.0f;
             viewport_.h = 0.0f;
             viewport_hovered_ = false;
+            viewport_input_active_ = false;
             marquee_ = {};
         }
     }
@@ -1188,7 +1188,7 @@ private:
             ImGui::TextWrapped("Select an actor in the viewport or outliner.");
             ImGui::Spacing();
             ImGui::TextDisabled("LMB pick / drag marquee");
-            ImGui::TextDisabled("Alt+LMB orbit · MMB pan · Alt+RMB dolly · RMB fly");
+            ImGui::TextDisabled("Alt+LMB orbit · Alt+MMB pan · Alt+RMB dolly · wheel zoom");
         } else if (genesis::Node* n = scene.find(primarySelected())) {
             genesis::drawEditorSectionLabel(n->name.c_str());
             const std::string node_path = genesis::nodePath(scene, n->id);
@@ -1738,10 +1738,11 @@ private:
 
     void drawViewportHelpPanel() {
         ImGui::Begin("Shortcuts", &show_viewport_help_);
-        ImGui::TextDisabled("NAVIGATION (Unreal-like, slowed)");
-        ImGui::BulletText("Alt + LMB — orbit around pivot");
-        ImGui::BulletText("MMB / Alt + MMB — pan (slow)");
-        ImGui::BulletText("Alt + RMB / wheel — dolly");
+        ImGui::TextDisabled("NAVIGATION (Maya)");
+        ImGui::BulletText("Alt + LMB — tumble / orbit around pivot");
+        ImGui::BulletText("Alt + MMB — pan / track");
+        ImGui::BulletText("Alt + RMB (or Alt + LMB+MMB) — dolly");
+        ImGui::BulletText("Scroll wheel — zoom (viewport + Tugela graph)");
         ImGui::BulletText("RMB + WASD / QE — fly look");
         ImGui::BulletText("F — frame selection (sets orbit pivot)");
         ImGui::BulletText("Grid — 1 m major / 0.25 m minor");
@@ -2968,8 +2969,8 @@ private:
     }
 
     void applyEditorCameraOrbit(const float dx, const float dy) {
-        // Unreal-like Alt+LMB orbit around pivot (slower than stock UE feel).
-        constexpr float kOrbit = 0.0032f;
+        // Maya tumble: ~0.5°/px so a half-viewport drag ≈ 180° about the pivot.
+        constexpr float kOrbit = 0.0055f;
         editor_camera_.yaw_radians -= dx * kOrbit;
         editor_camera_.pitch_radians -= dy * kOrbit;
         editor_camera_.pitch_radians = glm::clamp(editor_camera_.pitch_radians, -1.45f, 1.45f);
@@ -2979,18 +2980,20 @@ private:
     }
 
     void applyEditorCameraPan(const float dx, const float dy) {
-        // Unreal Alt+MMB / MMB track — intentionally slow for install-scale work.
+        // Maya track: screen-space motion at the pivot depth (perspective-correct).
         const float dist = editorCameraPivotDistance();
-        const float pan_scale = dist * 0.00055f;
+        const float vh = std::max(viewport_.h, 1.0f);
+        const float pan_scale =
+            (2.0f * dist * std::tan(editor_camera_.fov_y_radians * 0.5f)) / vh;
         const glm::vec3 delta = (-editor_camera_.right() * dx + editor_camera_.up() * dy) * pan_scale;
         editor_camera_.transform.position += delta;
         camera_pivot_ += delta;
     }
 
     void applyEditorCameraDolly(const float amount) {
-        // Positive amount dollies in toward pivot (Unreal Alt+RMB / wheel).
+        // Positive amount dollies in toward the center of interest (Maya Alt+RMB / wheel).
         float dist = editorCameraPivotDistance();
-        dist = std::clamp(dist * std::exp(-amount * 0.12f), 0.35f, 120.0f);
+        dist = std::clamp(dist * std::exp(-amount * 0.15f), 0.35f, 120.0f);
         editor_camera_.rebuildRotationFromYawPitch();
         editor_camera_.transform.position = camera_pivot_ - editor_camera_.forward() * dist;
     }
@@ -3007,10 +3010,12 @@ private:
         const float dy = input().mouseDeltaY();
         const float wheel = input().mouseWheelY();
 
-        // Unreal Maya-style: Alt+LMB orbit, Alt+MMB (or MMB) pan, Alt+RMB dolly.
-        const bool orbiting = alt && lmb && !ImGuizmo::IsUsing();
-        const bool panning = (mmb || (alt && mmb)) && !ImGuizmo::IsUsing();
-        const bool dollying = alt && rmb && !ImGuizmo::IsUsing();
+        // Maya: Alt+LMB tumble, Alt+MMB track, Alt+RMB / Alt+LMB+MMB dolly.
+        // Chorded LMB+MMB wins over single-button tumble/track.
+        const bool blocked = ImGuizmo::IsUsing();
+        const bool dollying = alt && !blocked && (rmb || (lmb && mmb));
+        const bool orbiting = alt && lmb && !mmb && !rmb && !blocked;
+        const bool panning = alt && mmb && !lmb && !rmb && !blocked;
         const bool navigating = orbiting || panning || dollying;
 
         if (navigating && (navigating_active_ || over_viewport)) {
@@ -3020,24 +3025,23 @@ private:
             input().setMouseCaptured(window().handle(), true);
             fly_camera_active_ = false;
 
-            if (orbiting) {
+            if (dollying) {
+                // Drag up/right → dolly in (SDL yrel is +down, so subtract dy).
+                applyEditorCameraDolly((dx - dy) * 0.010f);
+            } else if (orbiting) {
                 applyEditorCameraOrbit(dx, dy);
             } else if (panning) {
                 applyEditorCameraPan(dx, dy);
-            } else if (dollying) {
-                // Drag up/right → dolly in (match Unreal Alt+RMB feel, slowed).
-                applyEditorCameraDolly((dx + dy) * 0.045f);
             }
         } else {
             navigating_active_ = false;
         }
 
-        // Mouse wheel dolly when pointer is over the viewport (not captured by ImGui widgets).
-        if (over_viewport && !ImGui::GetIO().WantCaptureMouse && std::abs(wheel) > 0.0f &&
-            !ImGuizmo::IsUsing()) {
+        // Wheel zooms the 3D viewport when the overlay owns the pointer (not Tugela / other UI).
+        if (viewport_input_active_ && std::abs(wheel) > 0.0f && !ImGuizmo::IsUsing()) {
             use_editor_output_ = true;
             runtime_.scene().active_output_camera.reset();
-            applyEditorCameraDolly(wheel * 0.85f);
+            applyEditorCameraDolly(wheel * 1.0f);
         }
 
         // RMB fly look (no Alt) — slower / less twitchy than before.
@@ -3334,6 +3338,7 @@ private:
     bool use_editor_output_ = true;
     float output_aspect_ = 1.0f;
     bool viewport_hovered_ = false;
+    bool viewport_input_active_ = false;
     bool fly_camera_active_ = false;
     bool navigating_active_ = false;
     bool ui_style_initialized_ = false;

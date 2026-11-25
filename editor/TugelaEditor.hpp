@@ -59,6 +59,7 @@ struct TugelaEditorState {
     TugelaStackMod focus_stack = TugelaStackMod::SpawnRate;
     float graph_pan_x = 16.0f;
     float graph_pan_y = 22.0f;
+    float graph_zoom = 1.0f; // scroll-wheel zoom for the module graph canvas
 };
 
 // Floating Tugela Editor window. Safe to call every frame; respects state.open.
