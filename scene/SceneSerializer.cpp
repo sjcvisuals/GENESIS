@@ -315,6 +315,8 @@ const char* renderMeshName(ParticleRenderMesh mesh) {
         return "sphere";
     case ParticleRenderMesh::Sprite:
         return "sprite";
+    case ParticleRenderMesh::None:
+        return "none";
     default:
         return "cube";
     }
@@ -323,6 +325,7 @@ const char* renderMeshName(ParticleRenderMesh mesh) {
 ParticleRenderMesh renderMeshFromName(const std::string& name) {
     if (name == "sphere") return ParticleRenderMesh::Sphere;
     if (name == "sprite" || name == "billboard") return ParticleRenderMesh::Sprite;
+    if (name == "none") return ParticleRenderMesh::None;
     return ParticleRenderMesh::Cube;
 }
 
@@ -465,6 +468,7 @@ json particleEmitterToJson(const ParticleEmitter& e) {
         {"spawn_box_height", e.spawn_box_height},
         {"cone_angle_degrees", e.cone_angle_degrees},
         {"mod_sprite", e.mod_sprite},
+        {"mod_mesh", e.mod_mesh},
         {"render_mesh", renderMeshName(e.render_mesh)},
         {"sprite_aspect", e.sprite_aspect},
         {"velocity_stretch", e.velocity_stretch},
@@ -549,6 +553,13 @@ ParticleEmitter particleEmitterFromJson(const json& j) {
     e.mod_sprite = j.value("mod_sprite", e.mod_sprite);
     if (j.contains("render_mesh")) {
         e.render_mesh = renderMeshFromName(j["render_mesh"].get<std::string>());
+    }
+    if (j.contains("mod_mesh")) {
+        e.mod_mesh = j.value("mod_mesh", e.mod_mesh);
+    } else if (!e.mod_sprite && (e.render_mesh == ParticleRenderMesh::Sphere ||
+                                 e.render_mesh == ParticleRenderMesh::Cube)) {
+        // Legacy: disabling Sprite silently fell back to Sphere/Cube draw.
+        e.mod_mesh = true;
     }
     e.sprite_aspect = j.value("sprite_aspect", e.sprite_aspect);
     e.velocity_stretch = j.value("velocity_stretch", e.velocity_stretch);

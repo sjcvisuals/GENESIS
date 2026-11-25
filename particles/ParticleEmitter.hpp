@@ -2,7 +2,7 @@
 
 // Tugela particle emitter (modular Soft Circles stack — not a UE source port).
 // Flat enabled "modules" instead of a graph VM: spawn shape, forces, over-life curves,
-// kill volumes, sprite renderer, and a Trail Renderer module (history ribbons that taper).
+// kill volumes, Sprite / Mesh / Trail renderers (disable all → invisible particles).
 
 #include "particles/ParticleCurve.hpp"
 
@@ -26,6 +26,7 @@ enum class ParticleRenderMesh : std::uint8_t {
     Cube = 0,
     Sphere = 1,
     Sprite = 2, // camera-facing quad (sprite renderer)
+    None = 3,   // no head draw (all head renderers off)
 };
 
 enum class ParticleVelocityMode : std::uint8_t {
@@ -132,6 +133,9 @@ struct ParticleEmitter {
 
     // --- Sprite Renderer ---
     bool mod_sprite = true;
+    // --- Mesh Renderer (3D Cube / Sphere head; hidden fallback was the "still see balls" bug) ---
+    bool mod_mesh = false;
+    // Authored mesh for Mesh Renderer (Cube/Sphere). Sprite path ignores this and draws a billboard.
     ParticleRenderMesh render_mesh = ParticleRenderMesh::Sprite;
     bool unlit = true;
     bool additive = true; // SrcAlpha/One soft-emissive
@@ -156,6 +160,20 @@ struct ParticleEmitter {
     std::uint64_t seed_override = 0;
     bool fluid_coupled = false;
 };
+
+// Resolve which head mesh to draw. Sprite wins over Mesh; both off → None (invisible head).
+inline ParticleRenderMesh resolveParticleHeadMesh(const ParticleEmitter& e) {
+    if (e.mod_sprite) {
+        return ParticleRenderMesh::Sprite;
+    }
+    if (e.mod_mesh) {
+        if (e.render_mesh == ParticleRenderMesh::Cube) {
+            return ParticleRenderMesh::Cube;
+        }
+        return ParticleRenderMesh::Sphere;
+    }
+    return ParticleRenderMesh::None;
+}
 
 inline void syncEmitterCurvesFromEndpoints(ParticleEmitter& e) {
     if (e.size_over_life.count == 0) {

@@ -415,18 +415,30 @@ void drawParticleEmitterInspector(Node& emitter_node, const std::string& node_pa
     // --- 5 Sprite Renderer ---
     if (moduleHeader("5  ·  Sprite Renderer", true)) {
         moduleIndentBegin();
+        dirty |= ImGui::Checkbox("Enable sprites", &e.mod_sprite);
         dirty |= ImGui::Checkbox("Unlit", &e.unlit);
         ImGui::SameLine();
         dirty |= ImGui::Checkbox("Soft additive", &e.additive);
         ImGui::TextDisabled("Soft circle sprite · bloom-safe gaussian alpha");
-        const char* meshes[] = {"Cube", "Sphere", "Sprite (soft circle)"};
-        int mesh = static_cast<int>(e.render_mesh);
-        if (ImGui::Combo("Mesh", &mesh, meshes, IM_ARRAYSIZE(meshes))) {
-            e.render_mesh = static_cast<ParticleRenderMesh>(mesh);
-            dirty = true;
-        }
-        if (e.render_mesh == ParticleRenderMesh::Sprite) {
+        if (e.mod_sprite) {
             dirty |= ImGui::DragFloat("Sprite aspect", &e.sprite_aspect, 0.01f, 0.05f, 8.0f);
+        }
+        moduleIndentEnd();
+    }
+
+    // --- 5b Mesh Renderer ---
+    if (moduleHeader("5b ·  Mesh Renderer", true)) {
+        moduleIndentBegin();
+        dirty |= ImGui::Checkbox("Enable mesh head", &e.mod_mesh);
+        ImGui::TextDisabled("3D Cube / Sphere · off with Sprite/Trail = invisible particles");
+        if (e.mod_mesh) {
+            const char* meshes[] = {"Cube", "Sphere"};
+            int mesh = (e.render_mesh == ParticleRenderMesh::Cube) ? 0 : 1;
+            if (ImGui::Combo("Mesh", &mesh, meshes, IM_ARRAYSIZE(meshes))) {
+                e.render_mesh =
+                    (mesh == 0) ? ParticleRenderMesh::Cube : ParticleRenderMesh::Sphere;
+                dirty = true;
+            }
         }
         moduleIndentEnd();
     }
