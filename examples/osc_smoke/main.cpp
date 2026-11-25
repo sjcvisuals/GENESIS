@@ -373,6 +373,21 @@ int main() {
         }
     }
 
+    {
+        genesis::OscRoomPersonSettings medusa{};
+        genesis::configureMedusaExampleSettings(medusa);
+        if (!medusa.enabled || medusa.max_persons != 1 ||
+            medusa.wall_ray_mode != genesis::WallRaySpawnMode::PreferPlaneThenDistance ||
+            !medusa.debug_draw_wall_ray || medusa.wall_plane_path != "Scene/Wall Plane" ||
+            std::abs(medusa.room_radius - 3.0f) > 1e-5f ||
+            std::abs(medusa.tank_radius - 1.0f) > 1e-5f) {
+            std::cerr << "Medusa example settings mismatch\n";
+            ++failures;
+        } else {
+            std::cout << "Medusa example settings OK (max_persons=1, plane+debug)\n";
+        }
+    }
+
 #if !defined(GENESIS_OSC_SMOKE_LIGHT)
     {
         genesis::Scene scene{};

@@ -301,20 +301,29 @@ void Input::reloadSceneIfNeeded() {
 }
 
 void Input::configureRoomOscIfNeeded(const std::string& resource_path) {
-    if (resource_path.find("room_osc_particles") == std::string::npos) {
+    const bool room = resource_path.find("room_osc_particles") != std::string::npos;
+    const bool medusa = resource_path.find("medusa") != std::string::npos; // medusa.gns / medusa.scene.json
+    if (!room && !medusa) {
         return;
     }
     ::genesis::OscProtocol& osc = ::genesis::sharedOscProtocol();
-    ::genesis::OscRoomPersonSettings room = osc.roomPersonSettings();
-    ::genesis::configureRoomOscInstallSettings(room);
-    osc.setRoomPersonSettings(room);
+    ::genesis::OscRoomPersonSettings room_settings = osc.roomPersonSettings();
+    if (medusa) {
+        ::genesis::configureMedusaExampleSettings(room_settings);
+        // Renderbridge output: keep wall-ray math, skip editor line-trace overlay.
+        room_settings.debug_draw_wall_ray = false;
+    } else {
+        ::genesis::configureRoomOscInstallSettings(room_settings);
+    }
+    osc.setRoomPersonSettings(room_settings);
 
     ::genesis::OscParticleEmitSettings emit = osc.particleEmitSettings();
     emit.emitter_path = "Scene/Person Pool/Feet 00";
     emit.track_emitter_position = true;
     emit.burst_on_message = false;
     osc.setParticleEmitSettings(emit);
-    host().log_info("GENESIS room OSC person configured for Renderbridge");
+    host().log_info(medusa ? "GENESIS Medusa OSC person configured for Renderbridge"
+                           : "GENESIS room OSC person configured for Renderbridge");
 }
 
 void Input::publishTargetTexture() {

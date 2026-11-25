@@ -166,6 +166,15 @@ inline void configureRoomOscInstallSettings(OscRoomPersonSettings& room) {
     room.debug_draw_wall_ray = false;
 }
 
+// File → Examples → Medusa: lean single-person dual-ring + wall-plane ray debug.
+inline void configureMedusaExampleSettings(OscRoomPersonSettings& room) {
+    configureRoomOscInstallSettings(room);
+    room.max_persons = 1;
+    room.wall_ray_mode = WallRaySpawnMode::PreferPlaneThenDistance;
+    room.wall_plane_path = "Scene/Wall Plane";
+    room.debug_draw_wall_ray = true;
+}
+
 bool tryParseOscRoomPerson(const OscMessage& message, const OscRoomPersonSettings& settings,
                            OscRoomPersonEvent& out_event);
 

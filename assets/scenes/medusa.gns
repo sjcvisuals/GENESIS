@@ -1,0 +1,19 @@
+{
+  "format": "gns",
+  "version": 1,
+  "name": "Medusa",
+  "scene_ref": "medusa.scene.json",
+  "pixera": {
+    "streams": [
+      {
+        "handle": "main",
+        "resolution_x": 1920,
+        "resolution_y": 1080,
+        "use_scene_camera": true
+      }
+    ],
+    "bindings": {
+      "target_node": "Scene/Particle System/Outer Ring"
+    }
+  }
+}
