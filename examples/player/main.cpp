@@ -2,6 +2,7 @@
 // Uses windowed HostBridge for display; scene resolution uses runtime/RuntimePaths.
 
 #include "host/HostBridge.hpp"
+#include "platform/FrameLimiter.hpp"
 #include "runtime/RuntimePaths.hpp"
 #include "scene/ScenePath.hpp"
 
@@ -97,10 +98,17 @@ int main(int argc, char** argv) {
         spdlog::info("Genesis Player loaded '{}' (output camera: {})", resource,
                      has_output_camera ? "yes" : "fallback look-at");
 
+        // Match editor default: cap at 50 FPS so particle / production timing stays steady.
+        genesis::FrameLimiter frame_limiter{};
+        frame_limiter.setEnabled(true);
+        frame_limiter.setTargetFps(50.0f);
+        spdlog::info("Player frame limiter ON @ 50 FPS");
+
         double production_time_seconds = 0.0;
         std::uint64_t production_frame_number = 0;
 
         while (!bridge.shouldClose()) {
+            frame_limiter.beginFrame();
             bridge.pollEvents();
 
             production_time_seconds += 1.0 / 50.0;
@@ -123,6 +131,7 @@ int main(int argc, char** argv) {
             bridge.beginFrame(frame);
             bridge.renderScene();
             bridge.endFrame();
+            frame_limiter.endFrame();
         }
 
         genesis::clearRuntimeAssetRoots();

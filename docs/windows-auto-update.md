@@ -8,7 +8,7 @@ GENESIS ships on Windows as **`GenesisSetup-<version>.exe`** (Inno Setup wizard)
 
 | Source | Value |
 |--------|--------|
-| CMake `project(GENESIS VERSION …)` | `0.1.3` (see root `CMakeLists.txt`) |
+| CMake `project(GENESIS VERSION …)` | `0.1.4` (see root `CMakeLists.txt`) |
 | Generated `platform/Version.hpp` | `GENESIS_VERSION_STRING` |
 | `scripts/package-installer.ps1` | reads version from CMakeLists.txt automatically |
 | Inno `MyAppVersion` | passed as `/DMyAppVersion=` from the packaging script |

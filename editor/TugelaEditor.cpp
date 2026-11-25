@@ -1,12 +1,15 @@
 #include "editor/TugelaEditor.hpp"
 
 #include "editor/EditorTheme.hpp"
+#include "editor/OscProtocolUi.hpp"
 #include "particles/ParticleCurve.hpp"
+#include "protocol/OscParticleEmit.hpp"
 #include "scene/ScenePath.hpp"
 
 #include <algorithm>
 #include <cstdio>
 #include <cmath>
+#include <string>
 #include <vector>
 
 #include <imgui.h>
@@ -19,12 +22,49 @@ constexpr ImVec4 kAccent{0.34f, 0.78f, 0.82f, 1.0f};
 constexpr ImVec4 kMuted{0.50f, 0.54f, 0.58f, 1.0f};
 constexpr ImVec4 kPanel{0.032f, 0.034f, 0.038f, 1.0f};
 
-constexpr float kStageW = 148.0f;
-constexpr float kStageGapX = 22.0f;
-constexpr float kStageHeaderH = 26.0f;
-constexpr float kStackRowH = 20.0f;
-constexpr float kStagePad = 8.0f;
-constexpr float kEmitterLaneGap = 36.0f;
+// Layout derived from the live font size so UI scale 2+ stays readable
+// (hardcoded px crushed labels/rows when fonts grew).
+struct TugelaMetrics {
+    float font = 16.0f;
+    float stage_w = 180.0f;
+    float stage_gap_x = 24.0f;
+    float stage_header_h = 28.0f;
+    float stack_row_h = 24.0f;
+    float stage_pad = 8.0f;
+    float emitter_lane_gap = 40.0f;
+    float systems_w = 180.0f;
+    float emitters_w = 200.0f;
+    float header_h = 40.0f;
+    float checkbox = 14.0f;
+    float timing_h = 120.0f;
+    float curve_plot_h = 64.0f;
+    float color_bar_h = 22.0f;
+    float pad = 10.0f;
+};
+
+TugelaMetrics makeMetrics() {
+    const float f = std::max(ImGui::GetFontSize(), 12.0f);
+    const ImGuiStyle& st = ImGui::GetStyle();
+    TugelaMetrics m;
+    m.font = f;
+    m.pad = st.FramePadding.x;
+    // Fit longest stack labels ("Sprite Renderer", "Shape Location", …) + checkbox.
+    const float label_w = ImGui::CalcTextSize("Sprite Renderer").x;
+    m.checkbox = std::round(f * 0.85f);
+    m.stage_w = std::ceil(label_w + m.checkbox + m.pad * 4.0f + 12.0f);
+    m.stage_gap_x = std::max(18.0f, f * 1.1f);
+    m.stage_header_h = std::ceil(f + st.FramePadding.y * 2.0f + 4.0f);
+    m.stack_row_h = std::ceil(f + st.FramePadding.y * 2.0f + 6.0f);
+    m.stage_pad = std::max(6.0f, f * 0.35f);
+    m.emitter_lane_gap = std::max(28.0f, f * 1.6f);
+    m.systems_w = std::max(160.0f, f * 9.0f);
+    m.emitters_w = std::max(180.0f, f * 10.5f);
+    m.header_h = std::ceil(f + st.FramePadding.y * 2.0f + 12.0f);
+    m.timing_h = std::ceil(f * 2.0f + st.FramePadding.y * 6.0f + st.ItemSpacing.y * 4.0f + 36.0f);
+    m.curve_plot_h = std::max(48.0f, f * 2.4f);
+    m.color_bar_h = std::max(16.0f, f * 0.9f);
+    return m;
+}
 
 const char* stageLabel(TugelaModuleKind kind) {
     switch (kind) {
@@ -85,6 +125,8 @@ const char* stackLabel(TugelaStackMod mod) {
         return "Sprite Renderer";
     case TugelaStackMod::Trail:
         return "Trail Renderer";
+    case TugelaStackMod::OscDrive:
+        return "OSC Drive";
     default:
         return "Module";
     }
@@ -95,6 +137,7 @@ TugelaModuleKind stageForStack(TugelaStackMod mod) {
     case TugelaStackMod::SpawnRate:
     case TugelaStackMod::Burst:
     case TugelaStackMod::Shape:
+    case TugelaStackMod::OscDrive:
         return TugelaModuleKind::Spawn;
     case TugelaStackMod::Lifetime:
     case TugelaStackMod::Velocity:
@@ -162,6 +205,8 @@ bool stackEnabled(TugelaStackMod mod, const ParticleEmitter& e) {
         return e.mod_sprite && e.render_mesh == ParticleRenderMesh::Sprite;
     case TugelaStackMod::Trail:
         return e.trail_enabled;
+    case TugelaStackMod::OscDrive:
+        return e.osc_drive;
     default:
         return false;
     }
@@ -191,6 +236,7 @@ bool stackPresent(TugelaStackMod mod, const ParticleEmitter& e) {
     case TugelaStackMod::KillPlane:
     case TugelaStackMod::ScaleBySpeed:
     case TugelaStackMod::Trail:
+    case TugelaStackMod::OscDrive:
         return stackEnabled(mod, e); // optional — only when added/enabled
     default:
         return false;
@@ -288,6 +334,9 @@ void setStackEnabled(TugelaStackMod mod, ParticleEmitter& e, bool on) {
     case TugelaStackMod::Trail:
         e.trail_enabled = on;
         break;
+    case TugelaStackMod::OscDrive:
+        e.osc_drive = on;
+        break;
     default:
         break;
     }
@@ -308,10 +357,10 @@ void collectAddableForStage(TugelaModuleKind stage, const ParticleEmitter& e,
                             std::vector<TugelaStackMod>& out) {
     out.clear();
     static constexpr TugelaStackMod kOptional[] = {
-        TugelaStackMod::Burst,       TugelaStackMod::Gravity,      TugelaStackMod::Drag,
-        TugelaStackMod::PointForce,  TugelaStackMod::Vortex,       TugelaStackMod::Noise,
-        TugelaStackMod::Accel,       TugelaStackMod::KillPlane,    TugelaStackMod::ScaleBySpeed,
-        TugelaStackMod::Trail,
+        TugelaStackMod::Burst,       TugelaStackMod::OscDrive,     TugelaStackMod::Gravity,
+        TugelaStackMod::Drag,        TugelaStackMod::PointForce,   TugelaStackMod::Vortex,
+        TugelaStackMod::Noise,       TugelaStackMod::Accel,        TugelaStackMod::KillPlane,
+        TugelaStackMod::ScaleBySpeed, TugelaStackMod::Trail,
     };
     for (const TugelaStackMod mod : kOptional) {
         if (stageForStack(mod) == stage && !stackPresent(mod, e)) {
@@ -370,31 +419,38 @@ void mark(ParticleEmitterUiContext& ctx) {
     }
 }
 
-void drawTimingStrip(ParticleEmitter& e, ParticleEmitterUiContext& ctx) {
+void drawTimingStrip(ParticleEmitter& e, ParticleEmitterUiContext& ctx, const TugelaMetrics& m) {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.022f, 0.024f, 0.028f, 1.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 10.0f));
-    ImGui::BeginChild("tugela_timings", ImVec2(0.0f, 78.0f), ImGuiChildFlags_Borders);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(m.pad, m.pad * 0.85f));
+    // Auto height — 2×2 grid of fields; fixed 78px crushed at UI scale 2.
+    ImGui::BeginChild("tugela_timings", ImVec2(0.0f, 0.0f),
+                      ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
     ImGui::TextColored(kAccent, "Timings");
-    ImGui::SameLine();
-    ImGui::TextColored(kMuted, "  ·  emitter clock");
+    ImGui::SameLine(0.0f, m.pad);
+    ImGui::TextColored(kMuted, "emitter clock");
     ImGui::Spacing();
 
-    const float avail = ImGui::GetContentRegionAvail().x;
-    const float gap = ImGui::GetStyle().ItemSpacing.x;
-    const float cell = (avail - gap * 3.0f) / 4.0f;
     bool dirty = false;
-
-    ImGui::PushItemWidth(cell - 4.0f);
-    dirty |= ImGui::DragFloat("Duration", &e.duration_seconds, 0.05f, 0.0f, 600.0f, "%.2f");
-    ImGui::SameLine();
-    dirty |= ImGui::DragFloat("Delay", &e.start_delay_seconds, 0.01f, 0.0f, 60.0f, "%.2f");
-    ImGui::SameLine();
-    dirty |= ImGui::DragFloat("Life min", &e.lifetime_min, 0.01f, 0.01f, 60.0f, "%.2f");
-    e.lifetime_max = std::max(e.lifetime_max, e.lifetime_min);
-    ImGui::SameLine();
-    dirty |= ImGui::DragFloat("Rate / s", &e.rate_per_second, 0.5f, 0.0f, 20000.0f, "%.1f");
-    ImGui::PopItemWidth();
+    if (ImGui::BeginTable("tugela_timing_fields", 2,
+                          ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoPadOuterX)) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::SetNextItemWidth(-1.0f);
+        dirty |= ImGui::DragFloat("Duration", &e.duration_seconds, 0.05f, 0.0f, 600.0f, "%.2f");
+        ImGui::TableNextColumn();
+        ImGui::SetNextItemWidth(-1.0f);
+        dirty |= ImGui::DragFloat("Delay", &e.start_delay_seconds, 0.01f, 0.0f, 60.0f, "%.2f");
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::SetNextItemWidth(-1.0f);
+        dirty |= ImGui::DragFloat("Life min", &e.lifetime_min, 0.01f, 0.01f, 60.0f, "%.2f");
+        e.lifetime_max = std::max(e.lifetime_max, e.lifetime_min);
+        ImGui::TableNextColumn();
+        ImGui::SetNextItemWidth(-1.0f);
+        dirty |= ImGui::DragFloat("Rate / s", &e.rate_per_second, 0.5f, 0.0f, 20000.0f, "%.1f");
+        ImGui::EndTable();
+    }
 
     ImGui::EndChild();
     ImGui::PopStyleVar(2);
@@ -405,7 +461,7 @@ void drawTimingStrip(ParticleEmitter& e, ParticleEmitterUiContext& ctx) {
     }
 }
 
-void drawLeanSizeCurve(ParticleCurve1& curve, bool& dirty) {
+void drawLeanSizeCurve(ParticleCurve1& curve, bool& dirty, const TugelaMetrics& m) {
     ImGui::TextColored(kMuted, "Size over life");
     float samples[32];
     const int n = 32;
@@ -414,7 +470,8 @@ void drawLeanSizeCurve(ParticleCurve1& curve, bool& dirty) {
         samples[i] = curve.evaluate(t);
     }
     ImGui::PushStyleColor(ImGuiCol_PlotLines, kAccent);
-    ImGui::PlotLines("##size_curve", samples, n, 0, nullptr, 0.0f, 2.0f, ImVec2(-1.0f, 56.0f));
+    ImGui::PlotLines("##size_curve", samples, n, 0, nullptr, 0.0f, 2.0f,
+                     ImVec2(-1.0f, m.curve_plot_h));
     ImGui::PopStyleColor();
 
     int keys = static_cast<int>(curve.count);
@@ -422,22 +479,23 @@ void drawLeanSizeCurve(ParticleCurve1& curve, bool& dirty) {
         curve.count = static_cast<std::uint8_t>(std::clamp(keys, 2, 4));
         dirty = true;
     }
+    const float field = std::max(72.0f, m.font * 4.5f);
     for (std::uint8_t i = 0; i < curve.count; ++i) {
         ImGui::PushID(static_cast<int>(300 + i));
-        ImGui::SetNextItemWidth(72.0f);
+        ImGui::SetNextItemWidth(field);
         dirty |= ImGui::DragFloat("t", &curve.keys[i].t, 0.01f, 0.0f, 1.0f, "%.2f");
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(90.0f);
+        ImGui::SetNextItemWidth(field);
         dirty |= ImGui::DragFloat("mul", &curve.keys[i].v, 0.01f, 0.0f, 4.0f, "%.2f");
         ImGui::PopID();
     }
 }
 
-void drawLeanColorCurve(ParticleCurveColor& curve, bool& dirty) {
+void drawLeanColorCurve(ParticleCurveColor& curve, bool& dirty, const TugelaMetrics& m) {
     ImGui::TextColored(kMuted, "Color over life");
     const ImVec2 p0 = ImGui::GetCursorScreenPos();
     const float width = ImGui::GetContentRegionAvail().x;
-    const float height = 18.0f;
+    const float height = m.color_bar_h;
     ImDrawList* draw = ImGui::GetWindowDrawList();
     const int segs = 48;
     for (int i = 0; i < segs; ++i) {
@@ -453,17 +511,19 @@ void drawLeanColorCurve(ParticleCurveColor& curve, bool& dirty) {
     }
     draw->AddRect(p0, ImVec2(p0.x + width, p0.y + height), IM_COL32(70, 80, 90, 180), 3.0f, 0,
                   1.0f);
-    ImGui::Dummy(ImVec2(width, height + 4.0f));
+    ImGui::Dummy(ImVec2(width, height + m.pad * 0.5f));
 
     int keys = static_cast<int>(curve.count);
     if (ImGui::DragInt("Color keys", &keys, 1, 2, 4)) {
         curve.count = static_cast<std::uint8_t>(std::clamp(keys, 2, 4));
         dirty = true;
     }
+    const float field = std::max(72.0f, m.font * 4.5f);
     for (std::uint8_t i = 0; i < curve.count; ++i) {
         ImGui::PushID(static_cast<int>(400 + i));
-        ImGui::SetNextItemWidth(72.0f);
+        ImGui::SetNextItemWidth(field);
         dirty |= ImGui::DragFloat("t##c", &curve.keys[i].t, 0.01f, 0.0f, 1.0f, "%.2f");
+        ImGui::SameLine();
         dirty |= ImGui::ColorEdit4("rgba", &curve.keys[i].v.x,
                                    ImGuiColorEditFlags_AlphaPreviewHalf |
                                        ImGuiColorEditFlags_NoInputs);
@@ -471,13 +531,14 @@ void drawLeanColorCurve(ParticleCurveColor& curve, bool& dirty) {
     }
 }
 
-void drawCurvePanel(ParticleEmitter& e, ParticleEmitterUiContext& ctx) {
+void drawCurvePanel(ParticleEmitter& e, ParticleEmitterUiContext& ctx, const TugelaMetrics& m) {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, kPanel);
     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
-    ImGui::BeginChild("tugela_curves", ImVec2(0.0f, 210.0f), ImGuiChildFlags_Borders);
+    ImGui::BeginChild("tugela_curves", ImVec2(0.0f, 0.0f),
+                      ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
     ImGui::TextColored(kAccent, "Curves");
-    ImGui::SameLine();
-    ImGui::TextColored(kMuted, "  ·  lean over-life graphs");
+    ImGui::SameLine(0.0f, m.pad);
+    ImGui::TextColored(kMuted, "lean over-life graphs");
     ImGui::Spacing();
 
     bool dirty = false;
@@ -486,9 +547,9 @@ void drawCurvePanel(ParticleEmitter& e, ParticleEmitterUiContext& ctx) {
         dirty = true;
     }
     ImGui::Spacing();
-    drawLeanSizeCurve(e.size_over_life, dirty);
+    drawLeanSizeCurve(e.size_over_life, dirty, m);
     ImGui::Spacing();
-    drawLeanColorCurve(e.color_over_life, dirty);
+    drawLeanColorCurve(e.color_over_life, dirty, m);
 
     ImGui::EndChild();
     ImGui::PopStyleVar();
@@ -501,25 +562,45 @@ void drawCurvePanel(ParticleEmitter& e, ParticleEmitterUiContext& ctx) {
 }
 
 bool selectableRow(const char* label, bool selected, const char* badge) {
-    const bool clicked = ImGui::Selectable(label, selected, ImGuiSelectableFlags_AllowDoubleClick);
+    const ImVec2 row_min = ImGui::GetCursorScreenPos();
+    const float row_w = ImGui::GetContentRegionAvail().x;
+    const bool clicked = ImGui::Selectable(label, selected, ImGuiSelectableFlags_AllowDoubleClick,
+                                           ImVec2(row_w, 0.0f));
     if (badge && badge[0] != '\0') {
-        ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - 36.0f);
-        ImGui::TextColored(kMuted, "%s", badge);
+        const ImVec2 badge_sz = ImGui::CalcTextSize(badge);
+        const float x = row_min.x + row_w - badge_sz.x - ImGui::GetStyle().FramePadding.x;
+        const float y = row_min.y + (ImGui::GetTextLineHeight() - badge_sz.y) * 0.5f;
+        ImGui::GetWindowDrawList()->AddText(ImVec2(x, y),
+                                            ImGui::GetColorU32(ImVec4(kMuted.x, kMuted.y, kMuted.z, 1.0f)),
+                                            badge);
     }
     return clicked;
 }
 
-void drawStackModuleInspector(ParticleEmitter& e, TugelaStackMod mod, ParticleEmitterUiContext& ctx) {
+void drawStackModuleInspector(ParticleEmitter& e, TugelaStackMod mod, ParticleEmitterUiContext& ctx,
+                              const std::string& node_path) {
     bool dirty = false;
     ImGui::TextColored(kAccent, "%s", stackLabel(mod));
-    ImGui::SameLine();
-    ImGui::TextColored(kMuted, "  ·  %s", stackEnabled(mod, e) ? "enabled" : "disabled");
+    ImGui::SameLine(0.0f, 8.0f);
+    ImGui::TextColored(kMuted, "%s", stackEnabled(mod, e) ? "enabled" : "disabled");
     ImGui::Spacing();
     {
         bool en = stackEnabled(mod, e);
         if (ImGui::Checkbox("Enabled on emitter", &en)) {
             setStackEnabled(mod, e, en);
             dirty = true;
+            if (mod == TugelaStackMod::OscDrive && ctx.osc && ctx.osc->protocol) {
+                OscParticleEmitSettings emit = ctx.osc->protocol->particleEmitSettings();
+                if (en) {
+                    emit.enabled = true;
+                    emit.track_emitter_position = true;
+                    emit.emitter_path = node_path;
+                    ctx.osc->protocol->setParticleEmitSettings(emit);
+                } else if (emit.emitter_path == node_path) {
+                    emit.enabled = false;
+                    ctx.osc->protocol->setParticleEmitSettings(emit);
+                }
+            }
         }
     }
     ImGui::Spacing();
@@ -527,6 +608,9 @@ void drawStackModuleInspector(ParticleEmitter& e, TugelaStackMod mod, ParticleEm
     switch (mod) {
     case TugelaStackMod::SpawnRate:
         dirty |= ImGui::DragFloat("Rate / s", &e.rate_per_second, 0.5f, 0.0f, 20000.0f);
+        if (ctx.osc) {
+            drawOscLinkButton(*ctx.osc, OscParamTarget::ParticleRate, node_path, 0, "tg_rate");
+        }
         dirty |= ImGui::DragFloat("Spawn / meter", &e.spawn_per_unit, 0.1f, 0.0f, 500.0f);
         break;
     case TugelaStackMod::Burst: {
@@ -634,6 +718,53 @@ void drawStackModuleInspector(ParticleEmitter& e, TugelaStackMod mod, ParticleEm
         dirty |= ImGui::DragFloat("Trail alpha", &e.trail_alpha, 0.01f, 0.0f, 1.0f);
         break;
     }
+    case TugelaStackMod::OscDrive: {
+        ImGui::TextWrapped(
+            "Drive this emitter from Protocol OSC — not a special world actor. "
+            "XY float messages move the emitter; Link buttons bind any learned address "
+            "to rate/size/etc. (same as the Protocol window binding list).");
+        ImGui::Spacing();
+        if (ctx.osc && ctx.osc->protocol) {
+            OscParticleEmitSettings emit = ctx.osc->protocol->particleEmitSettings();
+            bool emit_dirty = false;
+            const bool targeting_this = emit.emitter_path == node_path;
+            ImGui::TextDisabled("Path: %s", node_path.c_str());
+            if (!targeting_this) {
+                ImGui::TextColored(kMuted, "Protocol XY currently points at another emitter.");
+                if (ImGui::Button("Point XY drive here")) {
+                    emit.emitter_path = node_path;
+                    emit.enabled = true;
+                    emit.track_emitter_position = true;
+                    emit_dirty = true;
+                }
+            } else {
+                ImGui::TextColored(kAccent, "Protocol XY drive targets this emitter");
+            }
+            emit_dirty |= ImGui::Checkbox("Enable XY drive", &emit.enabled);
+            emit_dirty |= ImGui::Checkbox("Track position", &emit.track_emitter_position);
+            emit_dirty |= ImGui::Checkbox("Burst on message", &emit.burst_on_message);
+            if (emit_dirty) {
+                if (emit.enabled) {
+                    emit.emitter_path = node_path;
+                }
+                ctx.osc->protocol->setParticleEmitSettings(emit);
+            }
+        } else {
+            ImGui::TextDisabled("Open View → Protocol to listen / learn OSC.");
+        }
+        ImGui::Spacing();
+        ImGui::TextColored(kMuted, "Parameter links (use Protocol Learn → Link, then click):");
+        dirty |= ImGui::DragFloat("Rate / s", &e.rate_per_second, 0.5f, 0.0f, 20000.0f);
+        if (ctx.osc) {
+            drawOscLinkButton(*ctx.osc, OscParamTarget::ParticleRate, node_path, 0, "osc_rate");
+        }
+        dirty |= ImGui::DragFloatRange2("Size", &e.size_min, &e.size_max, 0.001f, 0.02f, 10.0f);
+        if (ctx.osc) {
+            drawOscLinkButton(*ctx.osc, OscParamTarget::ParticleSizeMin, node_path, 0, "osc_sz0");
+            drawOscLinkButton(*ctx.osc, OscParamTarget::ParticleSizeMax, node_path, 0, "osc_sz1");
+        }
+        break;
+    }
     default:
         break;
     }
@@ -648,35 +779,38 @@ bool pointInRect(ImVec2 p, ImVec2 a, ImVec2 b) {
     return p.x >= a.x && p.x <= b.x && p.y >= a.y && p.y <= b.y;
 }
 
-float stageHeightFor(const std::vector<TugelaStackMod>& stack) {
+float stageHeightFor(const std::vector<TugelaStackMod>& stack, const TugelaMetrics& m) {
     const int rows = std::max(1, static_cast<int>(stack.size()));
-    return kStageHeaderH + kStagePad * 2.0f + static_cast<float>(rows) * kStackRowH + 22.0f;
+    return m.stage_header_h + m.stage_pad * 2.0f + static_cast<float>(rows) * m.stack_row_h +
+           m.font * 0.7f;
 }
 
 bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_index,
                          ParticleEmitterUiContext& ctx, ImDrawList* draw, ImVec2 canvas_origin,
-                         float& out_row_h, bool allow_pick) {
+                         float& out_row_h, bool allow_pick, const TugelaMetrics& m) {
     ParticleEmitter& e = *emitter_node.particle_emitter;
     const ImVec2 mouse = ImGui::GetIO().MousePos;
     bool picked = false;
 
-    float max_h = 80.0f;
+    float max_h = m.font * 4.0f;
     std::vector<TugelaStackMod> stacks[static_cast<int>(TugelaModuleKind::Count)];
     for (int si = 0; si < static_cast<int>(TugelaModuleKind::Count); ++si) {
         collectStageStack(static_cast<TugelaModuleKind>(si), e, stacks[si]);
-        max_h = std::max(max_h, stageHeightFor(stacks[si]));
+        max_h = std::max(max_h, stageHeightFor(stacks[si], m));
     }
-    out_row_h = max_h + kEmitterLaneGap;
+    out_row_h = max_h + m.emitter_lane_gap;
 
-    const float y = canvas_origin.y + state.graph_pan_y +
-                    static_cast<float>(row_index) * 0.0f; // caller accumulates via out_row_h
+    const float name_gap = m.font + 4.0f;
+    const float y = canvas_origin.y + state.graph_pan_y + name_gap;
     (void)row_index;
     const float x0 = canvas_origin.x + state.graph_pan_x;
 
-    draw->AddText(ImVec2(x0, y - 16.0f), IM_COL32(140, 150, 160, 255), emitter_node.name.c_str());
+    draw->AddText(ImVec2(x0, y - name_gap), IM_COL32(140, 150, 160, 255),
+                  emitter_node.name.c_str());
     if (!e.enabled) {
-        draw->AddText(ImVec2(x0 + ImGui::CalcTextSize(emitter_node.name.c_str()).x + 8.0f, y - 16.0f),
-                      IM_COL32(120, 90, 90, 220), "off");
+        draw->AddText(
+            ImVec2(x0 + ImGui::CalcTextSize(emitter_node.name.c_str()).x + m.pad, y - name_gap),
+            IM_COL32(120, 90, 90, 220), "off");
     }
 
     ImVec2 prev_center{};
@@ -685,15 +819,18 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
     TugelaModuleKind popup_stage = TugelaModuleKind::Update;
     bool open_add_popup = false;
 
+    const float add_btn = std::max(18.0f, m.font * 0.95f);
+    const float check = m.checkbox;
+
     for (int si = 0; si < static_cast<int>(TugelaModuleKind::Count); ++si) {
         const auto stage = static_cast<TugelaModuleKind>(si);
         const std::vector<TugelaStackMod>& stack = stacks[si];
-        const float x = x0 + static_cast<float>(si) * (kStageW + kStageGapX);
-        const float h = stageHeightFor(stack);
+        const float x = x0 + static_cast<float>(si) * (m.stage_w + m.stage_gap_x);
+        const float h = stageHeightFor(stack, m);
         const ImVec2 p0(x, y);
-        const ImVec2 p1(x + kStageW, y + h);
-        const bool stage_selected = state.focus_emitter == emitter_node.id &&
-                                    state.focus_module == stage;
+        const ImVec2 p1(x + m.stage_w, y + h);
+        const bool stage_selected =
+            state.focus_emitter == emitter_node.id && state.focus_module == stage;
         const bool stage_hovered = pointInRect(mouse, p0, p1);
 
         draw->AddRectFilled(p0, p1, IM_COL32(22, 26, 30, 255), 6.0f);
@@ -702,23 +839,28 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
                                      : (stage_hovered ? IM_COL32(80, 130, 140, 220)
                                                       : IM_COL32(55, 62, 70, 220)),
                       6.0f, 0, stage_selected ? 2.0f : 1.0f);
-        draw->AddRectFilled(p0, ImVec2(p1.x, p0.y + kStageHeaderH), IM_COL32(28, 36, 42, 255), 6.0f,
-                            ImDrawFlags_RoundCornersTop);
-        draw->AddText(ImVec2(p0.x + 10.0f, p0.y + 5.0f), IM_COL32(220, 230, 235, 255),
+        draw->AddRectFilled(p0, ImVec2(p1.x, p0.y + m.stage_header_h), IM_COL32(28, 36, 42, 255),
+                            6.0f, ImDrawFlags_RoundCornersTop);
+        const float header_text_y =
+            p0.y + (m.stage_header_h - m.font) * 0.5f;
+        draw->AddText(ImVec2(p0.x + m.pad, header_text_y), IM_COL32(220, 230, 235, 255),
                       stageLabel(stage));
 
         // "+ Add" affordance for optional modules
         std::vector<TugelaStackMod> addable;
         collectAddableForStage(stage, e, addable);
         if (!addable.empty()) {
-            const ImVec2 add_p0(p1.x - 28.0f, p0.y + 4.0f);
-            const ImVec2 add_p1(p1.x - 8.0f, p0.y + 20.0f);
+            const float add_pad = (m.stage_header_h - add_btn) * 0.5f;
+            const ImVec2 add_p0(p1.x - add_btn - m.pad * 0.6f, p0.y + add_pad);
+            const ImVec2 add_p1(p1.x - m.pad * 0.6f, p0.y + add_pad + add_btn);
             const bool add_hov = pointInRect(mouse, add_p0, add_p1);
             draw->AddRectFilled(add_p0, add_p1,
                                 add_hov ? IM_COL32(50, 90, 100, 255) : IM_COL32(36, 48, 54, 255),
                                 3.0f);
-            draw->AddText(ImVec2(add_p0.x + 5.0f, add_p0.y + 1.0f), IM_COL32(180, 220, 230, 255),
-                          "+");
+            const ImVec2 plus_sz = ImGui::CalcTextSize("+");
+            draw->AddText(ImVec2(add_p0.x + (add_btn - plus_sz.x) * 0.5f,
+                                 add_p0.y + (add_btn - plus_sz.y) * 0.5f),
+                          IM_COL32(180, 220, 230, 255), "+");
             if (allow_pick && add_hov && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
                 popup_stage = stage;
                 open_add_popup = true;
@@ -728,10 +870,10 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
             }
         }
 
-        float row_y = p0.y + kStageHeaderH + 4.0f;
+        float row_y = p0.y + m.stage_header_h + m.stage_pad * 0.5f;
         for (const TugelaStackMod mod : stack) {
-            const ImVec2 r0(p0.x + 6.0f, row_y);
-            const ImVec2 r1(p1.x - 6.0f, row_y + kStackRowH - 2.0f);
+            const ImVec2 r0(p0.x + m.pad * 0.6f, row_y);
+            const ImVec2 r1(p1.x - m.pad * 0.6f, row_y + m.stack_row_h - 2.0f);
             const bool en = stackEnabled(mod, e);
             const bool sel = state.focus_emitter == emitter_node.id && state.focus_stack == mod;
             const bool hov = pointInRect(mouse, r0, r1);
@@ -744,20 +886,25 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
                 draw->AddRect(r0, r1, IM_COL32(90, 180, 190, 220), 3.0f);
             }
 
-            // Enable checkbox square
-            const ImVec2 c0(r0.x + 4.0f, r0.y + 3.0f);
-            const ImVec2 c1(c0.x + 12.0f, c0.y + 12.0f);
+            // Enable checkbox square — centered vertically in the row
+            const float check_y = r0.y + (r1.y - r0.y - check) * 0.5f;
+            const ImVec2 c0(r0.x + 4.0f, check_y);
+            const ImVec2 c1(c0.x + check, c0.y + check);
             draw->AddRectFilled(c0, c1,
                                 en ? IM_COL32(70, 170, 180, 255) : IM_COL32(40, 44, 48, 255), 2.0f);
             draw->AddRect(c0, c1, IM_COL32(120, 140, 150, 220), 2.0f);
             if (en) {
-                draw->AddLine(ImVec2(c0.x + 2.5f, c0.y + 6.0f), ImVec2(c0.x + 5.0f, c0.y + 9.0f),
-                              IM_COL32(10, 20, 24, 255), 1.6f);
-                draw->AddLine(ImVec2(c0.x + 5.0f, c0.y + 9.0f), ImVec2(c0.x + 10.0f, c0.y + 3.0f),
-                              IM_COL32(10, 20, 24, 255), 1.6f);
+                const float s = check / 12.0f;
+                draw->AddLine(ImVec2(c0.x + 2.5f * s, c0.y + 6.0f * s),
+                              ImVec2(c0.x + 5.0f * s, c0.y + 9.0f * s), IM_COL32(10, 20, 24, 255),
+                              1.6f * s);
+                draw->AddLine(ImVec2(c0.x + 5.0f * s, c0.y + 9.0f * s),
+                              ImVec2(c0.x + 10.0f * s, c0.y + 3.0f * s), IM_COL32(10, 20, 24, 255),
+                              1.6f * s);
             }
 
-            draw->AddText(ImVec2(c1.x + 5.0f, r0.y + 2.0f),
+            const float label_y = r0.y + (r1.y - r0.y - m.font) * 0.5f;
+            draw->AddText(ImVec2(c1.x + 6.0f, label_y),
                           en ? IM_COL32(220, 230, 235, 255) : IM_COL32(110, 118, 125, 255),
                           stackLabel(mod));
 
@@ -779,19 +926,20 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
                 }
                 picked = true;
             }
-            row_y += kStackRowH;
+            row_y += m.stack_row_h;
         }
 
         if (stack.empty()) {
-            draw->AddText(ImVec2(p0.x + 10.0f, p0.y + kStageHeaderH + 8.0f),
+            draw->AddText(ImVec2(p0.x + m.pad, p0.y + m.stage_header_h + m.stage_pad),
                           IM_COL32(100, 110, 120, 200), "empty · + to add");
         }
 
         const ImVec2 center((p0.x + p1.x) * 0.5f, p0.y + h * 0.5f);
         if (has_prev) {
-            const ImVec2 a(prev_center.x + kStageW * 0.5f, prev_center.y);
-            const ImVec2 b(center.x - kStageW * 0.5f, center.y);
-            draw->AddBezierCubic(a, ImVec2(a.x + 16.0f, a.y), ImVec2(b.x - 16.0f, b.y), b,
+            const ImVec2 a(prev_center.x + m.stage_w * 0.5f, prev_center.y);
+            const ImVec2 b(center.x - m.stage_w * 0.5f, center.y);
+            const float bend = m.stage_gap_x * 0.55f;
+            draw->AddBezierCubic(a, ImVec2(a.x + bend, a.y), ImVec2(b.x - bend, b.y), b,
                                  IM_COL32(70, 150, 160, 180), 2.0f);
         }
         prev_center = center;
@@ -823,20 +971,21 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
 }
 
 void drawModuleGraph(TugelaEditorState& state, Scene& scene, const std::vector<NodeId>& emitters,
-                     ParticleEmitterUiContext& ctx) {
+                     ParticleEmitterUiContext& ctx, const TugelaMetrics& m) {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.018f, 0.019f, 0.022f, 1.0f));
     ImGui::BeginChild("tugela_graph_canvas", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
 
     ImGui::TextColored(kAccent, "Module graph");
-    ImGui::SameLine();
-    ImGui::TextColored(kMuted,
-                       "  ·  stack shows added modules · □ enable/disable · + adds forces/etc");
+    ImGui::Spacing();
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextColored(kMuted, "Stack shows added modules · □ enable/disable · + adds forces");
+    ImGui::PopTextWrapPos();
     ImGui::Spacing();
 
     const ImVec2 canvas_p0 = ImGui::GetCursorScreenPos();
     ImVec2 canvas_size = ImGui::GetContentRegionAvail();
-    if (canvas_size.y < 180.0f) {
-        canvas_size.y = 180.0f;
+    if (canvas_size.y < m.font * 8.0f) {
+        canvas_size.y = m.font * 8.0f;
     }
 
     ImGui::InvisibleButton("##graph_bg", canvas_size);
@@ -847,12 +996,13 @@ void drawModuleGraph(TugelaEditorState& state, Scene& scene, const std::vector<N
     draw->AddRectFilled(canvas_p0, ImVec2(canvas_p0.x + canvas_size.x, canvas_p0.y + canvas_size.y),
                         IM_COL32(14, 15, 17, 255), 4.0f);
 
-    for (float gx = std::fmod(state.graph_pan_x, 40.0f); gx < canvas_size.x; gx += 40.0f) {
+    const float grid_step = std::max(28.0f, m.font * 1.6f);
+    for (float gx = std::fmod(state.graph_pan_x, grid_step); gx < canvas_size.x; gx += grid_step) {
         draw->AddLine(ImVec2(canvas_p0.x + gx, canvas_p0.y),
                       ImVec2(canvas_p0.x + gx, canvas_p0.y + canvas_size.y),
                       IM_COL32(30, 34, 38, 120));
     }
-    for (float gy = std::fmod(state.graph_pan_y, 40.0f); gy < canvas_size.y; gy += 40.0f) {
+    for (float gy = std::fmod(state.graph_pan_y, grid_step); gy < canvas_size.y; gy += grid_step) {
         draw->AddLine(ImVec2(canvas_p0.x, canvas_p0.y + gy),
                       ImVec2(canvas_p0.x + canvas_size.x, canvas_p0.y + gy),
                       IM_COL32(30, 34, 38, 120));
@@ -862,7 +1012,8 @@ void drawModuleGraph(TugelaEditorState& state, Scene& scene, const std::vector<N
                        true);
 
     if (emitters.empty()) {
-        draw->AddText(ImVec2(canvas_p0.x + 24.0f, canvas_p0.y + 24.0f), IM_COL32(120, 130, 140, 255),
+        draw->AddText(ImVec2(canvas_p0.x + m.pad * 2.0f, canvas_p0.y + m.pad * 2.0f),
+                      IM_COL32(120, 130, 140, 255),
                       "Add emitters to this System to build the graph.");
     }
 
@@ -879,8 +1030,8 @@ void drawModuleGraph(TugelaEditorState& state, Scene& scene, const std::vector<N
         state.graph_pan_y = lane_y;
         float row_h = 0.0f;
         ImGui::PushID(static_cast<int>(id));
-        picked_node |=
-            drawEmitterGraphRow(state, *n, row, ctx, draw, canvas_p0, row_h, canvas_hovered);
+        picked_node |= drawEmitterGraphRow(state, *n, row, ctx, draw, canvas_p0, row_h,
+                                           canvas_hovered, m);
         ImGui::PopID();
         state.graph_pan_y = saved_pan_y;
         lane_y += row_h;
@@ -907,9 +1058,6 @@ void drawAddEmitterButtons(Scene& scene, NodeId system_id, ParticleEmitterUiCont
         return;
     }
     ImGui::TextDisabled("Add to System");
-    const float full = ImGui::GetContentRegionAvail().x;
-    const float gap = ImGui::GetStyle().ItemSpacing.x;
-    const float third = (full - gap * 2.0f) / 3.0f;
     auto add = [&](const char* name, const ParticleEmitter& preset) {
         const NodeId id = scene.createParticleEmitterNode(name, system_id, preset);
         mark(ctx);
@@ -921,19 +1069,18 @@ void drawAddEmitterButtons(Scene& scene, NodeId system_id, ParticleEmitterUiCont
             ctx.reset_particles();
         }
     };
-    if (ImGui::Button("Soft Circles", ImVec2(third, 0))) {
+    // Full-width stacked buttons — side-by-side thirds crush labels at UI scale 2.
+    if (ImGui::Button("Soft Circles", ImVec2(-1.0f, 0))) {
         add("Soft Circles", makeGentleCirclesEmitter());
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Trail", ImVec2(third, 0))) {
+    if (ImGui::Button("Trail", ImVec2(-1.0f, 0))) {
         ParticleEmitter trail = makeGentleSoftEmitter();
         trail.rate_per_second = 6.0f;
         trail.trail_enabled = true;
         trail.force_gravity = true;
         add("Trail", trail);
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Circles+Trail", ImVec2(third, 0))) {
+    if (ImGui::Button("Circles + Trail", ImVec2(-1.0f, 0))) {
         add("Soft Circles", makeGentleCirclesEmitter());
         ParticleEmitter trail = makeGentleSoftEmitter();
         trail.rate_per_second = 5.0f;
@@ -968,9 +1115,12 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
         return;
     }
     Scene& scene = *ctx.scene;
+    const TugelaMetrics m = makeMetrics();
 
-    ImGui::SetNextWindowSize(ImVec2(1240.0f, 760.0f), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(960.0f, 540.0f), ImVec2(2800.0f, 1800.0f));
+    const float min_w = std::max(720.0f, m.font * 42.0f);
+    const float min_h = std::max(480.0f, m.font * 28.0f);
+    ImGui::SetNextWindowSize(ImVec2(min_w * 1.35f, min_h * 1.35f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(min_w, min_h), ImVec2(3200.0f, 2200.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0f);
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.038f, 0.040f, 0.046f, 0.98f));
@@ -989,19 +1139,17 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
         ImDrawList* draw = ImGui::GetWindowDrawList();
         const ImVec2 p = ImGui::GetCursorScreenPos();
         const float w = ImGui::GetContentRegionAvail().x;
-        draw->AddRectFilled(p, ImVec2(p.x + w, p.y + 36.0f), IM_COL32(18, 20, 24, 255));
-        draw->AddRectFilled(p, ImVec2(p.x + 3.0f, p.y + 36.0f), IM_COL32(86, 198, 208, 255));
-        ImGui::Dummy(ImVec2(w, 36.0f));
-        ImGui::SetCursorScreenPos(ImVec2(p.x + 14.0f, p.y + 9.0f));
+        draw->AddRectFilled(p, ImVec2(p.x + w, p.y + m.header_h), IM_COL32(18, 20, 24, 255));
+        draw->AddRectFilled(p, ImVec2(p.x + 3.0f, p.y + m.header_h), IM_COL32(86, 198, 208, 255));
+        ImGui::Dummy(ImVec2(w, m.header_h));
+        ImGui::SetCursorScreenPos(ImVec2(p.x + m.pad * 1.4f, p.y + (m.header_h - m.font) * 0.5f));
         ImGui::TextColored(kAccent, "Tugela");
-        ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.88f, 0.90f, 0.93f, 1.0f), "  System · Emitters · Module stack");
-        ImGui::SameLine();
-        ImGui::TextColored(kMuted, "   forces · velocity · color");
-        ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + 40.0f));
+        ImGui::SameLine(0.0f, m.pad);
+        ImGui::TextColored(ImVec4(0.88f, 0.90f, 0.93f, 1.0f), "System · Emitters · Module stack");
+        ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + m.header_h + 4.0f));
     }
 
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 10.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(m.pad, m.pad));
     ImGui::BeginChild("tugela_body", ImVec2(0, 0), ImGuiChildFlags_None);
 
     std::vector<NodeId> systems;
@@ -1024,12 +1172,12 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
         state.focus_emitter = emitters.empty() ? 0 : emitters.front();
     }
 
-    ImGui::BeginChild("tugela_systems", ImVec2(150.0f, 0.0f), ImGuiChildFlags_Borders);
+    ImGui::BeginChild("tugela_systems", ImVec2(m.systems_w, 0.0f), ImGuiChildFlags_Borders);
     drawEditorSectionLabel("Systems");
-    ImGui::TextDisabled("1 actor = N emitters");
+    ImGui::TextDisabled("World actors");
     ImGui::Spacing();
     if (systems.empty()) {
-        ImGui::TextDisabled("No systems.\nCreate via Hierarchy.");
+        ImGui::TextWrapped("No systems. Hierarchy → Particle System.");
     }
     for (const NodeId id : systems) {
         const Node* n = scene.find(id);
@@ -1055,11 +1203,13 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
 
     ImGui::SameLine();
 
-    ImGui::BeginChild("tugela_emitters", ImVec2(158.0f, 0.0f), ImGuiChildFlags_Borders);
+    ImGui::BeginChild("tugela_emitters", ImVec2(m.emitters_w, 0.0f), ImGuiChildFlags_Borders);
     drawEditorSectionLabel("Emitters");
     if (state.focus_system != 0) {
         if (const Node* sys = scene.find(state.focus_system)) {
+            ImGui::PushTextWrapPos(0.0f);
             ImGui::TextColored(kMuted, "in %s", sys->name.c_str());
+            ImGui::PopTextWrapPos();
         }
     }
     ImGui::Spacing();
@@ -1106,21 +1256,22 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
     }
 
     if (state.tab == TugelaEditorTab::Graph) {
-        const float graph_h = std::max(260.0f, ImGui::GetContentRegionAvail().y * 0.58f);
+        const float graph_h = std::max(m.font * 12.0f, ImGui::GetContentRegionAvail().y * 0.55f);
         ImGui::BeginChild("graph_wrap", ImVec2(0.0f, graph_h), ImGuiChildFlags_None);
-        drawModuleGraph(state, scene, emitters, ctx);
+        drawModuleGraph(state, scene, emitters, ctx, m);
         ImGui::EndChild();
 
         ImGui::Spacing();
         Node* emitter = scene.find(state.focus_emitter);
         if (emitter && emitter->particle_emitter.has_value()) {
+            const std::string path = nodePath(scene, emitter->id);
             ImGui::BeginChild("graph_module_insp", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
             ImGui::TextColored(ImVec4(0.90f, 0.92f, 0.94f, 1.0f), "%s", emitter->name.c_str());
-            ImGui::SameLine();
-            ImGui::TextColored(kMuted, " / %s / %s", stageLabel(state.focus_module),
+            ImGui::Spacing();
+            ImGui::TextColored(kMuted, "%s  ·  %s", stageLabel(state.focus_module),
                                stackLabel(state.focus_stack));
             ImGui::Spacing();
-            drawStackModuleInspector(*emitter->particle_emitter, state.focus_stack, ctx);
+            drawStackModuleInspector(*emitter->particle_emitter, state.focus_stack, ctx, path);
             ImGui::EndChild();
         } else {
             ImGui::TextDisabled("Select a stack module to edit parameters.");
@@ -1134,13 +1285,13 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
             const std::string path = nodePath(scene, emitter->id);
 
             ImGui::TextColored(ImVec4(0.90f, 0.92f, 0.94f, 1.0f), "%s", emitter->name.c_str());
-            ImGui::SameLine();
-            ImGui::TextColored(kMuted, "  emitter");
+            ImGui::SameLine(0.0f, m.pad);
+            ImGui::TextColored(kMuted, "emitter");
             ImGui::Spacing();
 
-            drawTimingStrip(e, ctx);
+            drawTimingStrip(e, ctx, m);
             ImGui::Spacing();
-            drawCurvePanel(e, ctx);
+            drawCurvePanel(e, ctx, m);
             ImGui::Spacing();
 
             ImGui::BeginChild("tugela_modules", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);

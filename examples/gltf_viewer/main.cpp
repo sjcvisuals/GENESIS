@@ -129,7 +129,7 @@ public:
 
     void setPrefs(const genesis::EditorPrefs& prefs) {
         prefs_ = prefs;
-        ui_scale_baked_ = prefs_.ui_scale > 0.01f ? prefs_.ui_scale : 1.5f;
+        ui_scale_baked_ = prefs_.ui_scale > 0.01f ? prefs_.ui_scale : 2.0f;
     }
 
     void enableSmokeExit(int frames) {
@@ -431,7 +431,8 @@ protected:
             last_draw_batches_ = 0;
         }
 
-        if (show_grid_) {
+        // Game View hides editor helpers (grid, icons, wall-ray debug).
+        if (show_grid_ && !game_view_mode_) {
             // Cool readable lines on black unlit stage (1 m major / 0.25 m minor).
             const genesis::GridDrawPushConstants grid_pc =
                 genesis::makeGridDrawPushConstants(nullptr, 0.38f, 0.48f, 0.52f, 0.72f);
@@ -538,11 +539,25 @@ private:
 
     void handleEditorShortcuts() {
         const ImGuiIO& io = ImGui::GetIO();
+        const bool ctrl = input().keyDown(SDL_SCANCODE_LCTRL) || input().keyDown(SDL_SCANCODE_RCTRL);
+        const bool alt = input().keyDown(SDL_SCANCODE_LALT) || input().keyDown(SDL_SCANCODE_RALT);
+
+        // T is reserved for Tugela Editor only. Handle it even when ImGui has
+        // keyboard focus so an open Tugela window can be closed again with T.
+        // Skip only while typing into a text/numeric field.
+        if (!io.WantTextInput && !ctrl && !alt && input().keyPressed(SDL_SCANCODE_T)) {
+            tugela_editor_.open = !tugela_editor_.open;
+            if (tugela_editor_.open) {
+                if (const genesis::NodeId id = primarySelected()) {
+                    genesis::tugelaEditorFocusSelection(tugela_editor_, runtime_.scene(), id);
+                }
+            }
+        }
+
         if (io.WantCaptureKeyboard) {
             return;
         }
 
-        const bool ctrl = input().keyDown(SDL_SCANCODE_LCTRL) || input().keyDown(SDL_SCANCODE_RCTRL);
         if (ctrl && input().keyPressed(SDL_SCANCODE_S)) {
             saveCurrentDocument();
         }
@@ -562,15 +577,6 @@ private:
         // P: toggle detailed performance overlay.
         if (input().keyPressed(SDL_SCANCODE_P) && !ctrl) {
             show_perf_overlay_ = !show_perf_overlay_;
-        }
-        // T: toggle lean Tugela Editor pop-out (systems / emitters / curves).
-        if (input().keyPressed(SDL_SCANCODE_T) && !ctrl) {
-            tugela_editor_.open = !tugela_editor_.open;
-            if (tugela_editor_.open) {
-                if (const genesis::NodeId id = primarySelected()) {
-                    genesis::tugelaEditorFocusSelection(tugela_editor_, runtime_.scene(), id);
-                }
-            }
         }
         // Demo / QA hotkeys for edge-selection screenshots (black-stage visible cube).
         if (input().keyPressed(SDL_SCANCODE_F6)) {
@@ -625,7 +631,7 @@ private:
     }
 
     void applyUiScaleLive(float scale) {
-        prefs_.ui_scale = std::clamp(scale, 1.0f, 2.5f);
+        prefs_.ui_scale = std::clamp(scale, 1.0f, 3.0f);
         genesis::applyGenesisEditorTheme(prefs_.ui_scale);
         // Fonts were baked at ui_scale_baked_; relative FontGlobalScale keeps text in sync
         // until the next process launch (which rebakes the atlas).
@@ -694,7 +700,8 @@ private:
                     try {
                         loadSceneDocument(example);
                         genesis::OscParticleEmitSettings emit = osc_protocol_.particleEmitSettings();
-                        emit.emitter_path = "Scene/Particle System/OSC Tracker";
+                        // Any emitter under a System — XY drive is a Protocol link, not a special actor.
+                        emit.emitter_path = "Scene/Particle System/Driven";
                         emit.track_emitter_position = true;
                         emit.burst_on_message = false;
                         emit.plane_height = 0.15f;
@@ -771,23 +778,38 @@ private:
             ImGui::MenuItem("Protocol", nullptr, &show_protocol_);
             ImGui::MenuItem("Audio", nullptr, &show_audio_);
             ImGui::MenuItem("Animation Graph", nullptr, &show_animation_graph_);
-            ImGui::MenuItem("Show Grid", nullptr, &show_grid_);
             ImGui::BeginDisabled(game_view_mode_);
+            ImGui::MenuItem("Show Grid", nullptr, &show_grid_);
             ImGui::MenuItem("Actor Icons", nullptr, &show_actor_icons_);
             ImGui::EndDisabled();
             ImGui::MenuItem("Game View", "G", &game_view_mode_);
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Hide actor icons (Unreal-style game / show-flags).");
+                ImGui::SetTooltip(
+                    "Hide grid, actor icons, and Hidden in Game actors (Unreal-style preview).");
             }
             ImGui::Separator();
-            ImGui::SetNextItemWidth(140.0f);
-            float ui_scale = prefs_.ui_scale;
-            if (ImGui::SliderFloat("UI Scale", &ui_scale, 1.0f, 2.5f, "%.2f")) {
-                applyUiScaleLive(ui_scale);
-            }
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "Font and control size. Saved to editor prefs. Full font rebake on next launch.");
+            {
+                float ui_scale = prefs_.ui_scale;
+                bool scale_changed = false;
+                ImGui::SetNextItemWidth(120.0f);
+                scale_changed |= ImGui::SliderFloat("##UIScaleSlider", &ui_scale, 1.0f, 3.0f, "%.2f");
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(56.0f);
+                // Typeable field (Enter / focus-loss) — not slider-only.
+                if (ImGui::InputFloat("UI Scale", &ui_scale, 0.05f, 0.25f, "%.2f",
+                                      ImGuiInputTextFlags_EnterReturnsTrue)) {
+                    scale_changed = true;
+                }
+                if (ImGui::IsItemDeactivatedAfterEdit()) {
+                    scale_changed = true;
+                }
+                if (scale_changed) {
+                    applyUiScaleLive(ui_scale);
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip(
+                        "Font and control size (type or slide). Saved to prefs; full font rebake on next launch.");
+                }
             }
             if (ImGui::MenuItem("Start Maximized", nullptr, prefs_.start_maximized)) {
                 prefs_.start_maximized = !prefs_.start_maximized;
@@ -795,6 +817,26 @@ private:
             }
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("Open the editor maximized on next launch (persists).");
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Cap FPS", nullptr, prefs_.fps_cap_enabled)) {
+                prefs_.fps_cap_enabled = !prefs_.fps_cap_enabled;
+                frameLimiter().setEnabled(prefs_.fps_cap_enabled);
+                prefs_.save();
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Limit frame rate (default 50). Helps steady particle / OSC timing.");
+            }
+            {
+                float cap = prefs_.fps_cap;
+                ImGui::SetNextItemWidth(72.0f);
+                if (ImGui::InputFloat("FPS Cap", &cap, 1.0f, 5.0f, "%.0f",
+                                      ImGuiInputTextFlags_EnterReturnsTrue) ||
+                    ImGui::IsItemDeactivatedAfterEdit()) {
+                    prefs_.fps_cap = std::clamp(cap, 1.0f, 240.0f);
+                    frameLimiter().setTargetFps(prefs_.fps_cap);
+                    prefs_.save();
+                }
             }
             ImGui::Separator();
             ImGui::MenuItem("Performance Overlay", "P", &show_perf_overlay_);
@@ -884,8 +926,9 @@ private:
         });
 
         genesis::drawEditorSectionLabel("Particles · Tugela");
-        createBtn("Particle System", half, [&] {
-            // One System actor holding Soft Circles + Trail emitters (multi-emitter).
+        // Systems are the only particle actors placed in the world. Emitters live
+        // inside a System and are authored in the Tugela Editor (T).
+        if (ImGui::Button("Particle System", ImVec2(-1.0f, 0))) {
             std::optional<genesis::NodeId> scene_root =
                 genesis::findNodeByPath(scene, "Scene");
             const genesis::NodeId system =
@@ -900,49 +943,12 @@ private:
             tugela_editor_.open = true;
             genesis::tugelaEditorFocusSelection(tugela_editor_, scene, system);
             markDirty();
-        });
-        ImGui::SameLine();
-        createBtn("Emitter", half, [&] {
-            // Add under selected System (or parent of selected emitter), else default path.
-            std::optional<genesis::NodeId> parent;
-            if (const genesis::NodeId sel = primarySelected()) {
-                if (const genesis::Node* n = scene.find(sel)) {
-                    if (genesis::isParticleSystemNode(scene, *n)) {
-                        parent = sel;
-                    } else if (n->particle_emitter.has_value() && n->parent.has_value()) {
-                        parent = *n->parent;
-                    }
-                }
-            }
-            if (!parent.has_value()) {
-                parent = genesis::findNodeByPath(scene, "Scene/Particle System");
-            }
-            if (!parent.has_value()) {
-                std::optional<genesis::NodeId> scene_root =
-                    genesis::findNodeByPath(scene, "Scene");
-                parent = scene.createEmptyNode("Particle System", scene_root);
-            }
-            selectNode(scene.createParticleEmitterNode("Emitter", parent,
-                                                       genesis::makeGentleCirclesEmitter()));
-            markDirty();
-        });
-        createBtn("OSC Tracker", half, [&] {
-            std::optional<genesis::NodeId> system =
-                genesis::findNodeByPath(scene, "Scene/Particle System");
-            if (!system.has_value()) {
-                std::optional<genesis::NodeId> scene_root =
-                    genesis::findNodeByPath(scene, "Scene");
-                system = scene.createEmptyNode("Particle System", scene_root);
-            }
-            selectNode(scene.createParticleEmitterNode("OSC Tracker", system,
-                                                       genesis::makeOscTrackerBubbleEmitter()));
-            markDirty();
-            genesis::OscParticleEmitSettings emit = osc_protocol_.particleEmitSettings();
-            emit.emitter_path = "Scene/Particle System/OSC Tracker";
-            emit.track_emitter_position = true;
-            emit.burst_on_message = false;
-            osc_protocol_.setParticleEmitSettings(emit);
-        });
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Places a System in the scene. Add/edit emitters in Tugela (T). "
+                "Link OSC to any emitter parameter via Protocol or the OSC Drive module.");
+        }
 
         genesis::drawEditorSectionLabel("Actions");
 
@@ -961,12 +967,43 @@ private:
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Delete", ImVec2(half, 0))) {
-            queueDeleteSelectedNodes();
+        {
+            char delete_label[48];
+            if (selection_.size() > 1) {
+                std::snprintf(delete_label, sizeof(delete_label), "Delete (%zu)", selection_.size());
+            } else {
+                std::snprintf(delete_label, sizeof(delete_label), "Delete");
+            }
+            if (ImGui::Button(delete_label, ImVec2(half, 0))) {
+                queueDeleteSelectedNodes();
+            }
+            if (ImGui::IsItemHovered() && selection_.size() > 1) {
+                ImGui::SetTooltip("Delete all %zu selected actors (Shift+click to range-select).",
+                                  selection_.size());
+            }
         }
         ImGui::EndDisabled();
 
         genesis::drawEditorSectionLabel("Outliner");
+        ImGui::TextDisabled("Click · Shift+click range · Ctrl+click toggle · Delete");
+
+        // Flat DFS order matching the tree draw — used for Shift+click range select.
+        std::vector<genesis::NodeId> outliner_order;
+        outliner_order.reserve(scene.nodes.size());
+        auto collectOrder = [&](auto&& self, genesis::NodeId id) -> void {
+            if (!scene.find(id)) {
+                return;
+            }
+            outliner_order.push_back(id);
+            if (const genesis::Node* n = scene.find(id)) {
+                for (const genesis::NodeId child : n->children) {
+                    self(self, child);
+                }
+            }
+        };
+        for (const genesis::NodeId root : scene.roots) {
+            collectOrder(collectOrder, root);
+        }
 
         auto drawNode = [&](auto&& self, genesis::NodeId id) -> void {
             const genesis::Node* n = scene.find(id);
@@ -993,11 +1030,15 @@ private:
             const bool open = ImGui::TreeNodeEx((void*)(uintptr_t)n->id, flags, "%s", label.c_str());
             ImGui::PopStyleVar();
             if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) {
-                const bool additive = ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift;
-                if (additive) {
+                const ImGuiIO& io = ImGui::GetIO();
+                if (io.KeyShift) {
+                    selectHierarchyRange(outliner_order, id);
+                } else if (io.KeyCtrl) {
                     toggleSelected(id);
+                    hierarchy_anchor_ = id;
                 } else {
                     selectNode(id);
+                    hierarchy_anchor_ = id;
                 }
             }
             if (ImGui::BeginPopupContextItem("HierarchyNodeMenu")) {
@@ -1094,6 +1135,15 @@ private:
         particle_ui.stats = [this]() {
             const auto s = runtime_.particleWorld().stats();
             return genesis::ParticleWorldStatsLite{s.alive, s.emitters, s.steps};
+        };
+        particle_ui.emitter_live = [this](genesis::NodeId id) {
+            const auto live = runtime_.particleWorld().emitterLiveStats(id, runtime_.scene());
+            genesis::EmitterLiveUiStats out{};
+            out.found = live.found;
+            out.alive = live.alive;
+            out.measured_spawn_rate = live.measured_spawn_rate;
+            out.authored_rate = live.authored_rate;
+            return out;
         };
         genesis::drawTugelaEditorWindow(tugela_editor_, particle_ui);
     }
@@ -1231,6 +1281,15 @@ private:
             particle_ui.stats = [this]() {
                 const auto s = runtime_.particleWorld().stats();
                 return genesis::ParticleWorldStatsLite{s.alive, s.emitters, s.steps};
+            };
+            particle_ui.emitter_live = [this](genesis::NodeId id) {
+                const auto live = runtime_.particleWorld().emitterLiveStats(id, runtime_.scene());
+                genesis::EmitterLiveUiStats out{};
+                out.found = live.found;
+                out.alive = live.alive;
+                out.measured_spawn_rate = live.measured_spawn_rate;
+                out.authored_rate = live.authored_rate;
+                return out;
             };
             if (n->particle_emitter.has_value()) {
                 genesis::drawParticleEmitterInspector(*n, node_path, particle_ui);
@@ -1615,12 +1674,14 @@ private:
         if (ImGui::RadioButton("World", gizmo_mode_ == ImGuizmo::WORLD)) gizmo_mode_ = ImGuizmo::WORLD;
 
         ImGui::SameLine(0.0f, 16.0f);
+        ImGui::BeginDisabled(game_view_mode_);
         ImGui::Checkbox("Grid", &show_grid_);
+        ImGui::EndDisabled();
         ImGui::SameLine(0.0f, 12.0f);
         ImGui::Checkbox("Game", &game_view_mode_);
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip(
-                "Game View (G) — hide actor icons and Hidden in Game actors (preview output)");
+                "Game View (G) — hide grid, actor icons, and Hidden in Game actors");
         }
 
         ImGui::SameLine(0.0f, 20.0f);
@@ -1659,8 +1720,9 @@ private:
         ImGui::BulletText("Meshes — thin white silhouette outline");
         ImGui::BulletText("Emitters / lights / cameras — viewport icons");
         ImGui::BulletText("LMB — select / marquee");
-        ImGui::BulletText("Shift / Ctrl + LMB — multi");
-        ImGui::BulletText("Delete — remove (children reparent)");
+        ImGui::BulletText("Shift+LMB — range select (outliner)");
+        ImGui::BulletText("Ctrl+LMB — add / remove from selection");
+        ImGui::BulletText("Delete — remove all selected (children reparent)");
         ImGui::Spacing();
         ImGui::TextDisabled("TRANSFORM");
         ImGui::BulletText("W / E / R — move, rotate, scale");
@@ -2444,6 +2506,7 @@ private:
 
     void clearSelection() {
         selection_.clear();
+        hierarchy_anchor_ = 0;
         rot_edit_node_ = 0;
     }
 
@@ -2538,8 +2601,11 @@ private:
         selection_.clear();
         if (id != 0) {
             selection_.push_back(id);
+            hierarchy_anchor_ = id;
             syncReparentFromSelection(id);
             genesis::tugelaEditorFocusSelection(tugela_editor_, runtime_.scene(), id);
+        } else {
+            hierarchy_anchor_ = 0;
         }
         rot_edit_node_ = 0;
     }
@@ -2549,6 +2615,7 @@ private:
             return;
         }
         selection_.push_back(id);
+        hierarchy_anchor_ = id;
         syncReparentFromSelection(id);
         rot_edit_node_ = 0;
     }
@@ -2564,7 +2631,45 @@ private:
             selection_.push_back(id);
             syncReparentFromSelection(id);
         }
+        hierarchy_anchor_ = id;
         rot_edit_node_ = 0;
+    }
+
+    // Shift+click: select contiguous outliner rows from hierarchy_anchor_ → clicked (inclusive).
+    void selectHierarchyRange(const std::vector<genesis::NodeId>& order, genesis::NodeId clicked) {
+        if (clicked == 0 || order.empty()) {
+            return;
+        }
+        genesis::NodeId anchor = hierarchy_anchor_;
+        if (anchor == 0 || !isSelected(anchor)) {
+            if (!selection_.empty()) {
+                anchor = selection_.back();
+            } else {
+                selectNode(clicked);
+                return;
+            }
+        }
+
+        auto index_of = [&](genesis::NodeId id) -> int {
+            const auto it = std::find(order.begin(), order.end(), id);
+            return it == order.end() ? -1 : static_cast<int>(it - order.begin());
+        };
+        const int a = index_of(anchor);
+        const int b = index_of(clicked);
+        if (a < 0 || b < 0) {
+            selectNode(clicked);
+            return;
+        }
+        const int lo = std::min(a, b);
+        const int hi = std::max(a, b);
+        std::vector<genesis::NodeId> range;
+        range.reserve(static_cast<std::size_t>(hi - lo + 1));
+        for (int i = lo; i <= hi; ++i) {
+            range.push_back(order[static_cast<std::size_t>(i)]);
+        }
+        setSelection(std::move(range));
+        // Keep the original anchor so further Shift+clicks extend from the same start.
+        hierarchy_anchor_ = anchor;
     }
 
     void syncReparentFromSelection(const genesis::NodeId id) {
@@ -2591,7 +2696,16 @@ private:
         session_.document_path = genesis::uniqueProjectPath("Untitled Scene");
         session_.dirty = true;
         selection_.clear();
+        hierarchy_anchor_ = 0;
         use_editor_output_ = true;
+        // Room-person OSC must not re-seed Person Pool / Feet+Wall emitters into a blank scene.
+        {
+            genesis::OscRoomPersonSettings room = osc_protocol_.roomPersonSettings();
+            room.enabled = false;
+            osc_protocol_.setRoomPersonSettings(room);
+            osc_protocol_.clearRoomPersonEvents();
+            osc_room_person_cursor_ = 0;
+        }
         resetEditorCamera();
         syncEditorAfterDocumentLoad();
         updateWindowTitle();
@@ -3136,7 +3250,7 @@ private:
 
     genesis::EditorSession session_;
     genesis::EditorPrefs prefs_{};
-    float ui_scale_baked_ = 1.5f;
+    float ui_scale_baked_ = 2.0f;
     genesis::SceneRuntime runtime_;
     genesis::ColorManagement color_mgmt_;
     genesis::Mesh grid_mesh_{};
@@ -3150,6 +3264,7 @@ private:
     bool navigating_active_ = false;
     bool ui_style_initialized_ = false;
     std::vector<genesis::NodeId> selection_;
+    genesis::NodeId hierarchy_anchor_ = 0; // Shift+click range pivot in the outliner
     std::vector<genesis::NodeId> pending_delete_;
     struct MarqueeState {
         bool active = false;
@@ -3192,7 +3307,7 @@ private:
     bool perf_env_applied_ = false;
     bool show_grid_ = true;
     bool show_actor_icons_ = true;
-    bool game_view_mode_ = false; // Unreal-like: hide icons + Hidden in Game actors
+    bool game_view_mode_ = false; // Unreal-like: hide grid, icons + Hidden in Game actors
     int edge_demo_frames_ = 0;
     int tugela_demo_frames_ = 0;
 
@@ -3226,6 +3341,8 @@ int main(int argc, char** argv) {
         config.start_maximized = prefs.start_maximized;
         config.start_fullscreen = prefs.start_fullscreen;
         config.ui_scale = prefs.ui_scale;
+        config.fps_cap_enabled = prefs.fps_cap_enabled;
+        config.fps_cap = prefs.fps_cap;
 
         int smoke_frames = -1;
         std::filesystem::path open_path;

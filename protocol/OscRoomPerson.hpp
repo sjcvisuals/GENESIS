@@ -12,8 +12,9 @@
 //   Outer ~6 m diameter — rise / float upward
 //   Middle ~2 m diameter — flow outward on the floor plane (no rise)
 //
-// Per-person pool (max 10 active; capacity 20):
-//   Each ID → Feet + Wall Tugela emitters (pre-created). Idle pairs park at origin.
+// Per-person tracking (optional; capacity 20):
+//   Each active OSC id can drive Feet + Wall emitters (created lazily on message,
+//   not pre-baked into the scene). Authors build their own Hierarchy / stack.
 
 #include "particles/ParticleEmitter.hpp"
 #include "protocol/OscTypes.hpp"
@@ -36,19 +37,21 @@ enum class WallRaySpawnMode : std::uint8_t {
 };
 
 struct OscRoomPersonSettings {
-    bool enabled = true;
+    // Off by default so File → New / cold launch stay empty. Protocol panel or
+    // configureRoomOscInstallSettings() turns this on (creates Person Pool).
+    bool enabled = false;
     std::string address = "/genesis/room/person";
 
-    // Pre-created pool under this empty. Feet/Wall leaves: "Feet 00" / "Wall 00".
+    // Parent empty for lazily created Feet/Wall leaves ("Feet 00" / "Wall 00").
     std::string person_pool_path = "Scene/Person Pool";
-    // Legacy single-emitter paths (still created if pool missing / old scenes).
+    // Legacy / UI defaults (first slot). Not auto-spawned until OSC arrives.
     std::string feet_emitter_path = "Scene/Person Pool/Feet 00";
     std::string wall_emitter_path = "Scene/Person Pool/Wall 00";
     std::string ray_emitter_path = "Scene/Particle System/Center Ray";
     // Optional scene Plane actor (mesh faces +Y). Rotate upright for a wall.
     std::string wall_plane_path = "Scene/Wall Plane";
 
-    // Active person slots (design toward capacity 20).
+    // Max concurrent OSC person ids that may spawn Feet+Wall pairs (lazy).
     std::uint32_t max_persons = 10;
     float slot_idle_seconds = 0.75f;
 
@@ -146,6 +149,7 @@ inline void configureRoomOscInstallSettings(OscRoomPersonSettings& room) {
     room.feet_emitter_path = "Scene/Person Pool/Feet 00";
     room.wall_emitter_path = "Scene/Person Pool/Wall 00";
     room.ray_emitter_path = "Scene/Particle System/Center Ray";
+    // Capacity only — do not pre-create emitters; scene stays lean until OSC arrives.
     room.max_persons = 10;
     room.slot_idle_seconds = 0.75f;
     room.room_radius = 3.0f;

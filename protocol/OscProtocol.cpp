@@ -74,7 +74,7 @@ NodeId ensureOscEmitterNode(Scene& scene, const std::string& emitter_path,
 
 NodeId ensureOscParticleEmitterNode(Scene& scene, const std::string& emitter_path) {
     return ensureOscEmitterNode(scene, emitter_path, [] { return makeOscParticleEmitter(); },
-                                "OSC Tracker");
+                                "Emitter");
 }
 
 } // namespace
@@ -299,14 +299,8 @@ std::uint32_t OscProtocol::applyRoomPerson(SceneRuntime& runtime, std::uint64_t&
         kRoomPersonSlotCapacity);
     const double now = last_poll_seconds_;
 
-    // Ensure the full pre-created pool exists (constant load; idle pairs at origin).
-    ensureEmptyPath(runtime.scene(), room_person_.person_pool_path);
-    for (std::size_t slot = 0; slot < slot_count; ++slot) {
-        ensureOscEmitterNode(runtime.scene(), roomPersonFeetPath(room_person_, slot),
-                             [] { return makeRoomPersonFeetEmitter(); }, "Feet");
-        ensureOscEmitterNode(runtime.scene(), roomPersonWallPath(room_person_, slot),
-                             [] { return makeRoomWallTraceEmitter(); }, "Wall");
-    }
+    // Do NOT pre-create Feet/Wall 00..N — that floods the Hierarchy. Emitters are
+    // created lazily when an OSC person id arrives; authors place their own stack.
 
     // Optional single wall plane: Plane mesh faces +Y; world axes from node transform.
     // Only the node at wall_plane_path is used — no multi-plane fan / clutter.
@@ -347,23 +341,21 @@ std::uint32_t OscProtocol::applyRoomPerson(SceneRuntime& runtime, std::uint64_t&
         }
     };
 
+    auto park_existing = [&](const std::string& path) {
+        const std::optional<NodeId> id = findNodeByPath(runtime.scene(), path);
+        if (!id) {
+            return;
+        }
+        if (Node* node = runtime.scene().find(*id)) {
+            node->local.position = glm::vec3(0.0f);
+        }
+        // Stop spawning while idle — never create emitters just to park them.
+        set_emitter_active(*id, false);
+    };
+
     auto park_slot = [&](std::size_t slot) {
-        const NodeId feet_id = ensureOscEmitterNode(
-            runtime.scene(), roomPersonFeetPath(room_person_, slot),
-            [] { return makeRoomPersonFeetEmitter(); }, "Feet");
-        const NodeId wall_id = ensureOscEmitterNode(
-            runtime.scene(), roomPersonWallPath(room_person_, slot),
-            [] { return makeRoomWallTraceEmitter(); }, "Wall");
-        if (Node* feet = runtime.scene().find(feet_id)) {
-            feet->local.position = glm::vec3(0.0f);
-        }
-        if (Node* wall = runtime.scene().find(wall_id)) {
-            wall->local.position = glm::vec3(0.0f);
-        }
-        // Keep systems allocated at origin, but stop spawning while idle so the
-        // install doesn't build a particle tower at 0,0,0.
-        set_emitter_active(feet_id, false);
-        set_emitter_active(wall_id, false);
+        park_existing(roomPersonFeetPath(room_person_, slot));
+        park_existing(roomPersonWallPath(room_person_, slot));
         room_person_slots_[slot] = OscRoomPersonSlot{};
         wall_ray_debug_[slot] = OscWallRayDebugSample{};
     };
@@ -475,7 +467,7 @@ std::uint32_t OscProtocol::applyRoomPerson(SceneRuntime& runtime, std::uint64_t&
         applied_any = true;
     }
 
-    // Park idle IDs at world origin (keep emitters alive for constant load).
+    // Park idle IDs (disable + origin) only if those emitters already exist.
     for (std::size_t slot = 0; slot < slot_count; ++slot) {
         if (!room_person_slots_[slot].occupied) {
             park_slot(slot);
@@ -488,7 +480,6 @@ std::uint32_t OscProtocol::applyRoomPerson(SceneRuntime& runtime, std::uint64_t&
             applied_any = true;
         }
     }
-    // Any slots beyond max_persons stay parked.
     for (std::size_t slot = slot_count; slot < kRoomPersonSlotCapacity; ++slot) {
         if (room_person_slots_[slot].occupied) {
             park_slot(slot);

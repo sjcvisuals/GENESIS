@@ -56,6 +56,15 @@ public:
 
     ParticleSimStats stats() const { return stats_; }
 
+    // Per-emitter live readout for inspector / hitch diagnosis.
+    struct EmitterLiveStats {
+        std::uint32_t alive = 0;
+        float measured_spawn_rate = 0.0f; // particles/sec actually spawned (short window)
+        float authored_rate = 0.0f;       // ParticleEmitter::rate_per_second
+        bool found = false;
+    };
+    EmitterLiveStats emitterLiveStats(NodeId emitter_node, const Scene& scene) const;
+
     struct ParticleInstanceBatch {
         ParticleRenderMesh mesh = ParticleRenderMesh::Sprite;
         bool unlit = true;
@@ -84,6 +93,10 @@ private:
         glm::vec3 velocity{0.0f};
         bool has_last_pos = false;
         double distance_spawn_accumulator = 0.0; // meters × spawn_per_unit
+        // Rolling spawn-rate meter (updated in stepOnce).
+        std::uint32_t spawned_window = 0;
+        float window_seconds = 0.0f;
+        float measured_spawn_rate = 0.0f;
     };
 
     static constexpr std::uint8_t kMaxTrailPoints = 24;

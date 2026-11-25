@@ -103,14 +103,15 @@ void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
 
     ImGui::Spacing();
     ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.55f, 0.75f, 0.95f, 1.0f), "Particle emit (XY tracker)");
+    ImGui::TextColored(ImVec4(0.55f, 0.75f, 0.95f, 1.0f), "Drive emitter from OSC XY");
     ImGui::TextWrapped(
-        "Send floats x,y to move the OSC Tracker emitter (and optionally burst). "
-        "Continuous bubble spawn uses the emitter Rate. Optional: x,y,count or x,y,z,count.");
+        "Point at any emitter inside a Particle System (Hierarchy path). "
+        "Floats x,y move that emitter and can burst. Continuous spawn uses the emitter Rate. "
+        "Prefer linking individual params via Learned Messages → Link, or add OSC Drive in Tugela.");
 
     OscParticleEmitSettings emit = protocol.particleEmitSettings();
     bool emit_dirty = false;
-    emit_dirty |= ImGui::Checkbox("Enable XY particle emit", &emit.enabled);
+    emit_dirty |= ImGui::Checkbox("Enable XY drive", &emit.enabled);
     emit_dirty |= ImGui::Checkbox("Track emitter position", &emit.track_emitter_position);
     emit_dirty |= ImGui::Checkbox("Burst on each message", &emit.burst_on_message);
     char addr_buf[128]{};
@@ -124,6 +125,11 @@ void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
     if (ImGui::InputText("Emitter path", path_buf, sizeof(path_buf))) {
         emit.emitter_path = path_buf;
         emit_dirty = true;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Example: Scene/Particle System/Soft Circles\n"
+            "Set from Tugela → OSC Drive on the emitter.");
     }
     int plane = static_cast<int>(emit.plane);
     if (ImGui::Combo("XY plane", &plane, "XZ (floor)\0XY (screen)\0")) {

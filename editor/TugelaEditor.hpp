@@ -46,6 +46,7 @@ enum class TugelaStackMod : std::uint8_t {
     ScaleBySpeed,
     Sprite,
     Trail,
+    OscDrive, // link Protocol XY / params to this emitter (not a special actor)
     Count,
 };
 

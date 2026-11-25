@@ -139,6 +139,10 @@ struct ParticleEmitter {
     // Optional VelocityAligned stretch (kept for compatibility; prefer Trail for ribbons).
     float velocity_stretch = 0.0f;
 
+    // --- OSC Drive (optional Spawn stack module) ---
+    // When on, Protocol XY-drive targets this emitter path (not a special actor type).
+    bool osc_drive = false;
+
     // --- Trail Renderer (ribbon / wake) ---
     // Soft disc chain along motion history; widths are fractions of the head size.
     bool trail_enabled = false;
