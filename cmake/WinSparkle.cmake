@@ -5,8 +5,11 @@
 option(GENESIS_ENABLE_WINSPARKLE "Fetch and link WinSparkle on Windows" ON)
 
 set(GENESIS_WINSPARKLE_VERSION "0.8.3" CACHE STRING "WinSparkle release version")
+# Hosted as a GitHub Release asset named appcast.xml on the latest release.
+# Private repos: unauthenticated downloads 404 — use a public mirror or
+# GENESIS_UPDATE_FEED (see docs/windows-auto-update.md).
 set(GENESIS_UPDATE_APPCAST_URL
-    "https://updates.example.com/genesis/appcast.xml"
+    "https://github.com/sjcvisuals/GENESIS/releases/latest/download/appcast.xml"
     CACHE STRING "Default Sparkle/WinSparkle appcast URL (override at runtime via GENESIS_UPDATE_FEED)")
 
 set(GENESIS_HAS_WINSPARKLE 0)

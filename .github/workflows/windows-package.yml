@@ -1,6 +1,7 @@
 # Windows packaging + WinSparkle auto-update wiring.
-# Produces GenesisSetup-*.exe (primary) and optional portable zip when Inno Setup is available.
-# Does not publish a signed update feed — see docs/windows-auto-update.md / docs/install-windows.md.
+# Produces GenesisSetup-*.exe (primary), optional portable zip, and unsigned appcast.xml.
+# Does not publish a GitHub Release — run scripts/publish-github-update.ps1/.sh for that.
+# See docs/windows-auto-update.md / docs/install-windows.md.
 
 name: Windows package
 
@@ -16,9 +17,14 @@ on:
       - "scripts/package-installer.ps1"
       - "scripts/stage-installer.ps1"
       - "scripts/publish-appcast.ps1"
+      - "scripts/publish-appcast.sh"
+      - "scripts/publish-github-update.ps1"
+      - "scripts/publish-github-update.sh"
+      - "scripts/serve-local-update-feed.ps1"
       - "docs/windows-auto-update.md"
       - "docs/install-windows.md"
       - ".github/workflows/windows-package.yml"
+      - "CMakeLists.txt"
   pull_request:
     paths:
       - "cmake/WinSparkle.cmake"
@@ -26,9 +32,12 @@ on:
       - "installer/**"
       - "scripts/package-installer.ps1"
       - "scripts/stage-installer.ps1"
+      - "scripts/publish-appcast.ps1"
+      - "scripts/publish-github-update.ps1"
       - "docs/windows-auto-update.md"
       - "docs/install-windows.md"
       - ".github/workflows/windows-package.yml"
+      - "CMakeLists.txt"
 
 jobs:
   package:
@@ -48,7 +57,7 @@ jobs:
           # Default VS generator on the runner image (VS2022 or newer).
           cmake -B build -A x64 `
             -DGENESIS_ENABLE_WINSPARKLE=ON `
-            -DGENESIS_UPDATE_APPCAST_URL=https://updates.example.com/genesis/appcast.xml
+            -DGENESIS_UPDATE_APPCAST_URL=https://github.com/sjcvisuals/GENESIS/releases/latest/download/appcast.xml
 
       - name: Build packaging targets
         shell: pwsh
@@ -84,6 +93,12 @@ jobs:
           Get-ChildItem build\package\GENESIS-*-portable.zip -ErrorAction SilentlyContinue |
             ForEach-Object { Write-Host "PORTABLE" $_.FullName $_.Length }
 
+      - name: Generate unsigned appcast.xml (GitHub Releases URLs)
+        shell: pwsh
+        run: |
+          .\scripts\publish-appcast.ps1
+          Get-Content build\package\appcast.xml
+
       - name: Upload installer artifact (primary)
         uses: actions/upload-artifact@v4
         with:
@@ -96,4 +111,11 @@ jobs:
         with:
           name: GENESIS-portable
           path: build/package/GENESIS-*-windows-x64-portable.zip
+          if-no-files-found: warn
+
+      - name: Upload appcast.xml
+        uses: actions/upload-artifact@v4
+        with:
+          name: appcast
+          path: build/package/appcast.xml
           if-no-files-found: warn

@@ -32,30 +32,22 @@ Releases may also include `GENESIS-*-windows-x64-portable.zip` for advanced user
 
 ## Release checklist (maintainers)
 
-Cut a GitHub Release that puts Setup.exe in front of users:
+Cut a GitHub Release that puts Setup.exe **and** `appcast.xml` in front of users (WinSparkle reads `/releases/latest/download/appcast.xml`):
 
-1. Bump `project(GENESIS VERSION …)` in `CMakeLists.txt` (packaging scripts read this automatically).
+1. Bump `project(GENESIS VERSION …)` in `CMakeLists.txt` (must be **greater** than the version already installed for Check for Updates to offer it).
 2. On a Windows machine (or via **Actions → Windows package**):
    ```powershell
    .\scripts\package-installer.ps1
    ```
    Output:
-   - **`build\package\GenesisSetup-<version>.exe`** ← attach this as the primary Release asset
-   - `build\package\GENESIS-<version>-windows-x64-portable.zip` ← optional secondary asset
-3. Create a GitHub Release (tag `v<version>`).
-4. Release notes — keep them short and non-techy, for example:
-
-   ```text
-   ## Install
-   1. Download GenesisSetup-<version>.exe
-   2. Run it and click through the wizard
-   3. Open GENESIS from the Start menu
-
-   ## What's new
-   - …
+   - **`build\package\GenesisSetup-<version>.exe`** ← primary Release asset
+   - `build\package\GENESIS-<version>-windows-x64-portable.zip` ← optional
+3. Publish Release + appcast (unsigned lab OK; DSA for production):
+   ```powershell
+   .\scripts\publish-github-update.ps1
    ```
+4. Smoke-test: install the previous version → **Help → Check for Updates…** → install → About shows the new version.
 
-5. (Production trust, when ready) Authenticode-sign the Setup.exe; see [windows-auto-update.md](windows-auto-update.md) for WinSparkle feed signing.
-6. Smoke-test on a clean Windows PC: download from the Release page → install → launch → Help → About shows the new version.
+Full feed / signing / private-repo notes: [windows-auto-update.md](windows-auto-update.md).
 
-CI artifact from `.github/workflows/windows-package.yml` is the same Setup.exe (unsigned). Download it from the workflow run if you need a build before tagging.
+CI artifact from `.github/workflows/windows-package.yml` is the same Setup.exe (unsigned) plus a generated `appcast.xml`. Download from the workflow run if you need a build before tagging.

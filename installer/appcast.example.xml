@@ -1,10 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Sparkle / WinSparkle appcast for GENESIS.
-  Host this file (and the installer enclosure) on HTTPS.
-  Sign the enclosure with WinSparkle's generate_keys / sign_update tools
-  and put the DSA public key into the build via GENESIS_UPDATE_DSA_PEM
-  or AutoUpdateConfig::dsa_pub_pem.
+  Sparkle / WinSparkle appcast for GENESIS (GitHub Releases).
+
+  Production feed URL baked into the app:
+    https://github.com/sjcvisuals/GENESIS/releases/latest/download/appcast.xml
+
+  Attach this file as release asset "appcast.xml" on each versioned Release.
+  Prefer scripts/publish-appcast.ps1 (or .sh) over editing by hand.
+
+  Unsigned private testing: omit sparkle:dsaSignature and do not set
+  GENESIS_UPDATE_DSA_PEM in the app.
+
+  Production: sign with WinSparkle sign_update.bat and set the public PEM.
 
   See docs/windows-auto-update.md
 -->
@@ -12,28 +19,28 @@
      version="2.0">
   <channel>
     <title>GENESIS</title>
-    <link>https://updates.example.com/genesis/</link>
+    <link>https://github.com/sjcvisuals/GENESIS/releases</link>
     <description>GENESIS editor updates</description>
     <language>en</language>
 
     <item>
       <title>GENESIS 0.1.2</title>
-      <pubDate>Fri, 20 Nov 2026 12:00:00 +0000</pubDate>
+      <pubDate>Wed, 25 Nov 2026 12:00:00 +0000</pubDate>
       <description><![CDATA[
         <h3>What's new</h3>
         <ul>
-          <li>Quieter software updates (check → download → install → relaunch)</li>
+          <li>GitHub Releases update feed for Help → Check for Updates…</li>
           <li>Editor and packaging improvements</li>
         </ul>
       ]]></description>
       <!-- sparkle:version must be higher than the installed ProductVersion -->
       <enclosure
-          url="https://updates.example.com/genesis/GenesisSetup-0.1.2.exe"
+          url="https://github.com/sjcvisuals/GENESIS/releases/download/v0.1.2/GenesisSetup-0.1.2.exe"
           sparkle:version="0.1.2"
+          sparkle:shortVersionString="0.1.2"
           sparkle:os="windows-x64"
           length="0"
-          type="application/octet-stream"
-          sparkle:dsaSignature="REPLACE_WITH_sign_update_OUTPUT" />
+          type="application/octet-stream" />
     </item>
   </channel>
 </rss>

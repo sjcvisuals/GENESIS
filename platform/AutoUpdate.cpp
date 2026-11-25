@@ -180,7 +180,7 @@ void AutoUpdate::drawDemoUi(bool* open) {
         ImGui::ProgressBar(-1.0f * static_cast<float>(ImGui::GetTime()), ImVec2(-1, 0), "");
     } else if (demo_phase_ == 2) {
         ImGui::TextUnformatted("A new version of GENESIS is available.");
-        ImGui::TextDisabled("0.1.2 — quieter installs, improved updater.");
+        ImGui::TextDisabled("A newer build is ready — quieter installs, improved updater.");
         ImGui::Spacing();
         if (ImGui::Button("Download update", ImVec2(180, 0))) {
             demo_phase_ = 3;
