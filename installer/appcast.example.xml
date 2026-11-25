@@ -24,21 +24,22 @@
     <language>en</language>
 
     <item>
-      <title>GENESIS 0.1.6</title>
-      <pubDate>Wed, 25 Nov 2026 21:48:00 +0000</pubDate>
+      <title>GENESIS 0.1.7</title>
+      <pubDate>Wed, 25 Nov 2026 23:20:00 +0000</pubDate>
       <description><![CDATA[
         <h3>What's new</h3>
         <ul>
-          <li>OSC Protocol: incoming debug log + typed port</li>
-          <li>File → Examples → Medusa (lean room OSC scene)</li>
-          <li>Unsaved close: Save / Don't Save / Cancel</li>
+          <li>Tugela: Mesh Renderer, full stage module directory, settings apply</li>
+          <li>Actor Visible / Hidden-in-Game gate; emitters Hierarchy hide</li>
+          <li>Maya viewport nav + scroll zoom; block click-through via Tugela</li>
+          <li>Plane mesh no longer looks like two intersecting shells</li>
         </ul>
       ]]></description>
       <!-- sparkle:version must be higher than the installed ProductVersion -->
       <enclosure
-          url="https://github.com/sjcvisuals/GENESIS/releases/download/v0.1.6/GenesisSetup-0.1.6.exe"
-          sparkle:version="0.1.6"
-          sparkle:shortVersionString="0.1.6"
+          url="https://github.com/sjcvisuals/GENESIS/releases/download/v0.1.7/GenesisSetup-0.1.7.exe"
+          sparkle:version="0.1.7"
+          sparkle:shortVersionString="0.1.7"
           sparkle:os="windows-x64"
           length="0"
           type="application/octet-stream" />
