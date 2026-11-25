@@ -248,7 +248,8 @@ protected:
 
         // Empty scene: seed one System actor with Soft Circles + Trail emitters.
         std::optional<genesis::NodeId> scene_root = genesis::findNodeByPath(scene, "Scene");
-        const genesis::NodeId system = scene.createEmptyNode("Particle System", scene_root);
+        const genesis::NodeId system =
+            scene.createParticleSystemNode("Particle System", scene_root);
         scene.createParticleEmitterNode("Soft Circles", system, genesis::makeGentleCirclesEmitter());
         genesis::ParticleEmitter trail = genesis::makeGentleSoftEmitter();
         trail.rate_per_second = 5.0f;
@@ -966,7 +967,7 @@ private:
             std::optional<genesis::NodeId> scene_root =
                 genesis::findNodeByPath(scene, "Scene");
             const genesis::NodeId system =
-                scene.createEmptyNode("Particle System", scene_root);
+                scene.createParticleSystemNode("Particle System", scene_root);
             scene.createParticleEmitterNode("Soft Circles", system,
                                             genesis::makeGentleCirclesEmitter());
             genesis::ParticleEmitter trail = genesis::makeGentleSoftEmitter();
@@ -1019,34 +1020,48 @@ private:
         ImGui::EndDisabled();
 
         genesis::drawEditorSectionLabel("Outliner");
-        ImGui::TextDisabled("Click · Shift+click range · Ctrl+click toggle · Delete");
+        ImGui::TextDisabled("Systems only · emitters in Tugela (T) · Shift+click · Delete");
 
         // Flat DFS order matching the tree draw — used for Shift+click range select.
+        // Emitters are Tugela-only and omitted from the outliner entirely.
         std::vector<genesis::NodeId> outliner_order;
         outliner_order.reserve(scene.nodes.size());
         auto collectOrder = [&](auto&& self, genesis::NodeId id) -> void {
-            if (!scene.find(id)) {
+            const genesis::Node* n = scene.find(id);
+            if (!n || genesis::isHierarchyHiddenParticleEmitter(*n)) {
                 return;
             }
             outliner_order.push_back(id);
-            if (const genesis::Node* n = scene.find(id)) {
-                for (const genesis::NodeId child : n->children) {
-                    self(self, child);
-                }
+            for (const genesis::NodeId child : n->children) {
+                self(self, child);
             }
         };
         for (const genesis::NodeId root : scene.roots) {
             collectOrder(collectOrder, root);
         }
 
+        auto hasOutlinerChild = [&](const genesis::Node& node) {
+            for (const genesis::NodeId child : node.children) {
+                if (const genesis::Node* c = scene.find(child);
+                    c && !genesis::isHierarchyHiddenParticleEmitter(*c)) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
         auto drawNode = [&](auto&& self, genesis::NodeId id) -> void {
             const genesis::Node* n = scene.find(id);
-            if (!n) return;
+            if (!n || genesis::isHierarchyHiddenParticleEmitter(*n)) {
+                return;
+            }
 
             ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth |
                                        ImGuiTreeNodeFlags_FramePadding |
                                        ImGuiTreeNodeFlags_DefaultOpen;
-            if (n->children.empty()) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet;
+            if (!hasOutlinerChild(*n)) {
+                flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet;
+            }
             if (isSelected(id)) flags |= ImGuiTreeNodeFlags_Selected;
 
             std::string label = n->name;
@@ -1111,6 +1126,9 @@ private:
                     ImGui::Separator();
                     if (ImGui::BeginMenu("Parent selected to...")) {
                         for (const genesis::Node& candidate : scene.nodes) {
+                            if (genesis::isHierarchyHiddenParticleEmitter(candidate)) {
+                                continue;
+                            }
                             if (std::any_of(selection_.begin(), selection_.end(),
                                             [&](const genesis::NodeId sel) {
                                                 return sel == candidate.id ||
@@ -1132,7 +1150,9 @@ private:
                 ImGui::EndPopup();
             }
             if (open) {
-                for (auto child : n->children) self(self, child);
+                for (const genesis::NodeId child : n->children) {
+                    self(self, child);
+                }
                 ImGui::TreePop();
             }
         };

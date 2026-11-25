@@ -671,6 +671,7 @@ void SceneRuntime::applyNodeEntry(const NodeId id, const SceneDocumentNode& entr
     node->visible = entry.visible;
     node->pickable = entry.pickable;
     node->hidden_in_game = entry.hidden_in_game;
+    node->is_particle_system = entry.is_particle_system;
 
     if (entry.mesh_ref.has_value()) {
         node->has_mesh = true;
@@ -712,6 +713,8 @@ void SceneRuntime::createNodeFromEntry(const SceneDocumentNode& entry) {
         id = scene_.createParticleEmitterNode(entry.name, parent_id, *entry.particle_emitter);
     } else if (entry.particle_fluid.has_value()) {
         id = scene_.createFluidVolumeNode(entry.name, parent_id, *entry.particle_fluid);
+    } else if (entry.is_particle_system) {
+        id = scene_.createParticleSystemNode(entry.name, parent_id);
     } else {
         id = scene_.createEmptyNode(entry.name, parent_id);
     }
@@ -721,6 +724,20 @@ void SceneRuntime::createNodeFromEntry(const SceneDocumentNode& entry) {
 
 void SceneRuntime::finishDocumentLoad(const SceneDocument& document) {
     scene_.updateWorldTransforms();
+
+    // Legacy scenes: infer Particle System from emitter children when the flag is absent.
+    for (Node& node : scene_.nodes) {
+        if (node.is_particle_system || node.particle_emitter.has_value() ||
+            node.mesh_resource.has_value() || node.camera.has_value() || node.light.has_value()) {
+            continue;
+        }
+        for (const NodeId child : node.children) {
+            if (const Node* c = scene_.find(child); c && c->particle_emitter.has_value()) {
+                node.is_particle_system = true;
+                break;
+            }
+        }
+    }
 
     if (document.active_output_camera.has_value()) {
         if (std::optional<NodeId> cam_id = genesis::findNodeByPath(scene_, *document.active_output_camera)) {

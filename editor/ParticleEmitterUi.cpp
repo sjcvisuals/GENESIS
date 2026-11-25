@@ -67,12 +67,20 @@ bool isParticleSystemNode(const Scene& scene, const Node& node) {
     if (node.mesh_resource.has_value() || node.camera.has_value() || node.light.has_value()) {
         return false;
     }
+    if (node.is_particle_system) {
+        return true;
+    }
+    // Legacy: systems authored before the persistent flag still qualify via children.
     return countEmitterChildren(scene, node) > 0;
 }
 
+bool isHierarchyHiddenParticleEmitter(const Node& node) {
+    return node.particle_emitter.has_value();
+}
+
 const char* particleHierarchyBadge(const Scene& scene, const Node& node) {
-    if (node.particle_emitter.has_value()) {
-        return "EM";
+    if (isHierarchyHiddenParticleEmitter(node)) {
+        return "";
     }
     if (isParticleSystemNode(scene, node)) {
         return "SYS";
@@ -112,12 +120,8 @@ void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ct
             ImGui::TextUnformatted(c->name.c_str());
             ImGui::SameLine();
             ImGui::TextDisabled(enabled ? "on" : "off");
-            if (ctx.select_node) {
-                ImGui::SameLine();
-                if (ImGui::SmallButton("Select")) {
-                    ctx.select_node(child);
-                }
-            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("· Tugela");
             ImGui::PopID();
         }
         moduleIndentEnd();
@@ -131,10 +135,12 @@ void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ct
         const float third = (full - gap * 2.0f) / 3.0f;
 
         auto addEmitter = [&](const char* name, const ParticleEmitter& preset) {
-            const NodeId id = scene.createParticleEmitterNode(name, system_node.id, preset);
+            system_node.is_particle_system = true;
+            scene.createParticleEmitterNode(name, system_node.id, preset);
             mark(ctx);
             if (ctx.select_node) {
-                ctx.select_node(id);
+                // Keep Hierarchy selection on the System; emitters are Tugela-only.
+                ctx.select_node(system_node.id);
             }
             if (ctx.reset_particles) {
                 ctx.reset_particles();

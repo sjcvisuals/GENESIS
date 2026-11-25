@@ -36,11 +36,15 @@ struct ParticleEmitterUiContext {
     std::function<EmitterLiveUiStats(NodeId)> emitter_live;
 };
 
-// True when this empty/parent node owns one or more emitter children (Tugela System).
+// True when this empty/parent node is a Tugela Particle System (flag and/or emitters).
+// Remains true with zero emitters so Add Emitter still works in Tugela.
 bool isParticleSystemNode(const Scene& scene, const Node& node);
 
-// Outliner suffix: "SYS" / "EM" / empty.
+// Outliner suffix: "SYS" / empty. Emitters are not Hierarchy actors.
 const char* particleHierarchyBadge(const Scene& scene, const Node& node);
+
+// Hierarchy/outliner: emitters live under Systems but are authored only in Tugela.
+bool isHierarchyHiddenParticleEmitter(const Node& node);
 
 // Tugela System inspector (emitter list + add templates).
 void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ctx);
