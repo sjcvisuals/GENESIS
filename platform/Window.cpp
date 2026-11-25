@@ -18,7 +18,7 @@ Window::Window(const WindowConfig& config) {
     if (config.resizable) {
         flags |= SDL_WINDOW_RESIZABLE;
     }
-    if (config.start_maximized) {
+    if (config.start_maximized && !config.start_fullscreen) {
         flags |= SDL_WINDOW_MAXIMIZED;
     }
 
@@ -28,10 +28,25 @@ Window::Window(const WindowConfig& config) {
         throw std::runtime_error(std::string("SDL_CreateWindow failed: ") + SDL_GetError());
     }
 
-    width_ = config.width;
-    height_ = config.height;
+    if (config.start_fullscreen) {
+        if (!SDL_SetWindowFullscreen(window_, true)) {
+            spdlog::warn("SDL_SetWindowFullscreen failed: {} — falling back to maximized",
+                         SDL_GetError());
+            SDL_MaximizeWindow(window_);
+        }
+    } else if (config.start_maximized) {
+        // Belt-and-suspenders: some platforms ignore SDL_WINDOW_MAXIMIZED at create.
+        SDL_MaximizeWindow(window_);
+    }
 
-    spdlog::info("Window created ({}x{})", width_, height_);
+    int w = 0;
+    int h = 0;
+    SDL_GetWindowSize(window_, &w, &h);
+    width_ = w > 0 ? w : config.width;
+    height_ = h > 0 ? h : config.height;
+
+    spdlog::info("Window created ({}x{}, maximized={}, fullscreen={})", width_, height_,
+                 config.start_maximized, config.start_fullscreen);
 }
 
 Window::~Window() {

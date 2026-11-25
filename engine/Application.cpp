@@ -19,8 +19,10 @@ Application::Application(const ApplicationConfig& config) {
     window_config.title = config.title;
     window_config.width = config.width;
     window_config.height = config.height;
+    window_config.start_maximized = config.start_maximized;
+    window_config.start_fullscreen = config.start_fullscreen;
     window_ = std::make_unique<Window>(window_config);
-    renderer_ = std::make_unique<Renderer>(*window_);
+    renderer_ = std::make_unique<Renderer>(*window_, config.ui_scale);
     renderer_->enableImGuiLayoutPersistence();
 
     // WinSparkle / update feed — after the main window exists so UI can attach.

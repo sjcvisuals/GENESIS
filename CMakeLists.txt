@@ -307,6 +307,7 @@ if(GENESIS_BUILD_EXAMPLES)
     add_executable(genesis_gltf_viewer
         examples/gltf_viewer/main.cpp
         editor/EditorSession.cpp
+        editor/EditorPrefs.cpp
         editor/EditorTheme.cpp
         editor/ParticleEmitterUi.cpp
         editor/TugelaEditor.cpp

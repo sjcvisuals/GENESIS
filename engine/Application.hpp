@@ -15,6 +15,10 @@ struct ApplicationConfig {
     std::string title = "GENESIS";
     int width = 1280;
     int height = 720;
+    bool start_maximized = false;
+    bool start_fullscreen = false;
+    // Applied to ImGui fonts at CreateContext (1.0 = 16 px base before DPI).
+    float ui_scale = 1.0f;
 };
 
 class Application {

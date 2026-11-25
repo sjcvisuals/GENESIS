@@ -14,6 +14,8 @@ struct WindowConfig {
     int height = 720;
     bool resizable = true;
     bool start_maximized = false;
+    // Borderless desktop fullscreen (SDL_SetWindowFullscreen). Prefer maximized for editors.
+    bool start_fullscreen = false;
 };
 
 class Window {

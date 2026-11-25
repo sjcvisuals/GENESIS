@@ -37,7 +37,7 @@ struct ColorLut3D;
 
 class Renderer {
 public:
-    explicit Renderer(Window& window);
+    explicit Renderer(Window& window, float ui_scale = 1.0f);
     ~Renderer();
 
     Renderer(const Renderer&) = delete;
