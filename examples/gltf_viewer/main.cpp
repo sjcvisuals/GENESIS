@@ -2592,6 +2592,14 @@ private:
         session_.dirty = true;
         selection_.clear();
         use_editor_output_ = true;
+        // Room-person OSC must not re-seed Person Pool / Feet+Wall emitters into a blank scene.
+        {
+            genesis::OscRoomPersonSettings room = osc_protocol_.roomPersonSettings();
+            room.enabled = false;
+            osc_protocol_.setRoomPersonSettings(room);
+            osc_protocol_.clearRoomPersonEvents();
+            osc_room_person_cursor_ = 0;
+        }
         resetEditorCamera();
         syncEditorAfterDocumentLoad();
         updateWindowTitle();

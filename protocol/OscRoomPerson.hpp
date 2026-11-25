@@ -36,7 +36,9 @@ enum class WallRaySpawnMode : std::uint8_t {
 };
 
 struct OscRoomPersonSettings {
-    bool enabled = true;
+    // Off by default so File → New / cold launch stay empty. Protocol panel or
+    // configureRoomOscInstallSettings() turns this on (creates Person Pool).
+    bool enabled = false;
     std::string address = "/genesis/room/person";
 
     // Pre-created pool under this empty. Feet/Wall leaves: "Feet 00" / "Wall 00".
