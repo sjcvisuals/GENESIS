@@ -6,6 +6,7 @@
 #include "animation/AnimationEvaluator.hpp"
 #include "color/ColorManagement.hpp"
 #include "editor/EditorLayout.hpp"
+#include "editor/EditorPrefs.hpp"
 #include "editor/EditorSession.hpp"
 #include "editor/OscProtocolUi.hpp"
 #include "editor/AudioReactiveUi.hpp"
@@ -119,9 +120,16 @@ public:
     }
 
     void loadDefaultScene() {
+        // Launch must open an empty scene — never auto-load Examples / recent / showcase.
         newBlankScene();
         session_.dirty = false;
         updateWindowTitle();
+        spdlog::info("Started with empty scene (examples are under File → Examples)");
+    }
+
+    void setPrefs(const genesis::EditorPrefs& prefs) {
+        prefs_ = prefs;
+        ui_scale_baked_ = prefs_.ui_scale > 0.01f ? prefs_.ui_scale : 1.5f;
     }
 
     void enableSmokeExit(int frames) {
@@ -612,7 +620,18 @@ private:
     }
 
     void initEditorStyle() {
-        genesis::applyGenesisEditorTheme();
+        genesis::applyGenesisEditorTheme(prefs_.ui_scale);
+        ui_scale_baked_ = prefs_.ui_scale;
+    }
+
+    void applyUiScaleLive(float scale) {
+        prefs_.ui_scale = std::clamp(scale, 1.0f, 2.5f);
+        genesis::applyGenesisEditorTheme(prefs_.ui_scale);
+        // Fonts were baked at ui_scale_baked_; relative FontGlobalScale keeps text in sync
+        // until the next process launch (which rebakes the atlas).
+        const float baked = ui_scale_baked_ > 0.01f ? ui_scale_baked_ : 1.0f;
+        ImGui::GetIO().FontGlobalScale = prefs_.ui_scale / baked;
+        prefs_.save();
     }
 
     void drawMenuBar(genesis::Scene& scene) {
@@ -759,6 +778,23 @@ private:
             ImGui::MenuItem("Game View", "G", &game_view_mode_);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("Hide actor icons (Unreal-style game / show-flags).");
+            }
+            ImGui::Separator();
+            ImGui::SetNextItemWidth(140.0f);
+            float ui_scale = prefs_.ui_scale;
+            if (ImGui::SliderFloat("UI Scale", &ui_scale, 1.0f, 2.5f, "%.2f")) {
+                applyUiScaleLive(ui_scale);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Font and control size. Saved to editor prefs. Full font rebake on next launch.");
+            }
+            if (ImGui::MenuItem("Start Maximized", nullptr, prefs_.start_maximized)) {
+                prefs_.start_maximized = !prefs_.start_maximized;
+                prefs_.save();
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Open the editor maximized on next launch (persists).");
             }
             ImGui::Separator();
             ImGui::MenuItem("Performance Overlay", "P", &show_perf_overlay_);
@@ -3099,6 +3135,8 @@ private:
     }
 
     genesis::EditorSession session_;
+    genesis::EditorPrefs prefs_{};
+    float ui_scale_baked_ = 1.5f;
     genesis::SceneRuntime runtime_;
     genesis::ColorManagement color_mgmt_;
     genesis::Mesh grid_mesh_{};
@@ -3177,10 +3215,17 @@ private:
 
 int main(int argc, char** argv) {
     try {
+        genesis::ensureEditorDataDirs();
+        const genesis::EditorPrefs prefs = genesis::EditorPrefs::load();
+
         genesis::ApplicationConfig config{};
         config.title = "GENESIS — Scene Editor";
         config.width = 1680;
         config.height = 1050;
+        // Spencer / Windows: fill the monitor work area by default (persists via prefs.json).
+        config.start_maximized = prefs.start_maximized;
+        config.start_fullscreen = prefs.start_fullscreen;
+        config.ui_scale = prefs.ui_scale;
 
         int smoke_frames = -1;
         std::filesystem::path open_path;
@@ -3196,7 +3241,14 @@ int main(int argc, char** argv) {
             }
         }
 
+        // Smoke / CI runs stay windowed so headless/lavapipe sizes stay predictable.
+        if (smoke_frames > 0) {
+            config.start_maximized = false;
+            config.start_fullscreen = false;
+        }
+
         GltfViewerApp app(config);
+        app.setPrefs(prefs);
 
         if (!open_path.empty()) {
             const std::filesystem::path asset_path = genesis::resolveAssetPath(open_path);

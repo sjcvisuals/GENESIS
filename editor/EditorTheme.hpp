@@ -5,10 +5,11 @@ struct ImFont;
 namespace genesis {
 
 // Modern realtime/DCC chrome (Unreal/Blender/TD clarity — not WinXP grey boxes).
-void applyGenesisEditorTheme();
+// ui_scale enlarges paddings/controls (fonts are baked separately in ImGuiLayer).
+void applyGenesisEditorTheme(float ui_scale = 1.5f);
 
-// Load Inter (+ medium/semibold) into ImGui. Safe before first NewFrame; returns default font.
-ImFont* loadGenesisEditorFonts();
+// Load Inter / Segoe (+ medium/semibold) into ImGui. Safe before first NewFrame.
+ImFont* loadGenesisEditorFonts(float ui_scale = 1.5f);
 
 // Section label used across Hierarchy / Inspector panels.
 void drawEditorSectionLabel(const char* label);

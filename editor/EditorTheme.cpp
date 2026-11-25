@@ -2,6 +2,7 @@
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 
@@ -18,27 +19,41 @@ bool tryAddFont(ImGuiIO& io, const char* path, float size_px, ImFontConfig* cfg 
 
 } // namespace
 
-ImFont* loadGenesisEditorFonts() {
+ImFont* loadGenesisEditorFonts(float ui_scale) {
     ImGuiIO& io = ImGui::GetIO();
     io.Fonts->Clear();
 
-    // Prefer Inter — clean UI sans used by modern tools. Fall back to Noto / default.
-    constexpr float kUi = 16.0f;
+    const float scale = std::clamp(ui_scale > 0.01f ? ui_scale : 1.0f, 1.0f, 2.5f);
+    // Match ImGuiLayer: bake ui_scale only; DisplayFramebufferScale handles DPI.
+    const float kUi = 16.0f * scale;
+
     constexpr const char* kInterRegular = "/usr/share/fonts/truetype/macos/Inter-Regular.ttf";
     constexpr const char* kInterMedium = "/usr/share/fonts/truetype/macos/Inter-Medium.ttf";
     constexpr const char* kInterSemi = "/usr/share/fonts/truetype/macos/Inter-SemiBold.ttf";
     constexpr const char* kNoto = "/usr/share/fonts/truetype/noto/NotoSansDisplay-Regular.ttf";
+#if defined(_WIN32)
+    constexpr const char* kSegoe = "C:\\Windows\\Fonts\\segoeui.ttf";
+    constexpr const char* kSegoeAlt = "C:\\Windows\\Fonts\\SegoeUI.ttf";
+    constexpr const char* kSegoeSemi = "C:\\Windows\\Fonts\\seguisb.ttf";
+#endif
 
     ImFont* primary = nullptr;
     if (tryAddFont(io, kInterRegular, kUi)) {
         primary = io.Fonts->Fonts.back();
-        // Keep Medium/SemiBold in the atlas for future PushFont use (same size).
         tryAddFont(io, kInterMedium, kUi);
         tryAddFont(io, kInterSemi, kUi);
+#if defined(_WIN32)
+    } else if (tryAddFont(io, kSegoe, kUi) || tryAddFont(io, kSegoeAlt, kUi)) {
+        primary = io.Fonts->Fonts.back();
+        tryAddFont(io, kSegoeSemi, kUi);
+#endif
     } else if (tryAddFont(io, kNoto, kUi)) {
         primary = io.Fonts->Fonts.back();
     } else {
         primary = io.Fonts->AddFontDefault();
+        io.FontGlobalScale = scale;
+        io.FontDefault = primary;
+        return primary;
     }
 
     io.FontDefault = primary;
@@ -46,7 +61,7 @@ ImFont* loadGenesisEditorFonts() {
     return primary;
 }
 
-void applyGenesisEditorTheme() {
+void applyGenesisEditorTheme(float ui_scale) {
     ImGuiStyle& style = ImGui::GetStyle();
 
     // Premium dark DCC shell — quiet, dense, hairline structure (UE/Blender-adjacent).
@@ -80,6 +95,11 @@ void applyGenesisEditorTheme() {
     style.TabBarOverlineSize = 2.5f;
     style.HoverStationaryDelay = 0.12f;
     style.HoverDelayNormal = 0.35f;
+
+    const float scale = std::clamp(ui_scale > 0.01f ? ui_scale : 1.0f, 1.0f, 2.5f);
+    if (scale != 1.0f) {
+        style.ScaleAllSizes(scale);
+    }
 
     ImVec4* c = style.Colors;
 

@@ -45,7 +45,7 @@ const std::array<Vertex, 3> kTriangleVertices = {{
 
 } // namespace
 
-Renderer::Renderer(Window& window) : window_(window) {
+Renderer::Renderer(Window& window, float ui_scale) : window_(window) {
 #ifndef NDEBUG
     const bool enable_validation = true;
 #else
@@ -79,7 +79,7 @@ Renderer::Renderer(Window& window) : window_(window) {
     createGridResources();
 
     spdlog::debug("Initializing ImGui...");
-    imgui_ = std::make_unique<ImGuiLayer>(window.handle(), *context_, *swapchain_);
+    imgui_ = std::make_unique<ImGuiLayer>(window.handle(), *context_, *swapchain_, ui_scale);
 
     spdlog::info("Renderer initialized");
 }

@@ -8,8 +8,10 @@
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_vulkan.h>
 
+#include <SDL3/SDL.h>
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
@@ -24,9 +26,28 @@ void checkVulkanResult(VkResult err) {
     }
 }
 
+float displayContentScale(SDL_Window* window) {
+    if (!window) {
+        return 1.0f;
+    }
+    const float scale = SDL_GetWindowDisplayScale(window);
+    if (scale > 0.01f) {
+        return scale;
+    }
+    return 1.0f;
+}
+
+bool tryAddFont(ImGuiIO& io, const char* path, float size_px) {
+    if (!path || !std::filesystem::exists(path)) {
+        return false;
+    }
+    return io.Fonts->AddFontFromFileTTF(path, size_px) != nullptr;
+}
+
 } // namespace
 
-ImGuiLayer::ImGuiLayer(SDL_Window* window, const VulkanContext& context, Swapchain& swapchain)
+ImGuiLayer::ImGuiLayer(SDL_Window* window, const VulkanContext& context, Swapchain& swapchain,
+                       float ui_scale)
     : window_(window), device_(context.device()) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -37,27 +58,7 @@ ImGuiLayer::ImGuiLayer(SDL_Window* window, const VulkanContext& context, Swapcha
     io.IniFilename = nullptr;
 
     ImGui::StyleColorsDark();
-
-    // Prefer Inter for modern DCC chrome (atlas built on first NewFrame).
-    auto try_font = [&](const char* path, float size_px) -> bool {
-        if (!path || !std::filesystem::exists(path)) {
-            return false;
-        }
-        return io.Fonts->AddFontFromFileTTF(path, size_px) != nullptr;
-    };
-    io.Fonts->Clear();
-    constexpr float kUiPx = 16.0f;
-    if (!try_font("/usr/share/fonts/truetype/macos/Inter-Regular.ttf", kUiPx) &&
-        !try_font("/usr/share/fonts/truetype/noto/NotoSansDisplay-Regular.ttf", kUiPx)) {
-        io.Fonts->AddFontDefault();
-    } else {
-        // Medium/SemiBold kept in atlas for editor PushFont use.
-        try_font("/usr/share/fonts/truetype/macos/Inter-Medium.ttf", kUiPx);
-        try_font("/usr/share/fonts/truetype/macos/Inter-SemiBold.ttf", kUiPx);
-    }
-    if (!io.Fonts->Fonts.empty()) {
-        io.FontDefault = io.Fonts->Fonts[0];
-    }
+    loadFonts(ui_scale);
 
     if (!ImGui_ImplSDL3_InitForVulkan(window)) {
         throw std::runtime_error("Failed to initialize ImGui SDL3 backend");
@@ -86,6 +87,69 @@ ImGuiLayer::ImGuiLayer(SDL_Window* window, const VulkanContext& context, Swapcha
     }
 
     // Font texture is uploaded automatically on the first ImGui_ImplVulkan_NewFrame().
+}
+
+void ImGuiLayer::loadFonts(float ui_scale) {
+    ImGuiIO& io = ImGui::GetIO();
+    io.Fonts->Clear();
+
+    // Do not bake display DPI into the atlas — ImGui SDL3 sets DisplayFramebufferScale.
+    // Only the user/editor ui_scale enlarges the base 16 px face.
+    const float dpi = displayContentScale(window_);
+    const float scale = std::clamp(ui_scale > 0.01f ? ui_scale : 1.0f, 1.0f, 2.5f);
+    const float size_px = 16.0f * scale;
+
+    // Linux cloud image → Inter; Windows → Segoe UI; else Noto / Proggy default.
+    constexpr const char* kCandidates[] = {
+        "/usr/share/fonts/truetype/macos/Inter-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansDisplay-Regular.ttf",
+#if defined(_WIN32)
+        "C:\\Windows\\Fonts\\segoeui.ttf",
+        "C:\\Windows\\Fonts\\SegoeUI.ttf",
+        "C:\\Windows\\Fonts\\arial.ttf",
+#endif
+    };
+    constexpr const char* kMediumCandidates[] = {
+        "/usr/share/fonts/truetype/macos/Inter-Medium.ttf",
+#if defined(_WIN32)
+        "C:\\Windows\\Fonts\\seguisb.ttf", // Segoe UI Semibold
+#endif
+    };
+    constexpr const char* kSemiCandidates[] = {
+        "/usr/share/fonts/truetype/macos/Inter-SemiBold.ttf",
+#if defined(_WIN32)
+        "C:\\Windows\\Fonts\\seguisb.ttf",
+#endif
+    };
+
+    bool loaded = false;
+    for (const char* path : kCandidates) {
+        if (tryAddFont(io, path, size_px)) {
+            loaded = true;
+            for (const char* medium : kMediumCandidates) {
+                tryAddFont(io, medium, size_px);
+            }
+            for (const char* semi : kSemiCandidates) {
+                tryAddFont(io, semi, size_px);
+            }
+            break;
+        }
+    }
+    if (!loaded) {
+        io.Fonts->AddFontDefault();
+        // ProggyClean ~13px — scale up so tools stay readable when Inter/Segoe missing.
+        io.FontGlobalScale = scale;
+        spdlog::warn("No system UI font found; using ImGui default (FontGlobalScale={:.2f}, dpi={:.2f})",
+                     io.FontGlobalScale, dpi);
+    } else {
+        io.FontGlobalScale = 1.0f;
+        spdlog::info("ImGui UI font {:.1f}px (ui_scale={:.2f}, display_scale={:.2f})", size_px, scale,
+                     dpi);
+    }
+
+    if (!io.Fonts->Fonts.empty()) {
+        io.FontDefault = io.Fonts->Fonts[0];
+    }
 }
 
 void ImGuiLayer::enableLayoutPersistence() {

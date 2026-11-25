@@ -12,7 +12,8 @@ class Swapchain;
 
 class ImGuiLayer {
 public:
-    ImGuiLayer(SDL_Window* window, const VulkanContext& context, Swapchain& swapchain);
+    ImGuiLayer(SDL_Window* window, const VulkanContext& context, Swapchain& swapchain,
+               float ui_scale = 1.0f);
     ~ImGuiLayer();
 
     ImGuiLayer(const ImGuiLayer&) = delete;
@@ -27,6 +28,7 @@ public:
 
 private:
     void createDescriptorPool(const VulkanContext& context);
+    void loadFonts(float ui_scale);
 
     SDL_Window* window_ = nullptr;
     VkDevice device_ = VK_NULL_HANDLE;
