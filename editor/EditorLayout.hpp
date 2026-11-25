@@ -100,12 +100,15 @@ inline void drawViewportInputOverlay(const ImGuiID dockspace_id, bool enabled, I
 
     // Keep a hit target when the gizmo is idle so the overlay window receives focus/clicks.
     // While using/hovering the gizmo, skip the button so Manipulate keeps mouse ownership.
+    // IsItemHovered() respects windows stacked above us (Tugela, floating docks, modals).
     if (!ImGuizmo::IsUsing() && !ImGuizmo::IsOver()) {
         ImGui::SetCursorScreenPos(pos);
         ImGui::InvisibleButton("##ViewportInput", size);
         out_input_active = ImGui::IsItemHovered() || ImGui::IsItemActive();
     }
-    out_hovered = ImGui::IsMouseHoveringRect(out_rect_min, out_rect_max, false);
+    // Do NOT use a bare IsMouseHoveringRect here — that ignores Z-order and makes the
+    // 3D view look "hovered" through Tugela / other ImGui panels covering the center.
+    out_hovered = out_input_active || ImGuizmo::IsOver() || ImGuizmo::IsUsing();
 
     ImGui::End();
     ImGui::PopStyleColor();

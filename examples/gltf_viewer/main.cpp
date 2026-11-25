@@ -2214,12 +2214,28 @@ private:
         return true;
     }
 
+    // True when an ImGui panel stacked over the 3D view (Tugela, floating docks, …)
+    // owns the pointer. The viewport overlay InvisibleButton also sets WantCaptureMouse,
+    // so we only treat capture as a block when the overlay itself is NOT the owner.
+    bool imguiUiBlocksViewportMouse() const {
+        if (viewport_input_active_ || ImGuizmo::IsOver() || ImGuizmo::IsUsing()) {
+            return false;
+        }
+        return ImGui::GetIO().WantCaptureMouse;
+    }
+
     void handleViewportSelection(genesis::Scene& scene) {
         (void)scene;
         // Modals (Save / Don't Save / Cancel) must own the click — don't let the
         // same mouse release fall through into viewport deselect.
         if (ImGui::GetTopMostPopupModal() != nullptr) {
             marquee_ = {};
+            return;
+        }
+        // Tugela / other ImGui panels covering the central node must not click-through
+        // into actor pick / marquee (geometric viewport_.contains alone ignores Z-order).
+        // Keep an in-flight marquee alive if the drag crosses a panel.
+        if (imguiUiBlocksViewportMouse() && !marquee_.active) {
             return;
         }
         const bool alt_nav = ImGui::GetIO().KeyAlt;
@@ -2230,10 +2246,11 @@ private:
 
         const ImGuiIO& io = ImGui::GetIO();
         const ImVec2 mouse = io.MousePos;
-        const bool over_viewport = viewport_.contains(mouse.x, mouse.y);
+        // Overlay InvisibleButton hover is Z-aware; geometric contains is not.
+        const bool over_viewport = viewport_input_active_ || viewport_.contains(mouse.x, mouse.y);
         const bool gizmo_blocks = ImGuizmo::IsOver() || ImGuizmo::IsUsing();
 
-        if (over_viewport && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !gizmo_blocks) {
+        if (viewport_input_active_ && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !gizmo_blocks) {
             marquee_.active = true;
             marquee_.dragging = false;
             marquee_.start = mouse;
@@ -3035,8 +3052,9 @@ private:
     void updateEditorCameraNavigation(const float dt) {
         const bool typing = ImGui::GetIO().WantTextInput;
         const bool alt = input().keyDown(SDL_SCANCODE_LALT) || input().keyDown(SDL_SCANCODE_RALT);
-        const bool over_viewport =
-            viewport_hovered_ || viewport_.contains(input().mouseX(), input().mouseY());
+        // Prefer Z-aware overlay hover. Geometric contains alone would orbit/dolly through Tugela.
+        const bool over_viewport = viewport_hovered_ || viewport_input_active_;
+        const bool ui_blocks = imguiUiBlocksViewportMouse();
         const bool lmb = input().mouseButtonDown(SDL_BUTTON_LEFT);
         const bool mmb = input().mouseButtonDown(SDL_BUTTON_MIDDLE);
         const bool rmb = input().mouseButtonDown(SDL_BUTTON_RIGHT);
@@ -3052,7 +3070,7 @@ private:
         const bool panning = alt && mmb && !lmb && !rmb && !blocked;
         const bool navigating = orbiting || panning || dollying;
 
-        if (navigating && (navigating_active_ || over_viewport)) {
+        if (navigating && (navigating_active_ || (over_viewport && !ui_blocks))) {
             navigating_active_ = true;
             use_editor_output_ = true;
             runtime_.scene().active_output_camera.reset();
@@ -3071,7 +3089,8 @@ private:
             navigating_active_ = false;
         }
 
-        // Wheel zooms the 3D viewport when the overlay owns the pointer (not Tugela / other UI).
+        // Wheel dolly when overlay owns the pointer (InvisibleButton sets WantCaptureMouse,
+        // so !WantCaptureMouse alone falsely blocks empty-viewport zoom; Tugela still blocks).
         if (viewport_input_active_ && std::abs(wheel) > 0.0f && !ImGuizmo::IsUsing()) {
             use_editor_output_ = true;
             runtime_.scene().active_output_camera.reset();
@@ -3080,7 +3099,7 @@ private:
 
         // RMB fly look (no Alt) — slower / less twitchy than before.
         if (!alt && rmb && !ImGuizmo::IsUsing()) {
-            if (fly_camera_active_ || over_viewport) {
+            if (fly_camera_active_ || (over_viewport && !ui_blocks)) {
                 fly_camera_active_ = true;
             }
         } else if (!rmb || alt) {
@@ -3372,7 +3391,7 @@ private:
     bool use_editor_output_ = true;
     float output_aspect_ = 1.0f;
     bool viewport_hovered_ = false;
-    bool viewport_input_active_ = false;
+    bool viewport_input_active_ = false; // overlay InvisibleButton hover/active (Z-aware)
     bool fly_camera_active_ = false;
     bool navigating_active_ = false;
     bool ui_style_initialized_ = false;
