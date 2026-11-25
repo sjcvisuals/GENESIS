@@ -389,6 +389,10 @@ if(GENESIS_BUILD_EXAMPLES)
     add_executable(genesis_particle_world_smoke examples/particle_smoke/world_main.cpp)
     target_link_libraries(genesis_particle_world_smoke PRIVATE genesis_engine_runtime)
 
+    # Tugela inspector→runtime apply path (trail live-edit, stack mute, orphan cull).
+    add_executable(genesis_tugela_apply_smoke examples/particle_smoke/tugela_apply_main.cpp)
+    target_link_libraries(genesis_tugela_apply_smoke PRIVATE genesis_engine_runtime)
+
     add_executable(genesis_multiview_player examples/multiview_player/main.cpp)
     target_link_libraries(genesis_multiview_player PRIVATE genesis_engine)
     add_dependencies(genesis_multiview_player genesis_shaders)

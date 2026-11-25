@@ -1186,6 +1186,7 @@ private:
         particle_ui.audio = &audio_link_ctx;
         particle_ui.mark_dirty = [this]() { markDirty(); };
         particle_ui.reset_particles = [this]() { runtime_.resetParticles(); };
+        particle_ui.apply_particles = [this]() { runtime_.applyParticleAuthoring(); };
         particle_ui.select_node = [this](genesis::NodeId id) { selectNode(id); };
         particle_ui.stats = [this]() {
             const auto s = runtime_.particleWorld().stats();
@@ -1337,6 +1338,7 @@ private:
             particle_ui.audio = &audio_link_ctx;
             particle_ui.mark_dirty = [this]() { markDirty(); };
             particle_ui.reset_particles = [this]() { runtime_.resetParticles(); };
+            particle_ui.apply_particles = [this]() { runtime_.applyParticleAuthoring(); };
             particle_ui.select_node = [this](genesis::NodeId id) { selectNode(id); };
             particle_ui.stats = [this]() {
                 const auto s = runtime_.particleWorld().stats();

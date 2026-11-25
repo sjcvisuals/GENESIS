@@ -30,6 +30,8 @@ struct ParticleEmitterUiContext {
     AudioLinkUiContext* audio = nullptr;
     std::function<void()> mark_dirty;
     std::function<void()> reset_particles;
+    // Live-apply emitter authoring to living particles (trail width, enable, …).
+    std::function<void()> apply_particles;
     std::function<void(NodeId)> select_node;
     std::function<ParticleWorldStatsLite()> stats;
     // Optional: per-emitter alive + measured spawn rate (particles/sec).

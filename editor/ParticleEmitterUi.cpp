@@ -13,9 +13,16 @@ constexpr ImVec4 kAccent{0.30f, 0.74f, 0.78f, 1.0f};
 constexpr ImVec4 kMuted{0.48f, 0.505f, 0.545f, 1.0f};
 constexpr ImVec4 kModuleTitle{0.86f, 0.89f, 0.92f, 1.0f};
 
-void mark(ParticleEmitterUiContext& ctx) {
+void mark(ParticleEmitterUiContext& ctx, bool rebuild = false) {
     if (ctx.mark_dirty) {
         ctx.mark_dirty();
+    }
+    if (rebuild) {
+        if (ctx.reset_particles) {
+            ctx.reset_particles();
+        }
+    } else if (ctx.apply_particles) {
+        ctx.apply_particles();
     }
 }
 
@@ -137,13 +144,10 @@ void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ct
         auto addEmitter = [&](const char* name, const ParticleEmitter& preset) {
             system_node.is_particle_system = true;
             scene.createParticleEmitterNode(name, system_node.id, preset);
-            mark(ctx);
+            mark(ctx, true); // rebuild so new emitter is live immediately
             if (ctx.select_node) {
                 // Keep Hierarchy selection on the System; emitters are Tugela-only.
                 ctx.select_node(system_node.id);
-            }
-            if (ctx.reset_particles) {
-                ctx.reset_particles();
             }
         };
 
@@ -154,8 +158,11 @@ void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ct
         if (ImGui::Button("Trail", ImVec2(third, 0))) {
             ParticleEmitter trail = makeGentleSoftEmitter();
             trail.rate_per_second = 6.0f;
-            trail.trail_enabled = true;
-            trail.force_gravity = true;
+            particleStackSet(trail.module_stack, kStackTrail, true);
+            particleStackSet(trail.module_enabled, kStackTrail, true);
+            particleStackSet(trail.module_stack, kStackGravity, true);
+            particleStackSet(trail.module_enabled, kStackGravity, true);
+            syncOptionalStackFlags(trail);
             addEmitter("Trail", trail);
         }
         ImGui::SameLine();
@@ -163,7 +170,9 @@ void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ct
             addEmitter("Soft Circles", makeGentleCirclesEmitter());
             ParticleEmitter trail = makeGentleSoftEmitter();
             trail.rate_per_second = 5.0f;
-            trail.trail_enabled = true;
+            particleStackSet(trail.module_stack, kStackTrail, true);
+            particleStackSet(trail.module_enabled, kStackTrail, true);
+            syncOptionalStackFlags(trail);
             addEmitter("Trail", trail);
         }
         moduleIndentEnd();
@@ -336,7 +345,10 @@ void drawParticleEmitterInspector(Node& emitter_node, const std::string& node_pa
     // --- 3 Particle Update ---
     if (moduleHeader("3  ·  Particle Update", true)) {
         moduleIndentBegin();
-        dirty |= ImGui::Checkbox("Gravity / Lift", &e.force_gravity);
+        if (ImGui::Checkbox("Gravity / Lift", &e.force_gravity)) {
+            setOptionalModuleArmed(e, kStackGravity, e.force_gravity);
+            dirty = true;
+        }
         if (e.force_gravity) {
             dirty |= ImGui::DragFloat3("Gravity (+Y = lift)", &e.gravity.x, 0.02f);
             if (ctx.osc) {
@@ -346,36 +358,54 @@ void drawParticleEmitterInspector(Node& emitter_node, const std::string& node_pa
                 drawAudioLinkButton(*ctx.audio, OscParamTarget::ParticleGravityY, node_path, 0, "p_gy");
             }
         }
-        dirty |= ImGui::Checkbox("Drag", &e.force_drag);
+        if (ImGui::Checkbox("Drag", &e.force_drag)) {
+            setOptionalModuleArmed(e, kStackDrag, e.force_drag);
+            dirty = true;
+        }
         if (e.force_drag) {
             dirty |= ImGui::DragFloat("Drag amount", &e.drag, 0.01f, 0.0f, 10.0f);
         }
 
         // Advanced forces stay collapsed — keeps the stack readable.
         if (ImGui::TreeNodeEx("Advanced forces", ImGuiTreeNodeFlags_Framed)) {
-            dirty |= ImGui::Checkbox("Point force", &e.force_point);
+            if (ImGui::Checkbox("Point force", &e.force_point)) {
+                setOptionalModuleArmed(e, kStackPointForce, e.force_point);
+                dirty = true;
+            }
             if (e.force_point) {
                 dirty |= ImGui::DragFloat3("Point position", &e.point_force_position.x, 0.05f);
                 dirty |= ImGui::DragFloat("Strength (+in/-out)", &e.point_force_strength, 0.1f, -200.0f,
                                          200.0f);
             }
-            dirty |= ImGui::Checkbox("Vortex / Orbit", &e.force_vortex);
+            if (ImGui::Checkbox("Vortex / Orbit", &e.force_vortex)) {
+                setOptionalModuleArmed(e, kStackVortex, e.force_vortex);
+                dirty = true;
+            }
             if (e.force_vortex) {
                 dirty |= ImGui::DragFloat("Vortex strength", &e.vortex_strength, 0.05f, -50.0f, 50.0f);
                 dirty |= ImGui::DragFloat3("Vortex axis", &e.vortex_axis.x, 0.05f);
                 dirty |= ImGui::DragFloat("Vortex radius", &e.vortex_radius, 0.05f, 0.1f, 100.0f);
             }
-            dirty |= ImGui::Checkbox("Noise", &e.force_noise);
+            if (ImGui::Checkbox("Noise", &e.force_noise)) {
+                setOptionalModuleArmed(e, kStackNoise, e.force_noise);
+                dirty = true;
+            }
             if (e.force_noise) {
                 ImGui::TextDisabled("Keep low — noise sparkles on soft additive sprites");
                 dirty |= ImGui::DragFloat("Noise strength", &e.noise_strength, 0.005f, 0.0f, 5.0f);
                 dirty |= ImGui::DragFloat("Noise frequency", &e.noise_frequency, 0.01f, 0.01f, 20.0f);
             }
-            dirty |= ImGui::Checkbox("Acceleration", &e.force_accel);
+            if (ImGui::Checkbox("Acceleration", &e.force_accel)) {
+                setOptionalModuleArmed(e, kStackAccel, e.force_accel);
+                dirty = true;
+            }
             if (e.force_accel) {
                 dirty |= ImGui::DragFloat3("Acceleration", &e.acceleration.x, 0.05f);
             }
-            dirty |= ImGui::Checkbox("Kill below plane Y", &e.kill_plane);
+            if (ImGui::Checkbox("Kill below plane Y", &e.kill_plane)) {
+                setOptionalModuleArmed(e, kStackKillPlane, e.kill_plane);
+                dirty = true;
+            }
             if (e.kill_plane) {
                 dirty |= ImGui::DragFloat("Kill plane Y", &e.kill_plane_y, 0.05f);
             }
@@ -452,7 +482,10 @@ void drawParticleEmitterInspector(Node& emitter_node, const std::string& node_pa
     // --- 6 Trail Renderer ---
     if (moduleHeader("6  ·  Trail Renderer", true)) {
         moduleIndentBegin();
-        dirty |= ImGui::Checkbox("Enable trails", &e.trail_enabled);
+        if (ImGui::Checkbox("Enable trails", &e.trail_enabled)) {
+            setOptionalModuleArmed(e, kStackTrail, e.trail_enabled);
+            dirty = true;
+        }
         if (e.trail_enabled) {
             int segs = static_cast<int>(e.trail_segments);
             if (ImGui::DragInt("Segments", &segs, 1, 2, 24)) {
@@ -464,17 +497,14 @@ void drawParticleEmitterInspector(Node& emitter_node, const std::string& node_pa
             dirty |= ImGui::DragFloat("Width (tip)", &e.trail_width_end, 0.001f, 0.0f, 1.0f);
             dirty |= ImGui::DragFloat("Trail alpha", &e.trail_alpha, 0.01f, 0.0f, 1.0f);
             dirty |= ImGui::DragFloat("Trail lifetime feel", &e.trail_lifetime, 0.01f, 0.05f, 8.0f);
-            ImGui::TextDisabled("Tapers to a point · Ribbon/Trail analogue");
+            ImGui::TextDisabled("Tapers to a point · Edits apply to living particles.");
         }
         moduleIndentEnd();
     }
 
     if (dirty) {
         syncEmitterCurvesFromEndpoints(e);
-        mark(ctx);
-        if (ctx.reset_particles == nullptr) {
-            // no-op; mark_dirty already requested
-        }
+        mark(ctx); // live-apply trail / module edits to living particles
     }
 
     if (ctx.stats) {

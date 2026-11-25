@@ -127,6 +127,94 @@ void ParticleWorld::syncEmitters(Scene& scene) {
         next.push_back(runtime);
     }
     emitters_ = std::move(next);
+    cullOrphanParticles();
+}
+
+void ParticleWorld::cullOrphanParticles() {
+    bool any = false;
+    for (std::size_t i = 0; i < particles_.size(); ++i) {
+        Particle& p = particles_[i];
+        if (!p.alive) {
+            continue;
+        }
+        if (findEmitterRuntime(p.emitter_node) != nullptr) {
+            continue;
+        }
+        p.alive = false;
+        p.trail_enabled = false;
+        p.trail_count = 0;
+        free_list_.push_back(i);
+        any = true;
+    }
+    if (any) {
+        recountAlive();
+    }
+}
+
+void ParticleWorld::applyEmitterVisualsToParticle(Particle& p, const ParticleEmitter& desc) {
+    p.trail_enabled = desc.trail_enabled;
+    p.trail_max_segments =
+        static_cast<std::uint8_t>(std::clamp(static_cast<int>(desc.trail_segments), 2, 24));
+    p.trail_sample_distance = std::max(0.005f, desc.trail_sample_distance);
+    p.trail_width = std::max(0.0f, desc.trail_width);
+    p.trail_width_end = std::max(0.0f, desc.trail_width_end);
+    p.trail_alpha = std::clamp(desc.trail_alpha, 0.0f, 1.0f);
+    p.trail_lifetime = std::max(0.05f, desc.trail_lifetime);
+    if (!p.trail_enabled) {
+        p.trail_count = 0;
+        p.trail_dist_accum = 0.0f;
+        p.trail_has_sample = false;
+    } else if (p.trail_count > p.trail_max_segments) {
+        // Drop oldest samples when segments shrinks mid-flight.
+        const std::uint8_t drop =
+            static_cast<std::uint8_t>(p.trail_count - p.trail_max_segments);
+        for (std::uint8_t ti = 0; ti < p.trail_max_segments; ++ti) {
+            p.trail_pos[ti] = p.trail_pos[ti + drop];
+        }
+        p.trail_count = p.trail_max_segments;
+    }
+    p.sprite_aspect = desc.sprite_aspect;
+    p.velocity_stretch = desc.velocity_stretch;
+    p.mesh = desc.mod_sprite ? desc.render_mesh : ParticleRenderMesh::Sphere;
+    p.unlit = desc.unlit;
+    p.additive = desc.additive;
+    p.world_space = desc.world_space;
+}
+
+void ParticleWorld::applyAuthoringToLiving(Scene& scene) {
+    syncEmitters(scene);
+    stats_.emitters = static_cast<std::uint32_t>(emitters_.size());
+    for (EmitterRuntime& runtime : emitters_) {
+        Node* node = scene.find(runtime.node_id);
+        if (!node || !node->particle_emitter.has_value()) {
+            continue;
+        }
+        const ParticleEmitter& desc = *node->particle_emitter;
+        // Re-arm finished one-shots when authoring still wants emission.
+        if (runtime.finished && desc.enabled &&
+            (desc.looping || desc.duration_seconds <= 0.0f ||
+             optionalBurstArmed(desc) || desc.rate_per_second > 0.0f)) {
+            runtime.finished = false;
+            if (desc.looping || desc.duration_seconds <= 0.0f) {
+                runtime.burst_fired = false;
+                runtime.timed_bursts_fired = 0;
+            }
+        }
+    }
+    for (Particle& p : particles_) {
+        if (!p.alive) {
+            continue;
+        }
+        Node* node = scene.find(p.emitter_node);
+        if (!node || !node->particle_emitter.has_value()) {
+            p.alive = false;
+            p.trail_enabled = false;
+            p.trail_count = 0;
+            continue;
+        }
+        applyEmitterVisualsToParticle(p, *node->particle_emitter);
+    }
+    recountAlive();
 }
 
 ParticleWorld::EmitterRuntime* ParticleWorld::findEmitterRuntime(NodeId id) {
@@ -452,21 +540,23 @@ void ParticleWorld::stepOnce(Scene& scene, float dt, bool update_particles) {
 
         const double local_age = runtime.age_seconds - static_cast<double>(desc.start_delay_seconds);
 
-        if (!runtime.burst_fired && desc.burst_count > 0) {
-            spawnFromEmitter(scene, runtime, desc, *node, desc.burst_count);
-            runtime.burst_fired = true;
-        }
-
-        for (std::uint8_t bi = 0; bi < desc.burst_entries && bi < desc.bursts.size(); ++bi) {
-            const std::uint8_t bit = static_cast<std::uint8_t>(1u << bi);
-            if ((runtime.timed_bursts_fired & bit) != 0) {
-                continue;
+        if (optionalBurstArmed(desc)) {
+            if (!runtime.burst_fired && desc.burst_count > 0) {
+                spawnFromEmitter(scene, runtime, desc, *node, desc.burst_count);
+                runtime.burst_fired = true;
             }
-            if (local_age >= static_cast<double>(desc.bursts[bi].time_seconds) &&
-                desc.bursts[bi].count > 0) {
-                spawnFromEmitter(scene, runtime, desc, *node, desc.bursts[bi].count);
-                runtime.timed_bursts_fired =
-                    static_cast<std::uint8_t>(runtime.timed_bursts_fired | bit);
+
+            for (std::uint8_t bi = 0; bi < desc.burst_entries && bi < desc.bursts.size(); ++bi) {
+                const std::uint8_t bit = static_cast<std::uint8_t>(1u << bi);
+                if ((runtime.timed_bursts_fired & bit) != 0) {
+                    continue;
+                }
+                if (local_age >= static_cast<double>(desc.bursts[bi].time_seconds) &&
+                    desc.bursts[bi].count > 0) {
+                    spawnFromEmitter(scene, runtime, desc, *node, desc.bursts[bi].count);
+                    runtime.timed_bursts_fired =
+                        static_cast<std::uint8_t>(runtime.timed_bursts_fired | bit);
+                }
             }
         }
 
@@ -535,10 +625,17 @@ void ParticleWorld::updateParticlesCpu(Scene& scene, float dt) {
         }
 
         Node* node = scene.find(p.emitter_node);
-        ParticleEmitter desc = makeDefaultParticleEmitter();
-        if (node && node->particle_emitter.has_value()) {
-            desc = *node->particle_emitter;
+        if (!node || !node->particle_emitter.has_value() ||
+            findEmitterRuntime(p.emitter_node) == nullptr) {
+            p.alive = false;
+            p.trail_enabled = false;
+            p.trail_count = 0;
+            free_list_.push_back(i);
+            continue;
         }
+        const ParticleEmitter& desc = *node->particle_emitter;
+        // Live-apply trail / sprite authoring so inspector edits stick mid-flight.
+        applyEmitterVisualsToParticle(p, desc);
 
         p.age += dt;
         if (p.age >= p.lifetime) {
@@ -789,14 +886,22 @@ void ParticleWorld::unpackGpuParticles(const std::vector<GpuParticle>& gpu) {
 
 void ParticleWorld::updateTrailsAfterGpu(Scene& scene, float /*total_dt*/) {
     for (Particle& p : particles_) {
-        if (!p.alive || !p.trail_enabled) {
+        if (!p.alive) {
+            continue;
+        }
+        const Node* node = scene.find(p.emitter_node);
+        if (!node || !node->particle_emitter.has_value()) {
+            p.trail_enabled = false;
+            p.trail_count = 0;
+            continue;
+        }
+        applyEmitterVisualsToParticle(p, *node->particle_emitter);
+        if (!p.trail_enabled) {
             continue;
         }
         glm::vec3 world_pos = p.position;
         if (!p.world_space) {
-            if (const Node* node = scene.find(p.emitter_node)) {
-                world_pos = glm::vec3(node->world * glm::vec4(p.position, 1.0f));
-            }
+            world_pos = glm::vec3(node->world * glm::vec4(p.position, 1.0f));
         }
         auto push_trail_sample = [&](const glm::vec3& sample_pos) {
             const std::uint8_t max_seg = std::min(p.trail_max_segments, kMaxTrailPoints);

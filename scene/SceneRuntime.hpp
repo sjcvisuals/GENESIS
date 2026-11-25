@@ -145,6 +145,8 @@ public:
     void tickParticlesSteps(std::uint64_t steps, float fixed_step_seconds);
     void flushParticleGpuUpdates(VkCommandBuffer cmd);
     void resetParticles();
+    // Apply emitter authoring to living particles (trail/module edits) without full reset.
+    void applyParticleAuthoring();
     ParticleWorld& particleWorld() { return particle_world_; }
     const ParticleWorld& particleWorld() const { return particle_world_; }
     void setParticleViewBasis(const glm::vec3& camera_right, const glm::vec3& camera_up);

@@ -42,6 +42,10 @@ public:
     void clear();
     void reset();
 
+    // Push current emitter authoring onto living particles (trail / sprite flags) and
+    // revive finished emitter clocks so inspector edits take effect without a full reset.
+    void applyAuthoringToLiving(Scene& scene);
+
     // Fixed-step sim. When GPU is enabled this only advances emitters/spawns and queues
     // GPU motion updates for flushGpuUpdates().
     void simulate(Scene& scene, std::uint64_t steps, float dt);
@@ -138,12 +142,14 @@ private:
     };
 
     void syncEmitters(Scene& scene);
+    void cullOrphanParticles();
     void stepOnce(Scene& scene, float dt, bool update_particles);
     void updateParticlesCpu(Scene& scene, float dt);
     void spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, const ParticleEmitter& desc,
                           const Node& node, std::uint32_t count,
                           const glm::vec3* origin_override = nullptr);
     void recountAlive();
+    void applyEmitterVisualsToParticle(Particle& p, const ParticleEmitter& desc);
     void updateTrailsAfterGpu(Scene& scene, float dt);
     std::vector<GpuParticle> packGpuParticles(Scene& scene) const;
     void unpackGpuParticles(const std::vector<GpuParticle>& gpu);

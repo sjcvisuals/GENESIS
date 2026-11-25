@@ -360,6 +360,10 @@ void SceneRuntime::resetParticles() {
     particle_step_accumulator_ = 0.0;
 }
 
+void SceneRuntime::applyParticleAuthoring() {
+    particle_world_.applyAuthoringToLiving(scene_);
+}
+
 void SceneRuntime::setParticleViewBasis(const glm::vec3& camera_right, const glm::vec3& camera_up) {
     particle_view_basis_.right = camera_right;
     particle_view_basis_.up = camera_up;
