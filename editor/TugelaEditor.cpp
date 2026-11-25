@@ -1369,40 +1369,6 @@ void drawRemoveFocusedEmitter(Scene& scene, TugelaEditorState& state, ParticleEm
             system->is_particle_system = true;
         }
         scene.deleteNode(removed);
-        mark(ctx);
-        std::vector<NodeId> remaining;
-        collectEmitters(scene, system_id, remaining);
-        state.focus_emitter = remaining.empty() ? 0 : remaining.front();
-        state.focus_system = system_id;
-        if (ctx.select_node) {
-            ctx.select_node(system_id);
-        }
-        if (ctx.reset_particles) {
-            ctx.reset_particles();
-        }
-    }
-    ImGui::PopStyleColor(3);
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Delete this emitter from the System. Add templates below to restore.");
-    }
-}
-
-void drawRemoveFocusedEmitter(Scene& scene, TugelaEditorState& state, ParticleEmitterUiContext& ctx) {
-    if (state.focus_emitter == 0 || state.focus_system == 0) {
-        return;
-    }
-    const Node* emitter = scene.find(state.focus_emitter);
-    if (!emitter || !emitter->particle_emitter.has_value()) {
-        return;
-    }
-    ImGui::Spacing();
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.28f, 0.10f, 0.10f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.40f, 0.14f, 0.14f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.22f, 0.08f, 0.08f, 1.0f));
-    if (ImGui::Button("Remove Emitter", ImVec2(-1.0f, 0))) {
-        const NodeId removed = state.focus_emitter;
-        const NodeId system_id = state.focus_system;
-        scene.deleteNode(removed);
         std::vector<NodeId> remaining;
         collectEmitters(scene, system_id, remaining);
         state.focus_emitter = remaining.empty() ? 0 : remaining.front();
@@ -1414,7 +1380,7 @@ void drawRemoveFocusedEmitter(Scene& scene, TugelaEditorState& state, ParticleEm
     }
     ImGui::PopStyleColor(3);
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Delete this emitter from the System.");
+        ImGui::SetTooltip("Delete this emitter from the System. Add templates below to restore.");
     }
 }
 
