@@ -126,12 +126,29 @@ NodeId Scene::createLightNode(const std::string& name, SceneLightType type, std:
     return id;
 }
 
+NodeId Scene::createParticleSystemNode(const std::string& name, std::optional<NodeId> parent) {
+    const NodeId id = createEmptyNode(name, parent);
+    if (Node* node = find(id)) {
+        node->is_particle_system = true;
+    }
+    return id;
+}
+
 NodeId Scene::createParticleEmitterNode(const std::string& name, std::optional<NodeId> parent,
                                         ParticleEmitter emitter) {
     const NodeId id = createEmptyNode(name, parent);
     if (Node* node = find(id)) {
         node->has_particle_emitter = true;
         node->particle_emitter = std::move(emitter);
+    }
+    // Parent becomes / stays a Tugela System even if this was its first emitter.
+    if (parent.has_value()) {
+        if (Node* parent_node = find(*parent)) {
+            if (!parent_node->particle_emitter.has_value() && !parent_node->mesh_resource.has_value() &&
+                !parent_node->camera.has_value() && !parent_node->light.has_value()) {
+                parent_node->is_particle_system = true;
+            }
+        }
     }
     return id;
 }
@@ -234,7 +251,26 @@ bool Scene::deleteNode(NodeId id) {
     Node* node = find(id);
     if (!node) return false;
 
-    // Promote children to this node's parent (or scene root) instead of cascading delete.
+    // Particle Systems own their emitters — delete emitters with the system so they
+    // do not resurface as orphan Hierarchy actors (emitters are outliner-hidden).
+    if (node->is_particle_system) {
+        std::vector<NodeId> emitter_children;
+        for (const NodeId child_id : node->children) {
+            if (const Node* child = find(child_id);
+                child && child->particle_emitter.has_value()) {
+                emitter_children.push_back(child_id);
+            }
+        }
+        for (const NodeId emitter_id : emitter_children) {
+            deleteNode(emitter_id);
+        }
+        node = find(id);
+        if (!node) {
+            return true;
+        }
+    }
+
+    // Promote remaining children to this node's parent (or scene root).
     const std::optional<NodeId> new_parent = node->parent;
     const std::vector<NodeId> children = node->children;
     node->children.clear();

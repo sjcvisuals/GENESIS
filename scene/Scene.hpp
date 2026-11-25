@@ -40,6 +40,10 @@ struct Node {
     std::optional<ParticleEmitter> particle_emitter;
     std::optional<FluidVolume> particle_fluid;
 
+    // Tugela System actor: holds emitter children authored in the graph, not Hierarchy.
+    // Persists when the system has zero emitters so Add Emitter still works.
+    bool is_particle_system = false;
+
     // Import hints / component flags (expanded in later milestones).
     bool has_mesh = false;
     bool has_material = false;
@@ -68,6 +72,9 @@ struct Scene {
     NodeId createCameraNode(const std::string& name, std::optional<NodeId> parent = std::nullopt);
     NodeId createLightNode(const std::string& name, SceneLightType type,
                            std::optional<NodeId> parent = std::nullopt);
+    // Empty world actor marked as a Tugela Particle System (emitters added separately).
+    NodeId createParticleSystemNode(const std::string& name,
+                                    std::optional<NodeId> parent = std::nullopt);
     NodeId createParticleEmitterNode(const std::string& name,
                                      std::optional<NodeId> parent = std::nullopt,
                                      ParticleEmitter emitter = {});
@@ -76,6 +83,7 @@ struct Scene {
     void setActiveOutputCamera(std::optional<NodeId> node_id);
     const Node* activeOutputCameraNode() const;
     NodeId duplicateNode(NodeId id);
+    // Deletes the node. Particle System actors also destroy emitter children (not reparented).
     bool deleteNode(NodeId id);
     bool reparentNode(NodeId child, std::optional<NodeId> new_parent);
     bool isDescendantOf(NodeId node, NodeId potential_ancestor) const;

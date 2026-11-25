@@ -697,6 +697,7 @@ SceneDocument SceneSerializer::buildDocument(const Scene& scene, const std::stri
         entry.visible = node.visible;
         entry.pickable = node.pickable;
         entry.hidden_in_game = node.hidden_in_game;
+        entry.is_particle_system = node.is_particle_system;
         if (node.mesh_resource.has_value() && *node.mesh_resource < mesh_names.size()) {
             entry.mesh_ref = mesh_names[*node.mesh_resource];
         }
@@ -748,6 +749,9 @@ json SceneSerializer::documentToJson(const SceneDocument& document) {
             {"hidden_in_game", node.hidden_in_game},
             {"transform", transformToJson(node.local)},
         };
+        if (node.is_particle_system) {
+            entry["particle_system"] = true;
+        }
         if (node.parent_path.has_value()) {
             entry["parent"] = *node.parent_path;
         } else {
@@ -819,6 +823,7 @@ SceneDocument SceneSerializer::loadFromJson(const json& root) {
                 node.pickable = entry["pickable"].get<bool>();
             }
             node.hidden_in_game = entry.value("hidden_in_game", false);
+            node.is_particle_system = entry.value("particle_system", false);
             if (entry.contains("transform")) node.local = transformFromJson(entry["transform"]);
             if (entry.contains("parent") && !entry["parent"].is_null()) {
                 node.parent_path = entry["parent"].get<std::string>();

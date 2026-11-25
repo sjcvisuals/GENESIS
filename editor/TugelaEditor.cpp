@@ -405,8 +405,9 @@ NodeId resolveSystemForNode(Scene& scene, NodeId id) {
             return *n->parent;
         }
         if (const Node* parent = scene.find(*n->parent);
-            parent && !parent->particle_emitter.has_value() && !parent->mesh_resource.has_value() &&
-            !parent->camera.has_value() && !parent->light.has_value()) {
+            parent && (parent->is_particle_system ||
+                       (!parent->particle_emitter.has_value() && !parent->mesh_resource.has_value() &&
+                        !parent->camera.has_value() && !parent->light.has_value()))) {
             return *n->parent;
         }
     }
@@ -1059,11 +1060,14 @@ void drawAddEmitterButtons(Scene& scene, NodeId system_id, ParticleEmitterUiCont
     }
     ImGui::TextDisabled("Add to System");
     auto add = [&](const char* name, const ParticleEmitter& preset) {
+        system->is_particle_system = true;
         const NodeId id = scene.createParticleEmitterNode(name, system_id, preset);
         mark(ctx);
         state.focus_emitter = id;
+        state.focus_system = system_id;
         if (ctx.select_node) {
-            ctx.select_node(id);
+            // Hierarchy shows Systems only — keep selection on the System actor.
+            ctx.select_node(system_id);
         }
         if (ctx.reset_particles) {
             ctx.reset_particles();
@@ -1087,7 +1091,43 @@ void drawAddEmitterButtons(Scene& scene, NodeId system_id, ParticleEmitterUiCont
         trail.trail_enabled = true;
         add("Trail", trail);
     }
-    (void)system;
+}
+
+void drawRemoveFocusedEmitter(Scene& scene, TugelaEditorState& state, ParticleEmitterUiContext& ctx) {
+    if (state.focus_emitter == 0 || state.focus_system == 0) {
+        return;
+    }
+    const Node* emitter = scene.find(state.focus_emitter);
+    if (!emitter || !emitter->particle_emitter.has_value()) {
+        return;
+    }
+    ImGui::Spacing();
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.28f, 0.10f, 0.10f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.40f, 0.14f, 0.14f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.22f, 0.08f, 0.08f, 1.0f));
+    if (ImGui::Button("Remove Emitter", ImVec2(-1.0f, 0))) {
+        const NodeId removed = state.focus_emitter;
+        const NodeId system_id = state.focus_system;
+        if (Node* system = scene.find(system_id)) {
+            system->is_particle_system = true;
+        }
+        scene.deleteNode(removed);
+        mark(ctx);
+        std::vector<NodeId> remaining;
+        collectEmitters(scene, system_id, remaining);
+        state.focus_emitter = remaining.empty() ? 0 : remaining.front();
+        state.focus_system = system_id;
+        if (ctx.select_node) {
+            ctx.select_node(system_id);
+        }
+        if (ctx.reset_particles) {
+            ctx.reset_particles();
+        }
+    }
+    ImGui::PopStyleColor(3);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Delete this emitter from the System. Add templates below to restore.");
+    }
 }
 
 } // namespace
@@ -1214,7 +1254,7 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
     }
     ImGui::Spacing();
     if (emitters.empty()) {
-        ImGui::TextDisabled("Empty system.");
+        ImGui::TextDisabled("Empty system — add an emitter below.");
     }
     for (const NodeId id : emitters) {
         const Node* n = scene.find(id);
@@ -1227,7 +1267,8 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
         if (selectableRow(n->name.c_str(), state.focus_emitter == id, badge)) {
             state.focus_emitter = id;
             if (ctx.select_node) {
-                ctx.select_node(id);
+                // Keep Hierarchy on the System; emitter authoring stays in Tugela.
+                ctx.select_node(state.focus_system != 0 ? state.focus_system : id);
             }
         }
         ImGui::PopID();
@@ -1235,6 +1276,7 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
     ImGui::Spacing();
     ImGui::Separator();
     if (state.focus_system != 0) {
+        drawRemoveFocusedEmitter(scene, state, ctx);
         drawAddEmitterButtons(scene, state.focus_system, ctx, state);
         collectEmitters(scene, state.focus_system, emitters);
     }
