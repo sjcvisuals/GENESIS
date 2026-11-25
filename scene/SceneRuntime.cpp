@@ -417,6 +417,9 @@ void SceneRuntime::appendParticleDrawCommands(std::vector<SceneDrawCommand>& out
     const GpuTexture* soft_ribbon = texture(*particle_ribbon_texture_id_);
 
     for (const ParticleWorld::ParticleInstanceBatch& batch : batches) {
+        if (batch.mesh == ParticleRenderMesh::None) {
+            continue;
+        }
         const Mesh* mesh = nullptr;
         const bool is_sprite = batch.mesh == ParticleRenderMesh::Sprite;
         switch (batch.mesh) {

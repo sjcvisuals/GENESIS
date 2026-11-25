@@ -228,7 +228,7 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
         }
         p.sprite_aspect = desc.sprite_aspect;
         p.velocity_stretch = desc.velocity_stretch;
-        p.mesh = desc.mod_sprite ? desc.render_mesh : ParticleRenderMesh::Sphere;
+        p.mesh = resolveParticleHeadMesh(desc);
         p.unlit = desc.unlit;
         p.additive = desc.additive;
         p.world_space = desc.world_space;
@@ -934,6 +934,9 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
             mesh_base = 4;
             break;
         case ParticleRenderMesh::Sprite:
+            mesh_base = 8;
+            break;
+        case ParticleRenderMesh::None:
         default:
             mesh_base = 8;
             break;
@@ -948,9 +951,9 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
             out[dest_batch].instances.push_back(instance);
         };
 
-        // Trail Renderer: wake always BEHIND the head.
+        // Trail Renderer: wake always BEHIND the head (independent of head mesh — trail-only OK).
         // tip = oldest history, neck under current world_pos; never lead ahead of the ball.
-        if (p.trail_enabled && p.trail_count >= 2 && p.mesh == ParticleRenderMesh::Sprite) {
+        if (p.trail_enabled && p.trail_count >= 2) {
             const float trail_age_fade =
                 std::clamp(1.0f - (p.age / std::max(p.trail_lifetime * 2.5f, 0.1f)) * 0.12f, 0.75f,
                            1.0f);
@@ -1027,7 +1030,10 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
             }
         }
 
-        // Primary soft circle head — round, drawn after the ribbon so it seals the join.
+        // Primary head — after the ribbon so sprites seal the trail join. None = invisible head.
+        if (p.mesh == ParticleRenderMesh::None) {
+            continue;
+        }
         glm::mat4 model(1.0f);
         if (p.mesh == ParticleRenderMesh::Sprite) {
             const float speed = glm::length(p.velocity);

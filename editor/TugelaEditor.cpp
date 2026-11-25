@@ -48,8 +48,9 @@ TugelaMetrics makeMetrics() {
     TugelaMetrics m;
     m.font = f;
     m.pad = st.FramePadding.x;
-    // Fit longest stack labels ("Sprite Renderer", "Shape Location", …) + checkbox.
-    const float label_w = ImGui::CalcTextSize("Sprite Renderer").x;
+    // Fit longest stack labels ("Sprite Renderer", "Mesh Renderer", …) + checkbox.
+    const float label_w = std::max(ImGui::CalcTextSize("Sprite Renderer").x,
+                                   ImGui::CalcTextSize("Mesh Renderer").x);
     m.checkbox = std::round(f * 0.85f);
     m.stage_w = std::ceil(label_w + m.checkbox + m.pad * 4.0f + 12.0f);
     m.stage_gap_x = std::max(18.0f, f * 1.1f);
@@ -123,6 +124,8 @@ const char* stackLabel(TugelaStackMod mod) {
         return "Scale by Speed";
     case TugelaStackMod::Sprite:
         return "Sprite Renderer";
+    case TugelaStackMod::Mesh:
+        return "Mesh Renderer";
     case TugelaStackMod::Trail:
         return "Trail Renderer";
     case TugelaStackMod::OscDrive:
@@ -157,6 +160,7 @@ TugelaModuleKind stageForStack(TugelaStackMod mod) {
     case TugelaStackMod::ScaleBySpeed:
         return TugelaModuleKind::OverLife;
     case TugelaStackMod::Sprite:
+    case TugelaStackMod::Mesh:
         return TugelaModuleKind::Sprite;
     case TugelaStackMod::Trail:
         return TugelaModuleKind::Trail;
@@ -202,7 +206,9 @@ bool stackEnabled(TugelaStackMod mod, const ParticleEmitter& e) {
     case TugelaStackMod::ScaleBySpeed:
         return e.scale_by_speed;
     case TugelaStackMod::Sprite:
-        return e.mod_sprite && e.render_mesh == ParticleRenderMesh::Sprite;
+        return e.mod_sprite;
+    case TugelaStackMod::Mesh:
+        return e.mod_mesh;
     case TugelaStackMod::Trail:
         return e.trail_enabled;
     case TugelaStackMod::OscDrive:
@@ -224,7 +230,8 @@ bool stackPresent(TugelaStackMod mod, const ParticleEmitter& e) {
     case TugelaStackMod::SizeOverLife:
     case TugelaStackMod::ColorOverLife:
     case TugelaStackMod::Sprite:
-        return true; // core stack — always listed
+    case TugelaStackMod::Mesh:
+        return true; // always listed under Render — Mesh was the hidden Sphere fallback
     case TugelaStackMod::Burst:
         return e.burst_count > 0 || e.burst_entries > 0;
     case TugelaStackMod::Gravity:
@@ -325,10 +332,15 @@ void setStackEnabled(TugelaStackMod mod, ParticleEmitter& e, bool on) {
         break;
     case TugelaStackMod::Sprite:
         e.mod_sprite = on;
+        // Do not fall back to Sphere — that hid a Mesh path Spencer could not toggle off.
+        break;
+    case TugelaStackMod::Mesh:
+        e.mod_mesh = on;
         if (on) {
-            e.render_mesh = ParticleRenderMesh::Sprite;
-        } else {
-            e.render_mesh = ParticleRenderMesh::Sphere;
+            if (e.render_mesh != ParticleRenderMesh::Cube &&
+                e.render_mesh != ParticleRenderMesh::Sphere) {
+                e.render_mesh = ParticleRenderMesh::Sphere;
+            }
         }
         break;
     case TugelaStackMod::Trail:
@@ -357,9 +369,9 @@ void collectAddableForStage(TugelaModuleKind stage, const ParticleEmitter& e,
                             std::vector<TugelaStackMod>& out) {
     out.clear();
     static constexpr TugelaStackMod kOptional[] = {
-        TugelaStackMod::Burst,       TugelaStackMod::OscDrive,     TugelaStackMod::Gravity,
-        TugelaStackMod::Drag,        TugelaStackMod::PointForce,   TugelaStackMod::Vortex,
-        TugelaStackMod::Noise,       TugelaStackMod::Accel,        TugelaStackMod::KillPlane,
+        TugelaStackMod::Burst,        TugelaStackMod::OscDrive,     TugelaStackMod::Gravity,
+        TugelaStackMod::Drag,         TugelaStackMod::PointForce,   TugelaStackMod::Vortex,
+        TugelaStackMod::Noise,        TugelaStackMod::Accel,        TugelaStackMod::KillPlane,
         TugelaStackMod::ScaleBySpeed, TugelaStackMod::Trail,
     };
     for (const TugelaStackMod mod : kOptional) {
@@ -706,7 +718,25 @@ void drawStackModuleInspector(ParticleEmitter& e, TugelaStackMod mod, ParticleEm
         dirty |= ImGui::Checkbox("Unlit", &e.unlit);
         dirty |= ImGui::Checkbox("Soft additive", &e.additive);
         dirty |= ImGui::DragFloat("Sprite aspect", &e.sprite_aspect, 0.01f, 0.05f, 8.0f);
+        ImGui::TextDisabled("Soft circle billboard · disable + Mesh/Trail off = invisible");
         break;
+    case TugelaStackMod::Mesh: {
+        dirty |= ImGui::Checkbox("Unlit", &e.unlit);
+        dirty |= ImGui::Checkbox("Soft additive", &e.additive);
+        const char* meshes[] = {"Cube", "Sphere"};
+        int mesh = (e.render_mesh == ParticleRenderMesh::Cube) ? 0 : 1;
+        if (ImGui::Combo("Mesh", &mesh, meshes, IM_ARRAYSIZE(meshes))) {
+            e.render_mesh =
+                (mesh == 0) ? ParticleRenderMesh::Cube : ParticleRenderMesh::Sphere;
+            dirty = true;
+        }
+        if (e.mod_sprite) {
+            ImGui::TextDisabled("Sprite Renderer is on — it draws the head instead of Mesh.");
+        } else {
+            ImGui::TextDisabled("3D Cube / Sphere head · same batch path as lit/unlit meshes");
+        }
+        break;
+    }
     case TugelaStackMod::Trail: {
         int segs = static_cast<int>(e.trail_segments);
         if (ImGui::DragInt("Segments", &segs, 1, 2, 24)) {

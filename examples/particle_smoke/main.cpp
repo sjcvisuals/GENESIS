@@ -37,17 +37,34 @@ int main() {
     }
 
     genesis::ParticleEmitter soft = genesis::makeGentleSoftEmitter();
-    if (soft.render_mesh != ParticleRenderMesh::Sprite || soft.size_over_life.count < 2 ||
-        soft.color_over_life.count < 2 || !soft.trail_enabled || soft.trail_segments < 2) {
+    if (!soft.mod_sprite || soft.mod_mesh || soft.render_mesh != ParticleRenderMesh::Sprite ||
+        soft.size_over_life.count < 2 || soft.color_over_life.count < 2 || !soft.trail_enabled ||
+        soft.trail_segments < 2) {
         std::fprintf(stderr, "particle_smoke: gentle soft preset missing Tugela modules/trails\n");
         return 1;
     }
 
     genesis::ParticleEmitter tracker = genesis::makeOscTrackerBubbleEmitter();
     // Noise stays off by default — soft additive + noise reads as firefly sparkle.
-    if (tracker.render_mesh != ParticleRenderMesh::Sprite || tracker.force_noise ||
-        !tracker.trail_enabled || tracker.trail_width_end > tracker.trail_width) {
+    if (!tracker.mod_sprite || tracker.render_mesh != ParticleRenderMesh::Sprite ||
+        tracker.force_noise || !tracker.trail_enabled ||
+        tracker.trail_width_end > tracker.trail_width) {
         std::fprintf(stderr, "particle_smoke: OSC tracker preset incomplete\n");
+        return 1;
+    }
+
+    // Disable Sprite + Trail must not fall back to Sphere balls (Mesh Renderer off → None).
+    soft.mod_sprite = false;
+    soft.trail_enabled = false;
+    soft.mod_mesh = false;
+    if (genesis::resolveParticleHeadMesh(soft) != ParticleRenderMesh::None) {
+        std::fprintf(stderr, "particle_smoke: expected invisible head with all renderers off\n");
+        return 1;
+    }
+    soft.mod_mesh = true;
+    soft.render_mesh = ParticleRenderMesh::Sphere;
+    if (genesis::resolveParticleHeadMesh(soft) != ParticleRenderMesh::Sphere) {
+        std::fprintf(stderr, "particle_smoke: Mesh Renderer should draw Sphere\n");
         return 1;
     }
 
@@ -57,6 +74,6 @@ int main() {
         return 1;
     }
 
-    std::printf("particle_smoke: ok (sprite+curves+trail modules)\n");
+    std::printf("particle_smoke: ok (sprite+mesh+curves+trail modules)\n");
     return 0;
 }

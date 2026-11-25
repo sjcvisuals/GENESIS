@@ -45,6 +45,7 @@ enum class TugelaStackMod : std::uint8_t {
     ColorOverLife,
     ScaleBySpeed,
     Sprite,
+    Mesh,   // 3D Cube/Sphere head renderer
     Trail,
     OscDrive, // link Protocol XY / params to this emitter (not a special actor)
     Count,
