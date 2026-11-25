@@ -468,6 +468,7 @@ json particleEmitterToJson(const ParticleEmitter& e) {
         {"render_mesh", renderMeshName(e.render_mesh)},
         {"sprite_aspect", e.sprite_aspect},
         {"velocity_stretch", e.velocity_stretch},
+        {"osc_drive", e.osc_drive},
         {"trail_enabled", e.trail_enabled},
         {"trail_segments", e.trail_segments},
         {"trail_sample_distance", e.trail_sample_distance},
@@ -551,6 +552,7 @@ ParticleEmitter particleEmitterFromJson(const json& j) {
     }
     e.sprite_aspect = j.value("sprite_aspect", e.sprite_aspect);
     e.velocity_stretch = j.value("velocity_stretch", e.velocity_stretch);
+    e.osc_drive = j.value("osc_drive", e.osc_drive);
     e.trail_enabled = j.value("trail_enabled", e.trail_enabled);
     e.trail_segments = static_cast<std::uint8_t>(
         std::clamp(j.value("trail_segments", static_cast<int>(e.trail_segments)), 2, 24));

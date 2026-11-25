@@ -96,7 +96,7 @@ void ImGuiLayer::loadFonts(float ui_scale) {
     // Do not bake display DPI into the atlas — ImGui SDL3 sets DisplayFramebufferScale.
     // Only the user/editor ui_scale enlarges the base 16 px face.
     const float dpi = displayContentScale(window_);
-    const float scale = std::clamp(ui_scale > 0.01f ? ui_scale : 1.0f, 1.0f, 2.5f);
+    const float scale = std::clamp(ui_scale > 0.01f ? ui_scale : 1.0f, 1.0f, 3.0f);
     const float size_px = 16.0f * scale;
 
     // Linux cloud image → Inter; Windows → Segoe UI; else Noto / Proggy default.

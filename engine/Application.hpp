@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/FrameStats.hpp"
+#include "platform/FrameLimiter.hpp"
 #include "platform/Input.hpp"
 #include "platform/Timer.hpp"
 #include "platform/Window.hpp"
@@ -19,6 +20,9 @@ struct ApplicationConfig {
     bool start_fullscreen = false;
     // Applied to ImGui fonts at CreateContext (1.0 = 16 px base before DPI).
     float ui_scale = 1.0f;
+    // Frame pacing (editor + any Application-based host). On @ 50 by default.
+    bool fps_cap_enabled = true;
+    float fps_cap = 50.0f;
 };
 
 class Application {
@@ -42,6 +46,9 @@ protected:
     const FrameStats& frameStats() const { return frame_stats_; }
     void setRenderStatsEnabled(bool enabled) { show_render_stats_ = enabled; }
 
+    FrameLimiter& frameLimiter() { return frame_limiter_; }
+    const FrameLimiter& frameLimiter() const { return frame_limiter_; }
+
 private:
     void pollEvents();
 
@@ -49,6 +56,7 @@ private:
     std::unique_ptr<Renderer> renderer_;
     Input input_;
     Timer timer_;
+    FrameLimiter frame_limiter_{};
     FrameStats frame_stats_{};
     bool show_render_stats_ = false;
 };

@@ -182,11 +182,12 @@
       }
     },
     {
-      "path": "Scene/Particle System/OSC Tracker",
-      "name": "OSC Tracker",
+      "path": "Scene/Particle System/Driven",
+      "name": "Driven",
       "parent": "Scene/Particle System",
       "visible": true,
       "particle_emitter": {
+        "osc_drive": true,
         "enabled": false,
         "looping": true,
         "world_space": true,

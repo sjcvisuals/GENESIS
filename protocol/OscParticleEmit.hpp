@@ -27,7 +27,7 @@ enum class OscParticlePlane : std::uint8_t {
 struct OscParticleEmitSettings {
     bool enabled = true;
     std::string address = "/genesis/particles/emit";
-    std::string emitter_path = "Scene/Particle System/OSC Tracker";
+    std::string emitter_path = "Scene/Particle System/Soft Circles";
     OscParticlePlane plane = OscParticlePlane::XZ;
     float plane_height = 0.15f;
     float scale = 1.0f;

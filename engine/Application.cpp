@@ -25,6 +25,11 @@ Application::Application(const ApplicationConfig& config) {
     renderer_ = std::make_unique<Renderer>(*window_, config.ui_scale);
     renderer_->enableImGuiLayoutPersistence();
 
+    frame_limiter_.setEnabled(config.fps_cap_enabled);
+    frame_limiter_.setTargetFps(config.fps_cap > 0.0f ? config.fps_cap : 50.0f);
+    spdlog::info("Frame limiter {} @ {:.0f} FPS",
+                 frame_limiter_.enabled() ? "ON" : "OFF", frame_limiter_.targetFps());
+
     // WinSparkle / update feed — after the main window exists so UI can attach.
     AutoUpdateConfig update_cfg{};
     update_cfg.check_on_startup = true;
@@ -50,6 +55,7 @@ int Application::run() {
         const double perf_freq = static_cast<double>(SDL_GetPerformanceFrequency());
 
         while (!window_->shouldClose()) {
+            frame_limiter_.beginFrame();
             const uint64_t frame_start = SDL_GetPerformanceCounter();
 
             timer_.tick();
@@ -83,6 +89,8 @@ int Application::run() {
             frame_stats_.draw_ms =
                 static_cast<float>(static_cast<double>(draw_end - imgui_end) * 1000.0 / perf_freq);
             (void)frame_start;
+
+            frame_limiter_.endFrame();
         }
     } catch (const std::exception& ex) {
         spdlog::critical("Runtime error: {}", ex.what());

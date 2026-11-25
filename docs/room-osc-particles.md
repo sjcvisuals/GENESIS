@@ -18,19 +18,16 @@ Dual-ring cylindrical room soft-particle demo driven by OSC person tracking. Par
 | **Outer wall (math)** | radius 3 m | Center→person ray at fixed distance (default) |
 | **Wall plane (optional)** | **one** user-placed Plane | Center→person ray ↔ that panel; miss → fixed radius |
 
-### Tugela hierarchy
+### Tugela hierarchy (authored scene)
 
 ```
 Particle System
-├── Outer Ring              # ambient rise on 6 m ring
-└── Inner Tank Ring         # ambient floor-outward on 2 m ring
-Person Pool                 # 10 slots × Feet + Wall (constant load)
-├── Feet 00 … Feet 09       # horizontal cylinder drift at feet (no rise)
-└── Wall 00 … Wall 09       # rise at 3 m wall hit (like outer ring)
+├── Outer Ring          # ambient rise on 6 m ring
+└── Inner Tank Ring     # ambient floor-outward on 2 m ring
 Camera
 ```
 
-Idle person IDs park **both** Feet + Wall emitters at **world origin** (no spawn/despawn). Design capacity is 20 slots; install uses 10.
+**No pre-baked Person Pool.** When Protocol → **Enable room person** is on and `/genesis/room/person` messages arrive, Feet/Wall emitters are created **lazily** under `Scene/Person Pool` for active ids only. Idle pairs park at origin (disabled); they are not spawned just to fill slots. Build your own stack as you like — Duplicate / Shift+select Delete work in the Hierarchy.
 
 ## OSC addresses
 
@@ -48,37 +45,31 @@ Listen defaults: **UDP `0.0.0.0:9000`** (Protocol panel).
 
 **Behavior:**
 
-1. Map person **id** → pool slot (max 10 active).
-2. Move that slot’s **Feet** emitter to the person (horizontal cylinder drift).
-3. Cast center→person for the **Wall** emitter:
-   - **Fixed distance** (default): hit at `room_radius` (~3 m).
-   - **Plane collision** / **Prefer plane → distance**: intersect optional scene Plane (`Scene/Wall Plane` by default; mesh faces +Y — rotate upright for a wall). Miss falls back to fixed distance.
-4. If no messages for `slot_idle_seconds` (~0.75 s), park both emitters at origin.
+1. Map person **id** → slot (up to `max_persons`).
+2. Create that slot’s **Feet** / **Wall** emitters on first message (if missing).
+3. Move **Feet** to the person; cast center→person for **Wall** (fixed radius and/or one scene Plane).
+4. After `slot_idle_seconds` with no messages, park existing emitters at origin (disabled).
 
 ### `/genesis/particles/emit` (still supported)
 
-Generic XY tracker emit. On the room example it defaults to `Scene/Person Pool/Feet 00`.
+Generic XY tracker emit. Defaults can point at `Scene/Person Pool/Feet 00` once that leaf exists.
 
 ## Protocol settings
 
 `OscRoomPersonSettings` (Protocol UI → **Room person**):
 
-- `max_persons` — active slots (default 10; capacity 20)
+- **Enable room person** — off by default (blank launch stays empty)
+- `max_persons` — max concurrent OSC ids that may create Feet+Wall pairs
 - `slot_idle_seconds` — park timeout
 - `room_radius` / `tank_radius` — 3 m / 1 m
 - `wall_ray_mode` — Fixed distance | Plane collision | Prefer plane → distance
 - `wall_plane_path` — Hierarchy path to Plane actor (default `Scene/Wall Plane`)
 - `debug_draw_wall_ray` — viewport line + hit marker (off by default; editor-only)
-- optional bursts (off by default; continuous emitter rate preferred)
 
-**Hidden in Game:** actors expose an Unreal-like flag (Inspector → Hidden in Game; hierarchy badge `· HG`). Editor view draws them; Game View (`G`) and Pixera Renderbridge output skip their meshes. Collisions still run — the demo Wall Plane defaults Hidden in Game so wall particles hit/spawn while the plane stays invisible on output.
-
-## Demo media
-
-Store: `/cursor/stores/bc-bfd4a606-4e38-4cd5-93d8-8ae247b97bf2/media/` — `person_emit_*`, `hidden_in_game_{editor,game}.png`
+**Hidden in Game:** actors expose an Unreal-like flag (Inspector → Hidden in Game; hierarchy badge `· HG`). Editor view draws them; Game View (`G`) and Pixera Renderbridge output skip their meshes. Collisions still run.
 
 ## Renderbridge notes
 
-- ExtGenesis (`Input::render`) applies `applyRoomPerson` with per-stream cursors; loading `room_osc_particles` configures the person pool + 6 m/2 m radii.
-- Soft Circles **motion updates run on GPU compute** (`particle_update.comp`); spawn/OSC stay CPU-authored. Trails sample after GPU readback.
-- Prefer `/genesis/room/person` `,iff` at 10–30 Hz for smooth multi-person tracking.
+- ExtGenesis applies `applyRoomPerson` with per-stream cursors; loading `room_osc_particles` configures radii / listen — it does **not** bake a 10×2 emitter pool into the scene.
+- Soft Circles motion updates run on GPU compute; spawn/OSC stay CPU-authored.
+- Prefer `/genesis/room/person` `,iff` at 10–30 Hz for smooth tracking.

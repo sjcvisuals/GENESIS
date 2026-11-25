@@ -23,7 +23,7 @@ ImFont* loadGenesisEditorFonts(float ui_scale) {
     ImGuiIO& io = ImGui::GetIO();
     io.Fonts->Clear();
 
-    const float scale = std::clamp(ui_scale > 0.01f ? ui_scale : 1.0f, 1.0f, 2.5f);
+    const float scale = std::clamp(ui_scale > 0.01f ? ui_scale : 1.0f, 1.0f, 3.0f);
     // Match ImGuiLayer: bake ui_scale only; DisplayFramebufferScale handles DPI.
     const float kUi = 16.0f * scale;
 
@@ -96,7 +96,7 @@ void applyGenesisEditorTheme(float ui_scale) {
     style.HoverStationaryDelay = 0.12f;
     style.HoverDelayNormal = 0.35f;
 
-    const float scale = std::clamp(ui_scale > 0.01f ? ui_scale : 1.0f, 1.0f, 2.5f);
+    const float scale = std::clamp(ui_scale > 0.01f ? ui_scale : 1.0f, 1.0f, 3.0f);
     if (scale != 1.0f) {
         style.ScaleAllSizes(scale);
     }

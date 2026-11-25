@@ -112,9 +112,9 @@ void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ct
             ImGui::TextUnformatted(c->name.c_str());
             ImGui::SameLine();
             ImGui::TextDisabled(enabled ? "on" : "off");
-            ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - 64.0f);
-            if (ImGui::SmallButton("Select")) {
-                if (ctx.select_node) {
+            if (ctx.select_node) {
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Select")) {
                     ctx.select_node(child);
                 }
             }
@@ -160,9 +160,6 @@ void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ct
             trail.trail_enabled = true;
             addEmitter("Trail", trail);
         }
-        if (ImGui::Button("OSC Tracker", ImVec2(-1.0f, 0))) {
-            addEmitter("OSC Tracker", makeOscTrackerBubbleEmitter());
-        }
         moduleIndentEnd();
     }
 }
@@ -203,11 +200,8 @@ void drawParticleEmitterInspector(Node& emitter_node, const std::string& node_pa
         e = makeGentleSoftEmitter();
         dirty = true;
     }
-    ImGui::SameLine();
-    if (ImGui::SmallButton("OSC Tracker")) {
-        e = makeOscTrackerBubbleEmitter();
-        dirty = true;
-    }
+    ImGui::Spacing();
+    ImGui::TextDisabled("OSC: link params via Protocol window, or add OSC Drive in Tugela.");
     ImGui::Spacing();
 
     // --- Emitter Properties ---
@@ -243,6 +237,18 @@ void drawParticleEmitterInspector(Node& emitter_node, const std::string& node_pa
     if (moduleHeader("1  ·  Spawn Rate", true)) {
         moduleIndentBegin();
         dirty |= ImGui::DragFloat("Rate / s", &e.rate_per_second, 0.5f, 0.0f, 20000.0f);
+        if (ctx.emitter_live) {
+            const EmitterLiveUiStats live = ctx.emitter_live(emitter_node.id);
+            if (live.found) {
+                ImGui::TextDisabled("Alive %u  ·  Running %.1f / s", live.alive,
+                                    live.measured_spawn_rate);
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip(
+                        "Measured spawn rate over ~0.25 s (actual births/sec). "
+                        "Compare to Rate / s when diagnosing hitching.");
+                }
+            }
+        }
         if (ctx.osc) {
             drawOscLinkButton(*ctx.osc, OscParamTarget::ParticleRate, node_path, 0, "p_rate");
         }

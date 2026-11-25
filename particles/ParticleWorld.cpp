@@ -199,6 +199,7 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
     ParticleEmitter authored = desc;
     syncEmitterCurvesFromEndpoints(authored);
 
+    std::uint32_t spawned = 0;
     for (std::uint32_t i = 0; i < count; ++i) {
         if (runtime.alive_count >= desc.max_particles) {
             break;
@@ -208,6 +209,7 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
         Particle& p = particles_[slot];
         p = Particle{};
         p.alive = true;
+        ++spawned;
         p.emitter_node = runtime.node_id;
         p.emit_index = emit_index;
         p.age = 0.0f;
@@ -389,6 +391,32 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
         }
         ++runtime.alive_count;
     }
+    runtime.spawned_window += spawned;
+}
+
+ParticleWorld::EmitterLiveStats ParticleWorld::emitterLiveStats(NodeId emitter_node,
+                                                                const Scene& scene) const {
+    EmitterLiveStats out{};
+    if (emitter_node == 0) {
+        return out;
+    }
+    const EmitterRuntime* runtime = nullptr;
+    for (const EmitterRuntime& er : emitters_) {
+        if (er.node_id == emitter_node) {
+            runtime = &er;
+            break;
+        }
+    }
+    if (!runtime) {
+        return out;
+    }
+    out.found = true;
+    out.alive = runtime->alive_count;
+    out.measured_spawn_rate = runtime->measured_spawn_rate;
+    if (const Node* node = scene.find(emitter_node); node && node->particle_emitter.has_value()) {
+        out.authored_rate = node->particle_emitter->rate_per_second;
+    }
+    return out;
 }
 
 void ParticleWorld::stepOnce(Scene& scene, float dt, bool update_particles) {
@@ -472,6 +500,15 @@ void ParticleWorld::stepOnce(Scene& scene, float dt, bool update_particles) {
                 runtime.distance_spawn_accumulator -= static_cast<double>(to_spawn);
                 spawnFromEmitter(scene, runtime, desc, *node, to_spawn);
             }
+        }
+
+        // Short-window measured spawn rate for inspector / hitch diagnosis.
+        runtime.window_seconds += dt;
+        if (runtime.window_seconds >= 0.25f) {
+            runtime.measured_spawn_rate =
+                static_cast<float>(runtime.spawned_window) / runtime.window_seconds;
+            runtime.spawned_window = 0;
+            runtime.window_seconds = 0.0f;
         }
     }
 

@@ -17,6 +17,13 @@ struct ParticleWorldStatsLite {
     std::uint32_t steps = 0;
 };
 
+struct EmitterLiveUiStats {
+    std::uint32_t alive = 0;
+    float measured_spawn_rate = 0.0f;
+    float authored_rate = 0.0f;
+    bool found = false;
+};
+
 struct ParticleEmitterUiContext {
     Scene* scene = nullptr;
     OscLinkUiContext* osc = nullptr;
@@ -25,6 +32,8 @@ struct ParticleEmitterUiContext {
     std::function<void()> reset_particles;
     std::function<void(NodeId)> select_node;
     std::function<ParticleWorldStatsLite()> stats;
+    // Optional: per-emitter alive + measured spawn rate (particles/sec).
+    std::function<EmitterLiveUiStats(NodeId)> emitter_live;
 };
 
 // True when this empty/parent node owns one or more emitter children (Tugela System).
