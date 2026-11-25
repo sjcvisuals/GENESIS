@@ -117,6 +117,8 @@ const char* stackLabel(TugelaStackMod mod) {
         return "Burst";
     case TugelaStackMod::Shape:
         return "Shape Location";
+    case TugelaStackMod::SpawnByDistance:
+        return "Spawn by Distance";
     case TugelaStackMod::Lifetime:
         return "Lifetime";
     case TugelaStackMod::Velocity:
@@ -139,6 +141,10 @@ const char* stackLabel(TugelaStackMod mod) {
         return "Acceleration";
     case TugelaStackMod::KillPlane:
         return "Kill Plane";
+    case TugelaStackMod::KillBox:
+        return "Kill Box";
+    case TugelaStackMod::FluidCoupled:
+        return "Fluid Coupled";
     case TugelaStackMod::SizeOverLife:
         return "Size over Life";
     case TugelaStackMod::ColorOverLife:
@@ -163,6 +169,7 @@ TugelaModuleKind stageForStack(TugelaStackMod mod) {
     case TugelaStackMod::SpawnRate:
     case TugelaStackMod::Burst:
     case TugelaStackMod::Shape:
+    case TugelaStackMod::SpawnByDistance:
     case TugelaStackMod::OscDrive:
         return TugelaModuleKind::Spawn;
     case TugelaStackMod::Lifetime:
@@ -177,6 +184,8 @@ TugelaModuleKind stageForStack(TugelaStackMod mod) {
     case TugelaStackMod::Noise:
     case TugelaStackMod::Accel:
     case TugelaStackMod::KillPlane:
+    case TugelaStackMod::KillBox:
+    case TugelaStackMod::FluidCoupled:
         return TugelaModuleKind::Update;
     case TugelaStackMod::SizeOverLife:
     case TugelaStackMod::ColorOverLife:
@@ -222,6 +231,10 @@ bool stackEnabled(TugelaStackMod mod, const ParticleEmitter& e) {
         return e.force_accel;
     case TugelaStackMod::KillPlane:
         return e.kill_plane;
+    case TugelaStackMod::KillBox:
+        return e.kill_box;
+    case TugelaStackMod::FluidCoupled:
+        return e.fluid_coupled;
     case TugelaStackMod::SizeOverLife:
         return e.mod_size_over_life && e.size_over_life.count > 0;
     case TugelaStackMod::ColorOverLife:
@@ -236,6 +249,8 @@ bool stackEnabled(TugelaStackMod mod, const ParticleEmitter& e) {
         return e.trail_enabled;
     case TugelaStackMod::OscDrive:
         return e.osc_drive;
+    case TugelaStackMod::SpawnByDistance:
+        return e.spawn_per_unit > 0.0f;
     default:
         return false;
     }
@@ -257,6 +272,7 @@ bool stackPresent(TugelaStackMod mod, const ParticleEmitter& e) {
         return true; // always listed under Render — Mesh was the hidden Sphere fallback
     case TugelaStackMod::Burst:
         return e.burst_count > 0 || e.burst_entries > 0;
+    case TugelaStackMod::SpawnByDistance:
     case TugelaStackMod::Gravity:
     case TugelaStackMod::Drag:
     case TugelaStackMod::PointForce:
@@ -264,6 +280,8 @@ bool stackPresent(TugelaStackMod mod, const ParticleEmitter& e) {
     case TugelaStackMod::Noise:
     case TugelaStackMod::Accel:
     case TugelaStackMod::KillPlane:
+    case TugelaStackMod::KillBox:
+    case TugelaStackMod::FluidCoupled:
     case TugelaStackMod::ScaleBySpeed:
     case TugelaStackMod::Trail:
     case TugelaStackMod::OscDrive:
@@ -338,6 +356,21 @@ void setStackEnabled(TugelaStackMod mod, ParticleEmitter& e, bool on) {
     case TugelaStackMod::KillPlane:
         e.kill_plane = on;
         break;
+    case TugelaStackMod::KillBox:
+        e.kill_box = on;
+        break;
+    case TugelaStackMod::FluidCoupled:
+        e.fluid_coupled = on;
+        break;
+    case TugelaStackMod::SpawnByDistance:
+        if (on) {
+            if (e.spawn_per_unit <= 0.0f) {
+                e.spawn_per_unit = 8.0f;
+            }
+        } else {
+            e.spawn_per_unit = 0.0f;
+        }
+        break;
     case TugelaStackMod::SizeOverLife:
         e.mod_size_over_life = on;
         if (on && e.size_over_life.count == 0) {
@@ -388,17 +421,13 @@ void collectStageStack(TugelaModuleKind stage, const ParticleEmitter& e,
     }
 }
 
-void collectAddableForStage(TugelaModuleKind stage, const ParticleEmitter& e,
-                            std::vector<TugelaStackMod>& out) {
+// Full catalog for a stage — derived from TugelaStackMod::Count so new leaf
+// modules cannot be omitted from the "+" directory.
+void collectStageDirectory(TugelaModuleKind stage, std::vector<TugelaStackMod>& out) {
     out.clear();
-    static constexpr TugelaStackMod kOptional[] = {
-        TugelaStackMod::Burst,        TugelaStackMod::OscDrive,     TugelaStackMod::Gravity,
-        TugelaStackMod::Drag,         TugelaStackMod::PointForce,   TugelaStackMod::Vortex,
-        TugelaStackMod::Noise,        TugelaStackMod::Accel,        TugelaStackMod::KillPlane,
-        TugelaStackMod::ScaleBySpeed, TugelaStackMod::Trail,
-    };
-    for (const TugelaStackMod mod : kOptional) {
-        if (stageForStack(mod) == stage && !stackPresent(mod, e)) {
+    for (int i = 0; i < static_cast<int>(TugelaStackMod::Count); ++i) {
+        const auto mod = static_cast<TugelaStackMod>(i);
+        if (stageForStack(mod) == stage) {
             out.push_back(mod);
         }
     }
@@ -647,13 +676,31 @@ void drawStackModuleInspector(ParticleEmitter& e, TugelaStackMod mod, ParticleEm
         if (ctx.osc) {
             drawOscLinkButton(*ctx.osc, OscParamTarget::ParticleRate, node_path, 0, "tg_rate");
         }
+        break;
+    case TugelaStackMod::SpawnByDistance:
         dirty |= ImGui::DragFloat("Spawn / meter", &e.spawn_per_unit, 0.1f, 0.0f, 500.0f);
+        ImGui::TextDisabled("Emits as the emitter travels (OSC trackers, movers).");
         break;
     case TugelaStackMod::Burst: {
         int burst = static_cast<int>(e.burst_count);
         if (ImGui::DragInt("Burst @ t=0", &burst, 1, 0, 100000)) {
             e.burst_count = static_cast<std::uint32_t>(std::max(burst, 0));
             dirty = true;
+        }
+        int burst_entries = static_cast<int>(e.burst_entries);
+        if (ImGui::DragInt("Timed bursts", &burst_entries, 1, 0, 4)) {
+            e.burst_entries = static_cast<std::uint8_t>(std::clamp(burst_entries, 0, 4));
+            dirty = true;
+        }
+        for (std::uint8_t bi = 0; bi < e.burst_entries; ++bi) {
+            ImGui::PushID(static_cast<int>(bi));
+            dirty |= ImGui::DragFloat("Burst time", &e.bursts[bi].time_seconds, 0.01f, 0.0f, 120.0f);
+            int bc = static_cast<int>(e.bursts[bi].count);
+            if (ImGui::DragInt("Burst count", &bc, 1, 0, 100000)) {
+                e.bursts[bi].count = static_cast<std::uint32_t>(std::max(bc, 0));
+                dirty = true;
+            }
+            ImGui::PopID();
         }
         break;
     }
@@ -719,6 +766,15 @@ void drawStackModuleInspector(ParticleEmitter& e, TugelaStackMod mod, ParticleEm
     case TugelaStackMod::KillPlane:
         dirty |= ImGui::DragFloat("Kill plane Y", &e.kill_plane_y, 0.05f);
         break;
+    case TugelaStackMod::KillBox:
+        dirty |= ImGui::DragFloat3("Kill box min", &e.kill_box_min.x, 0.05f);
+        dirty |= ImGui::DragFloat3("Kill box max", &e.kill_box_max.x, 0.05f);
+        ImGui::TextDisabled("Particles die outside this world AABB.");
+        break;
+    case TugelaStackMod::FluidCoupled:
+        ImGui::TextWrapped(
+            "Couples particle motion to the scene fluid field when one is present.");
+        break;
     case TugelaStackMod::SizeOverLife:
         dirty |= ImGui::DragFloat("Size end mul", &e.size_end_multiplier, 0.01f, 0.0f, 2.0f);
         if (ImGui::Button("Rebuild size curve")) {
@@ -742,7 +798,9 @@ void drawStackModuleInspector(ParticleEmitter& e, TugelaStackMod mod, ParticleEm
         dirty |= ImGui::Checkbox("Unlit", &e.unlit);
         dirty |= ImGui::Checkbox("Soft additive", &e.additive);
         dirty |= ImGui::DragFloat("Sprite aspect", &e.sprite_aspect, 0.01f, 0.05f, 8.0f);
-        ImGui::TextDisabled("Soft circle billboard · disable + Mesh/Trail off = invisible");
+        dirty |= ImGui::DragFloat("Velocity stretch", &e.velocity_stretch, 0.01f, 0.0f, 8.0f);
+        ImGui::TextDisabled(
+            "Soft circle · stretch along velocity · Sprite+Mesh+Trail off = invisible");
         break;
     case TugelaStackMod::Mesh: {
         dirty |= ImGui::Checkbox("Unlit", &e.unlit);
@@ -901,10 +959,10 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
         graphAddText(draw, ImVec2(p0.x + m.pad, header_text_y), IM_COL32(220, 230, 235, 255),
                      stageLabel(stage), m.font);
 
-        // "+ Add" affordance for optional modules
-        std::vector<TugelaStackMod> addable;
-        collectAddableForStage(stage, e, addable);
-        if (!addable.empty()) {
+        // "+ Add" opens the full stage module directory (core + optional).
+        std::vector<TugelaStackMod> stage_dir;
+        collectStageDirectory(stage, stage_dir);
+        if (!stage_dir.empty()) {
             const float add_pad = (m.stage_header_h - add_btn) * 0.5f;
             const ImVec2 add_p0(p1.x - add_btn - m.pad * 0.6f, p0.y + add_pad);
             const ImVec2 add_p1(p1.x - m.pad * 0.6f, p0.y + add_pad + add_btn);
@@ -917,6 +975,9 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
                          ImVec2(add_p0.x + (add_btn - plus_w) * 0.5f,
                                 add_p0.y + (add_btn - m.font) * 0.5f),
                          IM_COL32(180, 220, 230, 255), "+", m.font);
+            if (add_hov) {
+                ImGui::SetTooltip("Module directory · %s", stageLabel(stage));
+            }
             if (allow_pick && add_hov && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
                 popup_stage = stage;
                 open_add_popup = true;
@@ -1006,19 +1067,40 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
         ImGui::OpenPopup("tugela_add_mod");
     }
     if (ImGui::BeginPopup("tugela_add_mod")) {
-        ImGui::TextDisabled("Add module · %s", stageLabel(popup_stage));
-        std::vector<TugelaStackMod> addable;
-        collectAddableForStage(popup_stage, e, addable);
-        for (const TugelaStackMod mod : addable) {
-            if (ImGui::MenuItem(stackLabel(mod))) {
+        ImGui::TextColored(kAccent, "%s modules", stageLabel(popup_stage));
+        ImGui::TextDisabled("Click to add · grey = already on stack");
+        ImGui::Separator();
+        std::vector<TugelaStackMod> directory;
+        collectStageDirectory(popup_stage, directory);
+        int added = 0;
+        for (const TugelaStackMod mod : directory) {
+            const bool on_stack = stackPresent(mod, e);
+            if (on_stack) {
+                ImGui::BeginDisabled();
+                ImGui::MenuItem(stackLabel(mod), nullptr, true);
+                ImGui::EndDisabled();
+            } else if (ImGui::MenuItem(stackLabel(mod))) {
                 setStackEnabled(mod, e, true);
                 state.focus_stack = mod;
                 state.focus_module = popup_stage;
                 mark(ctx);
+                ++added;
             }
         }
-        if (addable.empty()) {
-            ImGui::TextDisabled("Nothing left to add.");
+        if (directory.empty()) {
+            ImGui::TextDisabled("No modules for this stage.");
+        } else {
+            bool any_addable = false;
+            for (const TugelaStackMod mod : directory) {
+                if (!stackPresent(mod, e)) {
+                    any_addable = true;
+                    break;
+                }
+            }
+            if (!any_addable && added == 0) {
+                ImGui::Spacing();
+                ImGui::TextDisabled("All modules already on stack.");
+            }
         }
         ImGui::EndPopup();
         (void)popup_add_stage_mod;
@@ -1037,7 +1119,7 @@ void drawModuleGraph(TugelaEditorState& state, Scene& scene, const std::vector<N
     ImGui::Spacing();
     ImGui::PushTextWrapPos(0.0f);
     ImGui::TextColored(kMuted,
-                       "Stack · □ enable · + add · scroll zoom · MMB / LMB-drag pan");
+                       "Stack · □ enable · + directory · scroll zoom · MMB / LMB-drag pan");
     ImGui::PopTextWrapPos();
     ImGui::Spacing();
 
