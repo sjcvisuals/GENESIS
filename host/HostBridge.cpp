@@ -270,7 +270,8 @@ void HostBridge::prepareFrameUniforms(const HostFrameInput& input) {
 
     frame_uniforms_ = buildFrameUniforms(scene_->scene(), &view_proj[0][0], camera_pos,
                                          &look_settings_,
-                                         static_cast<float>(current_frame_time_.production_time_seconds));
+                                         static_cast<float>(current_frame_time_.production_time_seconds),
+                                         true);
 }
 
 void HostBridge::beginFrame(const HostFrameInput& input) {
@@ -303,6 +304,7 @@ void HostBridge::renderScene() {
     collect_params.view_proj_col_major = frame_uniforms_.view_proj;
     collect_params.enable_cpu_culling = true;
     collect_params.enable_gpu_culling = false;
+    collect_params.game_output = true; // host/player output: honor Hidden in Game
     collectSceneDrawCommands(*scene_, draw_commands_, &render_stats, collect_params);
 
     frame_stats_.draw_calls = render_stats.draw_calls;

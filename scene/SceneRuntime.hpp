@@ -41,7 +41,7 @@ struct SceneDrawCollectParams {
     const float* view_proj_col_major = nullptr;
     bool enable_cpu_culling = true;
     bool enable_gpu_culling = true;
-    // When true (Game View / Pixera Renderbridge), skip actors with hidden_in_game.
+    // When true (Game View / Pixera Renderbridge), apply Hidden-in-Game via isNodeDrawnInView.
     bool game_output = false;
 };
 
@@ -148,12 +148,14 @@ public:
     ParticleWorld& particleWorld() { return particle_world_; }
     const ParticleWorld& particleWorld() const { return particle_world_; }
     void setParticleViewBasis(const glm::vec3& camera_right, const glm::vec3& camera_up);
-    void appendParticleDrawCommands(std::vector<SceneDrawCommand>& out);
+    void appendParticleDrawCommands(std::vector<SceneDrawCommand>& out,
+                                    bool game_output = false);
 
     FluidWorld& fluidWorld() { return fluid_world_; }
     const FluidWorld& fluidWorld() const { return fluid_world_; }
     void simulateFluids(VkCommandBuffer cmd, float dt_seconds);
-    void appendFluidDrawCommands(std::vector<SceneDrawCommand>& out);
+    void appendFluidDrawCommands(std::vector<SceneDrawCommand>& out,
+                                 bool game_output = false);
 
 private:
     void loadGltfSource(const std::filesystem::path& path);

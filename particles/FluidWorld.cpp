@@ -1,5 +1,7 @@
 #include "particles/FluidWorld.hpp"
 
+#include "scene/SceneVisibility.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <glm/gtc/matrix_transform.hpp>
@@ -43,7 +45,9 @@ void FluidWorld::sync(Scene& scene) {
 void FluidWorld::rebuildDrawItems(Scene& scene) {
     draw_items_.clear();
     for (Node& node : scene.nodes) {
-        if (!node.visible || !node.particle_fluid.has_value()) {
+        // Editor-time gate only (Visible + ancestry). Hidden-in-Game is applied at append
+        // with game_output so Game View / Renderbridge stay in lockstep with meshes.
+        if (!node.particle_fluid.has_value() || !isNodeDrawnInView(scene, node, false)) {
             continue;
         }
         const FluidVolume& volume = *node.particle_fluid;
@@ -82,7 +86,7 @@ void FluidWorld::simulate(VkCommandBuffer cmd, Scene& scene, const float dt_seco
         }
 
         for (Node& node : scene.nodes) {
-            if (!node.visible || !node.particle_fluid.has_value()) {
+            if (!node.particle_fluid.has_value() || !isNodeDrawnInView(scene, node, false)) {
                 continue;
             }
             auto it = grids_.find(node.id);

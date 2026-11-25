@@ -56,8 +56,8 @@ void simulateSceneFluids(VkCommandBuffer cmd, SceneRuntime& scene, const float d
 void collectSceneDrawCommands(SceneRuntime& scene, std::vector<SceneDrawCommand>& out,
                               SceneRenderStats* out_stats, const SceneDrawCollectParams& params) {
     scene.collectDrawCommands(out, out_stats, params);
-    scene.appendFluidDrawCommands(out);
-    scene.appendParticleDrawCommands(out);
+    scene.appendFluidDrawCommands(out, params.game_output);
+    scene.appendParticleDrawCommands(out, params.game_output);
 
     if (!out_stats) {
         return;

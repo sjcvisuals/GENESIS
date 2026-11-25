@@ -115,7 +115,8 @@ void MultiViewSession::prepareFrameUniforms(const OutputSlot& slot, const glm::d
 
     out_uniforms = buildFrameUniforms(scene_->scene(), glm::value_ptr(view_proj_f), camera_pos,
                                       &look_settings_,
-                                      static_cast<float>(current_frame_time_.production_time_seconds));
+                                      static_cast<float>(current_frame_time_.production_time_seconds),
+                                      true);
 }
 
 MultiViewFrameMetrics MultiViewSession::renderAllOutputs(const glm::dmat4& host_view,

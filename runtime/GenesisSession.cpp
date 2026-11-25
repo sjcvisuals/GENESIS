@@ -99,7 +99,8 @@ void GenesisSession::prepareFrameUniforms(const glm::dmat4& view, const glm::dma
 
     frame_uniforms_ = buildFrameUniforms(scene_->scene(), glm::value_ptr(view_proj_f), camera_pos,
                                          &look_settings_,
-                                         static_cast<float>(frame_time.production_time_seconds));
+                                         static_cast<float>(frame_time.production_time_seconds),
+                                         true);
 }
 
 void GenesisSession::render(const glm::dmat4& view,

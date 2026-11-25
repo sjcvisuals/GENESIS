@@ -33,6 +33,7 @@
 #include "scene/SceneDrawBatch.hpp"
 #include "scene/ScenePicker.hpp"
 #include "scene/ScenePath.hpp"
+#include "scene/SceneVisibility.hpp"
 #include "particles/ParticleEmitter.hpp"
 #include "protocol/OscProtocol.hpp"
 #include "audio/AudioReactive.hpp"
@@ -357,7 +358,8 @@ protected:
         const glm::mat4 vp = outputViewProjection(renderAspect());
         genesis::FrameUniforms frame =
             genesis::buildFrameUniforms(runtime_.scene(), &vp[0][0], outputCameraPosition(),
-                                        &color_mgmt_.settings(), look_time_seconds_);
+                                        &color_mgmt_.settings(), look_time_seconds_,
+                                        game_view_mode_);
         // Particle look demos: pure black unlit stage (no ambient wash / fog fill).
         frame.ibl_intensity = 0.0f;
         frame.ambient_sky[0] = 0.0f;
@@ -400,7 +402,7 @@ protected:
         }
         // GPU particle motion flush (immediate compute submit) before collecting sprites.
         runtime_.flushParticleGpuUpdates(VK_NULL_HANDLE);
-        runtime_.appendParticleDrawCommands(draw_commands_);
+        runtime_.appendParticleDrawCommands(draw_commands_, game_view_mode_);
         render_stats.draw_calls = static_cast<std::uint32_t>(draw_commands_.size());
         // Recount triangles roughly including particles.
         render_stats.triangles = 0;
@@ -1051,6 +1053,7 @@ private:
             if (n->mesh_resource.has_value()) label += "  · M";
             if (n->camera.has_value()) label += "  · C";
             if (n->light.has_value()) label += "  · L";
+            if (!n->visible) label += "  · Hidden";
             if (n->hidden_in_game) label += "  · HG";
             if (const char* badge = genesis::particleHierarchyBadge(scene, *n);
                 badge[0] != '\0') {
@@ -1217,13 +1220,18 @@ private:
 
             bool changed = false;
             if (ImGui::Checkbox("Visible", &n->visible)) changed = true;
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Show/hide this actor (and descendants) in the editor, Game View, and output. "
+                    "Selection never overrides — outline only when the actor would draw.");
+            }
             genesis::drawOscLinkButton(link_ctx, genesis::OscParamTarget::NodeVisible, node_path, 0,
                                        "visible");
             if (ImGui::Checkbox("Hidden in Game", &n->hidden_in_game)) changed = true;
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip(
-                    "Unreal-like: shown in editor, hidden in Game View (G) and Pixera Renderbridge "
-                    "output. Collisions still apply (e.g. Wall Plane hits).");
+                    "Unreal-like: still shown in the editor; omitted in Game View (G) and Pixera "
+                    "Renderbridge. Visible=off always wins. Collisions still apply.");
             }
             if (n->camera.has_value()) {
                 ImGui::BeginDisabled();
@@ -2255,6 +2263,7 @@ private:
         genesis::ScenePickParams params{};
         params.meshes_only = false;
         params.exclude_cameras = true;
+        params.game_output = game_view_mode_;
 
         if (std::optional<genesis::ScenePickResult> picked = runtime_.pickNodeAtRay(ray, params)) {
             if (additive) {
@@ -2282,6 +2291,7 @@ private:
         genesis::ScenePickParams params{};
         params.meshes_only = false;
         params.exclude_cameras = true;
+        params.game_output = game_view_mode_;
 
         std::vector<genesis::NodeId> hits;
         genesis::pickNodesInScreenRect(runtime_.scene(), runtime_.meshes(), view_proj, viewport_.w,
@@ -2378,7 +2388,8 @@ private:
         constexpr float kIconRadius = 11.0f;
 
         for (const genesis::Node& node : scene.nodes) {
-            if (!node.visible) {
+            // Icons follow the same draw gate (editor view → game_output false).
+            if (!genesis::isNodeDrawnInView(scene, node, false)) {
                 continue;
             }
             ActorIconKind kind{};
@@ -2511,6 +2522,9 @@ private:
         };
 
         // Mesh / fluid actors only — never particle sprites, never helper spheres/boxes.
+        // Outline only for actors that already pass isNodeDrawnInView this frame (same gate as
+        // meshes). Inverted-hull needs the shaded body in the depth buffer; drawing outline for a
+        // hidden actor would paint a solid shell and look like selection un-hides the mesh.
         std::unordered_set<genesis::NodeId> outlined;
         for (const genesis::SceneDrawCommand& cmd : draw_commands_) {
             if (cmd.node_id == 0 || !isSelected(cmd.node_id) || !cmd.mesh) {
@@ -2528,7 +2542,7 @@ private:
             if (!node || !node->mesh_resource.has_value()) {
                 continue;
             }
-            if (game_view_mode_ && node->hidden_in_game) {
+            if (!genesis::isNodeDrawnInView(scene, *node, game_view_mode_)) {
                 continue;
             }
             if (const genesis::Mesh* mesh = runtime_.mesh(*node->mesh_resource)) {

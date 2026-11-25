@@ -4,6 +4,7 @@
 
 #include "particles/FluidWorld.hpp"
 #include "particles/ParticleRng.hpp"
+#include "scene/SceneVisibility.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -439,7 +440,8 @@ void ParticleWorld::stepOnce(Scene& scene, float dt, bool update_particles) {
         runtime.last_world_pos = world_pos;
         runtime.has_last_pos = true;
 
-        if (!desc.enabled || runtime.finished) {
+        // Visible=off (incl. ancestors) stops spawn; Hidden-in-Game still emits in the editor.
+        if (!desc.enabled || runtime.finished || !isNodeDrawnInView(scene, *node, false)) {
             continue;
         }
 
@@ -846,7 +848,7 @@ void ParticleWorld::rebuildToTime(Scene& scene, double production_time_seconds, 
 }
 
 void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleInstanceBatch>& out,
-                                     const ParticleViewBasis& view) const {
+                                     const ParticleViewBasis& view, bool game_output) const {
     // Batches: mesh × unlit × additive (12) + sprite ribbon trails (4). Keeps GPU instancing cheap.
     out.clear();
     out.resize(16);
@@ -886,6 +888,11 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
 
     for (const Particle& p : particles_) {
         if (!p.alive) {
+            continue;
+        }
+        // Same gate as meshes: Visible / Hidden-in-Game + ancestry. Selection never overrides.
+        if (const Node* emitter = scene.find(p.emitter_node);
+            !emitter || !isNodeDrawnInView(scene, *emitter, game_output)) {
             continue;
         }
         const float t = std::clamp(p.age / std::max(p.lifetime, 1e-5f), 0.0f, 1.0f);

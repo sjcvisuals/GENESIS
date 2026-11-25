@@ -67,7 +67,7 @@ Generic XY tracker emit. Defaults can point at `Scene/Person Pool/Feet 00` once 
 - `wall_plane_path` — Hierarchy path to Plane actor (default `Scene/Wall Plane`)
 - `debug_draw_wall_ray` — viewport line + hit marker (off by default; editor-only)
 
-**Hidden in Game:** actors expose an Unreal-like flag (Inspector → Hidden in Game; hierarchy badge `· HG`). Editor view draws them; Game View (`G`) and Pixera Renderbridge output skip their meshes. Collisions still run.
+**Visibility (single gate):** Inspector **Visible** hides the actor (and descendants) everywhere. **Hidden in Game** (hierarchy badge `· HG`) still draws in the editor; Game View (`G`) and Pixera Renderbridge omit them. Precedence is Visible → Hidden-in-Game under game output — selection never overrides. Collisions still run.
 
 ## Renderbridge notes
 

@@ -73,7 +73,7 @@ public:
         std::vector<GpuMeshInstance> instances;
     };
     void collectInstances(const Scene& scene, std::vector<ParticleInstanceBatch>& out,
-                          const ParticleViewBasis& view = {}) const;
+                          const ParticleViewBasis& view = {}, bool game_output = false) const;
 
     void setFluidWorld(class FluidWorld* world) { fluid_world_ = world; }
 
