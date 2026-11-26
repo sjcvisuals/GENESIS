@@ -560,6 +560,12 @@ private:
             }
         }
 
+        // Unreal-like G: Game View toggle (hides grid, actor icons, Hidden in Game).
+        // Same WantTextInput gate as T — works with panel focus, not while typing.
+        if (!io.WantTextInput && !ctrl && !alt && input().keyPressed(SDL_SCANCODE_G)) {
+            game_view_mode_ = !game_view_mode_;
+        }
+
         // File shortcuts must work while panels have focus (WantCaptureKeyboard),
         // but never while typing into a text/numeric field.
         if (!io.WantTextInput) {
@@ -580,10 +586,6 @@ private:
 
         if (input().keyPressed(SDL_SCANCODE_F)) {
             focusEditorCameraOnSelection();
-        }
-        // Unreal-like G: toggle game view (hides actor icons / editor helpers).
-        if (input().keyPressed(SDL_SCANCODE_G) && !ctrl) {
-            game_view_mode_ = !game_view_mode_;
         }
         // P: toggle detailed performance overlay.
         if (input().keyPressed(SDL_SCANCODE_P) && !ctrl) {
