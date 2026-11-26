@@ -203,6 +203,7 @@ inline ParticleEmitter makeRoomOuterRingEmitter() {
     e.size_min = 0.06f;
     e.size_max = 0.085f;
     e.spawn_shape = ParticleSpawnShape::Ring;
+    e.spawn_distribution = ParticleSpawnDistribution::Surface;
     e.spawn_radius = 3.0f; // 6 m diameter
     e.spawn_box_height = 0.06f;
     e.cone_angle_degrees = 6.0f;
@@ -238,6 +239,7 @@ inline ParticleEmitter makeRoomInnerTankRingEmitter() {
     e.size_min = 0.055f;
     e.size_max = 0.08f;
     e.spawn_shape = ParticleSpawnShape::Ring;
+    e.spawn_distribution = ParticleSpawnDistribution::Surface;
     e.spawn_radius = 1.0f; // 2 m diameter
     e.spawn_box_height = 0.02f;
     e.cone_angle_degrees = 8.0f;
@@ -269,6 +271,7 @@ inline ParticleEmitter makeRoomPersonFeetEmitter() {
     e.size_min = 0.05f;
     e.size_max = 0.075f;
     e.spawn_shape = ParticleSpawnShape::Ring;
+    e.spawn_distribution = ParticleSpawnDistribution::Surface;
     e.spawn_radius = 0.28f;
     e.spawn_box_height = 0.02f;
     e.cone_angle_degrees = 12.0f;

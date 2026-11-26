@@ -62,6 +62,82 @@ glm::vec3 curlNoiseApprox(const glm::vec3& p, float freq) {
                           glm::vec3(1e-5f));
 }
 
+// Sample a local offset inside the authored spawn shape (CPU birth; GPU sim moves after).
+glm::vec3 sampleSpawnLocalOffset(const ParticleEmitter& desc, std::uint64_t seed,
+                                 std::uint64_t emitter_id, std::uint64_t emit_index) {
+    const float ux = particleRandom01(seed, emitter_id, emit_index, kChanPosX);
+    const float uy = particleRandom01(seed, emitter_id, emit_index, kChanPosY);
+    const float uz = particleRandom01(seed, emitter_id, emit_index, kChanPosZ);
+    const ParticleSpawnDistribution dist = desc.spawn_distribution;
+    const float radius = std::max(0.0f, desc.spawn_radius);
+    const float half_h = std::max(0.0f, desc.spawn_box_height);
+
+    switch (desc.spawn_shape) {
+    case ParticleSpawnShape::Point:
+        return glm::vec3(0.0f);
+    case ParticleSpawnShape::Sphere: {
+        const glm::vec3 unit = randomUnitVector(seed, emitter_id, emit_index);
+        if (dist == ParticleSpawnDistribution::Surface) {
+            return unit * radius;
+        }
+        if (dist == ParticleSpawnDistribution::VolumeUniform) {
+            // Density-uniform ball: r = R * u^(1/3).
+            return unit * (radius * std::cbrt(ux));
+        }
+        // Volume (legacy): center-biased r = R * u.
+        return unit * (radius * ux);
+    }
+    case ParticleSpawnShape::Box: {
+        const float hx = radius;
+        const float hy = half_h;
+        const float hz = radius;
+        if (dist == ParticleSpawnDistribution::Surface) {
+            // Area-weighted face pick on the AABB shell.
+            const float ax = 2.0f * hy * hz; // ±X faces
+            const float ay = 2.0f * hx * hz; // ±Y faces
+            const float az = 2.0f * hx * hy; // ±Z faces
+            const float total = std::max(1e-8f, ax + ay + az);
+            float pick = ux * total;
+            if (pick < ax) {
+                const float side = (pick < ax * 0.5f) ? -1.0f : 1.0f;
+                return glm::vec3(side * hx, (uy * 2.0f - 1.0f) * hy, (uz * 2.0f - 1.0f) * hz);
+            }
+            pick -= ax;
+            if (pick < ay) {
+                const float side = (pick < ay * 0.5f) ? -1.0f : 1.0f;
+                return glm::vec3((uy * 2.0f - 1.0f) * hx, side * hy, (uz * 2.0f - 1.0f) * hz);
+            }
+            {
+                const float side = (uy < 0.5f) ? -1.0f : 1.0f;
+                return glm::vec3((uz * 2.0f - 1.0f) * hx, (uy * 2.0f - 1.0f) * hy, side * hz);
+            }
+        }
+        // Volume / VolumeUniform: AABB is already density-uniform.
+        return glm::vec3((ux * 2.0f - 1.0f) * hx, (uy * 2.0f - 1.0f) * hy, (uz * 2.0f - 1.0f) * hz);
+    }
+    case ParticleSpawnShape::Ring: {
+        constexpr float kTwoPi = 6.28318530718f;
+        const float angle = ux * kTwoPi;
+        float r = radius;
+        if (dist == ParticleSpawnDistribution::Surface) {
+            r = radius;
+        } else if (dist == ParticleSpawnDistribution::VolumeUniform) {
+            // Area-uniform disk in XZ, height uniform along cylinder.
+            r = radius * std::sqrt(uz);
+        } else {
+            // Volume: center-biased radial (legacy-ish fill).
+            r = radius * uz;
+        }
+        const float y = (uy * 2.0f - 1.0f) * half_h;
+        return glm::vec3(std::cos(angle) * r, y, std::sin(angle) * r);
+    }
+    case ParticleSpawnShape::Cone:
+    default:
+        // Cone/Point birth at origin; cone angle drives velocity only.
+        return glm::vec3(0.0f);
+    }
+}
+
 } // namespace
 
 void ParticleWorld::enableGpuCompute(const VulkanContext& context) {
@@ -368,49 +444,13 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
         glm::vec3 local_offset(0.0f);
         glm::vec3 direction = glm::normalize(glm::mat3(world) * glm::vec3(0.0f, 1.0f, 0.0f));
         if (desc.mod_shape) {
-            switch (desc.spawn_shape) {
-            case ParticleSpawnShape::Point:
-                break;
-            case ParticleSpawnShape::Sphere: {
-                // Offset only — do NOT steal velocity direction (that sprayed sideways and
-                // turned soft discs + trails into horizontal streaks).
-                const glm::vec3 unit = randomUnitVector(seed, runtime.node_id, emit_index);
-                local_offset = unit * (desc.spawn_radius *
-                                       particleRandom01(seed, runtime.node_id, emit_index, kChanPosX));
-                break;
-            }
-            case ParticleSpawnShape::Box: {
-                local_offset = glm::vec3(
-                    (particleRandom01(seed, runtime.node_id, emit_index, kChanPosX) * 2.0f - 1.0f) *
-                        desc.spawn_radius,
-                    (particleRandom01(seed, runtime.node_id, emit_index, kChanPosY) * 2.0f - 1.0f) *
-                        desc.spawn_box_height,
-                    (particleRandom01(seed, runtime.node_id, emit_index, kChanPosZ) * 2.0f - 1.0f) *
-                        desc.spawn_radius);
+            // Offset only for Sphere/Box/Ring — do NOT steal velocity direction from shape.
+            local_offset = sampleSpawnLocalOffset(desc, seed, runtime.node_id, emit_index);
+            if (desc.spawn_shape == ParticleSpawnShape::Box ||
+                desc.spawn_shape == ParticleSpawnShape::Ring ||
+                desc.spawn_shape == ParticleSpawnShape::Cone) {
                 direction =
                     coneDirection(world, desc.cone_angle_degrees, seed, runtime.node_id, emit_index);
-                break;
-            }
-            case ParticleSpawnShape::Ring: {
-                constexpr float kTwoPi = 6.28318530718f;
-                const float angle =
-                    particleRandom01(seed, runtime.node_id, emit_index, kChanPosX) * kTwoPi;
-                const float radial_jitter =
-                    0.9f + 0.1f * particleRandom01(seed, runtime.node_id, emit_index, kChanPosZ);
-                const float radius = desc.spawn_radius * radial_jitter;
-                const float y =
-                    (particleRandom01(seed, runtime.node_id, emit_index, kChanPosY) * 2.0f - 1.0f) *
-                    desc.spawn_box_height;
-                local_offset = glm::vec3(std::cos(angle) * radius, y, std::sin(angle) * radius);
-                direction =
-                    coneDirection(world, desc.cone_angle_degrees, seed, runtime.node_id, emit_index);
-                break;
-            }
-            case ParticleSpawnShape::Cone:
-            default:
-                direction =
-                    coneDirection(world, desc.cone_angle_degrees, seed, runtime.node_id, emit_index);
-                break;
             }
         }
 

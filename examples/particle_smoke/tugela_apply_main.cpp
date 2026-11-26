@@ -109,6 +109,60 @@ int main() {
         ok &= expect(particleStackHas(e.module_stack, kStackBurst), "mute keeps burst on stack");
     }
 
+    // --- 4) Spawn distribution: Surface vs Volume uniform change birth positions ---
+    {
+        auto make_ball = [](ParticleSpawnDistribution dist) {
+            ParticleEmitter ball = makeGentleCirclesEmitter();
+            ball.spawn_shape = ParticleSpawnShape::Sphere;
+            ball.spawn_radius = 1.0f;
+            ball.spawn_distribution = dist;
+            ball.rate_per_second = 200.0f;
+            ball.speed_min = 0.0f;
+            ball.speed_max = 0.0f;
+            ball.force_gravity = false;
+            ball.gravity = glm::vec3(0.0f);
+            return ball;
+        };
+
+        Scene surface_scene;
+        surface_scene.createParticleEmitterNode("Ball", std::nullopt,
+                                                make_ball(ParticleSpawnDistribution::Surface));
+        surface_scene.updateWorldTransforms();
+        ParticleWorld surface_world;
+        surface_world.setSceneSeed(11);
+        surface_world.simulate(surface_scene, 40, 0.01f);
+        ok &= expect(surface_world.stats().alive > 0, "surface sphere should spawn");
+        const std::uint64_t surface_hash = surface_world.stateHash();
+
+        Scene volume_scene;
+        volume_scene.createParticleEmitterNode("Ball", std::nullopt,
+                                               make_ball(ParticleSpawnDistribution::VolumeUniform));
+        volume_scene.updateWorldTransforms();
+        ParticleWorld volume_world;
+        volume_world.setSceneSeed(11);
+        volume_world.simulate(volume_scene, 40, 0.01f);
+        ok &= expect(volume_world.stats().alive > 0, "volume-uniform sphere should spawn");
+        ok &= expect(volume_world.stateHash() != surface_hash,
+                     "distribution mode must change spawn positions");
+
+        // Live authoring: flip Surface → Volume uniform on the same emitter, clear, respawn.
+        Scene live_scene;
+        const NodeId id = live_scene.createParticleEmitterNode(
+            "Ball", std::nullopt, make_ball(ParticleSpawnDistribution::Surface));
+        live_scene.updateWorldTransforms();
+        ParticleWorld live_world;
+        live_world.setSceneSeed(11);
+        live_world.simulate(live_scene, 40, 0.01f);
+        ok &= expect(live_world.stateHash() == surface_hash, "same seed/mode → same hash");
+        Node* node = live_scene.find(id);
+        ok &= expect(node && node->particle_emitter.has_value(), "live ball node");
+        node->particle_emitter->spawn_distribution = ParticleSpawnDistribution::VolumeUniform;
+        live_world.clear();
+        live_world.simulate(live_scene, 40, 0.01f);
+        ok &= expect(live_world.stateHash() == volume_world.stateHash(),
+                     "live distribution edit must affect new spawns");
+    }
+
     if (!ok) {
         return 1;
     }

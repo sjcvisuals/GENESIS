@@ -329,6 +329,16 @@ void drawParticleEmitterInspector(Node& emitter_node, const std::string& node_pa
             e.spawn_shape = static_cast<ParticleSpawnShape>(shape);
             dirty = true;
         }
+        const char* dists[] = {"Volume", "Volume uniform", "Surface"};
+        int dist = static_cast<int>(e.spawn_distribution);
+        if (ImGui::Combo("Distribution", &dist, dists, IM_ARRAYSIZE(dists))) {
+            e.spawn_distribution = static_cast<ParticleSpawnDistribution>(dist);
+            dirty = true;
+        }
+        if (e.spawn_shape == ParticleSpawnShape::Point ||
+            e.spawn_shape == ParticleSpawnShape::Cone) {
+            ImGui::TextDisabled("Distribution applies to Sphere / Box / Ring.");
+        }
         dirty |= ImGui::DragFloat("Spawn radius", &e.spawn_radius, 0.01f, 0.0f, 50.0f);
         dirty |= ImGui::DragFloat("Spawn height / box Y", &e.spawn_box_height, 0.01f, 0.0f, 50.0f);
         dirty |= ImGui::DragFloat("Cone angle", &e.cone_angle_degrees, 0.5f, 0.0f, 89.0f);

@@ -22,6 +22,14 @@ enum class ParticleSpawnShape : std::uint8_t {
     Ring = 4, // cylinder ring in local XZ
 };
 
+// How new particles are placed inside the spawn shape (Sphere / Box / Ring).
+// Point / Cone ignore this (birth at origin). Matches Niagara Shape Location volume vs surface.
+enum class ParticleSpawnDistribution : std::uint8_t {
+    Volume = 0,        // fill interior (legacy sphere: center-biased radius)
+    VolumeUniform = 1, // density-uniform volume fill
+    Surface = 2,       // on the shell / mantle
+};
+
 enum class ParticleRenderMesh : std::uint8_t {
     Cube = 0,
     Sphere = 1,
@@ -107,6 +115,7 @@ struct ParticleEmitter {
     // --- Location (Shape Location module) ---
     bool mod_shape = true;
     ParticleSpawnShape spawn_shape = ParticleSpawnShape::Cone;
+    ParticleSpawnDistribution spawn_distribution = ParticleSpawnDistribution::Volume;
     float spawn_radius = 0.1f;
     float spawn_box_height = 0.1f;
     float cone_angle_degrees = 25.0f;
