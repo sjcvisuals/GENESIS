@@ -136,44 +136,15 @@ void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ct
 
     if (moduleHeader("Add Emitter", true)) {
         moduleIndentBegin();
-        ImGui::TextDisabled("Templates default to soft circles (gentle look).");
-        const float full = ImGui::GetContentRegionAvail().x;
-        const float gap = ImGui::GetStyle().ItemSpacing.x;
-        const float third = (full - gap * 2.0f) / 3.0f;
-
-        auto addEmitter = [&](const char* name, const ParticleEmitter& preset) {
+        ImGui::TextDisabled("Generic emitter — modules set Sprite, Trail, Mesh, forces, …");
+        if (ImGui::Button("Add Emitter", ImVec2(-1.0f, 0))) {
             system_node.is_particle_system = true;
-            scene.createParticleEmitterNode(name, system_node.id, preset);
+            scene.createParticleEmitterNode("Emitter", system_node.id, makeGenericEmitter());
             mark(ctx, true); // rebuild so new emitter is live immediately
             if (ctx.select_node) {
                 // Keep Hierarchy selection on the System; emitters are Tugela-only.
                 ctx.select_node(system_node.id);
             }
-        };
-
-        if (ImGui::Button("Soft Circles", ImVec2(third, 0))) {
-            addEmitter("Soft Circles", makeGentleCirclesEmitter());
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Trail", ImVec2(third, 0))) {
-            ParticleEmitter trail = makeGentleSoftEmitter();
-            trail.rate_per_second = 6.0f;
-            particleStackSet(trail.module_stack, kStackTrail, true);
-            particleStackSet(trail.module_enabled, kStackTrail, true);
-            particleStackSet(trail.module_stack, kStackGravity, true);
-            particleStackSet(trail.module_enabled, kStackGravity, true);
-            syncOptionalStackFlags(trail);
-            addEmitter("Trail", trail);
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Circles+Trail", ImVec2(third, 0))) {
-            addEmitter("Soft Circles", makeGentleCirclesEmitter());
-            ParticleEmitter trail = makeGentleSoftEmitter();
-            trail.rate_per_second = 5.0f;
-            particleStackSet(trail.module_stack, kStackTrail, true);
-            particleStackSet(trail.module_enabled, kStackTrail, true);
-            syncOptionalStackFlags(trail);
-            addEmitter("Trail", trail);
         }
         moduleIndentEnd();
     }
@@ -204,17 +175,6 @@ void drawParticleEmitterInspector(Node& emitter_node, const std::string& node_pa
         }
     }
 
-    ImGui::Spacing();
-    ImGui::TextDisabled("Templates");
-    if (ImGui::SmallButton("Soft Circles")) {
-        e = makeGentleCirclesEmitter();
-        dirty = true;
-    }
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Soft + Trails")) {
-        e = makeGentleSoftEmitter();
-        dirty = true;
-    }
     ImGui::Spacing();
     ImGui::TextDisabled("OSC: link params via Protocol window, or add OSC Drive in Tugela.");
     ImGui::Spacing();

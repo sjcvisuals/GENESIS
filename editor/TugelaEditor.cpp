@@ -1314,9 +1314,11 @@ void drawAddEmitterButtons(Scene& scene, NodeId system_id, ParticleEmitterUiCont
         return;
     }
     ImGui::TextDisabled("Add to System");
-    auto add = [&](const char* name, const ParticleEmitter& preset) {
+    // Single generic emitter — modules (Sprite, Trail, Mesh, forces, …) specialize it.
+    if (ImGui::Button("Add Emitter", ImVec2(-1.0f, 0))) {
         system->is_particle_system = true;
-        const NodeId id = scene.createParticleEmitterNode(name, system_id, preset);
+        const NodeId id =
+            scene.createParticleEmitterNode("Emitter", system_id, makeGenericEmitter());
         mark(ctx, true); // rebuild so new emitter clocks + particles sync
         state.focus_emitter = id;
         state.focus_system = system_id;
@@ -1324,29 +1326,11 @@ void drawAddEmitterButtons(Scene& scene, NodeId system_id, ParticleEmitterUiCont
             // Hierarchy shows Systems only — keep selection on the System actor.
             ctx.select_node(system_id);
         }
-    };
-    // Full-width stacked buttons — side-by-side thirds crush labels at UI scale 2.
-    if (ImGui::Button("Soft Circles", ImVec2(-1.0f, 0))) {
-        add("Soft Circles", makeGentleCirclesEmitter());
     }
-    if (ImGui::Button("Trail", ImVec2(-1.0f, 0))) {
-        ParticleEmitter trail = makeGentleSoftEmitter();
-        trail.rate_per_second = 6.0f;
-        particleStackSet(trail.module_stack, kStackTrail, true);
-        particleStackSet(trail.module_enabled, kStackTrail, true);
-        particleStackSet(trail.module_stack, kStackGravity, true);
-        particleStackSet(trail.module_enabled, kStackGravity, true);
-        syncOptionalStackFlags(trail);
-        add("Trail", trail);
-    }
-    if (ImGui::Button("Circles + Trail", ImVec2(-1.0f, 0))) {
-        add("Soft Circles", makeGentleCirclesEmitter());
-        ParticleEmitter trail = makeGentleSoftEmitter();
-        trail.rate_per_second = 5.0f;
-        particleStackSet(trail.module_stack, kStackTrail, true);
-        particleStackSet(trail.module_enabled, kStackTrail, true);
-        syncOptionalStackFlags(trail);
-        add("Trail", trail);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Adds a generic emitter with a lean default stack. "
+            "Specialize with modules in the graph (Sprite, Trail, Mesh, forces, …).");
     }
 }
 
