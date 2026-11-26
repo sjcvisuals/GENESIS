@@ -109,6 +109,54 @@ int main() {
         ok &= expect(particleStackHas(e.module_stack, kStackBurst), "mute keeps burst on stack");
     }
 
+    // --- 4) Duplicate emitter deep-copies modules/params with unique sibling name ---
+    {
+        Scene scene;
+        const NodeId system = scene.createParticleSystemNode("System", std::nullopt);
+        ParticleEmitter src = makeGentleCirclesEmitter();
+        src.rate_per_second = 22.0f;
+        src.trail_enabled = true;
+        src.trail_width = 0.41f;
+        particleStackSet(src.module_stack, kStackTrail, true);
+        particleStackSet(src.module_enabled, kStackTrail, true);
+        particleStackSet(src.module_stack, kStackNoise, true);
+        particleStackSet(src.module_enabled, kStackNoise, false); // present but muted
+        syncOptionalStackFlags(src);
+        const NodeId a = scene.createParticleEmitterNode("Emitter", system, src);
+        if (Node* na = scene.find(a)) {
+            na->local.position = glm::vec3(1.5f, 0.0f, -0.25f);
+        }
+
+        const NodeId b = scene.duplicateParticleEmitter(a);
+        ok &= expect(b != 0 && b != a, "duplicate must create a new emitter id");
+        const Node* nb = scene.find(b);
+        ok &= expect(nb && nb->particle_emitter.has_value(), "duplicate node has emitter");
+        ok &= expect(nb && nb->parent.has_value() && *nb->parent == system,
+                     "duplicate stays under same System");
+        ok &= expect(nb && nb->name == "Emitter_2", "first duplicate names Emitter_2");
+        ok &= expect(nb && nb->local.position.x == 1.5f, "duplicate copies local transform");
+        ok &= expect(nb && nb->particle_emitter->rate_per_second == 22.0f,
+                     "duplicate copies rate");
+        ok &= expect(nb && nb->particle_emitter->trail_width == 0.41f,
+                     "duplicate copies trail params");
+        ok &= expect(nb && particleStackHas(nb->particle_emitter->module_stack, kStackTrail),
+                     "duplicate keeps Trail on stack");
+        ok &= expect(nb && particleStackHas(nb->particle_emitter->module_stack, kStackNoise) &&
+                         !particleStackHas(nb->particle_emitter->module_enabled, kStackNoise),
+                     "duplicate preserves muted Noise on stack");
+
+        // Independent authoring: mutate source must not affect clone.
+        if (Node* na = scene.find(a); na && na->particle_emitter.has_value()) {
+            na->particle_emitter->rate_per_second = 99.0f;
+        }
+        ok &= expect(nb && nb->particle_emitter->rate_per_second == 22.0f,
+                     "duplicate is a deep copy (independent params)");
+
+        const NodeId c = scene.duplicateParticleEmitter(b);
+        const Node* nc = scene.find(c);
+        ok &= expect(nc && nc->name == "Emitter_3", "second duplicate names Emitter_3");
+    }
+
     if (!ok) {
         return 1;
     }

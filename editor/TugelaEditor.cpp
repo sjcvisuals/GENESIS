@@ -1350,6 +1350,51 @@ void drawAddEmitterButtons(Scene& scene, NodeId system_id, ParticleEmitterUiCont
     }
 }
 
+bool duplicateEmitterIntoSystem(Scene& scene, NodeId emitter_id, NodeId system_id,
+                                TugelaEditorState& state, ParticleEmitterUiContext& ctx) {
+    if (emitter_id == 0 || system_id == 0) {
+        return false;
+    }
+    const Node* src = scene.find(emitter_id);
+    if (!src || !src->particle_emitter.has_value()) {
+        return false;
+    }
+    if (Node* system = scene.find(system_id)) {
+        system->is_particle_system = true;
+    }
+    const NodeId id = scene.duplicateParticleEmitter(emitter_id);
+    if (id == 0) {
+        return false;
+    }
+    mark(ctx, true); // rebuild so cloned emitter clocks + particles sync
+    state.focus_emitter = id;
+    state.focus_system = system_id;
+    if (ctx.select_node) {
+        // Hierarchy shows Systems only — keep selection on the System actor.
+        ctx.select_node(system_id);
+    }
+    return true;
+}
+
+void drawDuplicateFocusedEmitter(Scene& scene, TugelaEditorState& state,
+                                 ParticleEmitterUiContext& ctx) {
+    if (state.focus_emitter == 0 || state.focus_system == 0) {
+        return;
+    }
+    const Node* emitter = scene.find(state.focus_emitter);
+    if (!emitter || !emitter->particle_emitter.has_value()) {
+        return;
+    }
+    ImGui::Spacing();
+    if (ImGui::Button("Duplicate Emitter", ImVec2(-1.0f, 0))) {
+        duplicateEmitterIntoSystem(scene, state.focus_emitter, state.focus_system, state, ctx);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Deep-copy this emitter (modules + settings) as a sibling under the same System.");
+    }
+}
+
 void drawRemoveFocusedEmitter(Scene& scene, TugelaEditorState& state, ParticleEmitterUiContext& ctx) {
     if (state.focus_emitter == 0 || state.focus_system == 0) {
         return;
@@ -1380,7 +1425,7 @@ void drawRemoveFocusedEmitter(Scene& scene, TugelaEditorState& state, ParticleEm
     }
     ImGui::PopStyleColor(3);
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Delete this emitter from the System. Add templates below to restore.");
+        ImGui::SetTooltip("Delete this emitter from the System. Add below to restore.");
     }
 }
 
@@ -1525,11 +1570,32 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
                 ctx.select_node(state.focus_system != 0 ? state.focus_system : id);
             }
         }
+        if (ImGui::BeginPopupContextItem("EmitterCtx")) {
+            state.focus_emitter = id;
+            if (ImGui::MenuItem("Duplicate Emitter")) {
+                duplicateEmitterIntoSystem(scene, id, state.focus_system, state, ctx);
+            }
+            if (ImGui::MenuItem("Remove Emitter")) {
+                if (Node* system = scene.find(state.focus_system)) {
+                    system->is_particle_system = true;
+                }
+                scene.deleteNode(id);
+                std::vector<NodeId> remaining;
+                collectEmitters(scene, state.focus_system, remaining);
+                state.focus_emitter = remaining.empty() ? 0 : remaining.front();
+                if (ctx.select_node) {
+                    ctx.select_node(state.focus_system);
+                }
+                mark(ctx, true);
+            }
+            ImGui::EndPopup();
+        }
         ImGui::PopID();
     }
     ImGui::Spacing();
     ImGui::Separator();
     if (state.focus_system != 0) {
+        drawDuplicateFocusedEmitter(scene, state, ctx);
         drawRemoveFocusedEmitter(scene, state, ctx);
         drawAddEmitterButtons(scene, state.focus_system, ctx, state);
         collectEmitters(scene, state.focus_system, emitters);

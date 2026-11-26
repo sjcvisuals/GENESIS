@@ -1,8 +1,10 @@
 #include "scene/Scene.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <glm/mat4x4.hpp>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -245,6 +247,72 @@ NodeId Scene::duplicateNode(NodeId id) {
 
     updateWorldTransforms();
     return new_root_id;
+}
+
+namespace {
+
+std::string stripEmitterNumericSuffix(const std::string& name) {
+    // "Emitter_2" → "Emitter"; "Soft Circles" → "Soft Circles"; "123" unchanged.
+    if (name.empty()) {
+        return name;
+    }
+    std::size_t i = name.size();
+    while (i > 0 && std::isdigit(static_cast<unsigned char>(name[i - 1]))) {
+        --i;
+    }
+    if (i == name.size() || i == 0 || name[i - 1] != '_') {
+        return name;
+    }
+    return name.substr(0, i - 1);
+}
+
+std::string uniqueEmitterSiblingName(const Scene& scene, NodeId system_id,
+                                     const std::string& source_name) {
+    const std::string stem = stripEmitterNumericSuffix(source_name);
+    std::unordered_set<std::string> used;
+    if (const Node* system = scene.find(system_id)) {
+        for (const NodeId child : system->children) {
+            if (const Node* c = scene.find(child); c && c->particle_emitter.has_value()) {
+                used.insert(c->name);
+            }
+        }
+    }
+    for (int n = 2; n < 10000; ++n) {
+        const std::string candidate = stem + "_" + std::to_string(n);
+        if (used.find(candidate) == used.end()) {
+            return candidate;
+        }
+    }
+    return stem + "_copy";
+}
+
+} // namespace
+
+NodeId Scene::duplicateParticleEmitter(NodeId emitter_id) {
+    const Node* src = find(emitter_id);
+    if (!src || !src->particle_emitter.has_value() || !src->parent.has_value()) {
+        return 0;
+    }
+    const NodeId system_id = *src->parent;
+    if (!find(system_id)) {
+        return 0;
+    }
+
+    // Value-copy the full authored stack (modules, curves, masks, params).
+    const ParticleEmitter copy = *src->particle_emitter;
+    const std::string name = uniqueEmitterSiblingName(*this, system_id, src->name);
+    const NodeId id = createParticleEmitterNode(name, system_id, copy);
+    if (Node* dst = find(id)) {
+        dst->local = src->local;
+        dst->visible = src->visible;
+        dst->pickable = src->pickable;
+        dst->hidden_in_game = src->hidden_in_game;
+        updateWorldTransforms();
+    }
+    if (Node* system = find(system_id)) {
+        system->is_particle_system = true;
+    }
+    return id;
 }
 
 bool Scene::deleteNode(NodeId id) {
