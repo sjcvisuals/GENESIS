@@ -162,6 +162,7 @@ void OscProtocol::ingestMessage(const OscMessage& message, double now_seconds) {
     storeLastValues(message);
     ingestParticleEmit(message);
     ingestRoomPerson(message, now_seconds);
+    ingestTuio(message, now_seconds);
     if (settings_.learn_enabled) {
         updateLearned(message, now_seconds);
     }
@@ -182,11 +183,7 @@ void OscProtocol::ingestParticleEmit(const OscMessage& message) {
     }
 }
 
-void OscProtocol::ingestRoomPerson(const OscMessage& message, double now_seconds) {
-    OscRoomPersonEvent event{};
-    if (!tryParseOscRoomPerson(message, room_person_, event)) {
-        return;
-    }
+void OscProtocol::pushRoomPersonEvent(OscRoomPersonEvent event, double now_seconds) {
     event.sequence = next_room_person_sequence_++;
     event.received_seconds = now_seconds;
     room_person_events_.push_back(event);
@@ -195,6 +192,42 @@ void OscProtocol::ingestRoomPerson(const OscMessage& message, double now_seconds
         const std::size_t drop = room_person_events_.size() - kMaxQueuedRoomPerson;
         room_person_events_.erase(room_person_events_.begin(),
                                   room_person_events_.begin() + static_cast<std::ptrdiff_t>(drop));
+    }
+}
+
+void OscProtocol::ingestRoomPerson(const OscMessage& message, double now_seconds) {
+    OscRoomPersonEvent event{};
+    if (!tryParseOscRoomPerson(message, room_person_, event)) {
+        return;
+    }
+    pushRoomPersonEvent(event, now_seconds);
+}
+
+void OscProtocol::ingestTuio(const OscMessage& message, double now_seconds) {
+    if (!room_person_.enabled || !room_person_.tuio_enabled) {
+        return;
+    }
+    OscTuio2DcurParse parsed{};
+    if (!tryParseOscTuio2Dcur(message, room_person_, parsed)) {
+        return;
+    }
+    switch (parsed.command) {
+    case OscTuio2DcurCommand::Set: {
+        OscRoomPersonEvent event{};
+        mapTuioSetToRoomPersonEvent(room_person_, parsed.set, event);
+        pushRoomPersonEvent(event, now_seconds);
+        break;
+    }
+    case OscTuio2DcurCommand::Alive:
+        tuio_has_alive_ = true;
+        tuio_alive_ids_ = std::move(parsed.alive.session_ids);
+        break;
+    case OscTuio2DcurCommand::Fseq:
+        tuio_last_fseq_ = parsed.fseq.frame;
+        break;
+    case OscTuio2DcurCommand::Unknown:
+    default:
+        break;
     }
 }
 
@@ -400,8 +433,12 @@ std::uint32_t OscProtocol::applyRoomPerson(SceneRuntime& runtime, std::uint64_t&
 
         const OscRoomPersonPose pose = oscRoomPersonPose(room_person_, event, plane_ptr);
         const std::size_t slot = find_slot_for_id(event.person_id);
+        const bool same_id = room_person_slots_[slot].occupied &&
+                             room_person_slots_[slot].person_id == event.person_id;
         room_person_slots_[slot].occupied = true;
         room_person_slots_[slot].person_id = event.person_id;
+        room_person_slots_[slot].from_tuio =
+            event.from_tuio || (same_id && room_person_slots_[slot].from_tuio);
         room_person_slots_[slot].last_seen_seconds =
             event.received_seconds > 0.0 ? event.received_seconds : now;
 
@@ -474,13 +511,28 @@ std::uint32_t OscProtocol::applyRoomPerson(SceneRuntime& runtime, std::uint64_t&
         applied_any = true;
     }
 
+    // TUIO alive list is authoritative for TUIO-sourced slots: park IDs not listed.
+    auto tuio_id_alive = [&](std::int32_t person_id) {
+        return std::find(tuio_alive_ids_.begin(), tuio_alive_ids_.end(), person_id) !=
+               tuio_alive_ids_.end();
+    };
+
     // Park idle IDs (disable + origin) only if those emitters already exist.
     for (std::size_t slot = 0; slot < slot_count; ++slot) {
         if (!room_person_slots_[slot].occupied) {
             park_slot(slot);
             continue;
         }
-        if (room_person_.slot_idle_seconds > 0.0f &&
+        if (room_person_.tuio_enabled && tuio_has_alive_ && room_person_slots_[slot].from_tuio &&
+            !tuio_id_alive(room_person_slots_[slot].person_id)) {
+            park_slot(slot);
+            applied_any = true;
+            continue;
+        }
+        // Idle timeout for non-TUIO (or TUIO before first alive).
+        const bool use_idle =
+            !room_person_slots_[slot].from_tuio || !tuio_has_alive_;
+        if (use_idle && room_person_.slot_idle_seconds > 0.0f &&
             (now - room_person_slots_[slot].last_seen_seconds) >=
                 static_cast<double>(room_person_.slot_idle_seconds)) {
             park_slot(slot);

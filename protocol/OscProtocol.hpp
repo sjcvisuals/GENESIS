@@ -88,6 +88,9 @@ public:
     std::uint64_t parseErrors() const { return parse_errors_; }
     std::uint64_t totalParticleEmits() const { return total_particle_emits_; }
     std::uint64_t totalRoomPersonUpdates() const { return total_room_person_updates_; }
+    // Last TUIO fseq frame (optional debug). -1 = none yet.
+    std::int32_t lastTuioFseq() const { return tuio_last_fseq_; }
+    const std::vector<std::int32_t>& tuioAliveIds() const { return tuio_alive_ids_; }
 
 private:
     void ingestMessage(const OscMessage& message, double now_seconds);
@@ -95,6 +98,8 @@ private:
     void storeLastValues(const OscMessage& message);
     void ingestParticleEmit(const OscMessage& message);
     void ingestRoomPerson(const OscMessage& message, double now_seconds);
+    void ingestTuio(const OscMessage& message, double now_seconds);
+    void pushRoomPersonEvent(OscRoomPersonEvent event, double now_seconds);
     void pushDebugEntries(std::vector<OscDebugLogEntry> entries, double now_seconds,
                           std::uint64_t packet_seq);
     static std::string formatWallClockNow();
@@ -109,6 +114,10 @@ private:
     std::vector<OscRoomPersonEvent> room_person_events_;
     std::array<OscRoomPersonSlot, kRoomPersonSlotCapacity> room_person_slots_{};
     std::array<OscWallRayDebugSample, kRoomPersonSlotCapacity> wall_ray_debug_{};
+    // TUIO alive pool (session IDs). When has_alive_, missing from_tuio slots park.
+    bool tuio_has_alive_ = false;
+    std::vector<std::int32_t> tuio_alive_ids_;
+    std::int32_t tuio_last_fseq_ = -1;
     double last_poll_seconds_ = 0.0;
     std::unordered_map<std::string, std::vector<OscArg>> last_values_;
 

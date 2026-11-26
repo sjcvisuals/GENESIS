@@ -15,6 +15,69 @@ bool isIntegerish(float v) {
 
 } // namespace
 
+bool tryParseOscTuio2Dcur(const OscMessage& message, const OscRoomPersonSettings& settings,
+                          OscTuio2DcurParse& out) {
+    if (!settings.tuio_enabled || message.address != settings.tuio_address) {
+        return false;
+    }
+    if (message.args.empty() || message.args[0].type != OscArgType::String) {
+        return false;
+    }
+
+    out = OscTuio2DcurParse{};
+    const std::string& cmd = message.args[0].string;
+    if (cmd == "set") {
+        // ,sifffff → [set, id, x, y, Xvel, Yvel, m] — need at least id + x + y
+        if (message.args.size() < 4) {
+            return false;
+        }
+        out.command = OscTuio2DcurCommand::Set;
+        out.set.session_id = message.args[1].type == OscArgType::Int32
+                                 ? message.args[1].i32
+                                 : static_cast<std::int32_t>(std::lround(oscArgAsFloat(message.args[1])));
+        out.set.x = oscArgAsFloat(message.args[2]);
+        out.set.y = oscArgAsFloat(message.args[3]);
+        return true;
+    }
+    if (cmd == "alive") {
+        // ,siiii… → [alive, id0, id1, …] — ints ARE session IDs (not a count).
+        out.command = OscTuio2DcurCommand::Alive;
+        out.alive.session_ids.reserve(message.args.size() > 0 ? message.args.size() - 1 : 0);
+        for (std::size_t i = 1; i < message.args.size(); ++i) {
+            const OscArg& arg = message.args[i];
+            out.alive.session_ids.push_back(
+                arg.type == OscArgType::Int32
+                    ? arg.i32
+                    : static_cast<std::int32_t>(std::lround(oscArgAsFloat(arg))));
+        }
+        return true;
+    }
+    if (cmd == "fseq") {
+        if (message.args.size() < 2) {
+            return false;
+        }
+        out.command = OscTuio2DcurCommand::Fseq;
+        out.fseq.frame = message.args[1].type == OscArgType::Int32
+                             ? message.args[1].i32
+                             : static_cast<std::int32_t>(std::lround(oscArgAsFloat(message.args[1])));
+        return true;
+    }
+    return false;
+}
+
+void mapTuioSetToRoomPersonEvent(const OscRoomPersonSettings& settings, const OscTuio2DcurSet& set,
+                                 OscRoomPersonEvent& out_event) {
+    out_event = OscRoomPersonEvent{};
+    out_event.person_id = set.session_id;
+    // Horizontal floor plane (same as room feet): TUIO x→scene X, TUIO y→scene Z.
+    out_event.x = set.x * settings.tuio_scale + settings.tuio_offset.x + settings.room_center.x;
+    out_event.z = set.y * settings.tuio_scale + settings.tuio_offset.y + settings.room_center.z;
+    out_event.y = settings.feet_height;
+    out_event.has_y = true;
+    out_event.count = 0;
+    out_event.from_tuio = true;
+}
+
 bool tryParseOscRoomPerson(const OscMessage& message, const OscRoomPersonSettings& settings,
                            OscRoomPersonEvent& out_event) {
     if (!settings.enabled || message.address != settings.address) {
