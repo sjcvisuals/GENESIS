@@ -251,7 +251,9 @@ void ParticleWorld::applyEmitterVisualsToParticle(Particle& p, const ParticleEmi
     }
     p.sprite_aspect = desc.sprite_aspect;
     p.velocity_stretch = desc.velocity_stretch;
-    p.mesh = desc.mod_sprite ? desc.render_mesh : ParticleRenderMesh::Sphere;
+    // Same resolve as spawn: Sprite → Mesh → None. Never fall back to Sphere balls when
+    // Sprite is off and Mesh Renderer is also off (live-apply used to reintroduce spheres).
+    p.mesh = resolveParticleHeadMesh(desc);
     p.unlit = desc.unlit;
     p.additive = desc.additive;
     p.world_space = desc.world_space;

@@ -275,6 +275,56 @@ int main() {
                      "live distribution edit must affect new spawns");
     }
 
+    // --- 6) Sprite off + no Mesh/Trail → live-apply must not spawn Sphere balls ---
+    {
+        Scene scene;
+        ParticleEmitter soft = makeGentleSoftEmitter();
+        const NodeId id = scene.createParticleEmitterNode("Invisible", std::nullopt, soft);
+        scene.updateWorldTransforms();
+
+        ParticleWorld world;
+        world.setSceneSeed(11);
+        world.simulate(scene, 40, 0.01f);
+        ok &= expect(world.stats().alive > 0, "expected living particles before renderer mute");
+
+        Node* node = scene.find(id);
+        ok &= expect(node && node->particle_emitter.has_value(), "invisible emitter node");
+        node->particle_emitter->mod_sprite = false;
+        node->particle_emitter->mod_mesh = false;
+        setOptionalModuleArmed(*node->particle_emitter, kStackTrail, false);
+        world.applyAuthoringToLiving(scene);
+
+        ParticleViewBasis view{};
+        view.right = glm::vec3(1.0f, 0.0f, 0.0f);
+        view.up = glm::vec3(0.0f, 1.0f, 0.0f);
+        view.valid = true;
+        std::vector<ParticleWorld::ParticleInstanceBatch> batches;
+        world.collectInstances(scene, batches, view);
+        std::size_t drawn = 0;
+        std::size_t spheres = 0;
+        for (const auto& b : batches) {
+            drawn += b.instances.size();
+            if (b.mesh == ParticleRenderMesh::Sphere || b.mesh == ParticleRenderMesh::Cube) {
+                spheres += b.instances.size();
+            }
+        }
+        ok &= expect(drawn == 0, "all renderers off must draw nothing (live-apply)");
+        ok &= expect(spheres == 0, "must not fall back to Sphere/Cube heads");
+
+        // Mesh Renderer alone → Sphere heads visible again.
+        node->particle_emitter->mod_mesh = true;
+        node->particle_emitter->render_mesh = ParticleRenderMesh::Sphere;
+        world.applyAuthoringToLiving(scene);
+        world.collectInstances(scene, batches, view);
+        spheres = 0;
+        for (const auto& b : batches) {
+            if (b.mesh == ParticleRenderMesh::Sphere) {
+                spheres += b.instances.size();
+            }
+        }
+        ok &= expect(spheres > 0, "Mesh Renderer on must draw Sphere heads");
+    }
+
     if (!ok) {
         return 1;
     }
