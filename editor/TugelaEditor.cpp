@@ -27,11 +27,12 @@ constexpr ImVec4 kPanel{0.032f, 0.034f, 0.038f, 1.0f};
 // (hardcoded px crushed labels/rows when fonts grew).
 struct TugelaMetrics {
     float font = 16.0f;
-    float stage_w = 180.0f;
-    float stage_gap_x = 24.0f;
-    float stage_header_h = 28.0f;
+    float stack_w = 260.0f;       // single emitter module-stack panel width
+    float stack_gap_x = 28.0f;    // gap when laying emitters side-by-side
+    float emitter_header_h = 28.0f;
+    float section_header_h = 24.0f;
     float stack_row_h = 24.0f;
-    float stage_pad = 8.0f;
+    float stack_pad = 8.0f;
     float emitter_lane_gap = 40.0f;
     float systems_w = 180.0f;
     float emitters_w = 200.0f;
@@ -53,11 +54,12 @@ TugelaMetrics makeMetrics() {
     const float label_w = std::max(ImGui::CalcTextSize("Sprite Renderer").x,
                                    ImGui::CalcTextSize("Mesh Renderer").x);
     m.checkbox = std::round(f * 0.85f);
-    m.stage_w = std::ceil(label_w + m.checkbox + m.pad * 4.0f + 12.0f);
-    m.stage_gap_x = std::max(18.0f, f * 1.1f);
-    m.stage_header_h = std::ceil(f + st.FramePadding.y * 2.0f + 4.0f);
+    m.stack_w = std::ceil(label_w + m.checkbox + m.pad * 5.0f + 28.0f);
+    m.stack_gap_x = std::max(22.0f, f * 1.4f);
+    m.emitter_header_h = std::ceil(f + st.FramePadding.y * 2.0f + 6.0f);
+    m.section_header_h = std::ceil(f + st.FramePadding.y * 2.0f + 2.0f);
     m.stack_row_h = std::ceil(f + st.FramePadding.y * 2.0f + 6.0f);
-    m.stage_pad = std::max(6.0f, f * 0.35f);
+    m.stack_pad = std::max(6.0f, f * 0.35f);
     m.emitter_lane_gap = std::max(28.0f, f * 1.6f);
     m.systems_w = std::max(160.0f, f * 9.0f);
     m.emitters_w = std::max(180.0f, f * 10.5f);
@@ -71,11 +73,12 @@ TugelaMetrics makeMetrics() {
 TugelaMetrics scaleGraphMetrics(TugelaMetrics m, float zoom) {
     const float z = std::clamp(zoom, 0.35f, 2.5f);
     m.font *= z;
-    m.stage_w *= z;
-    m.stage_gap_x *= z;
-    m.stage_header_h *= z;
+    m.stack_w *= z;
+    m.stack_gap_x *= z;
+    m.emitter_header_h *= z;
+    m.section_header_h *= z;
     m.stack_row_h *= z;
-    m.stage_pad *= z;
+    m.stack_pad *= z;
     m.emitter_lane_gap *= z;
     m.checkbox *= z;
     m.pad *= z;
@@ -94,18 +97,12 @@ const char* stageLabel(TugelaModuleKind kind) {
     switch (kind) {
     case TugelaModuleKind::Spawn:
         return "Spawn";
-    case TugelaModuleKind::Initialize:
-        return "Initialize";
     case TugelaModuleKind::Update:
         return "Update";
-    case TugelaModuleKind::OverLife:
-        return "Over Life";
-    case TugelaModuleKind::Sprite:
+    case TugelaModuleKind::Render:
         return "Render";
-    case TugelaModuleKind::Trail:
-        return "Trail";
     default:
-        return "Stage";
+        return "Category";
     }
 }
 
@@ -164,6 +161,7 @@ const char* stackLabel(TugelaStackMod mod) {
     }
 }
 
+// Map leaf modules into Spawn / Update / Render sections of one emitter stack.
 TugelaModuleKind stageForStack(TugelaStackMod mod) {
     switch (mod) {
     case TugelaStackMod::SpawnRate:
@@ -171,12 +169,11 @@ TugelaModuleKind stageForStack(TugelaStackMod mod) {
     case TugelaStackMod::Shape:
     case TugelaStackMod::SpawnByDistance:
     case TugelaStackMod::OscDrive:
-        return TugelaModuleKind::Spawn;
     case TugelaStackMod::Lifetime:
     case TugelaStackMod::Velocity:
     case TugelaStackMod::Size:
     case TugelaStackMod::Color:
-        return TugelaModuleKind::Initialize;
+        return TugelaModuleKind::Spawn;
     case TugelaStackMod::Gravity:
     case TugelaStackMod::Drag:
     case TugelaStackMod::PointForce:
@@ -186,16 +183,14 @@ TugelaModuleKind stageForStack(TugelaStackMod mod) {
     case TugelaStackMod::KillPlane:
     case TugelaStackMod::KillBox:
     case TugelaStackMod::FluidCoupled:
-        return TugelaModuleKind::Update;
     case TugelaStackMod::SizeOverLife:
     case TugelaStackMod::ColorOverLife:
     case TugelaStackMod::ScaleBySpeed:
-        return TugelaModuleKind::OverLife;
+        return TugelaModuleKind::Update;
     case TugelaStackMod::Sprite:
     case TugelaStackMod::Mesh:
-        return TugelaModuleKind::Sprite;
     case TugelaStackMod::Trail:
-        return TugelaModuleKind::Trail;
+        return TugelaModuleKind::Render;
     default:
         return TugelaModuleKind::Spawn;
     }
@@ -985,12 +980,22 @@ bool pointInRect(ImVec2 p, ImVec2 a, ImVec2 b) {
     return p.x >= a.x && p.x <= b.x && p.y >= a.y && p.y <= b.y;
 }
 
-float stageHeightFor(const std::vector<TugelaStackMod>& stack, const TugelaMetrics& m) {
+float sectionBodyHeight(const std::vector<TugelaStackMod>& stack, const TugelaMetrics& m) {
     const int rows = std::max(1, static_cast<int>(stack.size()));
-    return m.stage_header_h + m.stage_pad * 2.0f + static_cast<float>(rows) * m.stack_row_h +
-           m.font * 0.7f;
+    return static_cast<float>(rows) * m.stack_row_h + m.stack_pad * 0.5f;
 }
 
+float emitterStackHeight(const std::vector<TugelaStackMod> stacks[], const TugelaMetrics& m) {
+    float h = m.emitter_header_h + m.stack_pad;
+    for (int si = 0; si < static_cast<int>(TugelaModuleKind::Count); ++si) {
+        h += m.section_header_h + sectionBodyHeight(stacks[si], m);
+    }
+    h += m.stack_pad;
+    return h;
+}
+
+// One Niagara-like module stack per emitter: Spawn → Update → Render sections
+// inside a single panel (leaf modules are rows, not free-floating graph nodes).
 bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_index,
                          ParticleEmitterUiContext& ctx, ImDrawList* draw, ImVec2 canvas_origin,
                          float& out_row_h, bool allow_pick, const TugelaMetrics& m) {
@@ -998,68 +1003,80 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
     const ImVec2 mouse = ImGui::GetIO().MousePos;
     bool picked = false;
 
-    float max_h = m.font * 4.0f;
     std::vector<TugelaStackMod> stacks[static_cast<int>(TugelaModuleKind::Count)];
     for (int si = 0; si < static_cast<int>(TugelaModuleKind::Count); ++si) {
         collectStageStack(static_cast<TugelaModuleKind>(si), e, stacks[si]);
-        max_h = std::max(max_h, stageHeightFor(stacks[si], m));
     }
-    out_row_h = max_h + m.emitter_lane_gap;
+    const float panel_h = emitterStackHeight(stacks, m);
+    out_row_h = panel_h + m.emitter_lane_gap;
 
-    const float name_gap = m.font + 4.0f;
-    const float y = canvas_origin.y + state.graph_pan_y + name_gap;
-    (void)row_index;
-    const float x0 = canvas_origin.x + state.graph_pan_x;
+    const float y = canvas_origin.y + state.graph_pan_y;
+    // Side-by-side emitter stacks when several share a System.
+    const float x0 =
+        canvas_origin.x + state.graph_pan_x +
+        static_cast<float>(row_index) * (m.stack_w + m.stack_gap_x);
+    const ImVec2 panel0(x0, y);
+    const ImVec2 panel1(x0 + m.stack_w, y + panel_h);
+    const bool emitter_focused = state.focus_emitter == emitter_node.id;
+    const bool panel_hov = pointInRect(mouse, panel0, panel1);
 
-    graphAddText(draw, ImVec2(x0, y - name_gap), IM_COL32(140, 150, 160, 255),
+    draw->AddRectFilled(panel0, panel1, IM_COL32(20, 23, 27, 255), 7.0f);
+    draw->AddRect(panel0, panel1,
+                  emitter_focused ? IM_COL32(100, 210, 220, 255)
+                                  : (panel_hov ? IM_COL32(70, 110, 120, 220)
+                                               : IM_COL32(48, 54, 60, 220)),
+                  7.0f, 0, emitter_focused ? 2.0f : 1.0f);
+
+    // Emitter title bar
+    draw->AddRectFilled(panel0, ImVec2(panel1.x, panel0.y + m.emitter_header_h),
+                        IM_COL32(28, 34, 40, 255), 7.0f, ImDrawFlags_RoundCornersTop);
+    const float title_y = panel0.y + (m.emitter_header_h - m.font) * 0.5f;
+    graphAddText(draw, ImVec2(panel0.x + m.pad, title_y), IM_COL32(220, 230, 235, 255),
                  emitter_node.name.c_str(), m.font);
     if (!e.enabled) {
-        graphAddText(
-            draw,
-            ImVec2(x0 + graphTextWidth(emitter_node.name.c_str(), m.font) + m.pad, y - name_gap),
-            IM_COL32(120, 90, 90, 220), "off", m.font);
+        const float name_w = graphTextWidth(emitter_node.name.c_str(), m.font);
+        graphAddText(draw, ImVec2(panel0.x + m.pad + name_w + m.pad * 0.6f, title_y),
+                     IM_COL32(150, 100, 100, 230), "off", m.font);
+    }
+    if (allow_pick && panel_hov && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+        mouse.y < panel0.y + m.emitter_header_h) {
+        state.focus_emitter = emitter_node.id;
+        if (ctx.select_node) {
+            ctx.select_node(emitter_node.id);
+        }
+        picked = true;
     }
 
-    ImVec2 prev_center{};
-    bool has_prev = false;
-    TugelaStackMod popup_add_stage_mod = TugelaStackMod::Gravity;
     TugelaModuleKind popup_stage = TugelaModuleKind::Update;
     bool open_add_popup = false;
-
     const float add_btn = std::max(18.0f, m.font * 0.95f);
     const float check = m.checkbox;
 
+    float cursor_y = panel0.y + m.emitter_header_h + m.stack_pad * 0.5f;
     for (int si = 0; si < static_cast<int>(TugelaModuleKind::Count); ++si) {
         const auto stage = static_cast<TugelaModuleKind>(si);
         const std::vector<TugelaStackMod>& stack = stacks[si];
-        const float x = x0 + static_cast<float>(si) * (m.stage_w + m.stage_gap_x);
-        const float h = stageHeightFor(stack, m);
-        const ImVec2 p0(x, y);
-        const ImVec2 p1(x + m.stage_w, y + h);
+        const float section_h = m.section_header_h + sectionBodyHeight(stack, m);
+        const ImVec2 sec0(panel0.x + m.pad * 0.4f, cursor_y);
+        const ImVec2 sec1(panel1.x - m.pad * 0.4f, cursor_y + section_h);
         const bool stage_selected =
             state.focus_emitter == emitter_node.id && state.focus_module == stage;
-        const bool stage_hovered = pointInRect(mouse, p0, p1);
 
-        draw->AddRectFilled(p0, p1, IM_COL32(22, 26, 30, 255), 6.0f);
-        draw->AddRect(p0, p1,
-                      stage_selected ? IM_COL32(100, 210, 220, 255)
-                                     : (stage_hovered ? IM_COL32(80, 130, 140, 220)
-                                                      : IM_COL32(55, 62, 70, 220)),
-                      6.0f, 0, stage_selected ? 2.0f : 1.0f);
-        draw->AddRectFilled(p0, ImVec2(p1.x, p0.y + m.stage_header_h), IM_COL32(28, 36, 42, 255),
-                            6.0f, ImDrawFlags_RoundCornersTop);
-        const float header_text_y =
-            p0.y + (m.stage_header_h - m.font) * 0.5f;
-        graphAddText(draw, ImVec2(p0.x + m.pad, header_text_y), IM_COL32(220, 230, 235, 255),
-                     stageLabel(stage), m.font);
+        // Section band (category divider — not a separate graph node).
+        draw->AddRectFilled(sec0, ImVec2(sec1.x, sec0.y + m.section_header_h),
+                            stage_selected ? IM_COL32(34, 48, 54, 255) : IM_COL32(26, 30, 34, 255),
+                            3.0f);
+        const float sec_label_y = sec0.y + (m.section_header_h - m.font) * 0.5f;
+        graphAddText(draw, ImVec2(sec0.x + m.pad * 0.6f, sec_label_y),
+                     IM_COL32(160, 190, 200, 255), stageLabel(stage), m.font);
 
-        // "+ Add" opens the full stage module directory (core + optional).
+        // "+" opens this category's module directory.
         std::vector<TugelaStackMod> stage_dir;
         collectStageDirectory(stage, stage_dir);
         if (!stage_dir.empty()) {
-            const float add_pad = (m.stage_header_h - add_btn) * 0.5f;
-            const ImVec2 add_p0(p1.x - add_btn - m.pad * 0.6f, p0.y + add_pad);
-            const ImVec2 add_p1(p1.x - m.pad * 0.6f, p0.y + add_pad + add_btn);
+            const float add_pad = (m.section_header_h - add_btn) * 0.5f;
+            const ImVec2 add_p0(sec1.x - add_btn - m.pad * 0.3f, sec0.y + add_pad);
+            const ImVec2 add_p1(sec1.x - m.pad * 0.3f, sec0.y + add_pad + add_btn);
             const bool add_hov = pointInRect(mouse, add_p0, add_p1);
             draw->AddRectFilled(add_p0, add_p1,
                                 add_hov ? IM_COL32(50, 90, 100, 255) : IM_COL32(36, 48, 54, 255),
@@ -1081,23 +1098,26 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
             }
         }
 
-        float row_y = p0.y + m.stage_header_h + m.stage_pad * 0.5f;
+        float row_y = sec0.y + m.section_header_h + 1.0f;
+        if (stack.empty()) {
+            graphAddText(draw, ImVec2(sec0.x + m.pad * 0.6f, row_y + (m.stack_row_h - m.font) * 0.5f),
+                         IM_COL32(100, 110, 120, 200), "empty · + to add", m.font);
+        }
         for (const TugelaStackMod mod : stack) {
-            const ImVec2 r0(p0.x + m.pad * 0.6f, row_y);
-            const ImVec2 r1(p1.x - m.pad * 0.6f, row_y + m.stack_row_h - 2.0f);
+            const ImVec2 r0(sec0.x + m.pad * 0.3f, row_y);
+            const ImVec2 r1(sec1.x - m.pad * 0.3f, row_y + m.stack_row_h - 2.0f);
             const bool en = stackEnabled(mod, e);
             const bool sel = state.focus_emitter == emitter_node.id && state.focus_stack == mod;
             const bool hov = pointInRect(mouse, r0, r1);
 
             draw->AddRectFilled(r0, r1,
                                 sel ? IM_COL32(32, 70, 78, 255)
-                                    : (en ? IM_COL32(30, 42, 48, 255) : IM_COL32(26, 28, 32, 255)),
+                                    : (en ? IM_COL32(30, 40, 46, 255) : IM_COL32(24, 26, 30, 255)),
                                 3.0f);
             if (sel || hov) {
                 draw->AddRect(r0, r1, IM_COL32(90, 180, 190, 220), 3.0f);
             }
 
-            // Enable checkbox square — centered vertically in the row
             const float check_y = r0.y + (r1.y - r0.y - check) * 0.5f;
             const ImVec2 c0(r0.x + 4.0f, check_y);
             const ImVec2 c1(c0.x + check, c0.y + check);
@@ -1129,32 +1149,17 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
                 if (ctx.select_node) {
                     ctx.select_node(emitter_node.id);
                 }
-                // Toggle when clicking the checkbox region
                 if (pointInRect(mouse, ImVec2(c0.x - 2.0f, c0.y - 2.0f),
                                 ImVec2(c1.x + 2.0f, c1.y + 2.0f))) {
                     setStackEnabled(mod, e, !en);
-                    mark(ctx); // live-apply trail / forces without full restart
+                    mark(ctx);
                 }
                 picked = true;
             }
             row_y += m.stack_row_h;
         }
 
-        if (stack.empty()) {
-            graphAddText(draw, ImVec2(p0.x + m.pad, p0.y + m.stage_header_h + m.stage_pad),
-                         IM_COL32(100, 110, 120, 200), "empty · + to add", m.font);
-        }
-
-        const ImVec2 center((p0.x + p1.x) * 0.5f, p0.y + h * 0.5f);
-        if (has_prev) {
-            const ImVec2 a(prev_center.x + m.stage_w * 0.5f, prev_center.y);
-            const ImVec2 b(center.x - m.stage_w * 0.5f, center.y);
-            const float bend = m.stage_gap_x * 0.55f;
-            draw->AddBezierCubic(a, ImVec2(a.x + bend, a.y), ImVec2(b.x - bend, b.y), b,
-                                 IM_COL32(70, 150, 160, 180), 2.0f);
-        }
-        prev_center = center;
-        has_prev = true;
+        cursor_y += section_h;
     }
 
     if (open_add_popup) {
@@ -1177,12 +1182,12 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
                 setStackEnabled(mod, e, true);
                 state.focus_stack = mod;
                 state.focus_module = popup_stage;
-                mark(ctx); // apply enable to living particles (esp. Trail)
+                mark(ctx);
                 ++added;
             }
         }
         if (directory.empty()) {
-            ImGui::TextDisabled("No modules for this stage.");
+            ImGui::TextDisabled("No modules for this category.");
         } else {
             bool any_addable = false;
             for (const TugelaStackMod mod : directory) {
@@ -1197,7 +1202,6 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
             }
         }
         ImGui::EndPopup();
-        (void)popup_add_stage_mod;
     }
     return picked;
 }
@@ -1209,11 +1213,13 @@ void drawModuleGraph(TugelaEditorState& state, Scene& scene, const std::vector<N
                       ImGuiChildFlags_Borders,
                       ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoScrollbar);
 
-    ImGui::TextColored(kAccent, "Module graph");
+    ImGui::TextColored(kAccent, "Emitter module stack");
     ImGui::Spacing();
     ImGui::PushTextWrapPos(0.0f);
-    ImGui::TextColored(kMuted,
-                       "Stack · □ enable · + directory · scroll zoom · MMB / LMB-drag pan");
+    ImGui::TextColored(
+        kMuted,
+        "One stack per emitter · Spawn / Update / Render · □ enable · + directory · "
+        "scroll zoom · MMB / LMB-drag pan");
     ImGui::PopTextWrapPos();
     ImGui::Spacing();
 
@@ -1270,28 +1276,23 @@ void drawModuleGraph(TugelaEditorState& state, Scene& scene, const std::vector<N
     if (emitters.empty()) {
         graphAddText(draw, ImVec2(canvas_p0.x + gm.pad * 2.0f, canvas_p0.y + gm.pad * 2.0f),
                      IM_COL32(120, 130, 140, 255),
-                     "Add emitters to this System to build the graph.", gm.font);
+                     "Add emitters to this System — each gets one module stack.", gm.font);
     }
 
     bool picked_node = false;
-    float lane_y = state.graph_pan_y;
-    int row = 0;
+    int col = 0;
     for (const NodeId id : emitters) {
         Node* n = scene.find(id);
         if (!n || !n->particle_emitter.has_value()) {
             continue;
         }
-        // Temporarily set pan_y so draw uses absolute lane position
-        const float saved_pan_y = state.graph_pan_y;
-        state.graph_pan_y = lane_y;
         float row_h = 0.0f;
         ImGui::PushID(static_cast<int>(id));
-        picked_node |= drawEmitterGraphRow(state, *n, row, ctx, draw, canvas_p0, row_h,
+        picked_node |= drawEmitterGraphRow(state, *n, col, ctx, draw, canvas_p0, row_h,
                                            canvas_hovered, gm);
         ImGui::PopID();
-        state.graph_pan_y = saved_pan_y;
-        lane_y += row_h;
-        ++row;
+        (void)row_h;
+        ++col;
     }
     draw->PopClipRect();
 

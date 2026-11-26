@@ -1,7 +1,8 @@
 #pragma once
 
 // Lean Tugela Editor pop-out — System (one level actor) → multiple Emitters →
-// Niagara-like module stack graph (leaf modules with enable) + timings + curves.
+// one Niagara-like module stack per emitter (Spawn / Update / Render sections,
+// leaf enable) + timings + curves. Leaf modules are not separate graph nodes.
 
 #include "editor/ParticleEmitterUi.hpp"
 
@@ -14,20 +15,17 @@ enum class TugelaEditorTab : std::uint8_t {
     Graph = 1,
 };
 
-// Stage columns on the graph (wires between stages).
+// Category sections inside a single emitter module stack (not separate nodes).
 enum class TugelaModuleKind : std::uint8_t {
     Spawn = 0,
-    Initialize = 1,
-    Update = 2,
-    OverLife = 3,
-    Sprite = 4,
-    Trail = 5,
-    Count = 6,
+    Update = 1,
+    Render = 2,
+    Count = 3,
 };
 
-// Leaf modules shown inside stage nodes (Niagara-like stack entries).
+// Leaf modules listed under a category section (Niagara-like stack entries).
 // Keep in sync with ParticleEmitter runtime flags — every supported module must
-// appear under stageForStack() and in the stage "+" add directory.
+// appear under stageForStack() and in the section "+" add directory.
 enum class TugelaStackMod : std::uint8_t {
     SpawnRate = 0,
     Burst,
