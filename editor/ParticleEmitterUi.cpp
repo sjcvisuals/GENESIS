@@ -221,6 +221,16 @@ void drawParticleEmitterInspector(Node& emitter_node, const std::string& node_pa
             uiSameLineIfFits(need);
         }
         dirty |= ImGui::Checkbox("World space", &e.world_space);
+        {
+            const float need = ImGui::CalcTextSize("Deterministic").x + ImGui::GetFontSize() + 12.0f;
+            uiSameLineIfFits(need);
+        }
+        dirty |= ImGui::Checkbox("Deterministic", &e.deterministic);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "On (default): same settings + seed replay identical motion.\n"
+                "Off: spawn/noise RNG varies across runs.");
+        }
         dirty |= ImGui::Checkbox("Show Spawn Location", &e.debug_show_spawn);
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip(
@@ -241,6 +251,11 @@ void drawParticleEmitterInspector(Node& emitter_node, const std::string& node_pa
         if (ImGui::DragInt("Seed override (0=scene)", &seed, 1, 0, 1000000)) {
             e.seed_override = static_cast<std::uint64_t>(std::max(seed, 0));
             dirty = true;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Base seed for spawn RNG (0 = scene seed). With Deterministic on, "
+                "identical motion; off, this is still the base mixed with varying entropy.");
         }
 
         ImGui::Spacing();

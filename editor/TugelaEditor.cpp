@@ -548,9 +548,16 @@ void drawTimingStrip(ParticleEmitter& e, ParticleEmitterUiContext& ctx, const Tu
     ImGui::TextColored(kAccent, "Timings");
     ImGui::SameLine(0.0f, m.pad);
     ImGui::TextColored(kMuted, "emitter clock");
+    ImGui::SameLine(0.0f, m.pad * 1.5f);
+    bool dirty = false;
+    dirty |= ImGui::Checkbox("Deterministic", &e.deterministic);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "On (default): same settings + seed replay identical motion.\n"
+            "Off: spawn/noise RNG varies across runs.");
+    }
     ImGui::Spacing();
 
-    bool dirty = false;
     if (ImGui::BeginTable("tugela_timing_fields", 2,
                           ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoPadOuterX)) {
         ImGui::TableNextRow();

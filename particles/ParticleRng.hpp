@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 
 namespace genesis {
@@ -33,6 +35,23 @@ inline float particleRandomRange(std::uint64_t scene_seed, std::uint64_t emitter
                                  std::uint64_t emit_index, std::uint32_t channel, float min_v,
                                  float max_v) {
     return min_v + (max_v - min_v) * particleRandom01(scene_seed, emitter_id, emit_index, channel);
+}
+
+// Wall-clock + monotonic counter entropy for non-deterministic particle RNG.
+inline std::uint64_t particleVaryingEntropy() {
+    static std::atomic<std::uint64_t> counter{1};
+    const auto ticks = static_cast<std::uint64_t>(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    return particleMixSeed(ticks, counter.fetch_add(1, std::memory_order_relaxed), 0xA5A5ull,
+                           0xC3u);
+}
+
+// Resolve spawn seed: deterministic keeps base; off mixes varying entropy.
+inline std::uint64_t particleEffectiveSeed(std::uint64_t base_seed, bool deterministic) {
+    if (deterministic) {
+        return base_seed;
+    }
+    return particleMixSeed(base_seed, particleVaryingEntropy(), 0xD17Eull, 0x51u);
 }
 
 } // namespace genesis
