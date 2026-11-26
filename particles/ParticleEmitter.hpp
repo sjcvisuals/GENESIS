@@ -364,6 +364,15 @@ inline ParticleEmitter makeGentleCirclesEmitter() {
     return e;
 }
 
+// Generic Add Emitter default — lean core stack that still spawns visible soft sprites.
+// Present: Spawn Rate, Shape, Lifetime, Velocity, Size, Color, Size/Color over Life,
+// Sprite Renderer, Gravity, Drag. Absent: Trail / Mesh / Burst / OSC Drive / extra forces
+// (add those from the Tugela module directory). Emitters are untyped containers; modules
+// specialize behavior.
+inline ParticleEmitter makeGenericEmitter() {
+    return makeGentleCirclesEmitter();
+}
+
 inline ParticleEmitter makeBubbleRingEmitter() {
     return makeGentleSoftEmitter();
 }

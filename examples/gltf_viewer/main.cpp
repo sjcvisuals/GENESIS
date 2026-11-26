@@ -247,16 +247,11 @@ protected:
             return;
         }
 
-        // Empty scene: seed one System actor with Soft Circles + Trail emitters.
+        // Empty scene: seed one System with a generic emitter (modules specialize look).
         std::optional<genesis::NodeId> scene_root = genesis::findNodeByPath(scene, "Scene");
         const genesis::NodeId system =
             scene.createParticleSystemNode("Particle System", scene_root);
-        scene.createParticleEmitterNode("Soft Circles", system, genesis::makeGentleCirclesEmitter());
-        genesis::ParticleEmitter trail = genesis::makeGentleSoftEmitter();
-        trail.rate_per_second = 5.0f;
-        trail.trail_enabled = true;
-        trail.force_gravity = true;
-        scene.createParticleEmitterNode("Trail", system, trail);
+        scene.createParticleEmitterNode("Emitter", system, genesis::makeGenericEmitter());
         selectNode(system);
         genesis::tugelaEditorFocusSelection(tugela_editor_, scene, system);
         markDirty();
@@ -999,12 +994,7 @@ private:
                 genesis::findNodeByPath(scene, "Scene");
             const genesis::NodeId system =
                 scene.createParticleSystemNode("Particle System", scene_root);
-            scene.createParticleEmitterNode("Soft Circles", system,
-                                            genesis::makeGentleCirclesEmitter());
-            genesis::ParticleEmitter trail = genesis::makeGentleSoftEmitter();
-            trail.rate_per_second = 5.0f;
-            trail.trail_enabled = true;
-            scene.createParticleEmitterNode("Trail", system, trail);
+            // Empty System — add a generic emitter in Tugela (T); modules set look.
             selectNode(system);
             tugela_editor_.open = true;
             genesis::tugelaEditorFocusSelection(tugela_editor_, scene, system);
@@ -1012,8 +1002,9 @@ private:
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip(
-                "Places a System (collapsed) with emitter children. Expand to select "
-                "emitters; author modules in Tugela (T). Link OSC via Protocol / OSC Drive.");
+                "Places an empty System (emitters nest under it, collapsed). "
+                "Add a generic emitter in Tugela (T); modules set Sprite, Trail, Mesh, forces. "
+                "Link OSC via Protocol or the OSC Drive module.");
         }
 
         genesis::drawEditorSectionLabel("Actions");
