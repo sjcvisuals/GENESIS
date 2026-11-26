@@ -249,7 +249,11 @@ bool MeshBatchDrawer::prepareDraw(const std::vector<SceneMeshBatch>& batches,
                                   BindlessTextures& bindless, const MeshDrawOptions& options) {
     resetFrame();
     // Scene textures live in a reallocating container; never keep GpuTexture* across frames.
-    bindless.resetFrame();
+    // Outline (and any follow-up pass) must NOT clear bindless after mesh/particle draws already
+    // recorded texture indices — that permanently contaminates sprite sampling mid-frame.
+    if (options.reset_bindless) {
+        bindless.resetFrame();
+    }
     if (batches.empty()) {
         return false;
     }
@@ -443,7 +447,7 @@ void MeshBatchDrawer::dispatchGpuCull(VkCommandBuffer cmd) {
 void MeshBatchDrawer::drawIndexedBatches(VkCommandBuffer cmd, const GraphicsPipeline& pipeline,
                                          VkDescriptorSet frame_descriptor_set,
                                          BindlessTextures& bindless, VkDescriptorSet display_lut_set,
-                                         bool depth_only) {
+                                         bool depth_only, MeshBatchBlendFilter filter) {
     if (!prepared_) {
         return;
     }
@@ -463,6 +467,15 @@ void MeshBatchDrawer::drawIndexedBatches(VkCommandBuffer cmd, const GraphicsPipe
         }
 
         const GpuBatchCullHeader& header = batch_headers_[header_index++];
+        // indirect_index must advance for every prepared batch — offsets were baked in prepareDraw.
+        const std::size_t this_indirect = indirect_index++;
+
+        if (filter == MeshBatchBlendFilter::NonAdditive && batch.additive) {
+            continue;
+        }
+        if (filter == MeshBatchBlendFilter::AdditiveOnly && !batch.additive) {
+            continue;
+        }
 
         if (current_mesh != batch.mesh) {
             current_mesh = batch.mesh;
@@ -490,23 +503,22 @@ void MeshBatchDrawer::drawIndexedBatches(VkCommandBuffer cmd, const GraphicsPipe
                            sizeof(MeshMaterialPushConstants), &push);
 
         const VkDeviceSize indirect_offset =
-            static_cast<VkDeviceSize>(indirect_index * sizeof(VkDrawIndexedIndirectCommand));
+            static_cast<VkDeviceSize>(this_indirect * sizeof(VkDrawIndexedIndirectCommand));
         vkCmdDrawIndexedIndirect(cmd, indirect_buffer_->handle(), indirect_offset, 1,
                                  sizeof(VkDrawIndexedIndirectCommand));
-        ++indirect_index;
     }
 }
 
 void MeshBatchDrawer::drawDepthPrepass(VkCommandBuffer cmd, const GraphicsPipeline& pipeline,
                                        VkDescriptorSet frame_descriptor_set,
-                                       BindlessTextures& bindless) {
-    drawIndexedBatches(cmd, pipeline, frame_descriptor_set, bindless, VK_NULL_HANDLE, true);
+                                       BindlessTextures& bindless, MeshBatchBlendFilter filter) {
+    drawIndexedBatches(cmd, pipeline, frame_descriptor_set, bindless, VK_NULL_HANDLE, true, filter);
 }
 
 void MeshBatchDrawer::drawColorPass(VkCommandBuffer cmd, const GraphicsPipeline& pipeline,
                                     VkDescriptorSet frame_descriptor_set, BindlessTextures& bindless,
-                                    VkDescriptorSet display_lut_set) {
-    drawIndexedBatches(cmd, pipeline, frame_descriptor_set, bindless, display_lut_set, false);
+                                    VkDescriptorSet display_lut_set, MeshBatchBlendFilter filter) {
+    drawIndexedBatches(cmd, pipeline, frame_descriptor_set, bindless, display_lut_set, false, filter);
 }
 
 } // namespace genesis
