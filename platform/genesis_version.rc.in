@@ -4,6 +4,9 @@
 #define GENESIS_FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
 #endif
 
+// Application icon (Explorer, taskbar, Alt+Tab, Start menu).
+IDI_ICON1 ICON "@GENESIS_EDITOR_ICON@"
+
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION GENESIS_FILEVERSION
 PRODUCTVERSION GENESIS_FILEVERSION
@@ -17,11 +20,11 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName", "GENESIS"
+            VALUE "CompanyName", "SJC Visuals"
             VALUE "FileDescription", "GENESIS Scene Editor"
             VALUE "FileVersion", "@PROJECT_VERSION@"
             VALUE "InternalName", "genesis_gltf_viewer"
-            VALUE "LegalCopyright", "Copyright (C) GENESIS"
+            VALUE "LegalCopyright", "Copyright (C) SJC Visuals"
             VALUE "OriginalFilename", "genesis_gltf_viewer.exe"
             VALUE "ProductName", "GENESIS"
             VALUE "ProductVersion", "@PROJECT_VERSION@"

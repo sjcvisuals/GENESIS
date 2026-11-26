@@ -37,6 +37,7 @@ WizardSizePercent=120
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+SetupIconFile=..\assets\branding\genesis-editor.ico
 UninstallDisplayIcon={code:GetUninstallIcon}
 UninstallDisplayName={#MyAppName}
 SetupLogging=yes
@@ -100,10 +101,11 @@ Source: "{#StagingDir}\Pixera\*"; DestDir: "{code:GetPixeraExtDir}"; Components:
 Source: "{#StagingDir}\redist\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: VCRedistNeedsInstall
 
 [Icons]
-Name: "{group}\GENESIS"; Filename: "{app}\Editor\{#MyAppExeName}"; WorkingDir: "{app}\Editor"; Components: editor
-Name: "{group}\GENESIS Player"; Filename: "{app}\Player\genesis_player.exe"; WorkingDir: "{app}\Player"; Components: player
+; IconFilename uses the embedded exe icon (IDI_ICON1) once the binaries ship with branding.
+Name: "{group}\GENESIS"; Filename: "{app}\Editor\{#MyAppExeName}"; WorkingDir: "{app}\Editor"; IconFilename: "{app}\Editor\{#MyAppExeName}"; IconIndex: 0; Components: editor
+Name: "{group}\GENESIS Player"; Filename: "{app}\Player\genesis_player.exe"; WorkingDir: "{app}\Player"; IconFilename: "{app}\Player\genesis_player.exe"; IconIndex: 0; Components: player
 Name: "{group}\Uninstall GENESIS"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\GENESIS"; Filename: "{app}\Editor\{#MyAppExeName}"; WorkingDir: "{app}\Editor"; Tasks: desktopicon; Components: editor
+Name: "{autodesktop}\GENESIS"; Filename: "{app}\Editor\{#MyAppExeName}"; WorkingDir: "{app}\Editor"; IconFilename: "{app}\Editor\{#MyAppExeName}"; IconIndex: 0; Tasks: desktopicon; Components: editor
 
 [Run]
 Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing required Windows components…"; Flags: waituntilterminated; Check: VCRedistNeedsInstall

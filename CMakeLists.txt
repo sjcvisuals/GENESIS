@@ -21,9 +21,17 @@ configure_file(
     @ONLY
 )
 if(WIN32)
+    # Absolute forward-slash paths for the RC compiler (ICON "…").
+    file(TO_CMAKE_PATH "${CMAKE_SOURCE_DIR}/assets/branding/genesis-editor.ico" GENESIS_EDITOR_ICON)
+    file(TO_CMAKE_PATH "${CMAKE_SOURCE_DIR}/assets/branding/genesis-player.ico" GENESIS_PLAYER_ICON)
     configure_file(
         "${CMAKE_SOURCE_DIR}/platform/genesis_version.rc.in"
         "${CMAKE_BINARY_DIR}/generated/platform/genesis_version.rc"
+        @ONLY
+    )
+    configure_file(
+        "${CMAKE_SOURCE_DIR}/platform/genesis_player_version.rc.in"
+        "${CMAKE_BINARY_DIR}/generated/platform/genesis_player_version.rc"
         @ONLY
     )
 endif()
@@ -340,6 +348,11 @@ if(GENESIS_BUILD_EXAMPLES)
     add_dependencies(genesis_bridge_host genesis_shaders)
 
     add_executable(genesis_player examples/player/main.cpp)
+    if(WIN32)
+        target_sources(genesis_player PRIVATE
+            "${CMAKE_BINARY_DIR}/generated/platform/genesis_player_version.rc"
+        )
+    endif()
     target_link_libraries(genesis_player PRIVATE genesis_engine)
     add_dependencies(genesis_player genesis_shaders)
 

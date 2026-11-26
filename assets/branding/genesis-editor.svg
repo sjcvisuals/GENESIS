@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="GENESIS Editor">
+  <defs>
+    <style>
+      .plate { fill: #16181c; }
+      .face { fill: #0a0b0e; }
+      .accent { fill: none; stroke: #57c7d1; stroke-width: 28; stroke-linecap: round; stroke-linejoin: round; }
+      .bar { fill: #57c7d1; }
+      .frame { fill: none; stroke: #78808a; stroke-width: 2; stroke-opacity: 0.45; }
+    </style>
+  </defs>
+  <rect class="plate" x="8" y="8" width="240" height="240" rx="56"/>
+  <rect class="face" x="22" y="22" width="212" height="212" rx="44"/>
+  <path class="accent" d="M178 86 A72 72 0 1 0 178 170"/>
+  <rect class="bar" x="138" y="116" width="58" height="24" rx="4"/>
+  <rect class="bar" x="172" y="116" width="24" height="48" rx="4"/>
+  <rect class="frame" x="76" y="76" width="104" height="104" rx="14"/>
+</svg>
