@@ -61,6 +61,8 @@ struct TugelaEditorState {
     NodeId focus_emitter = 0;
     TugelaModuleKind focus_module = TugelaModuleKind::Spawn;
     TugelaStackMod focus_stack = TugelaStackMod::SpawnRate;
+    // Category for the open "+" module-directory popup (must outlive the click frame).
+    TugelaModuleKind add_popup_stage = TugelaModuleKind::Spawn;
     float graph_pan_x = 16.0f;
     float graph_pan_y = 22.0f;
     float graph_zoom = 1.0f; // scroll-wheel zoom for the module graph canvas

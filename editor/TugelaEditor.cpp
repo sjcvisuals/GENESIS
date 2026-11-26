@@ -1047,7 +1047,6 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
         picked = true;
     }
 
-    TugelaModuleKind popup_stage = TugelaModuleKind::Update;
     bool open_add_popup = false;
     const float add_btn = std::max(18.0f, m.font * 0.95f);
     const float check = m.checkbox;
@@ -1090,7 +1089,8 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
                 ImGui::SetTooltip("Module directory · %s", stageLabel(stage));
             }
             if (allow_pick && add_hov && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-                popup_stage = stage;
+                // Persist category on state — popup stays open across frames.
+                state.add_popup_stage = stage;
                 open_add_popup = true;
                 state.focus_emitter = emitter_node.id;
                 state.focus_module = stage;
@@ -1166,6 +1166,7 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
         ImGui::OpenPopup("tugela_add_mod");
     }
     if (ImGui::BeginPopup("tugela_add_mod")) {
+        const TugelaModuleKind popup_stage = state.add_popup_stage;
         ImGui::TextColored(kAccent, "%s modules", stageLabel(popup_stage));
         ImGui::TextDisabled("Click to add · grey = already on stack");
         ImGui::Separator();
@@ -1537,7 +1538,8 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
     }
 
     if (state.tab == TugelaEditorTab::Graph) {
-        const float graph_h = std::max(m.font * 12.0f, ImGui::GetContentRegionAvail().y * 0.55f);
+        // Give the stack canvas most of the detail pane so Spawn→Render fits without heavy pan.
+        const float graph_h = std::max(m.font * 14.0f, ImGui::GetContentRegionAvail().y * 0.68f);
         ImGui::BeginChild("graph_wrap", ImVec2(0.0f, graph_h), ImGuiChildFlags_None,
                           ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoScrollbar);
         drawModuleGraph(state, scene, emitters, ctx, m);
