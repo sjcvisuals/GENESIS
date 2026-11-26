@@ -18,7 +18,7 @@ Scene
 ├── Particle System
 │   ├── Outer Ring          # ~6 m diameter, rise / float up
 │   └── Inner Tank Ring     # ~2 m diameter, floor-outward (no rise)
-├── Wall Plane              # Hidden in Game; center→person ray collide
+├── Wall Plane              # Hidden in Game; Collision ON; center→person ray collide
 └── Camera
 ```
 

@@ -675,6 +675,7 @@ void SceneRuntime::applyNodeEntry(const NodeId id, const SceneDocumentNode& entr
     node->visible = entry.visible;
     node->pickable = entry.pickable;
     node->hidden_in_game = entry.hidden_in_game;
+    node->collision_enabled = entry.collision_enabled;
     node->is_particle_system = entry.is_particle_system;
 
     if (entry.mesh_ref.has_value()) {

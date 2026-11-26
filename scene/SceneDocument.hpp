@@ -22,6 +22,7 @@ struct SceneDocumentNode {
     bool visible = true;
     bool pickable = true;
     bool hidden_in_game = false;
+    bool collision_enabled = true;
     bool is_particle_system = false;
 
     std::optional<std::string> mesh_ref;

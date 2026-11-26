@@ -9,6 +9,8 @@
 // Visible  = editor + runtime show/hide (Inspector "Visible").
 // Hidden in Game = Unreal-like: still shown in the editor viewport, omitted when
 //                  game_output is true (Game View G / Pixera Renderbridge).
+// Collision (Node::collision_enabled) is independent of this draw gate — Hidden in Game
+// does not disable wall-ray / mesh hit tests.
 
 #include "scene/Scene.hpp"
 
