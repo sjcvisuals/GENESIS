@@ -75,6 +75,8 @@ struct ParticleEmitter {
     bool enabled = true;
     bool looping = true;
     bool world_space = true;
+    // Editor-only: viewport spawn-origin marker. Hidden in Game View / Pixera (ImGui overlay).
+    bool debug_show_spawn = false;
 
     float duration_seconds = 0.0f; // 0 = forever while enabled
     float start_delay_seconds = 0.0f;

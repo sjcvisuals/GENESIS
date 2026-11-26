@@ -408,6 +408,7 @@ json particleEmitterToJson(const ParticleEmitter& e) {
         {"enabled", e.enabled},
         {"looping", e.looping},
         {"world_space", e.world_space},
+        {"debug_show_spawn", e.debug_show_spawn},
         {"duration", e.duration_seconds},
         {"start_delay", e.start_delay_seconds},
         {"mod_spawn_rate", e.mod_spawn_rate},
@@ -494,6 +495,7 @@ ParticleEmitter particleEmitterFromJson(const json& j) {
     e.enabled = j.value("enabled", e.enabled);
     e.looping = j.value("looping", e.looping);
     e.world_space = j.value("world_space", e.world_space);
+    e.debug_show_spawn = j.value("debug_show_spawn", false);
     e.duration_seconds = j.value("duration", e.duration_seconds);
     e.start_delay_seconds = j.value("start_delay", e.start_delay_seconds);
     e.mod_spawn_rate = j.value("mod_spawn_rate", e.mod_spawn_rate);
