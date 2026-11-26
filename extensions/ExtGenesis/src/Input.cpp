@@ -222,7 +222,7 @@ void Input::reloadSceneIfNeeded() {
             loaded_show_index_ = show_index;
             applyLoadedPixeraConfig();
             applyLoadedSceneOscSettings();
-            configureRoomOscIfNeeded(resource);
+            applyLoadedSceneRoomTracking();
             // Fresh per-stream cursors so dual-GPU consumers replay from the shared OSC hub.
             osc_particle_cursor_ = 0;
             osc_room_person_cursor_ = 0;
@@ -236,30 +236,39 @@ void Input::reloadSceneIfNeeded() {
     }
 }
 
-void Input::configureRoomOscIfNeeded(const std::string& resource_path) {
-    const bool room = resource_path.find("room_osc_particles") != std::string::npos;
-    const bool medusa = resource_path.find("medusa") != std::string::npos; // medusa.gns / medusa.scene.json
-    if (!room && !medusa) {
+void Input::applyLoadedSceneRoomTracking() {
+    if (!session_) {
         return;
     }
+
     ::genesis::OscProtocol& osc = ::genesis::sharedOscProtocol();
-    ::genesis::OscRoomPersonSettings room_settings = osc.roomPersonSettings();
-    if (medusa) {
-        ::genesis::configureMedusaExampleSettings(room_settings);
-        // Renderbridge output: keep wall-ray math, skip editor line-trace overlay.
-        room_settings.debug_draw_wall_ray = false;
-    } else {
-        ::genesis::configureRoomOscInstallSettings(room_settings);
+    const std::optional<::genesis::SceneRoomTrackingSettings>& scene_rt =
+        session_->sceneRuntime().roomTrackingSettings();
+    if (!scene_rt.has_value()) {
+        // No authored tracking block — leave people tracking off (no filename magic).
+        ::genesis::OscRoomPersonSettings room = osc.roomPersonSettings();
+        room.enabled = false;
+        room.tuio_enabled = false;
+        room.debug_draw_wall_ray = false;
+        osc.setRoomPersonSettings(room);
+        return;
     }
-    osc.setRoomPersonSettings(room_settings);
+
+    ::genesis::OscRoomPersonSettings room = ::genesis::roomTrackingFromScene(*scene_rt);
+    // Renderbridge: keep wall-ray math, skip editor line-trace overlay.
+    room.debug_draw_wall_ray = false;
+    osc.setRoomPersonSettings(room);
 
     ::genesis::OscParticleEmitSettings emit = osc.particleEmitSettings();
-    emit.emitter_path = "Scene/Person Pool/Feet 00";
+    emit.emitter_path = room.feet_emitter_path;
     emit.track_emitter_position = true;
     emit.burst_on_message = false;
     osc.setParticleEmitSettings(emit);
-    host().log_info(medusa ? "GENESIS Medusa OSC person configured for Renderbridge"
-                           : "GENESIS room OSC person configured for Renderbridge");
+
+    host().log_info(std::format(
+        "GENESIS scene room tracking (enabled={} tuio={} wall_ray={} plane={})",
+        room.enabled ? "yes" : "no", room.tuio_enabled ? "yes" : "no",
+        ::genesis::wallRayModeToString(room.wall_ray_mode), room.wall_plane_path));
 }
 
 void Input::publishTargetTexture() {

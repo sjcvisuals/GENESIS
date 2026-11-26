@@ -24,7 +24,7 @@ The generic extension slot in PIXERA is **not** where you import a `.gns` / `.ge
    Keep **`scenes/`** and **`assets/`** next to that DLL. Drop project shows into `scenes/`.
 3. Set device **adapter LUID** (hex) to the GPU PIXERA shares with GENESIS.
 4. On the layer, pick **Scene** from the dropdown (packaged `.gns` / `.genesis` under `scenes/` and `assets/scenes/`).
-5. Author actors/lights in the GENESIS editor and save the packaged show — the clip does **not** dump every transform into PIXERA (expose-from-Genesis is deferred). Protocol **OSC bind IP + port** (and listening) are stored in the scene file and restored when ExtGenesis loads the show.
+5. Author actors/lights in the GENESIS editor and save the packaged show — the clip does **not** dump every transform into PIXERA (expose-from-Genesis is deferred). Protocol **OSC bind IP + port** (and listening) plus **Room Tracking** (people / TUIO / wall-ray) are stored in the scene file and restored when ExtGenesis loads the show.
 
 You do **not** need to copy anything into `<PIXERA>/Program Files/.../data/rxExt/` for the generic extension workflow. PIXERA loads the DLL from wherever you browse.
 

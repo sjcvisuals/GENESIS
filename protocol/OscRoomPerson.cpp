@@ -239,4 +239,82 @@ OscRoomPersonPose oscRoomPersonPose(const OscRoomPersonSettings& settings,
     return pose;
 }
 
+std::string wallRayModeToString(WallRaySpawnMode mode) {
+    switch (mode) {
+    case WallRaySpawnMode::PlaneCollision:
+        return "plane_collision";
+    case WallRaySpawnMode::PreferPlaneThenDistance:
+        return "prefer_plane_then_distance";
+    case WallRaySpawnMode::FixedDistance:
+    default:
+        return "fixed_distance";
+    }
+}
+
+WallRaySpawnMode wallRayModeFromString(const std::string& name) {
+    if (name == "plane_collision") {
+        return WallRaySpawnMode::PlaneCollision;
+    }
+    if (name == "prefer_plane_then_distance") {
+        return WallRaySpawnMode::PreferPlaneThenDistance;
+    }
+    return WallRaySpawnMode::FixedDistance;
+}
+
+SceneRoomTrackingSettings captureSceneRoomTracking(const OscRoomPersonSettings& room) {
+    SceneRoomTrackingSettings out{};
+    out.enabled = room.enabled;
+    out.address = room.address;
+    out.tuio_enabled = room.tuio_enabled;
+    out.tuio_address = room.tuio_address;
+    out.tuio_scale = room.tuio_scale;
+    out.tuio_offset_x = room.tuio_offset.x;
+    out.tuio_offset_y = room.tuio_offset.y;
+    out.person_pool_path = room.person_pool_path;
+    out.wall_plane_path = room.wall_plane_path;
+    out.max_persons = room.max_persons;
+    out.slot_idle_seconds = room.slot_idle_seconds;
+    out.room_radius = room.room_radius;
+    out.tank_radius = room.tank_radius;
+    out.feet_height = room.feet_height;
+    out.wall_spawn_height = room.wall_spawn_height;
+    out.wall_ray_max_distance = room.wall_ray_max_distance;
+    out.wall_ray_mode = wallRayModeToString(room.wall_ray_mode);
+    out.debug_draw_wall_ray = room.debug_draw_wall_ray;
+    out.track_feet_emitter = room.track_feet_emitter;
+    out.track_wall_emitter = room.track_wall_emitter;
+    return out;
+}
+
+OscRoomPersonSettings roomTrackingFromScene(const SceneRoomTrackingSettings& scene) {
+    OscRoomPersonSettings room{};
+    room.enabled = scene.enabled;
+    room.address = scene.address.empty() ? "/genesis/room/person" : scene.address;
+    room.tuio_enabled = scene.tuio_enabled;
+    room.tuio_address = scene.tuio_address.empty() ? "/tuio/2Dcur" : scene.tuio_address;
+    room.tuio_scale = scene.tuio_scale;
+    room.tuio_offset = glm::vec2(scene.tuio_offset_x, scene.tuio_offset_y);
+    room.person_pool_path =
+        scene.person_pool_path.empty() ? "Scene/Person Pool" : scene.person_pool_path;
+    room.feet_emitter_path = room.person_pool_path + "/Feet 00";
+    room.wall_emitter_path = room.person_pool_path + "/Wall 00";
+    room.wall_plane_path =
+        scene.wall_plane_path.empty() ? "Scene/Wall Plane" : scene.wall_plane_path;
+    room.max_persons = std::max(1u, std::min(scene.max_persons,
+                                             static_cast<std::uint32_t>(kRoomPersonSlotCapacity)));
+    room.slot_idle_seconds = scene.slot_idle_seconds;
+    room.room_radius = scene.room_radius;
+    room.tank_radius = scene.tank_radius;
+    room.room_half_x = room.room_radius;
+    room.room_half_z = room.room_radius;
+    room.feet_height = scene.feet_height;
+    room.wall_spawn_height = scene.wall_spawn_height;
+    room.wall_ray_max_distance = scene.wall_ray_max_distance;
+    room.wall_ray_mode = wallRayModeFromString(scene.wall_ray_mode);
+    room.debug_draw_wall_ray = scene.debug_draw_wall_ray;
+    room.track_feet_emitter = scene.track_feet_emitter;
+    room.track_wall_emitter = scene.track_wall_emitter;
+    return room;
+}
+
 } // namespace genesis

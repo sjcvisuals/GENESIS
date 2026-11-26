@@ -9,6 +9,7 @@
 #include "editor/EditorPrefs.hpp"
 #include "editor/EditorSession.hpp"
 #include "editor/OscProtocolUi.hpp"
+#include "editor/RoomTrackingUi.hpp"
 #include "editor/AudioReactiveUi.hpp"
 #include "editor/EditorTheme.hpp"
 #include "editor/ParticleEmitterUi.hpp"
@@ -466,6 +467,11 @@ protected:
         if (show_viewport_help_) drawViewportHelpPanel();
         if (show_timeline_) drawTimelinePanel();
         if (show_protocol_) drawProtocolPanel();
+        if (show_room_tracking_) {
+            if (genesis::drawRoomTrackingPanel(osc_protocol_, &show_room_tracking_)) {
+                session_.dirty = true;
+            }
+        }
         if (show_osc_debug_log_) {
             genesis::drawOscDebugLogPanel(osc_protocol_, &show_osc_debug_log_);
         }
@@ -728,18 +734,10 @@ private:
                     const std::filesystem::path example =
                         genesis::resolveAssetPath("assets/scenes/room_osc_particles.scene.json");
                     try {
+                        // Settings come from scene room_tracking — open the panel so setup is visible.
                         loadSceneDocument(example);
-                        genesis::OscRoomPersonSettings room = osc_protocol_.roomPersonSettings();
-                        genesis::configureRoomOscInstallSettings(room);
-                        osc_protocol_.setRoomPersonSettings(room);
-                        genesis::OscParticleEmitSettings emit = osc_protocol_.particleEmitSettings();
-                        emit.emitter_path = "Scene/Person Pool/Feet 00";
-                        emit.track_emitter_position = true;
-                        emit.burst_on_message = false;
-                        osc_protocol_.setParticleEmitSettings(emit);
-                        if (!osc_protocol_.isListening()) {
-                            osc_protocol_.startListening();
-                        }
+                        show_room_tracking_ = true;
+                        show_protocol_ = true;
                     } catch (const std::exception& ex) {
                         spdlog::error("Open room OSC example failed: {}", ex.what());
                     }
@@ -748,18 +746,11 @@ private:
                     const std::filesystem::path example =
                         genesis::resolveAssetPath("assets/scenes/medusa.scene.json");
                     try {
+                        // Dual rings + Wall Plane are in the file; room_tracking is authored there too.
+                        // No silent configureMedusaExampleSettings — View → Room Tracking shows the setup.
                         loadSceneDocument(example);
-                        genesis::OscRoomPersonSettings room = osc_protocol_.roomPersonSettings();
-                        genesis::configureMedusaExampleSettings(room);
-                        osc_protocol_.setRoomPersonSettings(room);
-                        genesis::OscParticleEmitSettings emit = osc_protocol_.particleEmitSettings();
-                        emit.emitter_path = "Scene/Person Pool/Feet 00";
-                        emit.track_emitter_position = true;
-                        emit.burst_on_message = false;
-                        osc_protocol_.setParticleEmitSettings(emit);
-                        if (!osc_protocol_.isListening()) {
-                            osc_protocol_.startListening();
-                        }
+                        show_room_tracking_ = true;
+                        show_protocol_ = true;
                     } catch (const std::exception& ex) {
                         spdlog::error("Open Medusa example failed: {}", ex.what());
                     }
@@ -810,6 +801,11 @@ private:
             ImGui::MenuItem("Shortcuts", nullptr, &show_viewport_help_);
             ImGui::MenuItem("Timeline", nullptr, &show_timeline_);
             ImGui::MenuItem("Protocol", nullptr, &show_protocol_);
+            ImGui::MenuItem("Room Tracking", nullptr, &show_room_tracking_);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "People / wall-ray / TUIO — authored with the scene (Medusa-style from scratch).");
+            }
             ImGui::MenuItem("OSC Debug Log", nullptr, &show_osc_debug_log_);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("Raw incoming OSC packets / bundles (copyable ring buffer).");
@@ -3416,123 +3412,6 @@ private:
         runtime_.updateTransforms();
     }
 
-    void configureRoomOscDemoIfNeeded() {
-        const std::string path = session_.document_path.filename().string();
-        const bool room_demo = path.find("room_osc_particles") != std::string::npos;
-        const bool medusa_demo = path.find("medusa.scene") != std::string::npos;
-        if (!room_demo && !medusa_demo) {
-            return;
-        }
-        // Room / Medusa: surface OSC + wall-ray controls (skip panel when capturing viewport demos).
-        const bool hide_protocol =
-            (std::getenv("GENESIS_WALL_RAY_HIDE_PROTOCOL") != nullptr);
-        show_protocol_ = !hide_protocol;
-        genesis::OscRoomPersonSettings room = osc_protocol_.roomPersonSettings();
-        if (medusa_demo) {
-            genesis::configureMedusaExampleSettings(room);
-        } else {
-            genesis::configureRoomOscInstallSettings(room);
-        }
-        // Opt-in editor debug: GENESIS_WALL_RAY_DEBUG=1 (still off for Renderbridge / default).
-        // Medusa enables line-trace debug by default via configureMedusaExampleSettings.
-        if (const char* dbg = std::getenv("GENESIS_WALL_RAY_DEBUG");
-            dbg != nullptr && dbg[0] != '\0' && dbg[0] != '0') {
-            room.debug_draw_wall_ray = true;
-        }
-        // Opt-in (Room) or always-on (Medusa): one upright Wall Plane + PreferPlaneThenDistance.
-        const bool plane_env = (std::getenv("GENESIS_WALL_RAY_PLANE") != nullptr &&
-                                std::getenv("GENESIS_WALL_RAY_PLANE")[0] != '\0' &&
-                                std::getenv("GENESIS_WALL_RAY_PLANE")[0] != '0');
-        if (medusa_demo || plane_env) {
-            genesis::Scene& scene = runtime_.scene();
-            std::optional<genesis::NodeId> scene_root = genesis::findNodeByPath(scene, "Scene");
-            room.wall_plane_path = "Scene/Wall Plane";
-            // Drop any stray Plane* mesh actors under Scene so demos stay a single hit panel.
-            std::vector<genesis::NodeId> stray_planes;
-            for (const genesis::Node& node : scene.nodes) {
-                if (!node.has_mesh || !node.parent.has_value()) {
-                    continue;
-                }
-                if (scene_root && *node.parent != *scene_root) {
-                    continue;
-                }
-                if (node.name == "Wall Plane") {
-                    continue;
-                }
-                if (node.name.rfind("Plane", 0) == 0) {
-                    stray_planes.push_back(node.id);
-                }
-            }
-            for (genesis::NodeId id : stray_planes) {
-                scene.deleteNode(id);
-            }
-            auto place_compact_wall_plane = [&](genesis::Node& plane) {
-                // Just outside the 2 m walk ring, facing -X; ~2.2 m tall × ~1 m wide.
-                plane.local.position = glm::vec3(2.35f, 1.1f, 0.0f);
-                plane.local.rotation =
-                    glm::angleAxis(glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-                // local X → height, local Z → width after Z-90° rotation.
-                plane.local.scale = glm::vec3(2.2f, 1.0f, 1.0f);
-                // Mesh omitted from Game View / Renderbridge; Collision stays ON for wall-ray.
-                plane.hidden_in_game = true;
-                plane.collision_enabled = true;
-            };
-            if (const std::optional<genesis::NodeId> existing =
-                    genesis::findNodeByPath(scene, room.wall_plane_path)) {
-                if (genesis::Node* plane = scene.find(*existing)) {
-                    place_compact_wall_plane(*plane);
-                    runtime_.updateTransforms();
-                    spdlog::info("Wall ray demo: resized Scene/Wall Plane for natural hits");
-                }
-            } else {
-                // Compact panel near center: only a small +X sector of the donut hits;
-                // most of a circle walk falls back to fixed room_radius.
-                const std::uint32_t mesh_id =
-                    runtime_.addMesh("WallPlane", genesis::createPlaneMesh(renderer().context(), 0.5f));
-                genesis::SceneMaterial mat{};
-                mat.base_color = glm::vec4(0.35f, 0.38f, 0.42f, 1.0f);
-                mat.metallic = 0.0f;
-                mat.roughness = 0.9f;
-                mat.emissive = glm::vec3(0.28f, 0.30f, 0.33f);
-                mat.emissive_strength = 1.35f;
-                const std::uint32_t mat_id = runtime_.addMaterial("WallPlane Material", mat);
-                const genesis::NodeId plane_id =
-                    scene.createMeshNode("Wall Plane", mesh_id, scene_root, mat_id);
-                if (genesis::Node* plane = scene.find(plane_id)) {
-                    place_compact_wall_plane(*plane);
-                }
-                runtime_.updateTransforms();
-                spdlog::info("Wall ray demo: created compact Scene/Wall Plane (node {})", plane_id);
-            }
-            room.wall_ray_mode = genesis::WallRaySpawnMode::PreferPlaneThenDistance;
-        }
-        // Prefer green/yellow/blue gradual palette on room emitters (drop rainbow/red pops).
-        {
-            const genesis::ParticleEmitter palette = genesis::makeGentleSoftEmitter();
-            for (genesis::Node& node : runtime_.scene().nodes) {
-                if (!node.particle_emitter.has_value()) {
-                    continue;
-                }
-                genesis::ParticleEmitter& e = *node.particle_emitter;
-                e.color_start = palette.color_start;
-                e.color_end = palette.color_end;
-                e.color_over_life = palette.color_over_life;
-            }
-        }
-        osc_protocol_.setRoomPersonSettings(room);
-        genesis::OscParticleEmitSettings emit = osc_protocol_.particleEmitSettings();
-        emit.emitter_path = "Scene/Person Pool/Feet 00";
-        emit.track_emitter_position = true;
-        emit.burst_on_message = false;
-        osc_protocol_.setParticleEmitSettings(emit);
-        if (!osc_protocol_.isListening()) {
-            std::string err;
-            if (!osc_protocol_.startListening(&err) && !err.empty()) {
-                spdlog::warn("Room OSC listen failed: {}", err);
-            }
-        }
-    }
-
     void applyLoadedSceneOscSettings() {
         if (!runtime_.oscSettings().has_value()) {
             return;
@@ -3548,8 +3427,32 @@ private:
         }
     }
 
+    void applyLoadedSceneRoomTracking() {
+        if (runtime_.roomTrackingSettings().has_value()) {
+            osc_protocol_.setRoomPersonSettings(
+                genesis::roomTrackingFromScene(*runtime_.roomTrackingSettings()));
+            spdlog::info(
+                "Restored scene room tracking (enabled={}, tuio={}, wall_ray={}, plane={})",
+                osc_protocol_.roomPersonSettings().enabled ? "yes" : "no",
+                osc_protocol_.roomPersonSettings().tuio_enabled ? "yes" : "no",
+                genesis::wallRayModeToString(osc_protocol_.roomPersonSettings().wall_ray_mode),
+                osc_protocol_.roomPersonSettings().wall_plane_path);
+            return;
+        }
+        // Scenes without room_tracking stay off — no filename-based magic.
+        genesis::OscRoomPersonSettings room = osc_protocol_.roomPersonSettings();
+        room.enabled = false;
+        room.tuio_enabled = false;
+        room.debug_draw_wall_ray = false;
+        osc_protocol_.setRoomPersonSettings(room);
+        osc_protocol_.clearRoomPersonEvents();
+        osc_room_person_cursor_ = 0;
+    }
+
     void stampOscSettingsForSave() {
         runtime_.setOscSettings(osc_protocol_.captureSceneOscSettings());
+        runtime_.setRoomTrackingSettings(
+            genesis::captureSceneRoomTracking(osc_protocol_.roomPersonSettings()));
     }
 
     void syncEditorAfterDocumentLoad() {
@@ -3557,7 +3460,7 @@ private:
         orientSceneOutputCameras(runtime_.scene());
         resetEditorCamera();
         applyLoadedSceneOscSettings();
-        configureRoomOscDemoIfNeeded();
+        applyLoadedSceneRoomTracking();
 
         // Auto-frame: room / Medusa get a fixed overview so the 6 m wall + dual rings read;
         // other demos still frame the Soft Circles / Outer Ring emitter.
@@ -3654,6 +3557,7 @@ private:
     bool show_viewport_help_ = false;
     bool show_timeline_ = false;
     bool show_protocol_ = false;
+    bool show_room_tracking_ = false;
     bool show_osc_debug_log_ = false;
     bool show_audio_ = false;
     bool show_animation_graph_ = false;

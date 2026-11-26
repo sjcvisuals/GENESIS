@@ -819,6 +819,31 @@ json SceneSerializer::documentToJson(const SceneDocument& document) {
         };
     }
 
+    if (document.room_tracking.has_value()) {
+        const SceneRoomTrackingSettings& rt = *document.room_tracking;
+        root["room_tracking"] = json{
+            {"enabled", rt.enabled},
+            {"address", rt.address},
+            {"tuio_enabled", rt.tuio_enabled},
+            {"tuio_address", rt.tuio_address},
+            {"tuio_scale", rt.tuio_scale},
+            {"tuio_offset", json::array({rt.tuio_offset_x, rt.tuio_offset_y})},
+            {"person_pool_path", rt.person_pool_path},
+            {"wall_plane_path", rt.wall_plane_path},
+            {"max_persons", rt.max_persons},
+            {"slot_idle_seconds", rt.slot_idle_seconds},
+            {"room_radius", rt.room_radius},
+            {"tank_radius", rt.tank_radius},
+            {"feet_height", rt.feet_height},
+            {"wall_spawn_height", rt.wall_spawn_height},
+            {"wall_ray_max_distance", rt.wall_ray_max_distance},
+            {"wall_ray_mode", rt.wall_ray_mode},
+            {"debug_draw_wall_ray", rt.debug_draw_wall_ray},
+            {"track_feet_emitter", rt.track_feet_emitter},
+            {"track_wall_emitter", rt.track_wall_emitter},
+        };
+    }
+
     json materials = json::array();
     for (const auto& [name, material] : document.materials) {
         materials.push_back(materialToJson(name, material));
@@ -898,6 +923,35 @@ SceneDocument SceneSerializer::loadFromJson(const json& root) {
         settings.port = static_cast<std::uint16_t>(std::clamp(port, 1, 65535));
         settings.listening = osc.value("listening", false);
         document.osc = settings;
+    }
+
+    if (root.contains("room_tracking") && root["room_tracking"].is_object()) {
+        const json& rt = root["room_tracking"];
+        SceneRoomTrackingSettings settings{};
+        settings.enabled = rt.value("enabled", false);
+        settings.address = rt.value("address", std::string{"/genesis/room/person"});
+        settings.tuio_enabled = rt.value("tuio_enabled", false);
+        settings.tuio_address = rt.value("tuio_address", std::string{"/tuio/2Dcur"});
+        settings.tuio_scale = rt.value("tuio_scale", 3.0f);
+        if (rt.contains("tuio_offset") && rt["tuio_offset"].is_array() &&
+            rt["tuio_offset"].size() >= 2) {
+            settings.tuio_offset_x = rt["tuio_offset"][0].get<float>();
+            settings.tuio_offset_y = rt["tuio_offset"][1].get<float>();
+        }
+        settings.person_pool_path = rt.value("person_pool_path", std::string{"Scene/Person Pool"});
+        settings.wall_plane_path = rt.value("wall_plane_path", std::string{"Scene/Wall Plane"});
+        settings.max_persons = rt.value("max_persons", 10u);
+        settings.slot_idle_seconds = rt.value("slot_idle_seconds", 0.75f);
+        settings.room_radius = rt.value("room_radius", 3.0f);
+        settings.tank_radius = rt.value("tank_radius", 1.0f);
+        settings.feet_height = rt.value("feet_height", 0.05f);
+        settings.wall_spawn_height = rt.value("wall_spawn_height", 0.12f);
+        settings.wall_ray_max_distance = rt.value("wall_ray_max_distance", 20.0f);
+        settings.wall_ray_mode = rt.value("wall_ray_mode", std::string{"fixed_distance"});
+        settings.debug_draw_wall_ray = rt.value("debug_draw_wall_ray", false);
+        settings.track_feet_emitter = rt.value("track_feet_emitter", true);
+        settings.track_wall_emitter = rt.value("track_wall_emitter", true);
+        document.room_tracking = settings;
     }
 
     if (root.contains("materials") && root["materials"].is_array()) {

@@ -40,6 +40,7 @@ private:
     void refreshParameterCatalog();
     void applyLoadedPixeraConfig();
     void applyLoadedSceneOscSettings();
+    void applyLoadedSceneRoomTracking();
     void reloadSceneIfNeeded();
     std::string selectedShowPath() const;
 
@@ -65,8 +66,6 @@ private:
     std::uint64_t osc_particle_cursor_ = 0;
     std::uint64_t osc_room_person_cursor_ = 0;
     double osc_time_seconds_ = 0.0;
-
-    void configureRoomOscIfNeeded(const std::string& resource_path);
 };
 
 } // namespace rxext::genesis_ext

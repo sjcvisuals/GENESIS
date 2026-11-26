@@ -296,6 +296,7 @@ endif()
 
 add_library(genesis_protocol_ui STATIC
     editor/OscProtocolUi.cpp
+    editor/RoomTrackingUi.cpp
 )
 target_include_directories(genesis_protocol_ui PUBLIC ${CMAKE_SOURCE_DIR})
 target_link_libraries(genesis_protocol_ui PUBLIC genesis_protocol imgui_lib)

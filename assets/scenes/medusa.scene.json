@@ -354,7 +354,8 @@
           1.0,
           1.0
         ]
-      }
+      },
+      "collision_enabled": true
     },
     {
       "path": "Scene/Camera",
@@ -405,5 +406,29 @@
       "emissive_strength": 1.35
     }
   ],
-  "active_output_camera": "Scene/Camera"
+  "active_output_camera": "Scene/Camera",
+  "room_tracking": {
+    "enabled": true,
+    "address": "/genesis/room/person",
+    "tuio_enabled": true,
+    "tuio_address": "/tuio/2Dcur",
+    "tuio_scale": 3.0,
+    "tuio_offset": [
+      0.0,
+      0.0
+    ],
+    "person_pool_path": "Scene/Person Pool",
+    "wall_plane_path": "Scene/Wall Plane",
+    "max_persons": 10,
+    "slot_idle_seconds": 0.75,
+    "room_radius": 3.0,
+    "tank_radius": 1.0,
+    "feet_height": 0.05,
+    "wall_spawn_height": 0.12,
+    "wall_ray_max_distance": 20.0,
+    "wall_ray_mode": "prefer_plane_then_distance",
+    "debug_draw_wall_ray": true,
+    "track_feet_emitter": true,
+    "track_wall_emitter": true
+  }
 }
