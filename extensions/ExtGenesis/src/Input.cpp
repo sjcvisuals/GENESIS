@@ -59,9 +59,9 @@ Input::Input(std::uint64_t adapter_luid, ValueSet settings)
                                                       {"Fast", "Balanced", "Quality"});
     quality_->set_value(1);
 
-    ParameterVector3* position_param_ = nullptr;
+    ParameterVector3* position_param = nullptr;
     actor_bindings_.registerSceneParameters(*this, show_select_, use_scene_camera_, reload_scene_,
-                                              position_param_);
+                                              position_param);
 
     show_perf_debug_ = add_parameter<ParameterBool>("show_perf_debug", false);
     show_perf_debug_->set_property(PropertyNames::name, "Show Perf Debug");
@@ -77,8 +77,8 @@ Input::Input(std::uint64_t adapter_luid, ValueSet settings)
     projection_matrix_->set_property(PropertyNames::name, "Projection Matrix");
     projection_matrix_->set_property(PropertyNames::group_name, "Camera");
 
-    parameter_catalog_ = buildSceneParameterCatalog(module_dir_);
-    actor_bindings_.registerActors(*this, parameter_catalog_);
+    // Bulk actor/light parameter dump deferred (expose-from-Genesis later). Clip UI is
+    // Notch-like: scene dropdown from scenes/ + assets/scenes/ packaged shows only.
 
     time_ = add_parameter<ParameterValue>("time");
     time_->set_property(PropertyNames::purpose, PurposeNames::TimelineTime);
@@ -89,10 +89,8 @@ Input::Input(std::uint64_t adapter_luid, ValueSet settings)
 Input::~Input() = default;
 
 bool Input::initialize() noexcept try {
-    host().log_info(std::format("initializing GENESIS stream '{}' ({} actors, {} lights)",
-                                settings_.get(SettingNames::handle),
-                                actor_bindings_.actorCount(),
-                                actor_bindings_.lightCount()));
+    host().log_info(std::format("initializing GENESIS stream '{}' ({} packaged scenes)",
+                                settings_.get(SettingNames::handle), show_paths_.size()));
     if (!update_settings(std::move(settings_))) {
         return false;
     }
@@ -195,33 +193,13 @@ void Input::refreshShowSelector() {
 }
 
 void Input::refreshParameterCatalog() {
+    // Only refresh the scene dropdown when packaged shows appear/disappear beside the DLL.
+    // Do not register per-actor/light parameters (expose-from-Genesis is deferred).
     const std::vector<std::string> scanned = ::genesis::scanRuntimeShowResources(module_dir_);
-    const bool show_list_changed = scanned != show_paths_;
-    if (!show_list_changed) {
+    if (scanned == show_paths_) {
         return;
     }
-
-    parameter_catalog_ = buildSceneParameterCatalog(module_dir_);
-    const std::size_t added = actor_bindings_.registerNewFromCatalog(*this, parameter_catalog_);
-    if (added > 0) {
-        host().log_info(std::format("GENESIS registered {} new actor/light parameters", added));
-    }
-
     refreshShowSelector();
-}
-
-void Input::refreshCatalogForLoadedShow() {
-    if (loaded_scene_resource_.empty()) {
-        return;
-    }
-
-    const SceneParameterCatalog show_catalog =
-        buildSceneParameterCatalogForShow(module_dir_, loaded_scene_resource_);
-    const std::size_t added = actor_bindings_.registerNewFromCatalog(*this, show_catalog);
-    if (added > 0) {
-        host().log_info(std::format("GENESIS registered {} parameters for '{}'", added,
-                                    loaded_scene_resource_));
-    }
 }
 
 std::string Input::selectedShowPath() const {
@@ -241,13 +219,10 @@ void Input::applyLoadedPixeraConfig() {
 
     const std::optional<::genesis::GnsPixeraConfig>& pixera = session_->pixeraConfig();
     if (!pixera.has_value()) {
-        ::genesis::GnsBindings empty{};
-        actor_bindings_.applyGnsBindings(empty, session_->sceneRuntime());
-        actor_bindings_.syncAllFromScene(session_->sceneRuntime());
         return;
     }
 
-    if (!pixera->streams.empty()) {
+    if (!pixera->streams.empty() && use_scene_camera_) {
         use_scene_camera_->set_value(pixera->streams.front().use_scene_camera);
     }
 
@@ -257,14 +232,15 @@ void Input::applyLoadedPixeraConfig() {
         setShowEnumOptions(show_select_, show_paths_, show_index);
     }
 
-    actor_bindings_.applyGnsBindings(pixera->bindings, session_->sceneRuntime());
-    actor_bindings_.syncAllFromScene(session_->sceneRuntime());
-
+    // Bindings metadata is kept on the package for a future expose-from-Genesis path;
+    // do not dump actor/light parameters into the clip UI today.
     if (!pixera->bindings.target_node.empty()) {
-        host().log_info(std::format("GENESIS target_node: {}", pixera->bindings.target_node));
+        host().log_info(std::format("GENESIS target_node (deferred expose): {}",
+                                    pixera->bindings.target_node));
     }
     if (!pixera->bindings.light_node.empty()) {
-        host().log_info(std::format("GENESIS light_node: {}", pixera->bindings.light_node));
+        host().log_info(std::format("GENESIS light_node (deferred expose): {}",
+                                    pixera->bindings.light_node));
     }
 }
 
@@ -284,7 +260,6 @@ void Input::reloadSceneIfNeeded() {
         if (session_->tryLoadResolved(toGenesisRuntimeResource(*resolved))) {
             loaded_scene_resource_ = resource;
             loaded_show_index_ = show_index;
-            refreshCatalogForLoadedShow();
             applyLoadedPixeraConfig();
             configureRoomOscIfNeeded(resource);
             // Fresh per-stream cursors so dual-GPU consumers replay from the shared OSC hub.
@@ -500,8 +475,6 @@ RenderResult Input::render() noexcept try {
         }
         return RenderResult::Succeeded;
     }
-
-    actor_bindings_.apply(session_->sceneRuntime());
 
     // Shared OSC hub: one UDP listen per process, per-stream cursor for dual-GPU.
     ::genesis::OscProtocol& osc = ::genesis::sharedOscProtocol();

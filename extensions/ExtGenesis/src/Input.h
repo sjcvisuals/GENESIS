@@ -4,7 +4,6 @@
 #include "runtime/GenesisSession.hpp"
 #include "runtime/RemoverPipeline.hpp"
 #include "ResourceLoader.h"
-#include "SceneParameterCatalog.h"
 #include "rxext_client.h"
 
 #include <cstdint>
@@ -48,7 +47,6 @@ private:
     void applyMatteSettings();
     void refreshShowSelector();
     void refreshParameterCatalog();
-    void refreshCatalogForLoadedShow();
     void applyLoadedPixeraConfig();
     void reloadSceneIfNeeded();
     std::string selectedShowPath() const;
@@ -69,7 +67,6 @@ private:
     ParameterBool* reload_scene_ = nullptr;
     ParameterBool* show_perf_debug_ = nullptr;
     ActorBindings actor_bindings_;
-    SceneParameterCatalog parameter_catalog_;
     std::filesystem::path module_dir_;
     std::vector<std::string> show_paths_;
     std::string loaded_scene_resource_;

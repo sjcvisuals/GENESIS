@@ -53,8 +53,11 @@ bool isGltfPath(const std::filesystem::path& path) {
     return ext == ".gltf" || ext == ".glb";
 }
 
-bool isShowFile(const std::filesystem::path& path) {
-    return isGnsPath(path) || isDocumentPath(path) || isGltfPath(path);
+// Pixera clip dropdown: packaged shows only (.gns / .genesis), like Notch .dfx.
+// Authoring .scene.json / glTF stay loadable by explicit resource string, but are
+// not listed until expose-from-Genesis lands.
+bool isPackagedShowFile(const std::filesystem::path& path) {
+    return isGnsPath(path);
 }
 
 std::optional<std::filesystem::path> tryResolvePath(const std::filesystem::path& candidate) {
@@ -92,7 +95,7 @@ void scanShowDirectory(const std::filesystem::path& directory,
 
     std::vector<std::filesystem::path> files;
     for (const auto& entry : std::filesystem::recursive_directory_iterator(directory)) {
-        if (entry.is_regular_file() && isShowFile(entry.path())) {
+        if (entry.is_regular_file() && isPackagedShowFile(entry.path())) {
             files.push_back(entry.path());
         }
     }
@@ -182,9 +185,9 @@ std::vector<std::string> scanRuntimeShowResources(const std::filesystem::path& m
         return shows;
     }
 
-    // Dropdown sources next to ExtGenesis.dll:
+    // Notch-like scene picker sources next to ExtGenesis.dll:
     //   scenes/            (preferred project drop folder)
-    //   assets/scenes/     (bundled defaults shipped with the module)
+    //   assets/scenes/     (bundled packaged shows shipped with the module)
     // Always store paths relative to the module directory so resolve matches.
     scanShowDirectory(module_dir / "scenes", module_dir, shows);
     scanShowDirectory(module_dir / "Scenes", module_dir, shows);

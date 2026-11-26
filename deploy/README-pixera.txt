@@ -19,7 +19,7 @@ Required files
 --------------
   ExtGenesis.dll
   Genesis.manifest.json
-  scenes/   (drop your .genesis / .gns shows here — fills the Show dropdown)
+  scenes/   (drop your .genesis / .gns shows here — fills the Scene dropdown)
   assets/   (bundled resources; assets/scenes/ is also scanned into Show)
 
 Runtime dependency
