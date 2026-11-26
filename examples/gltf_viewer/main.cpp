@@ -531,6 +531,7 @@ protected:
             drawActorIcons(scene);
             drawParticleSpawnDebug(scene);
             drawWallRayDebug();
+            drawEmitterLineTraceDebug();
         } else {
             viewport_.w = 0.0f;
             viewport_.h = 0.0f;
@@ -1286,7 +1287,16 @@ private:
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip(
                     "Unreal-like: still shown in the editor; omitted in Game View (G) and Pixera "
-                    "Renderbridge. Visible=off always wins. Collisions still apply.");
+                    "Renderbridge. Visible=off always wins. Collisions still apply unless "
+                    "Collision is off.");
+            }
+            if (n->has_mesh) {
+                if (ImGui::Checkbox("Collision", &n->collision_enabled)) changed = true;
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip(
+                        "When off, wall-ray / Tugela Line Trace snap / mesh hit tests skip this "
+                        "mesh. Independent of Visible and Hidden in Game (default ON).");
+                }
             }
             if (n->camera.has_value()) {
                 ImGui::BeginDisabled();
@@ -2654,6 +2664,61 @@ private:
         }
     }
 
+    // Tugela emitter Line Trace debug — same style as wall-ray (hide in Game View).
+    void drawEmitterLineTraceDebug() {
+        if (game_view_mode_ || !show_viewport_ || viewport_.w < 2.0f) {
+            return;
+        }
+        const auto& samples = runtime_.emitterLineTraceDebugSamples();
+        if (samples.empty()) {
+            return;
+        }
+
+        const float aspect = renderAspect();
+        const glm::mat4 view_proj =
+            genesis::projectionForImGuizmo(outputProjectionMatrix(aspect)) * outputViewMatrix();
+        ImDrawList* draw = ImGui::GetForegroundDrawList();
+
+        auto project = [&](const glm::vec3& world, ImVec2& out) -> bool {
+            float sx = 0.0f;
+            float sy = 0.0f;
+            if (!projectWorldPointToScreen(view_proj, world, viewport_.w, viewport_.h, sx, sy)) {
+                return false;
+            }
+            out = ImVec2(viewport_.x + sx, viewport_.y + sy);
+            return true;
+        };
+
+        for (const genesis::EmitterLineTraceDebugSample& sample : samples) {
+            if (!sample.active) {
+                continue;
+            }
+            ImVec2 o{};
+            ImVec2 e{};
+            ImVec2 p{};
+            const bool ok_o = project(sample.origin, o);
+            const bool ok_e = project(sample.end, e);
+            const bool ok_p = project(sample.position, p);
+            const ImU32 line_col =
+                sample.used_collision_hit ? IM_COL32(120, 210, 160, 220) : IM_COL32(210, 180, 90, 210);
+            const ImU32 hit_col =
+                sample.used_collision_hit ? IM_COL32(90, 230, 150, 240) : IM_COL32(240, 200, 80, 230);
+            if (ok_o && ok_e) {
+                draw->AddLine(o, e, line_col, 1.75f);
+            }
+            if (ok_o) {
+                draw->AddCircleFilled(o, 4.0f, IM_COL32(200, 200, 210, 220), 10);
+            }
+            if (ok_e) {
+                draw->AddCircleFilled(e, 3.5f, IM_COL32(180, 180, 190, 200), 10);
+            }
+            if (ok_p) {
+                draw->AddCircleFilled(p, 6.0f, hit_col, 14);
+                draw->AddCircle(p, 9.0f, hit_col, 16, 1.5f);
+            }
+        }
+    }
+
     static genesis::MeshMaterialPushConstants makeOutlineMaterial(bool primary) {
         genesis::MeshMaterialPushConstants mat{};
         // Thin white Unreal-style silhouette — not amber, not a filled wash.
@@ -3415,8 +3480,9 @@ private:
                     glm::angleAxis(glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
                 // local X → height, local Z → width after Z-90° rotation.
                 plane.local.scale = glm::vec3(2.2f, 1.0f, 1.0f);
-                // Collisions still run; mesh omitted from Game View / Renderbridge.
+                // Mesh omitted from Game View / Renderbridge; Collision stays ON for wall-ray.
                 plane.hidden_in_game = true;
+                plane.collision_enabled = true;
             };
             if (const std::optional<genesis::NodeId> existing =
                     genesis::findNodeByPath(scene, room.wall_plane_path)) {

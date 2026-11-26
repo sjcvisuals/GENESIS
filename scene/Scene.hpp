@@ -30,8 +30,12 @@ struct Node {
     bool visible = true;
     bool pickable = true;
     // Unreal-like: still shown in the editor; omitted when game_output (Game View / Renderbridge).
-    // Cascades to children. Visible=off always wins. Collisions / wall-ray hits still apply.
+    // Cascades to children. Visible=off always wins. Collisions / wall-ray hits still apply
+    // unless collision_enabled is false (independent of Hidden in Game).
     bool hidden_in_game = false;
+    // Per-mesh collider: wall-ray / particle collide / mesh hit tests honor this.
+    // Default ON. Independent of Visible / Hidden in Game / Pickable.
+    bool collision_enabled = true;
 
     // Runtime mesh resource index (owned by application mesh pool).
     std::optional<std::uint32_t> mesh_resource;

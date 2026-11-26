@@ -351,7 +351,7 @@ std::uint32_t OscProtocol::applyRoomPerson(SceneRuntime& runtime, std::uint64_t&
         if (const std::optional<NodeId> plane_id =
                 findNodeByPath(runtime.scene(), room_person_.wall_plane_path)) {
             if (const Node* plane_node = runtime.scene().find(*plane_id); plane_node &&
-                plane_node->has_mesh) {
+                plane_node->has_mesh && plane_node->collision_enabled) {
                 WallPlane plane{};
                 plane.point = glm::vec3(plane_node->world[3]);
                 const glm::mat3 rot(plane_node->world);

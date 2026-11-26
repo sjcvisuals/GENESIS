@@ -411,6 +411,17 @@ json particleEmitterToJson(const ParticleEmitter& e) {
         {"debug_show_spawn", e.debug_show_spawn},
         {"duration", e.duration_seconds},
         {"start_delay", e.start_delay_seconds},
+        {"line_trace_enabled", e.line_trace_enabled},
+        {"line_trace_use_endpoints", e.line_trace_use_endpoints},
+        {"line_trace_origin", vec3ToJson(e.line_trace_origin)},
+        {"line_trace_direction", vec3ToJson(e.line_trace_direction)},
+        {"line_trace_from", vec3ToJson(e.line_trace_from)},
+        {"line_trace_to", vec3ToJson(e.line_trace_to)},
+        {"line_trace_max_distance", e.line_trace_max_distance},
+        {"line_trace_distance_normalized", e.line_trace_distance_normalized},
+        {"line_trace_distance", e.line_trace_distance},
+        {"line_trace_snap_to_collision", e.line_trace_snap_to_collision},
+        {"line_trace_debug_draw", e.line_trace_debug_draw},
         {"mod_spawn_rate", e.mod_spawn_rate},
         {"rate", e.rate_per_second},
         {"burst", e.burst_count},
@@ -498,6 +509,21 @@ ParticleEmitter particleEmitterFromJson(const json& j) {
     e.debug_show_spawn = j.value("debug_show_spawn", false);
     e.duration_seconds = j.value("duration", e.duration_seconds);
     e.start_delay_seconds = j.value("start_delay", e.start_delay_seconds);
+    e.line_trace_enabled = j.value("line_trace_enabled", e.line_trace_enabled);
+    e.line_trace_use_endpoints = j.value("line_trace_use_endpoints", e.line_trace_use_endpoints);
+    if (j.contains("line_trace_origin")) e.line_trace_origin = vec3FromJson(j["line_trace_origin"]);
+    if (j.contains("line_trace_direction")) {
+        e.line_trace_direction = vec3FromJson(j["line_trace_direction"]);
+    }
+    if (j.contains("line_trace_from")) e.line_trace_from = vec3FromJson(j["line_trace_from"]);
+    if (j.contains("line_trace_to")) e.line_trace_to = vec3FromJson(j["line_trace_to"]);
+    e.line_trace_max_distance = j.value("line_trace_max_distance", e.line_trace_max_distance);
+    e.line_trace_distance_normalized =
+        j.value("line_trace_distance_normalized", e.line_trace_distance_normalized);
+    e.line_trace_distance = j.value("line_trace_distance", e.line_trace_distance);
+    e.line_trace_snap_to_collision =
+        j.value("line_trace_snap_to_collision", e.line_trace_snap_to_collision);
+    e.line_trace_debug_draw = j.value("line_trace_debug_draw", e.line_trace_debug_draw);
     e.mod_spawn_rate = j.value("mod_spawn_rate", e.mod_spawn_rate);
     e.rate_per_second = j.value("rate", e.rate_per_second);
     e.burst_count = j.value("burst", e.burst_count);
@@ -722,6 +748,7 @@ SceneDocument SceneSerializer::buildDocument(const Scene& scene, const std::stri
         entry.visible = node.visible;
         entry.pickable = node.pickable;
         entry.hidden_in_game = node.hidden_in_game;
+        entry.collision_enabled = node.collision_enabled;
         entry.is_particle_system = node.is_particle_system;
         if (node.mesh_resource.has_value() && *node.mesh_resource < mesh_names.size()) {
             entry.mesh_ref = mesh_names[*node.mesh_resource];
@@ -772,6 +799,7 @@ json SceneSerializer::documentToJson(const SceneDocument& document) {
             {"visible", node.visible},
             {"pickable", node.pickable},
             {"hidden_in_game", node.hidden_in_game},
+            {"collision_enabled", node.collision_enabled},
             {"transform", transformToJson(node.local)},
         };
         if (node.is_particle_system) {
@@ -848,6 +876,7 @@ SceneDocument SceneSerializer::loadFromJson(const json& root) {
                 node.pickable = entry["pickable"].get<bool>();
             }
             node.hidden_in_game = entry.value("hidden_in_game", false);
+            node.collision_enabled = entry.value("collision_enabled", true);
             node.is_particle_system = entry.value("particle_system", false);
             if (entry.contains("transform")) node.local = transformFromJson(entry["transform"]);
             if (entry.contains("parent") && !entry["parent"].is_null()) {

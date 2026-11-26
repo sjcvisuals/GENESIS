@@ -2,6 +2,7 @@
 
 #include "animation/AnimationClip.hpp"
 #include "animation/AnimationGraph.hpp"
+#include "particles/EmitterLineTrace.hpp"
 #include "particles/FluidWorld.hpp"
 #include "particles/ParticleWorld.hpp"
 #include "renderer/Mesh.hpp"
@@ -103,6 +104,13 @@ public:
 
     void updateTransforms();
 
+    // Live Tugela Line Trace emitter placement (also runs inside updateTransforms).
+    // Returns samples for editor debug draw when emitters have line_trace_debug_draw on.
+    bool applyEmitterLineTraces();
+    const std::vector<EmitterLineTraceDebugSample>& emitterLineTraceDebugSamples() const {
+        return emitter_line_trace_debug_;
+    }
+
     void collectDrawCommands(std::vector<SceneDrawCommand>& out,
                              SceneRenderStats* out_stats = nullptr,
                              const SceneDrawCollectParams& params = {}) const;
@@ -193,6 +201,7 @@ private:
     ParticleViewBasis particle_view_basis_{};
     std::optional<std::uint32_t> fluid_box_mesh_id_;
     std::optional<std::uint32_t> fluid_display_material_id_;
+    std::vector<EmitterLineTraceDebugSample> emitter_line_trace_debug_{};
 };
 
 } // namespace genesis

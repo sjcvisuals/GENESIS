@@ -81,6 +81,21 @@ struct ParticleEmitter {
     float duration_seconds = 0.0f; // 0 = forever while enabled
     float start_delay_seconds = 0.0f;
 
+    // --- Line Trace position (Emitter Properties) ---
+    // When enabled, live-writes the emitter node position along an authored ray.
+    // Snap uses mesh actors with Collision on (Node::collision_enabled).
+    bool line_trace_enabled = false;
+    bool line_trace_use_endpoints = false; // false = origin+direction; true = from→to
+    glm::vec3 line_trace_origin{0.0f};
+    glm::vec3 line_trace_direction{0.0f, 0.0f, 1.0f};
+    glm::vec3 line_trace_from{0.0f};
+    glm::vec3 line_trace_to{0.0f, 0.0f, 3.0f};
+    float line_trace_max_distance = 10.0f; // meters for origin+direction mode
+    bool line_trace_distance_normalized = true; // true: 0–1 along ray; false: meters
+    float line_trace_distance = 1.0f;            // 0–1 or meters (clamped to ray length)
+    bool line_trace_snap_to_collision = false;  // place at closest Collision mesh hit
+    bool line_trace_debug_draw = false;         // editor ray + hit; hide in Game View
+
     // --- Spawn Rate / Burst (Spawn modules) ---
     bool mod_spawn_rate = true; // graph stack enable
     float rate_per_second = 40.0f;
