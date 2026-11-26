@@ -71,7 +71,10 @@ struct TugelaEditorState {
 // Floating Tugela Editor window. Safe to call every frame; respects state.open.
 void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& ctx);
 
-// Open (or focus) the editor on a system / emitter selection.
+// Sync Tugela focus from a Hierarchy/viewport selection.
+// Emitter selection focuses that emitter; System selection keeps the current
+// emitter when it still belongs to the System (so Tugela emitter-row clicks that
+// re-select the System do not snap focus back to emitters[0]).
 void tugelaEditorFocusSelection(TugelaEditorState& state, Scene& scene, NodeId selected);
 
 } // namespace genesis

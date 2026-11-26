@@ -1013,13 +1013,27 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
     (void)row_index;
     const float x0 = canvas_origin.x + state.graph_pan_x;
 
-    graphAddText(draw, ImVec2(x0, y - name_gap), IM_COL32(140, 150, 160, 255),
-                 emitter_node.name.c_str(), m.font);
-    if (!e.enabled) {
-        graphAddText(
-            draw,
-            ImVec2(x0 + graphTextWidth(emitter_node.name.c_str(), m.font) + m.pad, y - name_gap),
-            IM_COL32(120, 90, 90, 220), "off", m.font);
+    {
+        const ImVec2 name_p0(x0, y - name_gap);
+        const float name_w = graphTextWidth(emitter_node.name.c_str(), m.font);
+        const bool name_sel = state.focus_emitter == emitter_node.id;
+        const bool name_hov =
+            pointInRect(mouse, name_p0, ImVec2(name_p0.x + name_w + m.pad, name_p0.y + m.font));
+        graphAddText(draw, name_p0,
+                     name_sel ? IM_COL32(210, 230, 235, 255) : IM_COL32(140, 150, 160, 255),
+                     emitter_node.name.c_str(), m.font);
+        if (!e.enabled) {
+            graphAddText(draw, ImVec2(name_p0.x + name_w + m.pad, name_p0.y),
+                         IM_COL32(120, 90, 90, 220), "off", m.font);
+        }
+        if (allow_pick && name_hov && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            state.focus_emitter = emitter_node.id;
+            if (ctx.select_node) {
+                // Keep Hierarchy on the System; emitter focus lives in Tugela.
+                ctx.select_node(emitter_node.parent.value_or(emitter_node.id));
+            }
+            picked = true;
+        }
     }
 
     ImVec2 prev_center{};
@@ -1129,7 +1143,8 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
                 state.focus_module = stage;
                 state.focus_stack = mod;
                 if (ctx.select_node) {
-                    ctx.select_node(emitter_node.id);
+                    // Keep Hierarchy on the System; emitter focus lives in Tugela.
+                    ctx.select_node(emitter_node.parent.value_or(emitter_node.id));
                 }
                 // Toggle when clicking the checkbox region
                 if (pointInRect(mouse, ImVec2(c0.x - 2.0f, c0.y - 2.0f),
@@ -1145,6 +1160,17 @@ bool drawEmitterGraphRow(TugelaEditorState& state, Node& emitter_node, int row_i
         if (stack.empty()) {
             graphAddText(draw, ImVec2(p0.x + m.pad, p0.y + m.stage_header_h + m.stage_pad),
                          IM_COL32(100, 110, 120, 200), "empty · + to add", m.font);
+        }
+
+        // Stage chrome / empty body: focus this emitter + stage (module rows handled above).
+        if (allow_pick && !picked && pointInRect(mouse, p0, p1) &&
+            ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            state.focus_emitter = emitter_node.id;
+            state.focus_module = stage;
+            if (ctx.select_node) {
+                ctx.select_node(emitter_node.parent.value_or(emitter_node.id));
+            }
+            picked = true;
         }
 
         const ImVec2 center((p0.x + p1.x) * 0.5f, p0.y + h * 0.5f);
@@ -1445,9 +1471,14 @@ void tugelaEditorFocusSelection(TugelaEditorState& state, Scene& scene, NodeId s
     if (const Node* n = scene.find(selected); n && n->particle_emitter.has_value()) {
         state.focus_emitter = selected;
     } else {
+        // Hierarchy keeps Systems selected while Tugela authors emitters. Selecting the
+        // System (from Hierarchy, or after an emitter-row click that re-selects the
+        // System) must not clobber a still-valid focused emitter back to emitters[0].
         std::vector<NodeId> emitters;
         collectEmitters(scene, system, emitters);
-        state.focus_emitter = emitters.empty() ? 0 : emitters.front();
+        if (std::find(emitters.begin(), emitters.end(), state.focus_emitter) == emitters.end()) {
+            state.focus_emitter = emitters.empty() ? 0 : emitters.front();
+        }
     }
 }
 
