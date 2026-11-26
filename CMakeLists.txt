@@ -250,9 +250,9 @@ add_library(genesis_runtime STATIC
     runtime/MultiViewSession.cpp
 )
 target_include_directories(genesis_runtime PUBLIC ${CMAKE_SOURCE_DIR})
+# Remover is a separate product — do not pull matte/ONNX into Genesis runtime / ExtGenesis.
 target_link_libraries(genesis_runtime PUBLIC
     genesis_engine_runtime
-    genesis_remover_core
 )
 
 add_library(genesis_engine STATIC
@@ -296,6 +296,7 @@ endif()
 
 add_library(genesis_protocol_ui STATIC
     editor/OscProtocolUi.cpp
+    editor/RoomTrackingUi.cpp
 )
 target_include_directories(genesis_protocol_ui PUBLIC ${CMAKE_SOURCE_DIR})
 target_link_libraries(genesis_protocol_ui PUBLIC genesis_protocol imgui_lib)
@@ -474,10 +475,6 @@ if(GENESIS_BUILD_RENDERBRIDGE_EXT AND WIN32)
         genesis_runtime
         genesis_protocol
     )
-    if(MSVC AND GENESIS_HAS_ONNXRUNTIME)
-        target_link_options(ExtGenesis PRIVATE "/DELAYLOAD:onnxruntime.dll")
-        target_link_libraries(ExtGenesis PRIVATE delayimp)
-    endif()
 
     target_compile_definitions(ExtGenesis PRIVATE
         GENESIS_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders/spv"
@@ -507,22 +504,6 @@ if(GENESIS_BUILD_RENDERBRIDGE_EXT AND WIN32)
             "$<TARGET_FILE_DIR:ExtGenesis>/Genesis.manifest.json"
         COMMENT "Copying ExtGenesis assets next to DLL"
     )
-    if(GENESIS_HAS_ONNXRUNTIME)
-        add_custom_command(TARGET ExtGenesis POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${GENESIS_ONNXRUNTIME_ROOT}/lib/onnxruntime.dll"
-                "$<TARGET_FILE_DIR:ExtGenesis>/onnxruntime.dll"
-            COMMENT "Copying ONNX Runtime next to ExtGenesis"
-        )
-        if(EXISTS "${GENESIS_ONNXRUNTIME_ROOT}/lib/DirectML.dll")
-            add_custom_command(TARGET ExtGenesis POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${GENESIS_ONNXRUNTIME_ROOT}/lib/DirectML.dll"
-                    "$<TARGET_FILE_DIR:ExtGenesis>/DirectML.dll"
-                COMMENT "Copying DirectML.dll next to ExtGenesis"
-            )
-        endif()
-    endif()
 
     add_custom_target(GenesisDeploy DEPENDS ExtGenesis)
 endif()

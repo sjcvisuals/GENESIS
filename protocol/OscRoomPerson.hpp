@@ -18,6 +18,7 @@
 
 #include "particles/ParticleEmitter.hpp"
 #include "protocol/OscTypes.hpp"
+#include "scene/SceneDocument.hpp"
 
 #include <array>
 #include <cstdint>
@@ -213,7 +214,7 @@ inline void configureRoomOscInstallSettings(OscRoomPersonSettings& room) {
     room.debug_draw_wall_ray = false;
 }
 
-// File → Examples → Medusa: dual-ring + wall-plane ray debug + TUIO 2Dcur people.
+// File → Examples → Medusa defaults (also baked into medusa.scene.json room_tracking).
 inline void configureMedusaExampleSettings(OscRoomPersonSettings& room) {
     configureRoomOscInstallSettings(room);
     room.max_persons = 10;
@@ -225,6 +226,11 @@ inline void configureMedusaExampleSettings(OscRoomPersonSettings& room) {
     room.tuio_scale = room.room_radius; // ~[-1,1] → ±3 m floor
     room.tuio_offset = glm::vec2(0.0f, 0.0f);
 }
+
+SceneRoomTrackingSettings captureSceneRoomTracking(const OscRoomPersonSettings& room);
+OscRoomPersonSettings roomTrackingFromScene(const SceneRoomTrackingSettings& scene);
+std::string wallRayModeToString(WallRaySpawnMode mode);
+WallRaySpawnMode wallRayModeFromString(const std::string& name);
 
 bool tryParseOscRoomPerson(const OscMessage& message, const OscRoomPersonSettings& settings,
                            OscRoomPersonEvent& out_event);

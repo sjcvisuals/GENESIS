@@ -12,6 +12,7 @@ namespace rxext::genesis_ext {
 bool Extension::initialize() noexcept {
     host().log_info("GENESIS RenderBridge extension initialized");
 
+    // Default listen until a packaged scene with an `osc` block overrides IP/port.
     ::genesis::OscProtocol& osc = ::genesis::sharedOscProtocol();
     ::genesis::OscProtocol::Settings settings = osc.settings();
     settings.bind_ip = "0.0.0.0";
@@ -22,8 +23,9 @@ bool Extension::initialize() noexcept {
     std::string error;
     if (osc.startListening(&error)) {
         host().log_info(std::format(
-            "GENESIS OSC listening on {}:{} (emit '{}' room '{}')", settings.bind_ip, settings.port,
-            osc.particleEmitSettings().address, osc.roomPersonSettings().address));
+            "GENESIS OSC default listen {}:{} (scene may override; emit '{}' room '{}')",
+            settings.bind_ip, settings.port, osc.particleEmitSettings().address,
+            osc.roomPersonSettings().address));
     } else {
         host().log_error(std::format("GENESIS OSC listen failed: {}", error));
     }

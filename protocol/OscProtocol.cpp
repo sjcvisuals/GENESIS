@@ -93,6 +93,27 @@ void OscProtocol::setSettings(const Settings& settings) {
     }
 }
 
+SceneOscSettings OscProtocol::captureSceneOscSettings() const {
+    SceneOscSettings out{};
+    out.bind_ip = settings_.bind_ip;
+    out.port = settings_.port;
+    out.listening = settings_.listening || receiver_.isListening();
+    return out;
+}
+
+bool OscProtocol::applySceneOscSettings(const SceneOscSettings& settings, std::string* out_error) {
+    Settings next = settings_;
+    next.bind_ip = settings.bind_ip.empty() ? "0.0.0.0" : settings.bind_ip;
+    next.port = settings.port == 0 ? std::uint16_t{9000} : settings.port;
+    next.listening = settings.listening;
+    setSettings(next);
+    if (!settings.listening) {
+        stopListening();
+        return true;
+    }
+    return startListening(out_error);
+}
+
 bool OscProtocol::startListening(std::string* out_error) {
     stopListening();
     if (!receiver_.start(settings_.bind_ip, settings_.port, out_error)) {
