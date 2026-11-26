@@ -1234,7 +1234,7 @@ private:
             ImGui::TextWrapped("Select an actor in the viewport or outliner.");
             ImGui::Spacing();
             ImGui::TextDisabled("LMB pick / drag marquee");
-            ImGui::TextDisabled("Alt+LMB orbit · Alt+MMB pan · Alt+RMB dolly · wheel zoom");
+            ImGui::TextDisabled("Alt+LMB orbit · MMB / Alt+MMB pan · Alt+RMB dolly · wheel zoom");
         } else if (genesis::Node* n = scene.find(primarySelected())) {
             genesis::drawEditorSectionLabel(n->name.c_str());
             const std::string node_path = genesis::nodePath(scene, n->id);
@@ -1817,7 +1817,7 @@ private:
         ImGui::Begin("Shortcuts", &show_viewport_help_);
         ImGui::TextDisabled("NAVIGATION (Maya)");
         ImGui::BulletText("Alt + LMB — tumble / orbit around pivot");
-        ImGui::BulletText("Alt + MMB — pan / track");
+        ImGui::BulletText("MMB (or Alt + MMB) — pan / track");
         ImGui::BulletText("Alt + RMB (or Alt + LMB+MMB) — dolly");
         ImGui::BulletText("Scroll wheel — zoom (viewport + Tugela graph)");
         ImGui::BulletText("RMB + WASD / QE — fly look");
@@ -3112,11 +3112,12 @@ private:
         const float wheel = input().mouseWheelY();
 
         // Maya: Alt+LMB tumble, Alt+MMB track, Alt+RMB / Alt+LMB+MMB dolly.
-        // Chorded LMB+MMB wins over single-button tumble/track.
+        // Plain MMB (no Alt) also pans — common DCC feel (Blender / many DCCs).
+        // Chorded Alt+LMB+MMB wins over single-button tumble/track.
         const bool blocked = ImGuizmo::IsUsing();
         const bool dollying = alt && !blocked && (rmb || (lmb && mmb));
         const bool orbiting = alt && lmb && !mmb && !rmb && !blocked;
-        const bool panning = alt && mmb && !lmb && !rmb && !blocked;
+        const bool panning = mmb && !lmb && !rmb && !blocked;
         const bool navigating = orbiting || panning || dollying;
 
         if (navigating && (navigating_active_ || (over_viewport && !ui_blocks))) {
