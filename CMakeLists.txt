@@ -393,6 +393,11 @@ if(GENESIS_BUILD_EXAMPLES)
     add_executable(genesis_tugela_apply_smoke examples/particle_smoke/tugela_apply_main.cpp)
     target_link_libraries(genesis_tugela_apply_smoke PRIVATE genesis_engine_runtime)
 
+    # Header-only Line Trace emitter placement + Collision gate (no Vulkan).
+    add_executable(genesis_line_trace_smoke examples/particle_smoke/line_trace_main.cpp)
+    target_include_directories(genesis_line_trace_smoke PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(genesis_line_trace_smoke PRIVATE glm::glm)
+
     add_executable(genesis_multiview_player examples/multiview_player/main.cpp)
     target_link_libraries(genesis_multiview_player PRIVATE genesis_engine)
     add_dependencies(genesis_multiview_player genesis_shaders)

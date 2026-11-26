@@ -410,6 +410,17 @@ json particleEmitterToJson(const ParticleEmitter& e) {
         {"world_space", e.world_space},
         {"duration", e.duration_seconds},
         {"start_delay", e.start_delay_seconds},
+        {"line_trace_enabled", e.line_trace_enabled},
+        {"line_trace_use_endpoints", e.line_trace_use_endpoints},
+        {"line_trace_origin", vec3ToJson(e.line_trace_origin)},
+        {"line_trace_direction", vec3ToJson(e.line_trace_direction)},
+        {"line_trace_from", vec3ToJson(e.line_trace_from)},
+        {"line_trace_to", vec3ToJson(e.line_trace_to)},
+        {"line_trace_max_distance", e.line_trace_max_distance},
+        {"line_trace_distance_normalized", e.line_trace_distance_normalized},
+        {"line_trace_distance", e.line_trace_distance},
+        {"line_trace_snap_to_collision", e.line_trace_snap_to_collision},
+        {"line_trace_debug_draw", e.line_trace_debug_draw},
         {"mod_spawn_rate", e.mod_spawn_rate},
         {"rate", e.rate_per_second},
         {"burst", e.burst_count},
@@ -496,6 +507,21 @@ ParticleEmitter particleEmitterFromJson(const json& j) {
     e.world_space = j.value("world_space", e.world_space);
     e.duration_seconds = j.value("duration", e.duration_seconds);
     e.start_delay_seconds = j.value("start_delay", e.start_delay_seconds);
+    e.line_trace_enabled = j.value("line_trace_enabled", e.line_trace_enabled);
+    e.line_trace_use_endpoints = j.value("line_trace_use_endpoints", e.line_trace_use_endpoints);
+    if (j.contains("line_trace_origin")) e.line_trace_origin = vec3FromJson(j["line_trace_origin"]);
+    if (j.contains("line_trace_direction")) {
+        e.line_trace_direction = vec3FromJson(j["line_trace_direction"]);
+    }
+    if (j.contains("line_trace_from")) e.line_trace_from = vec3FromJson(j["line_trace_from"]);
+    if (j.contains("line_trace_to")) e.line_trace_to = vec3FromJson(j["line_trace_to"]);
+    e.line_trace_max_distance = j.value("line_trace_max_distance", e.line_trace_max_distance);
+    e.line_trace_distance_normalized =
+        j.value("line_trace_distance_normalized", e.line_trace_distance_normalized);
+    e.line_trace_distance = j.value("line_trace_distance", e.line_trace_distance);
+    e.line_trace_snap_to_collision =
+        j.value("line_trace_snap_to_collision", e.line_trace_snap_to_collision);
+    e.line_trace_debug_draw = j.value("line_trace_debug_draw", e.line_trace_debug_draw);
     e.mod_spawn_rate = j.value("mod_spawn_rate", e.mod_spawn_rate);
     e.rate_per_second = j.value("rate", e.rate_per_second);
     e.burst_count = j.value("burst", e.burst_count);

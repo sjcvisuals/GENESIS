@@ -245,6 +245,45 @@ void drawParticleEmitterInspector(Node& emitter_node, const std::string& node_pa
             e.seed_override = static_cast<std::uint64_t>(std::max(seed, 0));
             dirty = true;
         }
+
+        ImGui::Spacing();
+        ImGui::TextDisabled("Line Trace");
+        dirty |= ImGui::Checkbox("Line Trace", &e.line_trace_enabled);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Drive this emitter's position from a ray each frame. "
+                "Optional snap to a mesh with Collision on.");
+        }
+        if (e.line_trace_enabled) {
+            dirty |= ImGui::Checkbox("Use From → To", &e.line_trace_use_endpoints);
+            if (e.line_trace_use_endpoints) {
+                dirty |= ImGui::DragFloat3("From", &e.line_trace_from.x, 0.01f);
+                dirty |= ImGui::DragFloat3("To", &e.line_trace_to.x, 0.01f);
+            } else {
+                dirty |= ImGui::DragFloat3("Origin", &e.line_trace_origin.x, 0.01f);
+                dirty |= ImGui::DragFloat3("Direction", &e.line_trace_direction.x, 0.01f);
+                dirty |=
+                    ImGui::DragFloat("Max distance (m)", &e.line_trace_max_distance, 0.05f, 0.0f,
+                                     1000.0f);
+            }
+            dirty |= ImGui::Checkbox("Distance 0–1 (along ray)", &e.line_trace_distance_normalized);
+            if (e.line_trace_distance_normalized) {
+                dirty |= ImGui::SliderFloat("Distance along ray", &e.line_trace_distance, 0.0f, 1.0f);
+            } else {
+                dirty |=
+                    ImGui::DragFloat("Distance (m)", &e.line_trace_distance, 0.01f, 0.0f, 1000.0f);
+            }
+            dirty |= ImGui::Checkbox("Snap to Collision hit", &e.line_trace_snap_to_collision);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "If the ray hits a mesh with Collision on, place at the hit. "
+                    "Miss → distance along ray. Hidden in Game still collides.");
+            }
+            dirty |= ImGui::Checkbox("Debug draw (editor)", &e.line_trace_debug_draw);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Ray + placement marker in the editor viewport; hidden in Game View.");
+            }
+        }
         moduleIndentEnd();
     }
 
