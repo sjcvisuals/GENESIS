@@ -7,7 +7,7 @@ struct GpuParticle {
     vec4 pos_age;       // xyz position, w age
     vec4 vel_life;      // xyz velocity, w lifetime
     vec4 size_params;   // x size0, y aspect, z stretch, w unused
-    uvec4 meta;         // x flags, y emitter_node, z emit_index, w pad
+    uvec4 meta;         // x flags, y emitter_node, z emit_index, w host_slot
     vec4 gravity;       // xyz gravity
     vec4 accel_drag;    // xyz accel, w drag
     vec4 kill_plane;    // x kill_y when flag set

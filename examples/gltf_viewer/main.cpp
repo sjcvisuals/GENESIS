@@ -19,6 +19,7 @@
 #include "platform/AutoUpdate.hpp"
 #include "runtime/PerfDebug.hpp"
 #include "platform/EditorPaths.hpp"
+#include "platform/ParticleSimDt.hpp"
 #include "platform/Version.hpp"
 #include "platform/FileDialog.hpp"
 #include "platform/Paths.hpp"
@@ -343,8 +344,11 @@ protected:
         osc_protocol_.applyRoomPerson(runtime_, osc_room_person_cursor_);
         audio_reactive_.tick(runtime_, dt);
         runtime_.updateTransforms();
-        // Allow catch-up on slow software GPUs so gentle rise/trails stay readable.
-        runtime_.tickParticles(dt, 0.01f, 24);
+        // Pace sim dt when FPS cap is on so fixed 10 ms steps stay stable (~2/frame @ 50).
+        // Soft-clamp / limited catch-up avoids huge jumps after stalls without disabling the cap.
+        const float sim_dt =
+            genesis::particleSimDt(dt, prefs_.fps_cap_enabled, prefs_.fps_cap);
+        runtime_.tickParticles(sim_dt, 0.01f, 6);
         last_frame_dt_ = dt;
         handleEditorShortcuts();
 
@@ -2145,12 +2149,13 @@ private:
         ImGui::Text("Particles alive: %u", snap.particles_alive);
         ImGui::Text("Emitters: %u", snap.particle_emitters);
         ImGui::Text("Sim steps: %u (%s)", snap.particle_steps, snap.particle_gpu ? "GPU" : "CPU");
-        ImGui::TextDisabled("Fixed 10 ms steps · high-res wall-clock dt · ~2/frame @ 50 FPS");
+        ImGui::TextDisabled("Fixed 10 ms · paced sim dt when FPS cap ON · ~2/frame @ 50");
         ImGui::Text("FPS cap: %s @ %.0f", prefs_.fps_cap_enabled ? "ON" : "OFF", prefs_.fps_cap);
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip(
                 "Particles follow the editor frame loop (not a separate clock).\n"
-                "If Frame reads 0.00 ms while FPS is huge/frozen, dt was quantized.");
+                "FPS cap snaps near-target frames to 1/cap so step counts stay steady.\n"
+                "Sim dt is soft-clamped after stalls (no huge catch-up jumps).");
         }
         ImGui::Separator();
         ImGui::Text("GPU: %s", snap.gpu_name);

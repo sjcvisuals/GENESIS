@@ -800,7 +800,8 @@ void ParticleWorld::simulate(Scene& scene, std::uint64_t steps, float dt) {
 }
 
 void ParticleWorld::flushGpuUpdates(VkCommandBuffer cmd, Scene& scene) {
-    // cmd may be null — motion uses VulkanContext::immediateSubmit for host readback.
+    // Hybrid path always needs host readback for trails / CPU instance collect.
+    // Use a persistent fence submit (not per-frame pool create/destroy).
     if (!gpuComputeEnabled() || pending_gpu_steps_ == 0) {
         return;
     }
@@ -818,10 +819,7 @@ void ParticleWorld::flushGpuUpdates(VkCommandBuffer cmd, Scene& scene) {
     const std::uint32_t steps = pending_gpu_steps_;
     const float dt = pending_gpu_dt_;
     gpu_sim_->upload(gpu.data(), count);
-    // One-shot submit so compute finishes before host readback (hybrid CPU trail path).
-    gpu_sim_->context().immediateSubmit([&](VkCommandBuffer submit_cmd) {
-        gpu_sim_->dispatchUpdates(submit_cmd, count, steps, dt, start_time);
-    });
+    gpu_sim_->flushImmediateAndWait(count, steps, dt, start_time);
     gpu_sim_->download(gpu.data(), count);
     unpackGpuParticles(gpu);
     updateTrailsAfterGpu(scene, dt * static_cast<float>(steps));
@@ -831,14 +829,20 @@ void ParticleWorld::flushGpuUpdates(VkCommandBuffer cmd, Scene& scene) {
 }
 
 std::vector<GpuParticle> ParticleWorld::packGpuParticles(Scene& scene) const {
+    // Alive-only pack: free/dead slots used to ride along every frame and balloon
+    // upload/download + compute dispatch cost into hitch-sized stalls.
     std::vector<GpuParticle> out;
     out.reserve(particles_.size());
-    for (const Particle& p : particles_) {
+    for (std::size_t host_index = 0; host_index < particles_.size(); ++host_index) {
+        const Particle& p = particles_[host_index];
+        if (!p.alive) {
+            continue;
+        }
         GpuParticle g{};
         g.pos_age = glm::vec4(p.position, p.age);
         g.vel_life = glm::vec4(p.velocity, p.lifetime);
         g.size_params = glm::vec4(p.size0, p.sprite_aspect, p.velocity_stretch, 0.0f);
-        std::uint32_t flags = p.alive ? kGpuParticleAlive : 0u;
+        std::uint32_t flags = kGpuParticleAlive;
 
         ParticleEmitter desc = makeDefaultParticleEmitter();
         if (const Node* node = scene.find(p.emitter_node);
@@ -861,25 +865,31 @@ std::vector<GpuParticle> ParticleWorld::packGpuParticles(Scene& scene) const {
             flags |= kGpuParticleKillPlane;
             g.kill_plane = glm::vec4(desc.kill_plane_y, 0.0f, 0.0f, 0.0f);
         }
+        // meta.w = host particle slot for remapping after compact upload.
         g.meta = glm::uvec4(flags, static_cast<std::uint32_t>(p.emitter_node),
-                            static_cast<std::uint32_t>(p.emit_index & 0xffffffffu), 0u);
+                            static_cast<std::uint32_t>(p.emit_index & 0xffffffffu),
+                            static_cast<std::uint32_t>(host_index));
         out.push_back(g);
     }
     return out;
 }
 
 void ParticleWorld::unpackGpuParticles(const std::vector<GpuParticle>& gpu) {
-    const std::size_t n = std::min(gpu.size(), particles_.size());
-    free_list_.clear();
-    for (std::size_t i = 0; i < n; ++i) {
-        Particle& p = particles_[i];
-        const GpuParticle& g = gpu[i];
+    for (const GpuParticle& g : gpu) {
+        const std::size_t host_index = static_cast<std::size_t>(g.meta.w);
+        if (host_index >= particles_.size()) {
+            continue;
+        }
+        Particle& p = particles_[host_index];
         p.position = glm::vec3(g.pos_age);
         p.age = g.pos_age.w;
         p.velocity = glm::vec3(g.vel_life);
         p.lifetime = g.vel_life.w;
         p.alive = (g.meta.x & kGpuParticleAlive) != 0u;
-        if (!p.alive) {
+    }
+    free_list_.clear();
+    for (std::size_t i = 0; i < particles_.size(); ++i) {
+        if (!particles_[i].alive) {
             free_list_.push_back(i);
         }
     }

@@ -20,6 +20,7 @@ ParticleGpuSim::ParticleGpuSim(const VulkanContext& context) : context_(context)
 }
 
 ParticleGpuSim::~ParticleGpuSim() {
+    destroyImmediateResources();
     pipeline_.reset();
     buffer_.reset();
     if (pool_ != VK_NULL_HANDLE) {
@@ -29,6 +30,96 @@ ParticleGpuSim::~ParticleGpuSim() {
     if (set_layout_ != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(context_.device(), set_layout_, nullptr);
         set_layout_ = VK_NULL_HANDLE;
+    }
+}
+
+void ParticleGpuSim::ensureImmediateResources() {
+    if (immediate_pool_ != VK_NULL_HANDLE && immediate_cmd_ != VK_NULL_HANDLE &&
+        immediate_fence_ != VK_NULL_HANDLE) {
+        return;
+    }
+    destroyImmediateResources();
+
+    VkCommandPoolCreateInfo pool_info{};
+    pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    pool_info.queueFamilyIndex = context_.graphicsQueueFamily();
+    if (vkCreateCommandPool(context_.device(), &pool_info, nullptr, &immediate_pool_) !=
+        VK_SUCCESS) {
+        throw std::runtime_error("Failed to create particle GPU immediate command pool");
+    }
+
+    VkCommandBufferAllocateInfo alloc{};
+    alloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    alloc.commandPool = immediate_pool_;
+    alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    alloc.commandBufferCount = 1;
+    if (vkAllocateCommandBuffers(context_.device(), &alloc, &immediate_cmd_) != VK_SUCCESS) {
+        destroyImmediateResources();
+        throw std::runtime_error("Failed to allocate particle GPU immediate command buffer");
+    }
+
+    VkFenceCreateInfo fence_info{};
+    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    if (vkCreateFence(context_.device(), &fence_info, nullptr, &immediate_fence_) != VK_SUCCESS) {
+        destroyImmediateResources();
+        throw std::runtime_error("Failed to create particle GPU immediate fence");
+    }
+}
+
+void ParticleGpuSim::destroyImmediateResources() {
+    if (immediate_fence_ != VK_NULL_HANDLE) {
+        vkDestroyFence(context_.device(), immediate_fence_, nullptr);
+        immediate_fence_ = VK_NULL_HANDLE;
+    }
+    // Command buffers are freed with the pool.
+    immediate_cmd_ = VK_NULL_HANDLE;
+    if (immediate_pool_ != VK_NULL_HANDLE) {
+        vkDestroyCommandPool(context_.device(), immediate_pool_, nullptr);
+        immediate_pool_ = VK_NULL_HANDLE;
+    }
+}
+
+void ParticleGpuSim::flushImmediateAndWait(std::uint32_t count, std::uint32_t steps, float dt,
+                                           float sim_time_seconds) {
+    if (!ready() || count == 0 || steps == 0) {
+        return;
+    }
+    ensureImmediateResources();
+
+    if (vkWaitForFences(context_.device(), 1, &immediate_fence_, VK_TRUE, UINT64_MAX) !=
+        VK_SUCCESS) {
+        throw std::runtime_error("Failed waiting on particle GPU immediate fence");
+    }
+    if (vkResetFences(context_.device(), 1, &immediate_fence_) != VK_SUCCESS) {
+        throw std::runtime_error("Failed resetting particle GPU immediate fence");
+    }
+    if (vkResetCommandBuffer(immediate_cmd_, 0) != VK_SUCCESS) {
+        throw std::runtime_error("Failed resetting particle GPU immediate command buffer");
+    }
+
+    VkCommandBufferBeginInfo begin{};
+    begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(immediate_cmd_, &begin) != VK_SUCCESS) {
+        throw std::runtime_error("Failed beginning particle GPU immediate command buffer");
+    }
+    dispatchUpdates(immediate_cmd_, count, steps, dt, sim_time_seconds);
+    if (vkEndCommandBuffer(immediate_cmd_) != VK_SUCCESS) {
+        throw std::runtime_error("Failed ending particle GPU immediate command buffer");
+    }
+
+    VkSubmitInfo submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &immediate_cmd_;
+    if (vkQueueSubmit(context_.graphicsQueue(), 1, &submit, immediate_fence_) != VK_SUCCESS) {
+        throw std::runtime_error("Failed submitting particle GPU immediate compute");
+    }
+    if (vkWaitForFences(context_.device(), 1, &immediate_fence_, VK_TRUE, UINT64_MAX) !=
+        VK_SUCCESS) {
+        throw std::runtime_error("Failed waiting for particle GPU compute");
     }
 }
 
