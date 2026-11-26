@@ -6,8 +6,8 @@ namespace genesis {
 
 // Persistent editor preferences (SDL pref path / prefs.json).
 struct EditorPrefs {
-    // Multiplier for ImGui fonts + style sizes. 2.0 reads clearly on Windows.
-    float ui_scale = 2.0f;
+    // Multiplier for ImGui fonts + style sizes. 1.5 is readable on Windows without overcrowding.
+    float ui_scale = 1.5f;
     // Open the main window maximized (full monitor work area).
     bool start_maximized = true;
     // When true, also request borderless fullscreen after create (optional).

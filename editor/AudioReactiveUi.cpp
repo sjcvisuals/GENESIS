@@ -1,5 +1,6 @@
 #include "editor/AudioReactiveUi.hpp"
 
+#include "editor/UiWrap.hpp"
 #include "platform/FileDialog.hpp"
 #include "protocol/OscTypes.hpp"
 
@@ -16,8 +17,13 @@ namespace genesis {
 namespace {
 
 void drawMeter(const char* label, float value) {
+    const float label_col =
+        std::max(ImGui::CalcTextSize("Treble").x, ImGui::CalcTextSize(label).x) + 12.0f;
     ImGui::TextUnformatted(label);
-    ImGui::SameLine(72.0f);
+    // Font-relative column (not fixed 72px); stack when the panel is too narrow.
+    if (ImGui::GetWindowContentRegionMax().x - label_col > 40.0f) {
+        ImGui::SameLine(label_col);
+    }
     ImGui::ProgressBar(std::clamp(value, 0.0f, 1.0f), ImVec2(-1.0f, 0.0f), "");
 }
 
@@ -46,6 +52,7 @@ struct CaptureDevicePickerState {
 
 void drawAudioReactivePanel(AudioReactive& reactive, bool* open,
                             const std::string& selected_particle_node_path) {
+    ImGui::SetNextWindowSizeConstraints(ImVec2(280.0f, 200.0f), ImVec2(10000.0f, 10000.0f));
     ImGui::Begin("Audio", open);
 
     ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.65f, 1.0f), "ANALYSER");
@@ -56,8 +63,9 @@ void drawAudioReactivePanel(AudioReactive& reactive, bool* open,
 
     AudioReactive::Settings& settings = reactive.settings();
     ImGui::Checkbox("Enabled", &settings.enabled);
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(120.0f);
+    const float gain_w = std::min(160.0f, std::max(80.0f, ImGui::GetContentRegionAvail().x * 0.45f));
+    uiSameLineIfFits(gain_w + ImGui::CalcTextSize("Master gain").x + 8.0f);
+    ImGui::SetNextItemWidth(gain_w);
     ImGui::DragFloat("Master gain", &settings.master_gain, 0.01f, 0.0f, 4.0f);
 
     AudioAnalyser::Settings a = reactive.analyser().settings();
@@ -81,7 +89,13 @@ void drawAudioReactivePanel(AudioReactive& reactive, bool* open,
         if (picker.selected > 0 && picker.selected <= static_cast<int>(picker.devices.size())) {
             preview = picker.devices[static_cast<std::size_t>(picker.selected - 1)].name.c_str();
         }
-        ImGui::SetNextItemWidth(220.0f);
+        const float refresh_w =
+            ImGui::CalcTextSize("Refresh").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        const float combo_w =
+            std::max(80.0f, ImGui::GetContentRegionAvail().x - refresh_w -
+                                ImGui::GetStyle().ItemSpacing.x -
+                                ImGui::CalcTextSize("Input device").x - 8.0f);
+        ImGui::SetNextItemWidth(combo_w);
         if (ImGui::BeginCombo("Input device", preview)) {
             const bool default_selected = picker.selected <= 0;
             if (ImGui::Selectable("System default", default_selected)) {
@@ -102,7 +116,7 @@ void drawAudioReactivePanel(AudioReactive& reactive, bool* open,
             }
             ImGui::EndCombo();
         }
-        ImGui::SameLine();
+        uiSameLineIfFits(refresh_w);
         if (ImGui::Button("Refresh")) {
             picker.refresh();
         }
@@ -124,7 +138,9 @@ void drawAudioReactivePanel(AudioReactive& reactive, bool* open,
                 reactive.setLastError({});
             }
         }
-        ImGui::SameLine();
+        const float wav_w =
+            ImGui::CalcTextSize("Open WAV…").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        uiSameLineIfFits(wav_w);
         if (ImGui::Button("Open WAV…")) {
             openFileDialog(nullptr, {{"WAV", "wav"}, {"All Files", "*"}},
                            [&reactive](std::filesystem::path path) {
@@ -138,16 +154,17 @@ void drawAudioReactivePanel(AudioReactive& reactive, bool* open,
         }
     } else {
         if (reactive.capture().mode() == AudioInputMode::LiveCapture) {
-            ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "Live: %s @ %.0f Hz",
+            ImGui::TextWrapped("Live: %s @ %.0f Hz",
                                reactive.capture().activeDeviceName().empty()
                                    ? "Recording device"
                                    : reactive.capture().activeDeviceName().c_str(),
                                reactive.capture().sampleRate());
         } else {
-            ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "WAV: %s",
+            ImGui::TextWrapped("WAV: %s",
                                reactive.capture().wavPath().filename().string().c_str());
         }
-        ImGui::SameLine();
+        const float stop_w = ImGui::CalcTextSize("Stop").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        uiSameLineIfFits(stop_w);
         if (ImGui::Button("Stop")) {
             reactive.capture().stop();
             reactive.analyser().clear();
@@ -179,14 +196,16 @@ void drawAudioReactivePanel(AudioReactive& reactive, bool* open,
 
     static int link_channel = 0;
     const char* channel_names[] = {"Bass", "Mid", "Treble", "RMS", "Onset", "Beat"};
-    ImGui::SetNextItemWidth(120.0f);
+    const float feature_w = std::min(140.0f, std::max(72.0f, ImGui::GetContentRegionAvail().x * 0.4f));
+    ImGui::SetNextItemWidth(feature_w);
     ImGui::Combo("Feature", &link_channel, channel_names, IM_ARRAYSIZE(channel_names));
-    ImGui::SameLine();
+    const float begin_w =
+        ImGui::CalcTextSize("Begin link").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+    uiSameLineIfFits(begin_w);
     if (ImGui::Button("Begin link")) {
         reactive.beginLink(static_cast<AudioFeatureChannel>(link_channel));
     }
     if (reactive.isAwaitingParameterLink()) {
-        ImGui::SameLine();
         ImGui::TextColored(ImVec4(0.95f, 0.85f, 0.35f, 1.0f), "Linking %s…",
                            audioFeatureChannelLabel(reactive.pendingLinkChannel()));
         if (ImGui::Button("Cancel link")) {
@@ -195,7 +214,7 @@ void drawAudioReactivePanel(AudioReactive& reactive, bool* open,
     }
 
     if (!selected_particle_node_path.empty()) {
-        if (ImGui::Button("Bass → selected emitter (rate + lift)")) {
+        if (ImGui::Button("Bass → selected emitter (rate + lift)", ImVec2(-1.0f, 0))) {
             reactive.addParticleBassRatePreset(selected_particle_node_path);
         }
         if (ImGui::IsItemHovered()) {
@@ -204,16 +223,16 @@ void drawAudioReactivePanel(AudioReactive& reactive, bool* open,
         }
     } else {
         ImGui::BeginDisabled();
-        ImGui::Button("Bass → selected emitter (rate + lift)");
+        ImGui::Button("Bass → selected emitter (rate + lift)", ImVec2(-1.0f, 0));
         ImGui::EndDisabled();
     }
 
     if (ImGui::BeginTable("AudioBindings", 3,
                           ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
-                              ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("Map");
-        ImGui::TableSetupColumn("bias / gain / min / max");
-        ImGui::TableSetupColumn("");
+                              ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Resizable)) {
+        ImGui::TableSetupColumn("Map", ImGuiTableColumnFlags_WidthStretch, 0.45f);
+        ImGui::TableSetupColumn("bias / gain / min / max", ImGuiTableColumnFlags_WidthStretch, 0.45f);
+        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 28.0f);
         ImGui::TableHeadersRow();
         for (std::size_t i = 0; i < reactive.bindingsMutable().size(); ++i) {
             AudioBinding& binding = reactive.bindingsMutable()[i];
@@ -222,18 +241,20 @@ void drawAudioReactivePanel(AudioReactive& reactive, bool* open,
             ImGui::TableNextColumn();
             ImGui::Checkbox("##en", &binding.enabled);
             ImGui::SameLine();
-            ImGui::TextUnformatted(audioBindingSummary(binding).c_str());
+            ImGui::TextWrapped("%s", audioBindingSummary(binding).c_str());
             ImGui::TableNextColumn();
-            ImGui::SetNextItemWidth(54.0f);
+            const float cell = ImGui::GetContentRegionAvail().x;
+            const float field = std::max(40.0f, (cell - ImGui::GetStyle().ItemSpacing.x * 3.0f) * 0.25f);
+            ImGui::SetNextItemWidth(field);
             ImGui::DragFloat("##bias", &binding.bias, 0.01f);
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(54.0f);
+            uiSameLineIfFits(field);
+            ImGui::SetNextItemWidth(field);
             ImGui::DragFloat("##gain", &binding.gain, 0.01f);
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(54.0f);
+            uiSameLineIfFits(field);
+            ImGui::SetNextItemWidth(field);
             ImGui::DragFloat("##min", &binding.min_value, 0.01f);
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(54.0f);
+            uiSameLineIfFits(field);
+            ImGui::SetNextItemWidth(field);
             ImGui::DragFloat("##max", &binding.max_value, 0.01f);
             ImGui::TableNextColumn();
             if (ImGui::SmallButton("X")) {

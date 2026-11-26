@@ -1,5 +1,6 @@
 #include "editor/OscProtocolUi.hpp"
 
+#include "editor/UiWrap.hpp"
 #include "protocol/OscParser.hpp"
 
 #include <imgui.h>
@@ -27,7 +28,13 @@ void drawListenControls(OscProtocol& protocol) {
 
     char ip_buf[64]{};
     std::snprintf(ip_buf, sizeof(ip_buf), "%s", settings.bind_ip.c_str());
-    ImGui::SetNextItemWidth(140.0f);
+    const float port_field = 90.0f;
+    const float port_label = ImGui::CalcTextSize("Port").x + 8.0f;
+    const float avail = ImGui::GetContentRegionAvail().x;
+    const float iface_label = ImGui::CalcTextSize("Listen Interface").x + 8.0f;
+    const bool side_by_side =
+        avail >= 140.0f + iface_label + port_field + port_label + ImGui::GetStyle().ItemSpacing.x;
+    ImGui::SetNextItemWidth(side_by_side ? 140.0f : -1.0f);
     if (ImGui::InputText("Listen Interface", ip_buf, sizeof(ip_buf))) {
         settings.bind_ip = ip_buf;
         protocol.setSettings(settings);
@@ -40,7 +47,9 @@ void drawListenControls(OscProtocol& protocol) {
         ImGui::SetTooltip("0.0.0.0 = all interfaces\n127.0.0.1 = this PC only");
     }
 
-    ImGui::SameLine();
+    if (side_by_side) {
+        ImGui::SameLine();
+    }
     // Typed port (no +/- steppers) — commit on Enter / focus-loss.
     static char port_buf[16]{};
     static std::uint16_t port_buf_synced = 0;
@@ -48,7 +57,7 @@ void drawListenControls(OscProtocol& protocol) {
         std::snprintf(port_buf, sizeof(port_buf), "%u", static_cast<unsigned>(settings.port));
         port_buf_synced = settings.port;
     }
-    ImGui::SetNextItemWidth(90.0f);
+    ImGui::SetNextItemWidth(side_by_side ? port_field : -1.0f);
     ImGui::InputText("Port", port_buf, sizeof(port_buf), ImGuiInputTextFlags_CharsDecimal);
     if (ImGui::IsItemDeactivatedAfterEdit()) {
         applyTypedPort(protocol, settings, port_buf);
@@ -72,12 +81,16 @@ void drawListenControls(OscProtocol& protocol) {
             protocol.setSettings(stop_settings);
             protocol.stopListening();
         }
-        ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "Listening %s:%u",
-                           protocol.settings().bind_ip.c_str(), protocol.settings().port);
+        char status[96]{};
+        std::snprintf(status, sizeof(status), "Listening %s:%u", protocol.settings().bind_ip.c_str(),
+                      protocol.settings().port);
+        uiSameLineIfFits(ImGui::CalcTextSize(status).x + 8.0f);
+        ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "%s", status);
     } else {
         ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.35f, 1.0f), "Not listening");
-        ImGui::SameLine();
+        const float start_w =
+            ImGui::CalcTextSize("Start Listening").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        uiSameLineIfFits(start_w);
         if (ImGui::Button("Start Listening")) {
             OscProtocol::Settings listen_settings = protocol.settings();
             listen_settings.listening = true;
@@ -120,7 +133,7 @@ void drawLearnedAndBindings(OscProtocol& protocol) {
     }
 
     ImGui::TextUnformatted("Learned Messages");
-    ImGui::SameLine();
+    uiSameLineIfFits(ImGui::CalcTextSize("Clear").x + ImGui::GetStyle().FramePadding.x * 2.0f);
     if (ImGui::SmallButton("Clear##learned")) {
         protocol.clearLearned();
     }
@@ -178,7 +191,7 @@ void drawLearnedAndBindings(OscProtocol& protocol) {
 
     ImGui::Spacing();
     ImGui::TextUnformatted("Bindings");
-    ImGui::SameLine();
+    uiSameLineIfFits(ImGui::CalcTextSize("Clear").x + ImGui::GetStyle().FramePadding.x * 2.0f);
     if (ImGui::SmallButton("Clear##bindings")) {
         protocol.clearBindings();
     }
@@ -213,14 +226,26 @@ void drawLearnedAndBindings(OscProtocol& protocol) {
 }
 
 void drawOscDebugLogControls(OscProtocol& protocol, float log_height) {
+    bool row_started = false;
+    auto place = [&](float needed) {
+        if (row_started) {
+            uiSameLineIfFits(needed);
+        }
+        row_started = true;
+    };
+
     bool capture = protocol.debugLogEnabled();
+    place(ImGui::CalcTextSize("Capture").x + ImGui::GetFontSize() + 12.0f);
     if (ImGui::Checkbox("Capture", &capture)) {
         protocol.setDebugLogEnabled(capture);
     }
-    ImGui::SameLine();
-    ImGui::TextDisabled("%zu / %zu", protocol.debugLog().size(), protocol.debugLogCapacity());
+    char count_buf[32]{};
+    std::snprintf(count_buf, sizeof(count_buf), "%zu / %zu", protocol.debugLog().size(),
+                  protocol.debugLogCapacity());
+    place(ImGui::CalcTextSize(count_buf).x + 8.0f);
+    ImGui::TextDisabled("%s", count_buf);
 
-    ImGui::SameLine();
+    place(72.0f);
     int capacity = static_cast<int>(protocol.debugLogCapacity());
     ImGui::SetNextItemWidth(72.0f);
     if (ImGui::InputInt("##RingSize", &capacity, 0, 0)) {
@@ -230,11 +255,15 @@ void drawOscDebugLogControls(OscProtocol& protocol, float log_height) {
         ImGui::SetTooltip("Ring buffer size (rows).");
     }
 
-    ImGui::SameLine();
+    const float copy_all_w =
+        ImGui::CalcTextSize("Copy All").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+    place(copy_all_w);
     if (ImGui::Button("Copy All")) {
         ImGui::SetClipboardText(protocol.exportDebugLog().c_str());
     }
-    ImGui::SameLine();
+    const float copy50_w =
+        ImGui::CalcTextSize("Copy Last 50").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+    place(copy50_w);
     if (ImGui::Button("Copy Last 50")) {
         const std::vector<OscDebugLogEntry>& all = protocol.debugLog();
         const std::size_t start = all.size() > 50 ? all.size() - 50 : 0;
@@ -242,7 +271,9 @@ void drawOscDebugLogControls(OscProtocol& protocol, float log_height) {
                                             all.end());
         ImGui::SetClipboardText(formatOscDebugLog(slice).c_str());
     }
-    ImGui::SameLine();
+    const float clear_w =
+        ImGui::CalcTextSize("Clear Log").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+    place(clear_w);
     if (ImGui::Button("Clear Log")) {
         protocol.clearDebugLog();
     }
@@ -326,6 +357,7 @@ void drawOscDebugLogControls(OscProtocol& protocol, float log_height) {
 
 void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
     ImGui::SetNextWindowSize(ImVec2(520.0f, 680.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(280.0f, 240.0f), ImVec2(10000.0f, 10000.0f));
     if (!ImGui::Begin("Protocol", open)) {
         ImGui::End();
         return;
@@ -349,6 +381,7 @@ void drawOscProtocolPanel(OscProtocol& protocol, bool* open) {
 
 void drawOscDebugLogPanel(OscProtocol& protocol, bool* open) {
     ImGui::SetNextWindowSize(ImVec2(640.0f, 420.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(320.0f, 200.0f), ImVec2(10000.0f, 10000.0f));
     if (!ImGui::Begin("OSC Debug Log", open)) {
         ImGui::End();
         return;

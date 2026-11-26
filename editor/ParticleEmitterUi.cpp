@@ -1,5 +1,7 @@
 #include "editor/ParticleEmitterUi.hpp"
 
+#include "editor/UiWrap.hpp"
+
 #include <algorithm>
 #include <cstdio>
 
@@ -137,9 +139,10 @@ void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ct
     if (moduleHeader("Add Emitter", true)) {
         moduleIndentBegin();
         ImGui::TextDisabled("Templates default to soft circles (gentle look).");
-        const float full = ImGui::GetContentRegionAvail().x;
-        const float gap = ImGui::GetStyle().ItemSpacing.x;
-        const float third = (full - gap * 2.0f) / 3.0f;
+        const float longest = ImGui::CalcTextSize("Circles+Trail").x;
+        const int cols = uiAdaptiveColumns(3, longest);
+        const float btn_w = uiButtonWidthForColumns(cols);
+        int bi = 0;
 
         auto addEmitter = [&](const char* name, const ParticleEmitter& preset) {
             system_node.is_particle_system = true;
@@ -150,12 +153,18 @@ void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ct
                 ctx.select_node(system_node.id);
             }
         };
+        auto placeBtn = [&](const char* label, auto&& fn) {
+            if (cols > 1 && bi > 0 && (bi % cols) != 0) {
+                ImGui::SameLine();
+            }
+            if (ImGui::Button(label, ImVec2(btn_w, 0))) {
+                fn();
+            }
+            ++bi;
+        };
 
-        if (ImGui::Button("Soft Circles", ImVec2(third, 0))) {
-            addEmitter("Soft Circles", makeGentleCirclesEmitter());
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Trail", ImVec2(third, 0))) {
+        placeBtn("Soft Circles", [&] { addEmitter("Soft Circles", makeGentleCirclesEmitter()); });
+        placeBtn("Trail", [&] {
             ParticleEmitter trail = makeGentleSoftEmitter();
             trail.rate_per_second = 6.0f;
             particleStackSet(trail.module_stack, kStackTrail, true);
@@ -164,9 +173,8 @@ void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ct
             particleStackSet(trail.module_enabled, kStackGravity, true);
             syncOptionalStackFlags(trail);
             addEmitter("Trail", trail);
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Circles+Trail", ImVec2(third, 0))) {
+        });
+        placeBtn("Circles+Trail", [&] {
             addEmitter("Soft Circles", makeGentleCirclesEmitter());
             ParticleEmitter trail = makeGentleSoftEmitter();
             trail.rate_per_second = 5.0f;
@@ -174,7 +182,7 @@ void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ct
             particleStackSet(trail.module_enabled, kStackTrail, true);
             syncOptionalStackFlags(trail);
             addEmitter("Trail", trail);
-        }
+        });
         moduleIndentEnd();
     }
 }
@@ -210,7 +218,7 @@ void drawParticleEmitterInspector(Node& emitter_node, const std::string& node_pa
         e = makeGentleCirclesEmitter();
         dirty = true;
     }
-    ImGui::SameLine();
+    uiSameLineIfFits(ImGui::CalcTextSize("Soft + Trails").x + ImGui::GetStyle().FramePadding.x * 2.0f);
     if (ImGui::SmallButton("Soft + Trails")) {
         e = makeGentleSoftEmitter();
         dirty = true;
@@ -226,9 +234,15 @@ void drawParticleEmitterInspector(Node& emitter_node, const std::string& node_pa
         if (ctx.osc) {
             drawOscLinkButton(*ctx.osc, OscParamTarget::ParticleEnabled, node_path, 0, "p_en");
         }
-        ImGui::SameLine();
+        {
+            const float need = ImGui::CalcTextSize("Looping").x + ImGui::GetFontSize() + 12.0f;
+            uiSameLineIfFits(need);
+        }
         dirty |= ImGui::Checkbox("Looping", &e.looping);
-        ImGui::SameLine();
+        {
+            const float need = ImGui::CalcTextSize("World space").x + ImGui::GetFontSize() + 12.0f;
+            uiSameLineIfFits(need);
+        }
         dirty |= ImGui::Checkbox("World space", &e.world_space);
         dirty |= ImGui::DragFloat("Duration (0=∞)", &e.duration_seconds, 0.05f, 0.0f, 600.0f);
         dirty |= ImGui::DragFloat("Start delay", &e.start_delay_seconds, 0.01f, 0.0f, 60.0f);

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "editor/UiWrap.hpp"
+
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <ImGuizmo.h>
