@@ -1321,7 +1321,7 @@ void drawAddEmitterButtons(Scene& scene, NodeId system_id, ParticleEmitterUiCont
         state.focus_emitter = id;
         state.focus_system = system_id;
         if (ctx.select_node) {
-            // Hierarchy shows Systems only — keep selection on the System actor.
+            // Keep Hierarchy selection on the System after Add Emitter.
             ctx.select_node(system_id);
         }
     };
@@ -1521,7 +1521,7 @@ void drawTugelaEditorWindow(TugelaEditorState& state, ParticleEmitterUiContext& 
         if (selectableRow(n->name.c_str(), state.focus_emitter == id, badge)) {
             state.focus_emitter = id;
             if (ctx.select_node) {
-                // Keep Hierarchy on the System; emitter authoring stays in Tugela.
+                // Keep Hierarchy on the System when picking emitters inside Tugela.
                 ctx.select_node(state.focus_system != 0 ? state.focus_system : id);
             }
         }

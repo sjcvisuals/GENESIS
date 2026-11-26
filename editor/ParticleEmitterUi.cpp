@@ -81,13 +81,9 @@ bool isParticleSystemNode(const Scene& scene, const Node& node) {
     return countEmitterChildren(scene, node) > 0;
 }
 
-bool isHierarchyHiddenParticleEmitter(const Node& node) {
-    return node.particle_emitter.has_value();
-}
-
 const char* particleHierarchyBadge(const Scene& scene, const Node& node) {
-    if (isHierarchyHiddenParticleEmitter(node)) {
-        return "";
+    if (node.particle_emitter.has_value()) {
+        return "EM";
     }
     if (isParticleSystemNode(scene, node)) {
         return "SYS";
@@ -146,7 +142,7 @@ void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ct
             scene.createParticleEmitterNode(name, system_node.id, preset);
             mark(ctx, true); // rebuild so new emitter is live immediately
             if (ctx.select_node) {
-                // Keep Hierarchy selection on the System; emitters are Tugela-only.
+                // Keep Hierarchy selection on the System after Add Emitter.
                 ctx.select_node(system_node.id);
             }
         };

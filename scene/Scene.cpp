@@ -252,7 +252,7 @@ bool Scene::deleteNode(NodeId id) {
     if (!node) return false;
 
     // Particle Systems own their emitters — delete emitters with the system so they
-    // do not resurface as orphan Hierarchy actors (emitters are outliner-hidden).
+    // do not resurface as orphan Hierarchy actors under the scene root.
     if (node->is_particle_system) {
         std::vector<NodeId> emitter_children;
         for (const NodeId child_id : node->children) {

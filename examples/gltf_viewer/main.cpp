@@ -966,8 +966,8 @@ private:
         });
 
         genesis::drawEditorSectionLabel("Particles · Tugela");
-        // Systems are the only particle actors placed in the world. Emitters live
-        // inside a System and are authored in the Tugela Editor (T).
+        // Systems are world actors; emitters nest under them in Hierarchy (collapsed by
+        // default) and are authored in the Tugela Editor (T).
         if (ImGui::Button("Particle System", ImVec2(-1.0f, 0))) {
             std::optional<genesis::NodeId> scene_root =
                 genesis::findNodeByPath(scene, "Scene");
@@ -986,8 +986,8 @@ private:
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip(
-                "Places a System in the scene. Add/edit emitters in Tugela (T). "
-                "Link OSC to any emitter parameter via Protocol or the OSC Drive module.");
+                "Places a System (collapsed) with emitter children. Expand to select "
+                "emitters; author modules in Tugela (T). Link OSC via Protocol / OSC Drive.");
         }
 
         genesis::drawEditorSectionLabel("Actions");
@@ -1025,15 +1025,15 @@ private:
         ImGui::EndDisabled();
 
         genesis::drawEditorSectionLabel("Outliner");
-        ImGui::TextDisabled("Systems only · emitters in Tugela (T) · Shift+click · Delete");
+        ImGui::TextDisabled("Systems collapsed · expand for emitters · Shift+click · Delete");
 
         // Flat DFS order matching the tree draw — used for Shift+click range select.
-        // Emitters are Tugela-only and omitted from the outliner entirely.
+        // Emitters appear as children under Particle Systems (systems start collapsed).
         std::vector<genesis::NodeId> outliner_order;
         outliner_order.reserve(scene.nodes.size());
         auto collectOrder = [&](auto&& self, genesis::NodeId id) -> void {
             const genesis::Node* n = scene.find(id);
-            if (!n || genesis::isHierarchyHiddenParticleEmitter(*n)) {
+            if (!n) {
                 return;
             }
             outliner_order.push_back(id);
@@ -1046,24 +1046,23 @@ private:
         }
 
         auto hasOutlinerChild = [&](const genesis::Node& node) {
-            for (const genesis::NodeId child : node.children) {
-                if (const genesis::Node* c = scene.find(child);
-                    c && !genesis::isHierarchyHiddenParticleEmitter(*c)) {
-                    return true;
-                }
-            }
-            return false;
+            return !node.children.empty();
         };
 
         auto drawNode = [&](auto&& self, genesis::NodeId id) -> void {
             const genesis::Node* n = scene.find(id);
-            if (!n || genesis::isHierarchyHiddenParticleEmitter(*n)) {
+            if (!n) {
                 return;
             }
 
+            const bool is_particle_system = genesis::isParticleSystemNode(scene, *n);
             ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth |
-                                       ImGuiTreeNodeFlags_FramePadding |
-                                       ImGuiTreeNodeFlags_DefaultOpen;
+                                       ImGuiTreeNodeFlags_FramePadding;
+            // Particle Systems start collapsed so emitters stay hidden until expanded.
+            // Other folders (Scene root, groups) stay DefaultOpen.
+            if (!is_particle_system) {
+                flags |= ImGuiTreeNodeFlags_DefaultOpen;
+            }
             if (!hasOutlinerChild(*n)) {
                 flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet;
             }
@@ -1131,9 +1130,6 @@ private:
                     ImGui::Separator();
                     if (ImGui::BeginMenu("Parent selected to...")) {
                         for (const genesis::Node& candidate : scene.nodes) {
-                            if (genesis::isHierarchyHiddenParticleEmitter(candidate)) {
-                                continue;
-                            }
                             if (std::any_of(selection_.begin(), selection_.end(),
                                             [&](const genesis::NodeId sel) {
                                                 return sel == candidate.id ||
