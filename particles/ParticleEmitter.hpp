@@ -176,14 +176,17 @@ struct ParticleEmitter {
     bool osc_drive = false;
 
     // --- Trail Renderer (ribbon / wake) ---
-    // Soft disc chain along motion history; widths are fractions of the head size.
+    // Soft wedge tip→head. All live-apply to living particles / draw (disable clears
+    // ribbons immediately; re-enable reseeds history over a few frames). Length grows
+    // from Segments × Sample distance; Trail lifetime fades and can shorten via
+    // speed×lifetime. Particle head color/size stay spawn-baked.
     bool trail_enabled = false;
-    std::uint8_t trail_segments = 10;     // history points (2..24)
-    float trail_sample_distance = 0.035f; // meters between samples
-    float trail_width = 0.75f;            // width at head as fraction of particle size
-    float trail_width_end = 0.1f;         // width at tip (small = taper toward a point)
-    float trail_alpha = 0.55f;            // trail opacity multiplier vs particle color
-    float trail_lifetime = 0.85f;         // conceptual trail length in seconds (fade with age)
+    std::uint8_t trail_segments = 10;     // history points (2..24) — live
+    float trail_sample_distance = 0.035f; // meters between samples — live
+    float trail_width = 0.75f;            // width at head as fraction of particle size — live
+    float trail_width_end = 0.1f;         // width at tip (fraction of head size) — live
+    float trail_alpha = 0.55f;            // trail opacity multiplier vs particle color — live
+    float trail_lifetime = 0.85f;         // fade + length feel in seconds — live
 
     // Optional module graph: present on stack (module_stack) vs armed (module_enabled).
     // Disabling clears only module_enabled (+ mirrored runtime flags); Remove clears both.
