@@ -4,6 +4,7 @@
 #include "protocol/OscRoomPerson.hpp"
 #include "protocol/OscTypes.hpp"
 #include "protocol/OscUdpReceiver.hpp"
+#include "scene/SceneDocument.hpp"
 #include "scene/SceneRuntime.hpp"
 
 #include <array>
@@ -25,6 +26,10 @@ public:
 
     void setSettings(const Settings& settings);
     const Settings& settings() const { return settings_; }
+
+    // Capture / restore listen endpoint for scene documents (editor + Pixera).
+    SceneOscSettings captureSceneOscSettings() const;
+    bool applySceneOscSettings(const SceneOscSettings& settings, std::string* out_error = nullptr);
 
     OscParticleEmitSettings& particleEmitSettings() { return particle_emit_; }
     const OscParticleEmitSettings& particleEmitSettings() const { return particle_emit_; }

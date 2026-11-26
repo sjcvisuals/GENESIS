@@ -2,12 +2,12 @@
 
 ## Goals
 
-- Ingest live video (Pixera sampler / later NDI·SDI) into GENESIS
 - Cut out people in realtime **without** the NVIDIA Broadcast / Maxine SDK
-- Keep a shared matte core for ExtGenesis **Background Remover** mode
+- Ship matte as its **own product** — not as an ExtGenesis stream Mode
 
 The free matte-only PIXERA product (`ExtGenesisRemover`) lives in
 [`sjcvisuals/GenesisRemover`](https://github.com/sjcvisuals/GenesisRemover).
+**ExtGenesis** (this repo) is scene playback only — no Background Remover Mode / Matte / Video In params.
 
 ## Architecture
 
@@ -16,14 +16,7 @@ The free matte-only PIXERA product (`ExtGenesisRemover`) lives in
 | `ExternalSharedImage` | Pixera→DLL shared RGBA |
 | `BgRemover` + `RvmOnnxSession` | Auto → **RVM ONNX** (preferred) or chroma key |
 | `AsyncMatteWorker` | One-inflight worker; skip when busy; reuse last matte |
-| `RemoverPipeline` | video_in → async matte → exportable RGBA |
-| ExtGenesis `mode` | Scene **or** Background Remover (+ Quality) |
-
-### Pixera — full GENESIS (`ExtGenesis`)
-
-1. Mode = **Background Remover**
-2. Link media/NDI/SDI → **Video In**, pick **Quality**
-3. Output sampler = transparent cutout
+| `RemoverPipeline` | video_in → async matte → exportable RGBA (GenesisRemover) |
 
 ### Pixera — Genesis Remover (free cutout module)
 

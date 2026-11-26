@@ -41,24 +41,7 @@ Input::Input(std::uint64_t adapter_luid, ValueSet settings)
 
     sampler_ = add_output_parameter<ParameterTexture>(ParameterNames::sampler);
 
-    mode_ = add_parameter<ParameterInt>("mode");
-    mode_->set_property(PropertyNames::name, "Mode");
-    mode_->set_property(PropertyNames::group_name, "Stream");
-    mode_->set_property<std::vector<std::string>>(PropertyNames::enum_names,
-                                                   {"Scene", "Background Remover"});
-    mode_->set_value(0);
-
-    video_in_ = add_parameter<ParameterTexture>("texture");
-    video_in_->set_property(PropertyNames::name, "Video In");
-    video_in_->set_property(PropertyNames::group_name, "Inputs");
-
-    quality_ = add_parameter<ParameterInt>("quality");
-    quality_->set_property(PropertyNames::name, "Quality");
-    quality_->set_property(PropertyNames::group_name, "Matte");
-    quality_->set_property<std::vector<std::string>>(PropertyNames::enum_names,
-                                                      {"Fast", "Balanced", "Quality"});
-    quality_->set_value(1);
-
+    // Notch-like clip: Scene picker only. Background Remover is a separate product/DLL.
     ParameterVector3* position_param = nullptr;
     actor_bindings_.registerSceneParameters(*this, show_select_, use_scene_camera_, reload_scene_,
                                               position_param);
@@ -76,9 +59,6 @@ Input::Input(std::uint64_t adapter_luid, ValueSet settings)
     projection_matrix_->set_property(PropertyNames::purpose, PurposeNames::ProjectionMatrix);
     projection_matrix_->set_property(PropertyNames::name, "Projection Matrix");
     projection_matrix_->set_property(PropertyNames::group_name, "Camera");
-
-    // Bulk actor/light parameter dump deferred (expose-from-Genesis later). Clip UI is
-    // Notch-like: scene dropdown from scenes/ + assets/scenes/ packaged shows only.
 
     time_ = add_parameter<ParameterValue>("time");
     time_->set_property(PropertyNames::purpose, PurposeNames::TimelineTime);
@@ -111,59 +91,20 @@ bool Input::update_settings(ValueSet settings) noexcept try {
 
     if (session_ && session_adapter_luid_ != adapter_luid_) {
         session_.reset();
-        remover_.reset();
         loaded_scene_resource_.clear();
         loaded_show_index_ = -1;
     }
 
-    if (currentMode() == StreamMode::BackgroundRemover) {
-        // Timeline-safe: publish shared output only. video_in / async happen in update().
-        ensureRemover();
-        remover_->resize(width_, height_);
-        publishTargetTexture();
-    } else {
-        ensureSession();
-        session_->resize(width_, height_);
-        publishTargetTexture();
-        view_matrix_->set_value(defaultViewMatrix());
-        projection_matrix_->set_value(defaultProjectionMatrix(width_, height_));
-        reloadSceneIfNeeded();
-    }
+    ensureSession();
+    session_->resize(width_, height_);
+    publishTargetTexture();
+    view_matrix_->set_value(defaultViewMatrix());
+    projection_matrix_->set_value(defaultProjectionMatrix(width_, height_));
+    reloadSceneIfNeeded();
     return true;
 } catch (const std::exception& ex) {
     host().log_error(std::format("updating GENESIS stream settings failed: {}", ex.what()));
     return false;
-}
-
-StreamMode Input::currentMode() const {
-    const std::int32_t mode = mode_ ? mode_->value() : 0;
-    return mode == static_cast<std::int32_t>(StreamMode::BackgroundRemover)
-               ? StreamMode::BackgroundRemover
-               : StreamMode::Scene;
-}
-
-void Input::ensureRemover() {
-    if (remover_) {
-        return;
-    }
-    remover_ = std::make_unique<::genesis::RemoverPipeline>(adapter_luid_);
-    // Async/ONNX stay deferred until after output sampler is published and video_in exists.
-    host().log_info("GENESIS Background Remover Vulkan ready (matte deferred)");
-}
-
-void Input::applyMatteSettings() {
-    if (!remover_) {
-        return;
-    }
-    ::genesis::BgRemoverSettings matte = remover_->remover().settings();
-    const int q = quality_ ? std::clamp(quality_->value(), 0, 2) : 1;
-    const auto next_q = static_cast<::genesis::BgRemoverQuality>(q);
-    if (matte.backend == ::genesis::BgRemoverBackend::Auto && matte.quality == next_q) {
-        return;
-    }
-    matte.backend = ::genesis::BgRemoverBackend::Auto;
-    matte.quality = next_q;
-    remover_->setSettings(matte);
 }
 
 void Input::ensureSession() {
@@ -194,7 +135,6 @@ void Input::refreshShowSelector() {
 
 void Input::refreshParameterCatalog() {
     // Only refresh the scene dropdown when packaged shows appear/disappear beside the DLL.
-    // Do not register per-actor/light parameters (expose-from-Genesis is deferred).
     const std::vector<std::string> scanned = ::genesis::scanRuntimeShowResources(module_dir_);
     if (scanned == show_paths_) {
         return;
@@ -232,8 +172,6 @@ void Input::applyLoadedPixeraConfig() {
         setShowEnumOptions(show_select_, show_paths_, show_index);
     }
 
-    // Bindings metadata is kept on the package for a future expose-from-Genesis path;
-    // do not dump actor/light parameters into the clip UI today.
     if (!pixera->bindings.target_node.empty()) {
         host().log_info(std::format("GENESIS target_node (deferred expose): {}",
                                     pixera->bindings.target_node));
@@ -242,6 +180,28 @@ void Input::applyLoadedPixeraConfig() {
         host().log_info(std::format("GENESIS light_node (deferred expose): {}",
                                     pixera->bindings.light_node));
     }
+}
+
+void Input::applyLoadedSceneOscSettings() {
+    if (!session_) {
+        return;
+    }
+
+    const std::optional<::genesis::SceneOscSettings>& scene_osc =
+        session_->sceneRuntime().oscSettings();
+    if (!scene_osc.has_value()) {
+        return;
+    }
+
+    ::genesis::OscProtocol& osc = ::genesis::sharedOscProtocol();
+    std::string error;
+    if (!osc.applySceneOscSettings(*scene_osc, &error)) {
+        host().log_error(std::format("GENESIS scene OSC listen failed ({}:{}): {}",
+                                     scene_osc->bind_ip, scene_osc->port, error));
+        return;
+    }
+    host().log_info(std::format("GENESIS scene OSC {}:{} (listening={})", scene_osc->bind_ip,
+                                scene_osc->port, scene_osc->listening ? "yes" : "no"));
 }
 
 void Input::reloadSceneIfNeeded() {
@@ -261,6 +221,7 @@ void Input::reloadSceneIfNeeded() {
             loaded_scene_resource_ = resource;
             loaded_show_index_ = show_index;
             applyLoadedPixeraConfig();
+            applyLoadedSceneOscSettings();
             configureRoomOscIfNeeded(resource);
             // Fresh per-stream cursors so dual-GPU consumers replay from the shared OSC hub.
             osc_particle_cursor_ = 0;
@@ -302,21 +263,13 @@ void Input::configureRoomOscIfNeeded(const std::string& resource_path) {
 }
 
 void Input::publishTargetTexture() {
-    const ::genesis::ExternalImageExport* export_info = nullptr;
-    std::uint32_t w = width_;
-    std::uint32_t h = height_;
-
-    if (currentMode() == StreamMode::BackgroundRemover && remover_) {
-        export_info = &remover_->output().colorExport();
-        w = remover_->output().extent().width;
-        h = remover_->output().extent().height;
-    } else if (session_) {
-        export_info = &session_->renderer().target().colorExport();
-        w = session_->renderer().target().extent().width;
-        h = session_->renderer().target().extent().height;
-    } else {
+    if (!session_) {
         return;
     }
+
+    const ::genesis::ExternalImageExport& export_info = session_->renderer().target().colorExport();
+    const std::uint32_t w = session_->renderer().target().extent().width;
+    const std::uint32_t h = session_->renderer().target().extent().height;
 
     TextureDesc desc{};
     desc.width = w;
@@ -325,88 +278,14 @@ void Input::publishTargetTexture() {
     desc.is_target = true;
     desc.share_handle = {
         kHandleType,
-        reinterpret_cast<Handle>(export_info->win32_handle),
+        reinterpret_cast<Handle>(export_info.win32_handle),
         0,
-        export_info->memory_size,
+        export_info.memory_size,
         0,
-        export_info->dedicated,
+        export_info.dedicated,
     };
 
     sampler_->set_texture(host().create_texture(desc));
-}
-
-void Input::publishVideoInTexture() {
-    if (!video_in_ || !remover_) {
-        return;
-    }
-
-    auto allocate = [&](const TextureDesc& desc) {
-        if (desc.width == 0 || desc.height == 0) {
-            return;
-        }
-        width_ = static_cast<std::uint32_t>(desc.width);
-        height_ = static_cast<std::uint32_t>(desc.height);
-        remover_->resize(width_, height_);
-        const VkFormat vk_fmt = [&]() -> VkFormat {
-            switch (desc.format) {
-            case Format::B8G8R8A8_UNORM:
-                return VK_FORMAT_B8G8R8A8_UNORM;
-            case Format::R16G16B16A16_SFLOAT:
-                return VK_FORMAT_R16G16B16A16_SFLOAT;
-            case Format::R32G32B32A32_SFLOAT:
-                return VK_FORMAT_R32G32B32A32_SFLOAT;
-            default:
-                return VK_FORMAT_R8G8B8A8_UNORM;
-            }
-        }();
-        remover_->ensureVideoIn(vk_fmt);
-        const auto& exp = remover_->videoIn().exportInfo();
-        TextureDesc shared = desc;
-        if (shared.format == Format::None) {
-            shared.format = Format::R8G8B8A8_UNORM;
-        }
-        shared.is_target = false;
-        shared.share_handle = {
-            kHandleType,
-            reinterpret_cast<Handle>(exp.win32_handle),
-            0,
-            exp.memory_size,
-            0,
-            exp.dedicated,
-        };
-        video_in_->set_texture(host().create_texture(shared));
-        publishTargetTexture();
-        applyMatteSettings();
-        remover_->setAsyncEnabled(true);
-    };
-
-    update_input_texture(*video_in_, allocate);
-
-    if (!remover_->hasVideoIn()) {
-        TextureDesc desc{};
-        desc.width = static_cast<std::size_t>(
-            video_in_->get_property<int>(SettingNames::resolution_x, 0));
-        desc.height = static_cast<std::size_t>(
-            video_in_->get_property<int>(SettingNames::resolution_y, 0));
-        desc.format = get_format_by_name(video_in_->get_property(SettingNames::format),
-                                         Format::R8G8B8A8_UNORM);
-        if (desc.width == 0 || desc.height == 0) {
-            try {
-                const auto cur = video_in_->texture().desc();
-                if (cur.width > 0 && cur.height > 0) {
-                    desc.width = cur.width;
-                    desc.height = cur.height;
-                    if (cur.format != Format::None) {
-                        desc.format = cur.format;
-                    }
-                }
-            } catch (...) {
-            }
-        }
-        if (desc.width > 0 && desc.height > 0) {
-            allocate(desc);
-        }
-    }
 }
 
 ValueSet Input::get_state() noexcept {
@@ -427,12 +306,6 @@ string Input::get_property(string_view name) noexcept {
 }
 
 bool Input::update() noexcept try {
-    if (currentMode() == StreamMode::BackgroundRemover) {
-        ensureRemover();
-        publishVideoInTexture();
-        return true;
-    }
-
     if (reload_scene_ && reload_scene_->value()) {
         loaded_scene_resource_.clear();
         loaded_show_index_ = -1;
@@ -449,9 +322,6 @@ bool Input::update() noexcept try {
 }
 
 SyncDesc Input::before_render() noexcept {
-    if (currentMode() == StreamMode::BackgroundRemover) {
-        return {};
-    }
     return {
         SyncStrategy::BinarySemaphore,
         ShareHandle{
@@ -462,20 +332,6 @@ SyncDesc Input::before_render() noexcept {
 }
 
 RenderResult Input::render() noexcept try {
-    if (currentMode() == StreamMode::BackgroundRemover) {
-        ensureRemover();
-        if (remover_->hasVideoIn() && !remover_->asyncEnabled()) {
-            applyMatteSettings();
-            remover_->setAsyncEnabled(true);
-        }
-        std::string error;
-        if (!remover_->processFrame(&error)) {
-            host().log_error(std::format("GENESIS remover failed: {}", error));
-            return RenderResult::Failed;
-        }
-        return RenderResult::Succeeded;
-    }
-
     // Shared OSC hub: one UDP listen per process, per-stream cursor for dual-GPU.
     ::genesis::OscProtocol& osc = ::genesis::sharedOscProtocol();
     if (osc.settings().listening || osc.isListening()) {
@@ -505,9 +361,6 @@ RenderResult Input::render() noexcept try {
 }
 
 SyncDesc Input::after_render() noexcept {
-    if (currentMode() == StreamMode::BackgroundRemover) {
-        return {};
-    }
     return {
         SyncStrategy::BinarySemaphore,
         ShareHandle{

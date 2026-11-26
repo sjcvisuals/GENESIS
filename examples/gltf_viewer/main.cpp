@@ -3094,6 +3094,7 @@ private:
                     path += ".genesis";
                 }
                 try {
+                    stampOscSettingsForSave();
                     session_.saveDocument(runtime_, path);
                     updateWindowTitle();
                     runPendingAfterSave();
@@ -3112,6 +3113,7 @@ private:
             return;
         }
         try {
+            stampOscSettingsForSave();
             session_.saveDocument(runtime_, session_.document_path);
             updateWindowTitle();
             runPendingAfterSave();
@@ -3531,10 +3533,30 @@ private:
         }
     }
 
+    void applyLoadedSceneOscSettings() {
+        if (!runtime_.oscSettings().has_value()) {
+            return;
+        }
+        std::string err;
+        if (!osc_protocol_.applySceneOscSettings(*runtime_.oscSettings(), &err) && !err.empty()) {
+            spdlog::warn("Scene OSC listen failed ({}:{}): {}", runtime_.oscSettings()->bind_ip,
+                         runtime_.oscSettings()->port, err);
+        } else {
+            spdlog::info("Restored scene OSC {}:{} (listening={})",
+                         osc_protocol_.settings().bind_ip, osc_protocol_.settings().port,
+                         osc_protocol_.settings().listening ? "yes" : "no");
+        }
+    }
+
+    void stampOscSettingsForSave() {
+        runtime_.setOscSettings(osc_protocol_.captureSceneOscSettings());
+    }
+
     void syncEditorAfterDocumentLoad() {
         use_editor_output_ = true;
         orientSceneOutputCameras(runtime_.scene());
         resetEditorCamera();
+        applyLoadedSceneOscSettings();
         configureRoomOscDemoIfNeeded();
 
         // Auto-frame: room / Medusa get a fixed overview so the 6 m wall + dual rings read;

@@ -2,7 +2,6 @@
 
 #include "ActorBindings.h"
 #include "runtime/GenesisSession.hpp"
-#include "runtime/RemoverPipeline.hpp"
 #include "ResourceLoader.h"
 #include "rxext_client.h"
 
@@ -17,11 +16,6 @@
 namespace rxext::genesis_ext {
 
 using ParameterMatrix4 = ParameterT<glm::dmat4, ParameterType::Matrix4>;
-
-enum class StreamMode : std::int32_t {
-    Scene = 0,
-    BackgroundRemover = 1,
-};
 
 class Input : public rxext::InputStream {
     friend class ActorBindings;
@@ -41,24 +35,18 @@ public:
 
 private:
     void publishTargetTexture();
-    void publishVideoInTexture();
     void ensureSession();
-    void ensureRemover();
-    void applyMatteSettings();
     void refreshShowSelector();
     void refreshParameterCatalog();
     void applyLoadedPixeraConfig();
+    void applyLoadedSceneOscSettings();
     void reloadSceneIfNeeded();
     std::string selectedShowPath() const;
-    StreamMode currentMode() const;
 
     std::uint64_t adapter_luid_ = 0;
     std::uint64_t session_adapter_luid_ = 0;
     ValueSet settings_;
     ParameterTexture* sampler_ = nullptr;
-    ParameterTexture* video_in_ = nullptr;
-    ParameterInt* mode_ = nullptr;
-    ParameterInt* quality_ = nullptr;
     ParameterValue* time_ = nullptr;
     ParameterMatrix4* view_matrix_ = nullptr;
     ParameterMatrix4* projection_matrix_ = nullptr;
@@ -72,7 +60,6 @@ private:
     std::string loaded_scene_resource_;
     std::int32_t loaded_show_index_ = -1;
     std::unique_ptr<::genesis::GenesisSession> session_;
-    std::unique_ptr<::genesis::RemoverPipeline> remover_;
     std::uint32_t width_ = 1920;
     std::uint32_t height_ = 1080;
     std::uint64_t osc_particle_cursor_ = 0;

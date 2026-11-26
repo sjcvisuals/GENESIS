@@ -73,6 +73,10 @@ public:
     SceneDocument buildSceneDocument() const;
     void loadDemo();
 
+    // Protocol OSC endpoint stamped into / restored from the scene document.
+    void setOscSettings(std::optional<SceneOscSettings> settings);
+    const std::optional<SceneOscSettings>& oscSettings() const { return osc_settings_; }
+
     const VulkanContext& context() const { return context_; }
 
     Scene& scene() { return scene_; }
@@ -186,6 +190,7 @@ private:
     std::vector<std::string> texture_names_;
     std::string source_path_ = "builtin";
     std::string document_path_;
+    std::optional<SceneOscSettings> osc_settings_;
     std::filesystem::path gltf_source_path_;
     std::vector<AnimationClip> animation_clips_;
     AnimationGraph animation_graph_{};

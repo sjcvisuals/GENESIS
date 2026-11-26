@@ -811,6 +811,14 @@ json SceneSerializer::documentToJson(const SceneDocument& document) {
         root["active_output_camera"] = *document.active_output_camera;
     }
 
+    if (document.osc.has_value()) {
+        root["osc"] = json{
+            {"bind_ip", document.osc->bind_ip},
+            {"port", document.osc->port},
+            {"listening", document.osc->listening},
+        };
+    }
+
     json materials = json::array();
     for (const auto& [name, material] : document.materials) {
         materials.push_back(materialToJson(name, material));
@@ -880,6 +888,16 @@ SceneDocument SceneSerializer::loadFromJson(const json& root) {
 
     if (root.contains("active_output_camera") && !root["active_output_camera"].is_null()) {
         document.active_output_camera = root["active_output_camera"].get<std::string>();
+    }
+
+    if (root.contains("osc") && root["osc"].is_object()) {
+        const json& osc = root["osc"];
+        SceneOscSettings settings{};
+        settings.bind_ip = osc.value("bind_ip", std::string{"0.0.0.0"});
+        const int port = osc.value("port", 9000);
+        settings.port = static_cast<std::uint16_t>(std::clamp(port, 1, 65535));
+        settings.listening = osc.value("listening", false);
+        document.osc = settings;
     }
 
     if (root.contains("materials") && root["materials"].is_array()) {

@@ -8,11 +8,19 @@
 #include "scene/SceneMaterial.hpp"
 #include "scene/Transform.hpp"
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace genesis {
+
+// Protocol / OSC listen endpoint authored in the editor and restored for player / Pixera.
+struct SceneOscSettings {
+    std::string bind_ip = "0.0.0.0";
+    std::uint16_t port = 9000;
+    bool listening = false;
+};
 
 struct SceneDocumentNode {
     std::string path;
@@ -38,6 +46,8 @@ struct SceneDocument {
     int version = 1;
     std::string source; // glTF path relative to assets, or "builtin"
     std::optional<std::string> active_output_camera;
+    // When set, editor / ExtGenesis restore UDP listen IP + port from this scene.
+    std::optional<SceneOscSettings> osc;
 
     std::vector<std::pair<std::string, SceneMaterial>> materials;
     std::vector<SceneDocumentNode> nodes;

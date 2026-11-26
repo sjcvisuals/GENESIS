@@ -45,6 +45,7 @@ void SceneRuntime::clear() {
     texture_names_.clear();
     source_path_ = "builtin";
     document_path_.clear();
+    osc_settings_.reset();
     gltf_source_path_.clear();
     animation_clips_.clear();
     animation_graph_ = {};
@@ -117,6 +118,7 @@ void SceneRuntime::loadGnsFile(const std::filesystem::path& absolute_path) {
 SceneDocument SceneRuntime::buildSceneDocument() const {
     SceneDocument document =
         SceneSerializer::buildDocument(scene_, source_path_, mesh_names_, material_names_, materials_);
+    document.osc = osc_settings_;
     document.animations = animation_clips_;
     for (AnimationClip& clip : document.animations) {
         for (AnimationChannel& channel : clip.channels) {
@@ -127,6 +129,10 @@ SceneDocument SceneRuntime::buildSceneDocument() const {
         }
     }
     return document;
+}
+
+void SceneRuntime::setOscSettings(std::optional<SceneOscSettings> settings) {
+    osc_settings_ = std::move(settings);
 }
 
 void SceneRuntime::saveDocument(const std::filesystem::path& path) {
@@ -764,6 +770,7 @@ void SceneRuntime::createNodeFromEntry(const SceneDocumentNode& entry) {
 
 void SceneRuntime::finishDocumentLoad(const SceneDocument& document) {
     scene_.updateWorldTransforms();
+    osc_settings_ = document.osc;
 
     // Legacy scenes: infer Particle System from emitter children when the flag is absent.
     for (Node& node : scene_.nodes) {
