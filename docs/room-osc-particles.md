@@ -7,7 +7,7 @@ Dual-ring cylindrical room soft-particle demo driven by OSC person tracking. Par
 - Package: `assets/scenes/room_osc_particles.gns`
 - Document: `assets/scenes/room_osc_particles.scene.json`
 - Editor: **File → Examples → Room OSC Particles**
-- Lean single-person demo: **File → Examples → Medusa** (`assets/scenes/medusa.scene.json`) — dual rings + one Wall Plane, `max_persons = 1`, Prefer plane → distance, line-trace debug on
+- Lean room demo: **File → Examples → Medusa** (`assets/scenes/medusa.scene.json`) — dual rings + one Wall Plane, TUIO `/tuio/2Dcur` multi-person (max 10), Prefer plane → distance, line-trace debug on
 
 ### Geometry (install scale)
 
@@ -34,7 +34,19 @@ Camera
 
 Listen defaults: **UDP `0.0.0.0:9000`** (Protocol panel).
 
-### `/genesis/room/person` (primary)
+### `/tuio/2Dcur` (OSC from TouchDesigner — not a native TUIO client)
+
+TD manages TUIO and forwards `/tuio/2Dcur` onto GENESIS’s existing OSC UDP listen. Same poll/ingest path as `/genesis/room/person`.
+
+| Message | Args | Meaning |
+|---------|------|---------|
+| `alive` | `,siiii…` `[alive, id0, …]` | Active **session IDs** (pool). Ints after `alive` are IDs, **not** a count. |
+| `set` | `,sifffff` `[set, id, x, y, …]` | Position for that ID. Use **x,y** only (vel/m ignored). |
+| `fseq` | `,si` `[fseq, n]` | Frame sequence (optional debug). |
+
+Normalized `x,y` → floor meters: `X = x * tuio_scale`, `Z = y * tuio_scale` (default scale = `room_radius` = 3). Alive parks IDs that drop out of the list. Protocol UI stays lean — raw packets still show in the OSC debug log.
+
+### `/genesis/room/person` (primary meter path)
 
 | Args | Meaning |
 |------|---------|
@@ -49,7 +61,7 @@ Listen defaults: **UDP `0.0.0.0:9000`** (Protocol panel).
 1. Map person **id** → slot (up to `max_persons`).
 2. Create that slot’s **Feet** / **Wall** emitters on first message (if missing).
 3. Move **Feet** to the person; cast center→person for **Wall** (fixed radius and/or one scene Plane).
-4. After `slot_idle_seconds` with no messages, park existing emitters at origin (disabled).
+4. TUIO: park when id leaves `alive`. Otherwise after `slot_idle_seconds` with no messages, park at origin (disabled).
 
 ### `/genesis/particles/emit` (still supported)
 

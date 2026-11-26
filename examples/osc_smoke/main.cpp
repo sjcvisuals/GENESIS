@@ -100,6 +100,41 @@ std::vector<std::uint8_t> makeRoomPersonIdXz() {
     return packet;
 }
 
+std::vector<std::uint8_t> makeTuioAlive() {
+    std::vector<std::uint8_t> packet;
+    appendPadded(packet, "/tuio/2Dcur");
+    appendPadded(packet, ",siiii");
+    appendPadded(packet, "alive");
+    appendIntBe(packet, 2);
+    appendIntBe(packet, 12);
+    appendIntBe(packet, 14);
+    appendIntBe(packet, 13);
+    return packet;
+}
+
+std::vector<std::uint8_t> makeTuioSet() {
+    std::vector<std::uint8_t> packet;
+    appendPadded(packet, "/tuio/2Dcur");
+    appendPadded(packet, ",sifffff");
+    appendPadded(packet, "set");
+    appendIntBe(packet, 12);
+    appendFloatBe(packet, -0.5421f);
+    appendFloatBe(packet, 0.2700f);
+    appendFloatBe(packet, -0.2216f);
+    appendFloatBe(packet, -0.4029f);
+    appendFloatBe(packet, 0.4599f);
+    return packet;
+}
+
+std::vector<std::uint8_t> makeTuioFseq() {
+    std::vector<std::uint8_t> packet;
+    appendPadded(packet, "/tuio/2Dcur");
+    appendPadded(packet, ",si");
+    appendPadded(packet, "fseq");
+    appendIntBe(packet, 9453);
+    return packet;
+}
+
 std::vector<std::uint8_t> makeNestedBundle() {
     // Outer #bundle containing /a and an inner #bundle with /b.
     const auto msg_a = makeIntMessage();
@@ -270,6 +305,7 @@ int main() {
         std::string err;
         const auto msg = genesis::parseOscMessage(packet, &err);
         genesis::OscRoomPersonSettings settings{};
+        settings.enabled = true;
         genesis::OscRoomPersonEvent event{};
         if (!msg || !genesis::tryParseOscRoomPerson(*msg, settings, event)) {
             std::cerr << "room person xz parse failed: " << err << '\n';
@@ -363,6 +399,7 @@ int main() {
         std::string err;
         const auto msg = genesis::parseOscMessage(packet, &err);
         genesis::OscRoomPersonSettings settings{};
+        settings.enabled = true;
         genesis::OscRoomPersonEvent event{};
         if (!msg || !genesis::tryParseOscRoomPerson(*msg, settings, event) || event.person_id != 3 ||
             std::abs(event.x - 2.0f) > 1e-5f || std::abs(event.z - 1.0f) > 1e-5f) {
@@ -376,15 +413,65 @@ int main() {
     {
         genesis::OscRoomPersonSettings medusa{};
         genesis::configureMedusaExampleSettings(medusa);
-        if (!medusa.enabled || medusa.max_persons != 1 ||
+        if (!medusa.enabled || medusa.max_persons != 10 || !medusa.tuio_enabled ||
+            medusa.tuio_address != "/tuio/2Dcur" ||
             medusa.wall_ray_mode != genesis::WallRaySpawnMode::PreferPlaneThenDistance ||
             !medusa.debug_draw_wall_ray || medusa.wall_plane_path != "Scene/Wall Plane" ||
             std::abs(medusa.room_radius - 3.0f) > 1e-5f ||
-            std::abs(medusa.tank_radius - 1.0f) > 1e-5f) {
+            std::abs(medusa.tank_radius - 1.0f) > 1e-5f ||
+            std::abs(medusa.tuio_scale - 3.0f) > 1e-5f) {
             std::cerr << "Medusa example settings mismatch\n";
             ++failures;
         } else {
-            std::cout << "Medusa example settings OK (max_persons=1, plane+debug)\n";
+            std::cout << "Medusa example settings OK (TUIO + max_persons=10, plane+debug)\n";
+        }
+    }
+
+    {
+        const auto alive_pkt = makeTuioAlive();
+        const auto set_pkt = makeTuioSet();
+        const auto fseq_pkt = makeTuioFseq();
+        std::string err;
+        const auto alive_msg = genesis::parseOscMessage(alive_pkt, &err);
+        const auto set_msg = genesis::parseOscMessage(set_pkt, &err);
+        const auto fseq_msg = genesis::parseOscMessage(fseq_pkt, &err);
+        genesis::OscRoomPersonSettings settings{};
+        genesis::configureMedusaExampleSettings(settings);
+        genesis::OscTuio2DcurParse alive_p{};
+        genesis::OscTuio2DcurParse set_p{};
+        genesis::OscTuio2DcurParse fseq_p{};
+        if (!alive_msg || !genesis::tryParseOscTuio2Dcur(*alive_msg, settings, alive_p) ||
+            alive_p.command != genesis::OscTuio2DcurCommand::Alive ||
+            alive_p.alive.session_ids.size() != 4 || alive_p.alive.session_ids[0] != 2 ||
+            alive_p.alive.session_ids[1] != 12 || alive_p.alive.session_ids[2] != 14 ||
+            alive_p.alive.session_ids[3] != 13) {
+            std::cerr << "TUIO alive parse failed (IDs must be session ids, not a count)\n";
+            ++failures;
+        } else if (!set_msg || !genesis::tryParseOscTuio2Dcur(*set_msg, settings, set_p) ||
+                   set_p.command != genesis::OscTuio2DcurCommand::Set ||
+                   set_p.set.session_id != 12 || std::abs(set_p.set.x + 0.5421f) > 1e-4f ||
+                   std::abs(set_p.set.y - 0.2700f) > 1e-4f) {
+            std::cerr << "TUIO set parse failed\n";
+            ++failures;
+        } else if (!fseq_msg || !genesis::tryParseOscTuio2Dcur(*fseq_msg, settings, fseq_p) ||
+                   fseq_p.command != genesis::OscTuio2DcurCommand::Fseq ||
+                   fseq_p.fseq.frame != 9453) {
+            std::cerr << "TUIO fseq parse failed\n";
+            ++failures;
+        } else {
+            genesis::OscRoomPersonEvent mapped{};
+            genesis::mapTuioSetToRoomPersonEvent(settings, set_p.set, mapped);
+            const float expect_x = -0.5421f * settings.tuio_scale;
+            const float expect_z = 0.2700f * settings.tuio_scale;
+            if (mapped.person_id != 12 || !mapped.from_tuio ||
+                std::abs(mapped.x - expect_x) > 1e-4f || std::abs(mapped.z - expect_z) > 1e-4f) {
+                std::cerr << "TUIO→floor map failed feet xz=(" << mapped.x << "," << mapped.z
+                          << ")\n";
+                ++failures;
+            } else {
+                std::cout << "OSC TUIO 2Dcur alive/set/fseq OK → id=" << mapped.person_id
+                          << " floor(" << mapped.x << "," << mapped.z << ")\n";
+            }
         }
     }
 

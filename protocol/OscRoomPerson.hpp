@@ -22,8 +22,10 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 #include <string>
+#include <vector>
 
 namespace genesis {
 
@@ -41,6 +43,18 @@ struct OscRoomPersonSettings {
     // configureRoomOscInstallSettings() turns this on (creates Person Pool).
     bool enabled = false;
     std::string address = "/genesis/room/person";
+
+    // `/tuio/2Dcur` over the existing OSC listen path (TouchDesigner owns TUIO;
+    // GENESIS is not a native TUIO UDP client). No Protocol UI clutter.
+    //   set  `,sifffff` [set, id, x, y, Xvel, Yvel, m] — id + x,y (vel/m ignored)
+    //   alive `,siiii…` [alive, id0, id1, …] — active session IDs (NOT a count)
+    //   fseq  `,si`     [fseq, n] — frame tick (debug)
+    // Normalized x,y map onto the horizontal floor (scene XZ), like feet.
+    bool tuio_enabled = false;
+    std::string tuio_address = "/tuio/2Dcur";
+    // meters = tuio_xy * tuio_scale + tuio_offset (default scale = room_radius).
+    float tuio_scale = 3.0f;
+    glm::vec2 tuio_offset{0.0f, 0.0f};
 
     // Parent empty for lazily created Feet/Wall leaves ("Feet 00" / "Wall 00").
     std::string person_pool_path = "Scene/Person Pool";
@@ -104,6 +118,8 @@ struct OscRoomPersonEvent {
     bool has_y = false;
     std::uint32_t count = 0; // 0 → use settings defaults
     double received_seconds = 0.0;
+    // True when produced from `/tuio/2Dcur` set (alive list parks these slots).
+    bool from_tuio = false;
 };
 
 struct OscRoomPersonPose {
@@ -128,6 +144,37 @@ struct OscRoomPersonSlot {
     std::int32_t person_id = -1; // -1 = free / idle at origin
     double last_seen_seconds = 0.0;
     bool occupied = false;
+    // True when this slot was assigned from TUIO set/alive (alive list parks these).
+    bool from_tuio = false;
+};
+
+enum class OscTuio2DcurCommand : std::uint8_t {
+    Unknown = 0,
+    Set,
+    Alive,
+    Fseq,
+};
+
+struct OscTuio2DcurSet {
+    std::int32_t session_id = 0;
+    float x = 0.0f; // normalized TUIO cursor X
+    float y = 0.0f; // normalized TUIO cursor Y → scene Z on floor
+};
+
+struct OscTuio2DcurAlive {
+    // Active person session IDs (pool). Size = number of people; values are IDs.
+    std::vector<std::int32_t> session_ids;
+};
+
+struct OscTuio2DcurFseq {
+    std::int32_t frame = 0;
+};
+
+struct OscTuio2DcurParse {
+    OscTuio2DcurCommand command = OscTuio2DcurCommand::Unknown;
+    OscTuio2DcurSet set{};
+    OscTuio2DcurAlive alive{};
+    OscTuio2DcurFseq fseq{};
 };
 
 inline std::string roomPersonFeetPath(const OscRoomPersonSettings& settings, std::size_t slot) {
@@ -166,17 +213,29 @@ inline void configureRoomOscInstallSettings(OscRoomPersonSettings& room) {
     room.debug_draw_wall_ray = false;
 }
 
-// File → Examples → Medusa: lean single-person dual-ring + wall-plane ray debug.
+// File → Examples → Medusa: dual-ring + wall-plane ray debug + TUIO 2Dcur people.
 inline void configureMedusaExampleSettings(OscRoomPersonSettings& room) {
     configureRoomOscInstallSettings(room);
-    room.max_persons = 1;
+    room.max_persons = 10;
     room.wall_ray_mode = WallRaySpawnMode::PreferPlaneThenDistance;
     room.wall_plane_path = "Scene/Wall Plane";
     room.debug_draw_wall_ray = true;
+    room.tuio_enabled = true;
+    room.tuio_address = "/tuio/2Dcur";
+    room.tuio_scale = room.room_radius; // ~[-1,1] → ±3 m floor
+    room.tuio_offset = glm::vec2(0.0f, 0.0f);
 }
 
 bool tryParseOscRoomPerson(const OscMessage& message, const OscRoomPersonSettings& settings,
                            OscRoomPersonEvent& out_event);
+
+// Parse one `/tuio/2Dcur` message (set / alive / fseq). Address must match settings.
+bool tryParseOscTuio2Dcur(const OscMessage& message, const OscRoomPersonSettings& settings,
+                          OscTuio2DcurParse& out);
+
+// Map TUIO set x,y → room-person event on the horizontal floor (x→X, y→Z meters).
+void mapTuioSetToRoomPersonEvent(const OscRoomPersonSettings& settings, const OscTuio2DcurSet& set,
+                                 OscRoomPersonEvent& out_event);
 
 // Fixed-distance cylinder hit (room_radius) from room center through person XZ.
 OscRoomPersonPose oscRoomPersonPose(const OscRoomPersonSettings& settings,
