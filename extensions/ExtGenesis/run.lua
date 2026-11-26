@@ -16,16 +16,9 @@ SET_STREAM_INPUTS = function(stream)
   clock = host.create_node("SystemClock")
   stream.time = clock
 
-  -- Drive the demo sphere from the timeline (Position purpose).
-  stream.position = host.create_node("Keyframe", {
-    keys = {
-      { time = 0, value = { 0.15, 0.525, -0.35 } },
-      { time = 4, value = { 0.15, 1.1, -0.35 } },
-    },
-    loop = true,
-  })
-
-  -- stream.scene_resource = "scenes/demo.gns"
+  -- Notch-like clip: pick a packaged scene via show_select (Scene dropdown).
+  -- Per-actor Position / expose-from-Genesis is deferred.
+  -- stream.show_select = 0
 end
 
 dofile('data/scripts/extension_in.lua')

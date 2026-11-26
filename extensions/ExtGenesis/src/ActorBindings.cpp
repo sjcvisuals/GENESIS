@@ -202,8 +202,10 @@ void ActorBindings::registerSceneParameters(Input& input,
                                             ParameterBool*& use_scene_camera,
                                             ParameterBool*& reload_scene,
                                             ParameterVector3*& target_position) {
+    // Notch-like clip surface: scene picker (+ reload / camera). Actor/light dumps
+    // and Position expose-from-Genesis stay deferred — do not register them here.
     show_select = input.add_parameter<ParameterInt>("show_select", 0);
-    show_select->set_property(PropertyNames::name, "Show");
+    show_select->set_property(PropertyNames::name, "Scene");
     applySceneGroupProperties(show_select);
 
     use_scene_camera = input.add_parameter<ParameterBool>("use_scene_camera", false);
@@ -214,11 +216,9 @@ void ActorBindings::registerSceneParameters(Input& input,
     reload_scene->set_property(PropertyNames::name, "Reload Scene");
     applySceneGroupProperties(reload_scene);
 
-    target_position = input.add_parameter<ParameterVector3>(
-        "position", std::array<double, 3>{0.0, 0.0, 0.0});
-    target_position->set_property(PropertyNames::purpose, PurposeNames::Position);
-    target_position->set_property(PropertyNames::name, "Position");
-    target_position_ = target_position;
+    // Keep out-param null; bulk Position / actor / light params are intentionally hidden.
+    target_position = nullptr;
+    target_position_ = nullptr;
 }
 
 void ActorBindings::registerLight(Input& input, const CatalogLight& light) {

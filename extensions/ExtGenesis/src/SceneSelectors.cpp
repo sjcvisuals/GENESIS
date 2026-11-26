@@ -9,11 +9,11 @@ namespace rxext::genesis_ext {
 namespace {
 
 std::string friendlyShowLabel(const std::string& resource_path) {
-    if (resource_path == "demo") {
+    if (resource_path == "demo" || resource_path == "default" || resource_path == "builtin") {
         return "Built-in Demo";
     }
     const std::filesystem::path path(resource_path);
-    return path.filename().string();
+    return path.stem().string();
 }
 
 std::string friendlyNodeLabel(const std::string& node_path) {

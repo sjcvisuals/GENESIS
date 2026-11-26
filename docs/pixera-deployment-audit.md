@@ -130,14 +130,13 @@ Scene + assets deploy as a folder with relative paths. Single-file container is 
 
 Stable IDs (not display names):
 
-- `show_select` — scene selection enum
+- `show_select` — packaged scene selection enum (`.gns` / `.genesis` under `scenes/` + `assets/scenes/`)
 - `use_scene_camera` — bool
+- `reload_scene` — force reload
 - `view_matrix`, `projection_matrix` — camera override
-- `actor_{id}_position_x` … `actor_{id}_mesh_enabled`
-- `light_{id}_intensity`
 - `time` — timeline
 
-Structural scene edits remain in Genesis Editor; save and reload in PIXERA.
+Per-actor / per-light parameter IDs (`actor_*`, `light_*`) are deferred (expose-from-Genesis). Structural scene edits remain in Genesis Editor; save a packaged show and reload in PIXERA.
 
 ## 10. Performance baseline (to measure)
 
