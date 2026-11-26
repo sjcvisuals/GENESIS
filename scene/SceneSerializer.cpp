@@ -484,6 +484,7 @@ json particleEmitterToJson(const ParticleEmitter& e) {
         {"module_enabled", e.module_enabled},
         {"unlit", e.unlit},
         {"additive", e.additive},
+        {"deterministic", e.deterministic},
         {"seed_override", e.seed_override},
         {"fluid_coupled", e.fluid_coupled},
     };
@@ -576,6 +577,7 @@ ParticleEmitter particleEmitterFromJson(const json& j) {
     e.trail_lifetime = j.value("trail_lifetime", e.trail_lifetime);
     e.unlit = j.value("unlit", e.unlit);
     e.additive = j.value("additive", e.additive);
+    e.deterministic = j.value("deterministic", e.deterministic);
     e.seed_override = j.value("seed_override", e.seed_override);
     e.fluid_coupled = j.value("fluid_coupled", e.fluid_coupled);
     if (j.contains("bursts") && j["bursts"].is_array()) {

@@ -281,7 +281,7 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
         return;
     }
 
-    const std::uint64_t seed = desc.seed_override != 0 ? desc.seed_override : scene_seed_;
+    const std::uint64_t base_seed = desc.seed_override != 0 ? desc.seed_override : scene_seed_;
     const glm::mat4 world = node.world;
     const glm::vec3 origin = origin_override ? *origin_override : glm::vec3(world[3]);
 
@@ -294,6 +294,9 @@ void ParticleWorld::spawnFromEmitter(Scene& scene, EmitterRuntime& runtime, cons
             break;
         }
         const std::uint64_t emit_index = runtime.next_emit_index++;
+        // Deterministic (default): same base + emit_index → identical attributes.
+        // Off: mix varying entropy so each spawn diverges across runs.
+        const std::uint64_t seed = particleEffectiveSeed(base_seed, desc.deterministic);
         const std::size_t slot = allocateParticle();
         Particle& p = particles_[slot];
         p = Particle{};
@@ -677,9 +680,17 @@ void ParticleWorld::updateParticlesCpu(Scene& scene, float dt) {
             }
         }
         if (desc.force_noise && desc.noise_strength > 1e-6f) {
-            const glm::vec3 n =
-                curlNoiseApprox(world_pos + glm::vec3(static_cast<float>(sim_time_seconds_)),
-                                desc.noise_frequency);
+            glm::vec3 noise_pos =
+                world_pos + glm::vec3(static_cast<float>(sim_time_seconds_));
+            if (!desc.deterministic) {
+                // Vary noise field samples when Deterministic is off.
+                const std::uint64_t salt = particleVaryingEntropy();
+                noise_pos += glm::vec3(
+                    particleRandom01(salt, p.emitter_node, p.emit_index, 11u),
+                    particleRandom01(salt, p.emitter_node, p.emit_index, 12u),
+                    particleRandom01(salt, p.emitter_node, p.emit_index, 13u));
+            }
+            const glm::vec3 n = curlNoiseApprox(noise_pos, desc.noise_frequency);
             p.velocity += n * desc.noise_strength * dt;
         }
 

@@ -191,6 +191,10 @@ struct ParticleEmitter {
     std::uint32_t module_stack = kStackGravity | kStackDrag;
     std::uint32_t module_enabled = kStackGravity | kStackDrag;
 
+    // When true (default), spawn RNG is counter-based from scene/seed_override —
+    // same settings + seed replay identical motion. When false, each spawn mixes
+    // varying entropy so randomness diverges across runs.
+    bool deterministic = true;
     std::uint64_t seed_override = 0;
     bool fluid_coupled = false;
 };
