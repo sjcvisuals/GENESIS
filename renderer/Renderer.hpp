@@ -110,6 +110,8 @@ private:
     std::unique_ptr<BindlessTextures> bindless_textures_;
     std::unique_ptr<DisplayLutBinding> display_lut_;
     std::unique_ptr<MeshBatchDrawer> mesh_batch_drawer_;
+    // Own buffers so selection outline never overwrites mesh/particle instance+indirect state.
+    std::unique_ptr<MeshBatchDrawer> outline_batch_drawer_;
     std::unique_ptr<Buffer> vertex_buffer_;
     std::unique_ptr<ImGuiLayer> imgui_;
 
@@ -117,6 +119,10 @@ private:
     VkDescriptorSetLayout frame_set_layout_ = VK_NULL_HANDLE;
     VkDescriptorPool frame_descriptor_pool_ = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> frame_descriptor_sets_;
+    // Parallel set0 for selection outline — same FrameUBO, own instance SSBO binding.
+    // Must not rewrite frame_descriptor_sets_ mid-frame or mesh/particle draws read
+    // outline instances at GPU execute time.
+    std::vector<VkDescriptorSet> outline_frame_descriptor_sets_;
 
     VkCommandPool command_pool_ = VK_NULL_HANDLE;
     std::vector<VkCommandBuffer> command_buffers_;

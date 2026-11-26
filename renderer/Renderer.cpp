@@ -94,12 +94,16 @@ Renderer::~Renderer() {
     mesh_pipeline_.reset();
     mesh_additive_pipeline_.reset();
     mesh_depth_pipeline_.reset();
+    selection_outline_pipeline_.reset();
     grid_pipeline_.reset();
     mesh_batch_drawer_.reset();
+    outline_batch_drawer_.reset();
     display_lut_.reset();
     bindless_textures_.reset();
     imgui_.reset();
     frame_ubo_.reset();
+    frame_descriptor_sets_.clear();
+    outline_frame_descriptor_sets_.clear();
 
     if (frame_descriptor_pool_ != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(context_->device(), frame_descriptor_pool_, nullptr);
@@ -235,15 +239,17 @@ void Renderer::createFrameDescriptorSetLayout() {
 }
 
 void Renderer::createFrameDescriptorPool() {
+    // Mesh sets + outline sets (same layout, isolated instance SSBO bindings).
+    const uint32_t set_count = static_cast<uint32_t>(kFramesInFlight * 2);
     VkDescriptorPoolSize pool_sizes[2]{};
     pool_sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    pool_sizes[0].descriptorCount = static_cast<uint32_t>(kFramesInFlight);
+    pool_sizes[0].descriptorCount = set_count;
     pool_sizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    pool_sizes[1].descriptorCount = static_cast<uint32_t>(kFramesInFlight);
+    pool_sizes[1].descriptorCount = set_count;
 
     VkDescriptorPoolCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    info.maxSets = static_cast<uint32_t>(kFramesInFlight);
+    info.maxSets = set_count;
     info.poolSizeCount = 2;
     info.pPoolSizes = pool_sizes;
 
@@ -254,34 +260,41 @@ void Renderer::createFrameDescriptorPool() {
 
 void Renderer::createFrameDescriptorSets() {
     frame_descriptor_sets_.resize(kFramesInFlight);
+    outline_frame_descriptor_sets_.resize(kFramesInFlight);
 
-    std::vector<VkDescriptorSetLayout> layouts(kFramesInFlight, frame_set_layout_);
-    VkDescriptorSetAllocateInfo alloc{};
-    alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    alloc.descriptorPool = frame_descriptor_pool_;
-    alloc.descriptorSetCount = static_cast<uint32_t>(layouts.size());
-    alloc.pSetLayouts = layouts.data();
+    auto alloc_sets = [&](std::vector<VkDescriptorSet>& out) {
+        std::vector<VkDescriptorSetLayout> layouts(kFramesInFlight, frame_set_layout_);
+        VkDescriptorSetAllocateInfo alloc{};
+        alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        alloc.descriptorPool = frame_descriptor_pool_;
+        alloc.descriptorSetCount = static_cast<uint32_t>(layouts.size());
+        alloc.pSetLayouts = layouts.data();
+        if (vkAllocateDescriptorSets(context_->device(), &alloc, out.data()) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to allocate frame descriptor sets");
+        }
+    };
+    alloc_sets(frame_descriptor_sets_);
+    alloc_sets(outline_frame_descriptor_sets_);
 
-    if (vkAllocateDescriptorSets(context_->device(), &alloc, frame_descriptor_sets_.data()) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to allocate frame descriptor sets");
-    }
+    auto bind_ubo = [&](std::vector<VkDescriptorSet>& sets) {
+        for (int i = 0; i < kFramesInFlight; ++i) {
+            VkDescriptorBufferInfo buf{};
+            buf.buffer = frame_ubo_->handle();
+            buf.offset = static_cast<VkDeviceSize>(i) * sizeof(FrameUniforms);
+            buf.range = sizeof(FrameUniforms);
 
-    for (int i = 0; i < kFramesInFlight; ++i) {
-        VkDescriptorBufferInfo buf{};
-        buf.buffer = frame_ubo_->handle();
-        buf.offset = static_cast<VkDeviceSize>(i) * sizeof(FrameUniforms);
-        buf.range = sizeof(FrameUniforms);
-
-        VkWriteDescriptorSet write{};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet = frame_descriptor_sets_[i];
-        write.dstBinding = 0;
-        write.descriptorCount = 1;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        write.pBufferInfo = &buf;
-
-        vkUpdateDescriptorSets(context_->device(), 1, &write, 0, nullptr);
-    }
+            VkWriteDescriptorSet write{};
+            write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            write.dstSet = sets[i];
+            write.dstBinding = 0;
+            write.descriptorCount = 1;
+            write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            write.pBufferInfo = &buf;
+            vkUpdateDescriptorSets(context_->device(), 1, &write, 0, nullptr);
+        }
+    };
+    bind_ubo(frame_descriptor_sets_);
+    bind_ubo(outline_frame_descriptor_sets_);
 }
 
 void Renderer::createCommandPool() {
@@ -373,9 +386,13 @@ void Renderer::createMeshResources() {
     bindless_textures_ = std::make_unique<BindlessTextures>(*context_);
     display_lut_ = std::make_unique<DisplayLutBinding>(*context_);
     mesh_batch_drawer_ = std::make_unique<MeshBatchDrawer>(*context_);
+    outline_batch_drawer_ = std::make_unique<MeshBatchDrawer>(*context_);
 
     for (VkDescriptorSet frame_set : frame_descriptor_sets_) {
         mesh_batch_drawer_->bindInstanceBuffer(context_->device(), frame_set);
+    }
+    for (VkDescriptorSet frame_set : outline_frame_descriptor_sets_) {
+        outline_batch_drawer_->bindInstanceBuffer(context_->device(), frame_set);
     }
 
     createMeshPipelines();
@@ -494,6 +511,11 @@ void Renderer::recreateSwapchain(int width, int height) {
         if (mesh_batch_drawer_) {
             for (VkDescriptorSet frame_set : frame_descriptor_sets_) {
                 mesh_batch_drawer_->bindInstanceBuffer(context_->device(), frame_set);
+            }
+        }
+        if (outline_batch_drawer_) {
+            for (VkDescriptorSet frame_set : outline_frame_descriptor_sets_) {
+                outline_batch_drawer_->bindInstanceBuffer(context_->device(), frame_set);
             }
         }
     }
@@ -657,46 +679,49 @@ void Renderer::drawMeshBatches(const std::vector<SceneMeshBatch>& batches, const
         draw_options.view_proj_col_major = frame_uniforms_.view_proj;
     }
 
-    std::vector<SceneMeshBatch> alpha_batches;
-    std::vector<SceneMeshBatch> additive_batches;
-    alpha_batches.reserve(batches.size());
-    additive_batches.reserve(batches.size());
+    // One prepareDraw for the whole frame's mesh+particle batches. Calling prepareDraw
+    // separately for alpha then additive (or for selection outline) overwrote the shared
+    // instance/indirect buffers and bindless set while earlier draws were still pending —
+    // mesh actors then permanently corrupted particle sprite appearance.
+    if (!mesh_batch_drawer_->prepareDraw(batches, *bindless_textures_, draw_options)) {
+        return;
+    }
+    mesh_batch_drawer_->dispatchGpuCull(cmd);
+    mesh_batch_drawer_->bindDrawInstanceBuffer(context_->device(),
+                                               frame_descriptor_sets_[current_frame_]);
+    ensureRenderPass();
+    applyDrawRegion(cmd);
+
+    bool has_non_additive = false;
+    bool has_additive = false;
     for (const SceneMeshBatch& batch : batches) {
         if (batch.additive) {
-            additive_batches.push_back(batch);
+            has_additive = true;
         } else {
-            alpha_batches.push_back(batch);
+            has_non_additive = true;
         }
     }
 
-    auto draw_group = [&](const std::vector<SceneMeshBatch>& group, GraphicsPipeline& pipeline,
-                          bool depth_prepass) {
-        if (group.empty()) {
-            return;
-        }
-        if (!mesh_batch_drawer_->prepareDraw(group, *bindless_textures_, draw_options)) {
-            return;
-        }
-        mesh_batch_drawer_->dispatchGpuCull(cmd);
-        mesh_batch_drawer_->bindDrawInstanceBuffer(context_->device(),
-                                                   frame_descriptor_sets_[current_frame_]);
-        ensureRenderPass();
-        applyDrawRegion(cmd);
-        if (depth_prepass && draw_options.enable_depth_prepass && mesh_depth_pipeline_) {
+    if (has_non_additive) {
+        if (draw_options.enable_depth_prepass && mesh_depth_pipeline_) {
             mesh_batch_drawer_->drawDepthPrepass(cmd, *mesh_depth_pipeline_,
-                                                 frame_descriptor_sets_[current_frame_], *bindless_textures_);
+                                                 frame_descriptor_sets_[current_frame_],
+                                                 *bindless_textures_,
+                                                 MeshBatchBlendFilter::NonAdditive);
         }
-        mesh_batch_drawer_->drawColorPass(cmd, pipeline, frame_descriptor_sets_[current_frame_],
+        mesh_batch_drawer_->drawColorPass(cmd, *mesh_pipeline_, frame_descriptor_sets_[current_frame_],
                                           *bindless_textures_,
-                                          display_lut_ ? display_lut_->descriptorSet() : VK_NULL_HANDLE);
-    };
-
-    draw_group(alpha_batches, *mesh_pipeline_, true);
-    if (mesh_additive_pipeline_) {
-        // Additive particles skip depth-prepass writes (already depth-tested, no write).
-        draw_group(additive_batches, *mesh_additive_pipeline_, false);
-    } else {
-        draw_group(additive_batches, *mesh_pipeline_, false);
+                                          display_lut_ ? display_lut_->descriptorSet() : VK_NULL_HANDLE,
+                                          MeshBatchBlendFilter::NonAdditive);
+    }
+    if (has_additive) {
+        GraphicsPipeline& additive_pipeline =
+            mesh_additive_pipeline_ ? *mesh_additive_pipeline_ : *mesh_pipeline_;
+        // Additive particles: depth-tested, no depth write (skip prepass).
+        mesh_batch_drawer_->drawColorPass(cmd, additive_pipeline, frame_descriptor_sets_[current_frame_],
+                                          *bindless_textures_,
+                                          display_lut_ ? display_lut_->descriptorSet() : VK_NULL_HANDLE,
+                                          MeshBatchBlendFilter::AdditiveOnly);
     }
 }
 
@@ -706,7 +731,7 @@ void Renderer::drawSelectionOutlineBatches(const std::vector<SceneMeshBatch>& ba
         spdlog::warn("selection outline pipeline missing");
         return;
     }
-    if (!bindless_textures_ || !mesh_batch_drawer_ || batches.empty()) {
+    if (!bindless_textures_ || !outline_batch_drawer_ || batches.empty()) {
         return;
     }
 
@@ -717,17 +742,20 @@ void Renderer::drawSelectionOutlineBatches(const std::vector<SceneMeshBatch>& ba
     }
     draw_options.enable_gpu_cull = false;
     draw_options.enable_depth_prepass = false;
+    // Keep mesh/particle bindless registrations from the color pass intact.
+    draw_options.reset_bindless = false;
 
-    if (!mesh_batch_drawer_->prepareDraw(batches, *bindless_textures_, draw_options)) {
+    if (!outline_batch_drawer_->prepareDraw(batches, *bindless_textures_, draw_options)) {
         return;
     }
-    mesh_batch_drawer_->bindDrawInstanceBuffer(context_->device(),
-                                               frame_descriptor_sets_[current_frame_]);
+    // Own descriptor set: never rewrite mesh/particle set0 instance binding mid-frame.
+    outline_batch_drawer_->bindDrawInstanceBuffer(context_->device(),
+                                                  outline_frame_descriptor_sets_[current_frame_]);
     ensureRenderPass();
     applyDrawRegion(cmd);
-    mesh_batch_drawer_->drawColorPass(cmd, *selection_outline_pipeline_,
-                                      frame_descriptor_sets_[current_frame_], *bindless_textures_,
-                                      VK_NULL_HANDLE);
+    outline_batch_drawer_->drawColorPass(cmd, *selection_outline_pipeline_,
+                                         outline_frame_descriptor_sets_[current_frame_],
+                                         *bindless_textures_, VK_NULL_HANDLE);
 }
 
 void Renderer::drawGrid(const Mesh& mesh, const GridDrawPushConstants& draw_constants) {

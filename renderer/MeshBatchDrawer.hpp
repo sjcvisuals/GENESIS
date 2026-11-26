@@ -23,6 +23,16 @@ struct MeshDrawOptions {
     const float* view_proj_col_major = nullptr;
     bool enable_gpu_cull = false;
     bool enable_depth_prepass = true;
+    // When false, prepareDraw must not clear/rebuild bindless (use after another
+    // pass already registered textures this frame — e.g. selection outline).
+    bool reset_bindless = true;
+};
+
+// Optional filter for multi-pipeline draws from one prepareDraw (alpha then additive).
+enum class MeshBatchBlendFilter {
+    All,
+    NonAdditive,
+    AdditiveOnly,
 };
 
 struct GpuBatchCullHeader {
@@ -49,10 +59,12 @@ public:
                      const MeshDrawOptions& options);
     void dispatchGpuCull(VkCommandBuffer cmd);
     void drawDepthPrepass(VkCommandBuffer cmd, const GraphicsPipeline& pipeline,
-                          VkDescriptorSet frame_descriptor_set, BindlessTextures& bindless);
+                          VkDescriptorSet frame_descriptor_set, BindlessTextures& bindless,
+                          MeshBatchBlendFilter filter = MeshBatchBlendFilter::All);
     void drawColorPass(VkCommandBuffer cmd, const GraphicsPipeline& pipeline,
                        VkDescriptorSet frame_descriptor_set, BindlessTextures& bindless,
-                       VkDescriptorSet display_lut_set = VK_NULL_HANDLE);
+                       VkDescriptorSet display_lut_set = VK_NULL_HANDLE,
+                       MeshBatchBlendFilter filter = MeshBatchBlendFilter::All);
 
     Buffer& instanceBuffer() { return *instance_buffer_; }
 
@@ -62,7 +74,8 @@ private:
     void buildIndirectCommands();
     void drawIndexedBatches(VkCommandBuffer cmd, const GraphicsPipeline& pipeline,
                             VkDescriptorSet frame_descriptor_set, BindlessTextures& bindless,
-                            VkDescriptorSet display_lut_set, bool depth_only);
+                            VkDescriptorSet display_lut_set, bool depth_only,
+                            MeshBatchBlendFilter filter);
 
     const VulkanContext& context_;
 

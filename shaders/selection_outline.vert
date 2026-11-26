@@ -96,15 +96,18 @@ void main() {
     vec3 worldN = nLen2 > 1e-8 ? normalize(n) : vec3(0.0, 1.0, 0.0);
 
     // Thin, distance-stable shell — reads as a line, not a filled volume.
-    // Face-on surfaces must not extrude: on thin slabs / planes the large face
-    // would expand into a second filled shell that looks like a duplicate plane.
-    // Keep extrusion near the silhouette so only the rim survives the depth test.
+    // Face-on / near-face-on surfaces must not extrude at all: on planes/slabs the
+    // large face would expand into a second filled shell that reads as a duplicate
+    // or "cross" plane (especially edge-on). Only true silhouettes get a tiny push.
     float dist = max(length(uFrame.cameraPos.xyz - worldPos), 0.35);
     float expandScale = max(uPush.materialParams.x, 0.0);
     vec3 viewDir = normalize(uFrame.cameraPos.xyz - worldPos);
     float facing = abs(dot(worldN, viewDir));
-    float silhouette = 1.0 - smoothstep(0.12, 0.55, facing);
-    float expand = clamp(expandScale * dist, 0.012, 0.07) * silhouette;
+    // Narrow window: expand only near true silhouettes. Broad facing windows painted a
+    // filled white plate (read as a second / "cross" plane). Keep a readable rim on
+    // slab edges without extruding face-on surfaces into a duplicate shell.
+    float silhouette = 1.0 - smoothstep(0.05, 0.32, facing);
+    float expand = clamp(expandScale * dist, 0.006, 0.028) * silhouette;
     worldPos += worldN * expand;
 
     gl_Position = uFrame.viewProj * vec4(worldPos, 1.0);

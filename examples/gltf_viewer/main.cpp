@@ -958,8 +958,17 @@ private:
         createBtn("Plane", [&] {
             addPrimitiveMesh("Plane", genesis::createPlaneMesh(renderer().context()));
             // Sit just above the editor meter grid so the new slab doesn't z-fight it.
+            // Medium gray + tiny emissive so the flat mesh stays visible on black unlit
+            // stages (selection outline must not be the only thing that makes it show).
             if (genesis::Node* n = runtime_.scene().find(primarySelected())) {
                 n->local.position.y = 0.01f;
+                if (n->material_resource.has_value()) {
+                    if (genesis::SceneMaterial* mat = runtime_.material(*n->material_resource)) {
+                        mat->base_color = glm::vec4(0.52f, 0.55f, 0.60f, 1.0f);
+                        mat->emissive = glm::vec3(0.06f);
+                        mat->emissive_strength = 1.0f;
+                    }
+                }
                 runtime_.updateTransforms();
             }
         });
@@ -2648,7 +2657,8 @@ private:
         mat.base_color[2] = 1.0f;
         mat.base_color[3] = primary ? 0.95f : 0.55f;
         // Expand scale (meters of shell per meter of camera distance).
-        mat.material_params[0] = 0.006f;
+        // Kept modest — large values fill face-on slabs into a second white plane.
+        mat.material_params[0] = 0.01f;
         mat.material_params[2] = 0.0f;
         return mat;
     }
