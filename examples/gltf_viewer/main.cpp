@@ -1257,7 +1257,16 @@ private:
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip(
                     "Unreal-like: still shown in the editor; omitted in Game View (G) and Pixera "
-                    "Renderbridge. Visible=off always wins. Collisions still apply.");
+                    "Renderbridge. Visible=off always wins. Collisions still apply unless "
+                    "Collision is off.");
+            }
+            if (n->has_mesh) {
+                if (ImGui::Checkbox("Collision", &n->collision_enabled)) changed = true;
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip(
+                        "When off, wall-ray / particle collide / mesh hit tests skip this mesh. "
+                        "Independent of Visible and Hidden in Game (default ON for wall planes).");
+                }
             }
             if (n->camera.has_value()) {
                 ImGui::BeginDisabled();
@@ -3274,8 +3283,9 @@ private:
                     glm::angleAxis(glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
                 // local X → height, local Z → width after Z-90° rotation.
                 plane.local.scale = glm::vec3(2.2f, 1.0f, 1.0f);
-                // Collisions still run; mesh omitted from Game View / Renderbridge.
+                // Mesh omitted from Game View / Renderbridge; Collision stays ON for wall-ray.
                 plane.hidden_in_game = true;
+                plane.collision_enabled = true;
             };
             if (const std::optional<genesis::NodeId> existing =
                     genesis::findNodeByPath(scene, room.wall_plane_path)) {
