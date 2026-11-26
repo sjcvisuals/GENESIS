@@ -85,6 +85,9 @@ struct Scene {
     void setActiveOutputCamera(std::optional<NodeId> node_id);
     const Node* activeOutputCameraNode() const;
     NodeId duplicateNode(NodeId id);
+    // Deep-copy a particle emitter as a sibling under the same System.
+    // New unique name uses stem_N (e.g. Emitter → Emitter_2). Returns 0 on failure.
+    NodeId duplicateParticleEmitter(NodeId emitter_id);
     // Deletes the node. Particle System actors also destroy emitter children (not reparented).
     bool deleteNode(NodeId id);
     bool reparentNode(NodeId child, std::optional<NodeId> new_parent);
