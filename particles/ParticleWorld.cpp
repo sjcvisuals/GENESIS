@@ -739,7 +739,8 @@ void ParticleWorld::updateParticlesCpu(Scene& scene, float dt) {
                 const glm::vec3 prev = p.trail_last_sample;
                 const float moved = glm::length(world_pos - prev);
                 p.trail_dist_accum += moved;
-                const float sample_dist = std::max(0.015f, p.trail_sample_distance);
+                // Honor authored sample distance (apply path clamps to ≥0.005m).
+                const float sample_dist = std::max(0.005f, p.trail_sample_distance);
                 const float early_dist =
                     p.trail_count < 6 ? std::min(sample_dist, 0.012f) : sample_dist;
                 float sampled = 0.0f;
@@ -924,7 +925,8 @@ void ParticleWorld::updateTrailsAfterGpu(Scene& scene, float /*total_dt*/) {
             const glm::vec3 prev = p.trail_last_sample;
             const float moved = glm::length(world_pos - prev);
             p.trail_dist_accum += moved;
-            const float sample_dist = std::max(0.015f, p.trail_sample_distance);
+            // Honor authored sample distance (same floor as applyEmitterVisualsToParticle).
+            const float sample_dist = std::max(0.005f, p.trail_sample_distance);
             float sampled = 0.0f;
             while (p.trail_dist_accum >= sample_dist) {
                 p.trail_dist_accum -= sample_dist;
@@ -1063,82 +1065,148 @@ void ParticleWorld::collectInstances(const Scene& scene, std::vector<ParticleIns
             out[dest_batch].instances.push_back(instance);
         };
 
-        // Trail Renderer: wake always BEHIND the head (independent of head mesh — trail-only OK).
-        // tip = oldest history, neck under current world_pos; never lead ahead of the ball.
-        if (p.trail_enabled && p.trail_count >= 2) {
-            const float trail_age_fade =
-                std::clamp(1.0f - (p.age / std::max(p.trail_lifetime * 2.5f, 0.1f)) * 0.12f, 0.75f,
-                           1.0f);
-            const float head_w = std::max(size, 0.04f);
-            const float width_head_frac = std::clamp(p.trail_width, 0.35f, 1.15f);
-            const std::size_t trail_batch =
-                12u + (p.additive ? 2u : 0u) + (p.unlit ? 1u : 0u);
-
-            // History: [0]=oldest … [count-1]=newest (pinned).
-            // Round H.2 — zero anti-comet:
-            // Runtime logs show tip_end.y < head.y always when along = +travel; remaining
-            // anti-comet reads came from UV/neck round competing with the soft circle and
-            // short wakes. Lock tip→head to cam_up for vertical motion (Soft Circles), keep
-            // a long wake, neck UV under the ball, tip UV behind.
-            const glm::vec3 head = world_pos;
-            const glm::vec3 oldest = p.trail_pos[0];
-            auto project_plane = [&](glm::vec3 v) {
-                return v - cam_forward * glm::dot(v, cam_forward);
-            };
-
-            glm::vec3 travel = p.velocity;
-            if (glm::dot(travel, travel) < 1e-8f) {
-                travel = head - oldest;
+        // Trail Renderer: wake always BEHIND the head (trail-only emitters OK).
+        // Live-read authoring from the emitter so inspector edits affect draw even if a
+        // particle field lagged one frame. Round H.2 look-lock clamps used to swallow
+        // width/alpha/length so settings looked broken despite applyAuthoringToLiving.
+        {
+            bool trail_on = p.trail_enabled;
+            float trail_w_head = p.trail_width;
+            float trail_w_tip = p.trail_width_end;
+            float trail_a = p.trail_alpha;
+            float trail_life = p.trail_lifetime;
+            float trail_sample = p.trail_sample_distance;
+            std::uint8_t trail_segs = p.trail_max_segments;
+            if (const Node* emitter_node = scene.find(p.emitter_node);
+                emitter_node && emitter_node->particle_emitter.has_value()) {
+                const ParticleEmitter& pe = *emitter_node->particle_emitter;
+                trail_on = pe.trail_enabled;
+                trail_w_head = pe.trail_width;
+                trail_w_tip = pe.trail_width_end;
+                trail_a = pe.trail_alpha;
+                trail_life = pe.trail_lifetime;
+                trail_sample = pe.trail_sample_distance;
+                trail_segs = static_cast<std::uint8_t>(
+                    std::clamp(static_cast<int>(pe.trail_segments), 2, 24));
             }
-            if (glm::dot(travel, travel) < 1e-8f) {
-                travel = cam_up;
-            }
-            travel = glm::normalize(travel);
 
-            // Use real history length so wakes stay attached to their own head and do not
-            // spear through particles above (that read as yellow anti-comet outliers).
-            float wake_len = glm::length(head - oldest);
-            wake_len = std::clamp(wake_len, head_w * 0.85f, head_w * 4.5f);
-            const float tip_span = wake_len + head_w * 0.12f;
+            if (trail_on && p.trail_count >= 2) {
+                const float head_w = std::max(size, 0.04f);
+                const std::size_t trail_batch =
+                    12u + (p.additive ? 2u : 0u) + (p.unlit ? 1u : 0u);
 
-            if (tip_span > head_w * 0.25f) {
-                glm::vec3 move_proj = project_plane(travel);
-                const float move_len = glm::length(move_proj);
-                const glm::vec3 move_dir =
-                    (move_len > 1e-4f) ? (move_proj / move_len) : cam_up;
+                const glm::vec3 head = world_pos;
+                const glm::vec3 oldest = p.trail_pos[0];
+                auto project_plane = [&](glm::vec3 v) {
+                    return v - cam_forward * glm::dot(v, cam_forward);
+                };
 
-                // Vertical Soft Circles: tip→head is exactly ±cam_up so tip cannot flip
-                // per-particle from history/camera-plane noise. Lateral motion uses move_dir.
-                const float rise = glm::dot(move_dir, cam_up);
-                glm::vec3 along =
-                    (std::abs(rise) >= 0.4f) ? ((rise >= 0.0f) ? cam_up : -cam_up) : move_dir;
-
-                glm::vec3 across = glm::cross(cam_forward, along);
-                const float across_len = glm::length(across);
-                if (across_len < 1e-4f) {
-                    across = cam_right;
-                } else {
-                    across /= across_len;
+                glm::vec3 travel = p.velocity;
+                if (glm::dot(travel, travel) < 1e-8f) {
+                    travel = head - oldest;
                 }
+                if (glm::dot(travel, travel) < 1e-8f) {
+                    travel = cam_up;
+                }
+                travel = glm::normalize(travel);
 
-                const float ribbon_w = head_w * std::clamp(width_head_frac, 0.55f, 0.85f);
-                // Tip strictly opposite along from head (behind travel / below when rising).
-                const glm::vec3 tip_end = head - along * tip_span;
-                const glm::vec3 mid = tip_end + along * (tip_span * 0.5f);
+                // Length: real history span, capped by authored sample budget
+                // (segments × sample distance) and optional lifetime×speed feel.
+                float wake_len = glm::length(head - oldest);
+                const float sample_budget =
+                    static_cast<float>(std::max(1, static_cast<int>(trail_segs) - 1)) *
+                    std::max(0.005f, trail_sample);
+                const float speed = glm::length(p.velocity);
+                const float life_budget =
+                    std::max(0.05f, trail_life) * std::max(speed, head_w * 0.5f);
+                // Prefer history; lifetime feel can shorten. Budget grows with Segments /
+                // Sample distance so those knobs visibly change ribbon length.
+                const float max_len = std::max(sample_budget, head_w * 2.0f);
+                wake_len = std::min(wake_len, max_len);
+                wake_len = std::min(wake_len, std::max(life_budget, head_w * 0.35f));
+                wake_len = std::max(wake_len, 0.0f);
+                const float tip_span = wake_len;
 
-                glm::vec4 trail_color = color;
-                // Keep wake under the head; dim enough that bright yellow tips cannot bloom
-                // into a second soft-circle "head" behind the ball (Round H.2 yellow outliers).
-                trail_color.a *= p.trail_alpha * trail_age_fade * 0.72f;
-                trail_color.a = std::clamp(std::max(trail_color.a, 0.22f), 0.0f, 0.45f);
+                if (tip_span > head_w * 0.08f) {
+                    glm::vec3 move_proj = project_plane(travel);
+                    const float move_len = glm::length(move_proj);
+                    const glm::vec3 move_dir =
+                        (move_len > 1e-4f) ? (move_proj / move_len) : cam_up;
 
-                glm::mat4 model(1.0f);
-                model[0] = glm::vec4(across * ribbon_w, 0.0f);
-                // +Y → head (V=1 neck under soft circle); -Y → tip behind (V=0 point).
-                model[1] = glm::vec4(along * tip_span, 0.0f);
-                model[2] = glm::vec4(cam_forward, 0.0f);
-                model[3] = glm::vec4(mid, 1.0f);
-                push_sprite(model, trail_color, trail_batch);
+                    // Vertical Soft Circles: lock tip→head to ±cam_up so tip cannot flip.
+                    const float rise = glm::dot(move_dir, cam_up);
+                    glm::vec3 along = (std::abs(rise) >= 0.4f)
+                                         ? ((rise >= 0.0f) ? cam_up : -cam_up)
+                                         : move_dir;
+
+                    glm::vec3 across = glm::cross(cam_forward, along);
+                    const float across_len = glm::length(across);
+                    if (across_len < 1e-4f) {
+                        across = cam_right;
+                    } else {
+                        across /= across_len;
+                    }
+
+                    // Width: fractions of head size — no Round H.2 0.55–0.85 lock.
+                    const float w_head =
+                        head_w * std::clamp(std::max(0.0f, trail_w_head), 0.0f, 4.0f);
+                    const float w_tip =
+                        head_w * std::clamp(std::max(0.0f, trail_w_tip), 0.0f, 4.0f);
+
+                    // Age fade from trail lifetime (0 at age≥lifetime — fully gone).
+                    const float trail_age_fade = std::clamp(
+                        1.0f - (p.age / std::max(trail_life, 0.05f)), 0.0f, 1.0f);
+                    glm::vec4 trail_color = color;
+                    // Alpha 0 must hide the wake (no Round H.2 floor of 0.22). Soft max
+                    // keeps wakes under the head so tips do not bloom into a second disc.
+                    trail_color.a = std::clamp(
+                        color.a * std::clamp(trail_a, 0.0f, 1.0f) * trail_age_fade * 0.85f, 0.0f,
+                        0.62f);
+                    if (trail_color.a <= 1e-4f || (w_head <= 1e-5f && w_tip <= 1e-5f)) {
+                        // Disabled via alpha/width — skip draw (re-enable restores next frame).
+                    } else {
+                        // Tip strictly opposite along from head (behind travel).
+                        const glm::vec3 tip_end = head - along * tip_span;
+
+                        // Single soft-wedge ribbon tip→head. Neck width = Width (head).
+                        // Tip width scales the tip half via a second thinner overlay so both
+                        // knobs read without Round H.2 locking them into ~0.7×head.
+                        const glm::vec3 mid = tip_end + along * (tip_span * 0.5f);
+
+                        auto push_wedge = [&](const glm::vec3& a, const glm::vec3& b, float width,
+                                              float alpha_mul) {
+                            if (width <= 1e-5f) {
+                                return;
+                            }
+                            const float span = glm::length(b - a);
+                            if (span <= 1e-5f) {
+                                return;
+                            }
+                            glm::vec4 tint = trail_color;
+                            tint.a = std::clamp(tint.a * alpha_mul, 0.0f, 0.85f);
+                            if (tint.a <= 1e-4f) {
+                                return;
+                            }
+                            glm::mat4 model(1.0f);
+                            model[0] = glm::vec4(across * width, 0.0f);
+                            // +Y → headward (V=1 neck); -Y → tipward (V=0 point).
+                            model[1] = glm::vec4(along * span, 0.0f);
+                            model[2] = glm::vec4(cam_forward, 0.0f);
+                            model[3] = glm::vec4((a + b) * 0.5f, 1.0f);
+                            push_sprite(model, tint, trail_batch);
+                        };
+
+                        // Full wake at head width (wedge texture supplies silhouette taper).
+                        push_wedge(tip_end, head, std::max(w_head, 1e-4f), 1.0f);
+                        // Tip accent: when tip width differs, add/replace tip half so the
+                        // Width (tip) slider is visible (thinner tip = darker tip half).
+                        if (std::abs(w_tip - w_head) > head_w * 0.02f) {
+                            const float tip_alpha =
+                                std::clamp(w_tip / std::max(w_head, 1e-4f), 0.0f, 1.25f);
+                            push_wedge(tip_end, mid, std::max(w_tip, 1e-4f), tip_alpha * 0.65f);
+                        }
+                    }
+                }
             }
         }
 

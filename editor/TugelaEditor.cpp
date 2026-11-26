@@ -921,7 +921,9 @@ void drawStackModuleInspector(ParticleEmitter& e, TugelaStackMod mod, ParticleEm
         dirty |= ImGui::DragFloat("Width (tip)", &e.trail_width_end, 0.001f, 0.0f, 1.0f);
         dirty |= ImGui::DragFloat("Trail alpha", &e.trail_alpha, 0.01f, 0.0f, 1.0f);
         dirty |= ImGui::DragFloat("Trail lifetime feel", &e.trail_lifetime, 0.01f, 0.05f, 8.0f);
-        ImGui::TextDisabled("Edits apply to living particles immediately.");
+        ImGui::TextDisabled(
+            "Live: width / alpha / segments / sample / lifetime · disable stops draw · "
+            "length ≈ segments × sample (lifetime can shorten).");
         break;
     }
     case TugelaStackMod::OscDrive: {

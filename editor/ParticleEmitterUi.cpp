@@ -544,7 +544,8 @@ void drawParticleEmitterInspector(Node& emitter_node, const std::string& node_pa
             dirty |= ImGui::DragFloat("Width (tip)", &e.trail_width_end, 0.001f, 0.0f, 1.0f);
             dirty |= ImGui::DragFloat("Trail alpha", &e.trail_alpha, 0.01f, 0.0f, 1.0f);
             dirty |= ImGui::DragFloat("Trail lifetime feel", &e.trail_lifetime, 0.01f, 0.05f, 8.0f);
-            ImGui::TextDisabled("Tapers to a point · Edits apply to living particles.");
+            ImGui::TextDisabled(
+                "Live: width / alpha / segments / sample / lifetime · disable stops draw.");
         }
         moduleIndentEnd();
     }
