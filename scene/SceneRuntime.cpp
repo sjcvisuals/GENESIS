@@ -278,14 +278,20 @@ void SceneRuntime::tickParticles(float dt_seconds, float fixed_step_seconds, std
     if (fixed_step_seconds <= 1e-8f) {
         return;
     }
-    particle_step_accumulator_ += static_cast<double>(dt_seconds);
+    // Soft clamp — callers should already pace dt; this bounds spiral-of-death if they don't.
+    constexpr float kMaxParticleDt = 0.05f;
+    const float clamped_dt = std::clamp(dt_seconds, 0.0f, kMaxParticleDt);
+    particle_step_accumulator_ += static_cast<double>(clamped_dt);
     std::uint64_t steps = 0;
     while (particle_step_accumulator_ >= static_cast<double>(fixed_step_seconds) && steps < max_steps) {
         particle_step_accumulator_ -= static_cast<double>(fixed_step_seconds);
         ++steps;
     }
     if (steps >= max_steps) {
-        particle_step_accumulator_ = 0.0;
+        // Keep at most one residual step so the next frame doesn't start from a cold zero
+        // (which used to amplify 1↔3 step flicker after a hitch).
+        particle_step_accumulator_ =
+            std::min(particle_step_accumulator_, static_cast<double>(fixed_step_seconds));
     }
     tickParticlesSteps(steps, fixed_step_seconds);
 }

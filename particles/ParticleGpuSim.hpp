@@ -19,7 +19,7 @@ struct alignas(16) GpuParticle {
     glm::vec4 pos_age{0.0f};     // xyz position, w age
     glm::vec4 vel_life{0.0f};    // xyz velocity, w lifetime
     glm::vec4 size_params{0.0f}; // x size0, y aspect, z stretch
-    glm::uvec4 meta{0};          // x flags, y emitter, z emit_index
+    glm::uvec4 meta{0};          // x flags, y emitter, z emit_index, w host_slot
     glm::vec4 gravity{0.0f};
     glm::vec4 accel_drag{0.0f};  // xyz accel, w drag
     glm::vec4 kill_plane{0.0f};  // x kill_y
@@ -47,6 +47,10 @@ public:
     void upload(const GpuParticle* particles, std::uint32_t count);
     void dispatchUpdates(VkCommandBuffer cmd, std::uint32_t count, std::uint32_t steps, float dt,
                          float sim_time_seconds);
+    // Persistent one-shot submit + fence wait for host readback (trails / instance collect).
+    // Reuses pool/cmd/fence — avoids per-frame create/destroy hitch of VulkanContext::immediateSubmit.
+    void flushImmediateAndWait(std::uint32_t count, std::uint32_t steps, float dt,
+                               float sim_time_seconds);
     void download(GpuParticle* particles, std::uint32_t count);
 
     bool ready() const { return pipeline_ != nullptr && buffer_ != nullptr; }
@@ -62,6 +66,8 @@ private:
 
     void createPipeline();
     void writeDescriptors();
+    void ensureImmediateResources();
+    void destroyImmediateResources();
 
     const VulkanContext& context_;
     std::unique_ptr<Buffer> buffer_;
@@ -70,6 +76,9 @@ private:
     VkDescriptorPool pool_ = VK_NULL_HANDLE;
     VkDescriptorSet set_ = VK_NULL_HANDLE;
     std::unique_ptr<ComputePipeline> pipeline_;
+    VkCommandPool immediate_pool_ = VK_NULL_HANDLE;
+    VkCommandBuffer immediate_cmd_ = VK_NULL_HANDLE;
+    VkFence immediate_fence_ = VK_NULL_HANDLE;
 };
 
 } // namespace genesis

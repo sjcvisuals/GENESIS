@@ -13,7 +13,7 @@ namespace genesis {
 // Particles in the editor advance on a fixed 10 ms step accumulator driven by
 // wall-clock dt. Coarse SDL_Delay-only waits (±1–15 ms) make frame dt oscillate
 // (e.g. 18 vs 22 ms → 1 vs 3 sim steps) and look like a regular beat hitch.
-// Sleep most of the wait, then spin the last ~1.5 ms for tighter pacing.
+// Sleep most of the wait, then spin the last ~2 ms against an absolute deadline.
 class FrameLimiter {
 public:
     void setEnabled(bool enabled) { enabled_ = enabled; }
@@ -34,20 +34,24 @@ public:
             return;
         }
         const double target = 1.0 / static_cast<double>(target_fps_);
+        // Absolute deadline from frame start — avoids drift when Delay overshoots.
+        const double deadline =
+            static_cast<double>(frame_start_) / freq + target;
 
-        auto seconds_since_start = [&]() -> double {
-            const uint64_t now = SDL_GetPerformanceCounter();
-            return static_cast<double>(now - frame_start_) / freq;
+        auto seconds_now = [&]() -> double {
+            return static_cast<double>(SDL_GetPerformanceCounter()) / freq;
         };
 
-        double elapsed = seconds_since_start();
-        double remain = target - elapsed;
-        // Sleep all but the last 1.5 ms — Delay granularity is ~1 ms and often overshoots.
-        constexpr double kSpinReserve = 0.0015;
+        // Sleep all but the last 2 ms — Delay granularity is ~1 ms and often overshoots.
+        // Larger reserve than before: Windows timer coalescing made 1.5 ms too tight and
+        // left us overshooting into the next fixed particle step.
+        constexpr double kSpinReserve = 0.002;
+        const double remain = deadline - seconds_now();
         if (remain > kSpinReserve) {
-            SDL_Delay(static_cast<Uint32>((remain - kSpinReserve) * 1000.0));
+            const double sleep_s = remain - kSpinReserve;
+            SDL_DelayNS(static_cast<Uint64>(sleep_s * 1'000'000'000.0));
         }
-        while (seconds_since_start() < target) {
+        while (seconds_now() < deadline) {
             // Busy-wait the remainder for stable particle step counts.
         }
     }

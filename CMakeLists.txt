@@ -380,6 +380,10 @@ if(GENESIS_BUILD_EXAMPLES)
     target_include_directories(genesis_particle_smoke PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(genesis_particle_smoke PRIVATE glm::glm)
 
+    # Header-only particle sim-dt pacing smoke (FPS-cap snap / stall clamp).
+    add_executable(genesis_particle_sim_dt_smoke examples/particle_smoke/sim_dt_main.cpp)
+    target_include_directories(genesis_particle_sim_dt_smoke PRIVATE ${CMAKE_SOURCE_DIR})
+
     # Header-only actor visibility precedence smoke (no Vulkan / GPU).
     add_executable(genesis_visibility_smoke examples/visibility_smoke/main.cpp)
     target_include_directories(genesis_visibility_smoke PRIVATE ${CMAKE_SOURCE_DIR})

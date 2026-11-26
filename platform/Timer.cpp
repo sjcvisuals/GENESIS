@@ -23,8 +23,9 @@ void Timer::tick() {
     }
 
     double dt = static_cast<double>(now - last_ticks_) / freq;
-    // Clamp spiral-of-death after stalls / debugger breaks (keep particle catch-up bounded).
-    dt = std::clamp(dt, 0.0, 0.25);
+    // Clamp spiral-of-death after stalls / debugger breaks.
+    // 100 ms (was 250) — still covers a missed vsync, without dumping ~25 particle steps.
+    dt = std::clamp(dt, 0.0, 0.10);
     delta_time_ = static_cast<float>(dt);
     elapsed_ += delta_time_;
     last_ticks_ = now;
