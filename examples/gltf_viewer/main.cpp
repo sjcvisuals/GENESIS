@@ -130,7 +130,7 @@ public:
 
     void setPrefs(const genesis::EditorPrefs& prefs) {
         prefs_ = prefs;
-        ui_scale_baked_ = prefs_.ui_scale > 0.01f ? prefs_.ui_scale : 2.0f;
+        ui_scale_baked_ = prefs_.ui_scale > 0.01f ? prefs_.ui_scale : 1.5f;
     }
 
     void enableSmokeExit(int frames) {
@@ -826,10 +826,13 @@ private:
             {
                 float ui_scale = prefs_.ui_scale;
                 bool scale_changed = false;
-                ImGui::SetNextItemWidth(120.0f);
+                const float slider_w = 120.0f;
+                ImGui::SetNextItemWidth(slider_w);
                 scale_changed |= ImGui::SliderFloat("##UIScaleSlider", &ui_scale, 1.0f, 3.0f, "%.2f");
-                ImGui::SameLine();
-                ImGui::SetNextItemWidth(56.0f);
+                const float field_w = 56.0f;
+                const float label_w = ImGui::CalcTextSize("UI Scale").x + 8.0f;
+                genesis::uiSameLineIfFits(field_w + label_w);
+                ImGui::SetNextItemWidth(field_w);
                 // Typeable field (Enter / focus-loss) — not slider-only.
                 if (ImGui::InputFloat("UI Scale", &ui_scale, 0.05f, 0.25f, "%.2f",
                                       ImGuiInputTextFlags_EnterReturnsTrue)) {
@@ -910,38 +913,46 @@ private:
     }
 
     void drawHierarchyPanel(genesis::Scene& scene) {
+        ImGui::SetNextWindowSizeConstraints(ImVec2(180.0f, 160.0f), ImVec2(10000.0f, 10000.0f));
         ImGui::Begin("Hierarchy", &show_hierarchy_);
 
         genesis::drawEditorSectionLabel("Create");
 
-        const float full = ImGui::GetContentRegionAvail().x;
-        const float gap = ImGui::GetStyle().ItemSpacing.x;
-        const float half = (full - gap) * 0.5f;
+        // Adaptive 2-col grid: stack full-width when the dock is too narrow for labels.
+        const float longest_create = std::max({ImGui::CalcTextSize("Spot Light").x,
+                                               ImGui::CalcTextSize("Dir Light").x,
+                                               ImGui::CalcTextSize("Point Light").x,
+                                               ImGui::CalcTextSize("Cylinder").x});
+        const int create_cols = genesis::uiAdaptiveColumns(2, longest_create);
+        const float create_w = genesis::uiButtonWidthForColumns(create_cols);
+        int create_i = 0;
 
-        auto createBtn = [&](const char* label, float width, auto&& fn) {
+        auto createBtn = [&](const char* label, auto&& fn) {
+            if (create_cols > 1 && create_i > 0 && (create_i % create_cols) != 0) {
+                ImGui::SameLine();
+            }
             ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 5.0f);
-            if (ImGui::Button(label, ImVec2(width, 0))) {
+            if (ImGui::Button(label, ImVec2(create_w, 0))) {
                 fn();
             }
             ImGui::PopStyleVar();
+            ++create_i;
         };
 
-        createBtn("Empty", half, [&] {
+        createBtn("Empty", [&] {
             selectNode(scene.createEmptyNode("Empty Node"));
             markDirty();
         });
-        ImGui::SameLine();
-        createBtn("Cube", half, [&] {
+        createBtn("Cube", [&] {
             addPrimitiveMesh("Cube", genesis::createCubeMesh(renderer().context()));
         });
-        createBtn("Sphere", half, [&] {
+        createBtn("Sphere", [&] {
             addPrimitiveMesh("Sphere", genesis::createSphereMesh(renderer().context()));
         });
-        ImGui::SameLine();
-        createBtn("Cylinder", half, [&] {
+        createBtn("Cylinder", [&] {
             addPrimitiveMesh("Cylinder", genesis::createCylinderMesh(renderer().context()));
         });
-        createBtn("Plane", half, [&] {
+        createBtn("Plane", [&] {
             addPrimitiveMesh("Plane", genesis::createPlaneMesh(renderer().context()));
             // Sit just above the editor meter grid so the new slab doesn't z-fight it.
             if (genesis::Node* n = runtime_.scene().find(primarySelected())) {
@@ -949,19 +960,17 @@ private:
                 runtime_.updateTransforms();
             }
         });
-        ImGui::SameLine();
-        createBtn("Camera", half, [&] {
+        createBtn("Camera", [&] {
             selectNode(scene.createCameraNode("Camera"));
             markDirty();
         });
-        createBtn("Dir Light", half, [&] {
+        createBtn("Dir Light", [&] {
             addLightNode("Directional Light", genesis::SceneLightType::Directional);
         });
-        ImGui::SameLine();
-        createBtn("Point Light", half, [&] {
+        createBtn("Point Light", [&] {
             addLightNode("Point Light", genesis::SceneLightType::Point);
         });
-        createBtn("Spot Light", half, [&] {
+        createBtn("Spot Light", [&] {
             addLightNode("Spot Light", genesis::SceneLightType::Spot);
         });
 
@@ -992,8 +1001,13 @@ private:
 
         genesis::drawEditorSectionLabel("Actions");
 
+        const float longest_action =
+            std::max(ImGui::CalcTextSize("Duplicate").x, ImGui::CalcTextSize("Delete (99)").x);
+        const int action_cols = genesis::uiAdaptiveColumns(2, longest_action);
+        const float action_w = genesis::uiButtonWidthForColumns(action_cols);
+
         ImGui::BeginDisabled(selection_.empty());
-        if (ImGui::Button("Duplicate", ImVec2(half, 0))) {
+        if (ImGui::Button("Duplicate", ImVec2(action_w, 0))) {
             std::vector<genesis::NodeId> created;
             created.reserve(selection_.size());
             for (const genesis::NodeId id : selection_) {
@@ -1006,7 +1020,9 @@ private:
                 markDirty();
             }
         }
-        ImGui::SameLine();
+        if (action_cols > 1) {
+            ImGui::SameLine();
+        }
         {
             char delete_label[48];
             if (selection_.size() > 1) {
@@ -1014,7 +1030,7 @@ private:
             } else {
                 std::snprintf(delete_label, sizeof(delete_label), "Delete");
             }
-            if (ImGui::Button(delete_label, ImVec2(half, 0))) {
+            if (ImGui::Button(delete_label, ImVec2(action_w, 0))) {
                 queueDeleteSelectedNodes();
             }
             if (ImGui::IsItemHovered() && selection_.size() > 1) {
@@ -1210,6 +1226,7 @@ private:
     }
 
     void drawInspectorPanel(genesis::Scene& scene) {
+        ImGui::SetNextWindowSizeConstraints(ImVec2(220.0f, 160.0f), ImVec2(10000.0f, 10000.0f));
         ImGui::Begin("Inspector", &show_inspector_);
 
         if (selection_.empty()) {
@@ -1721,52 +1738,77 @@ private:
     }
 
     void drawToolbarPanel(genesis::Scene& scene) {
+        ImGui::SetNextWindowSizeConstraints(ImVec2(220.0f, 48.0f), ImVec2(10000.0f, 10000.0f));
         ImGui::Begin("Toolbar", &show_toolbar_);
 
+        bool row_started = false;
+        auto placeNext = [&](float needed, float spacing = -1.0f) {
+            if (row_started) {
+                genesis::uiSameLineIfFits(needed, spacing);
+            }
+            row_started = true;
+        };
+        auto radioNeed = [](const char* label) {
+            return ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f +
+                   ImGui::GetFontSize() + 8.0f;
+        };
+
+        placeNext(radioNeed("Move"));
         if (ImGui::RadioButton("Move", gizmo_operation_ == ImGuizmo::TRANSLATE)) {
             gizmo_operation_ = ImGuizmo::TRANSLATE;
         }
-        ImGui::SameLine();
+        placeNext(radioNeed("Rotate"));
         if (ImGui::RadioButton("Rotate", gizmo_operation_ == ImGuizmo::ROTATE)) {
             gizmo_operation_ = ImGuizmo::ROTATE;
         }
-        ImGui::SameLine();
+        placeNext(radioNeed("Scale"));
         if (ImGui::RadioButton("Scale", gizmo_operation_ == ImGuizmo::SCALE)) {
             gizmo_operation_ = ImGuizmo::SCALE;
         }
 
-        ImGui::SameLine(0.0f, 16.0f);
-        if (ImGui::RadioButton("Local", gizmo_mode_ == ImGuizmo::LOCAL)) gizmo_mode_ = ImGuizmo::LOCAL;
-        ImGui::SameLine();
-        if (ImGui::RadioButton("World", gizmo_mode_ == ImGuizmo::WORLD)) gizmo_mode_ = ImGuizmo::WORLD;
+        placeNext(radioNeed("Local"), 16.0f);
+        if (ImGui::RadioButton("Local", gizmo_mode_ == ImGuizmo::LOCAL)) {
+            gizmo_mode_ = ImGuizmo::LOCAL;
+        }
+        placeNext(radioNeed("World"));
+        if (ImGui::RadioButton("World", gizmo_mode_ == ImGuizmo::WORLD)) {
+            gizmo_mode_ = ImGuizmo::WORLD;
+        }
 
-        ImGui::SameLine(0.0f, 16.0f);
+        placeNext(radioNeed("Grid"), 16.0f);
         ImGui::BeginDisabled(game_view_mode_);
         ImGui::Checkbox("Grid", &show_grid_);
         ImGui::EndDisabled();
-        ImGui::SameLine(0.0f, 12.0f);
+        placeNext(radioNeed("Game"), 12.0f);
         ImGui::Checkbox("Game", &game_view_mode_);
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip(
                 "Game View (G) — hide grid, actor icons, and Hidden in Game actors");
         }
 
-        ImGui::SameLine(0.0f, 20.0f);
+        char selection_label[128]{};
         if (!selection_.empty() && scene.find(primarySelected())) {
             if (selection_.size() == 1) {
-                ImGui::TextDisabled("%s", scene.find(primarySelected())->name.c_str());
+                std::snprintf(selection_label, sizeof(selection_label), "%s",
+                              scene.find(primarySelected())->name.c_str());
             } else {
-                ImGui::TextDisabled("%zu selected", selection_.size());
+                std::snprintf(selection_label, sizeof(selection_label), "%zu selected",
+                              selection_.size());
             }
         } else {
-            ImGui::TextDisabled("Nothing selected");
+            std::snprintf(selection_label, sizeof(selection_label), "Nothing selected");
         }
+        placeNext(ImGui::CalcTextSize(selection_label).x + 8.0f, 20.0f);
+        ImGui::TextDisabled("%s", selection_label);
 
         const genesis::FrameStats& stats = frameStats();
-        const char* fps_line = "  %.0f FPS · %u tris";
-        const ImVec2 fps_size = ImGui::CalcTextSize("  000 FPS · 00000 tris");
-        ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - fps_size.x);
-        ImGui::TextDisabled(fps_line, timer().fps(), stats.triangles);
+        char fps_buf[64]{};
+        std::snprintf(fps_buf, sizeof(fps_buf), "%.0f FPS · %u tris", timer().fps(), stats.triangles);
+        const float fps_w = ImGui::CalcTextSize(fps_buf).x;
+        if (ImGui::GetContentRegionAvail().x >= fps_w + ImGui::GetStyle().ItemSpacing.x) {
+            ImGui::SameLine(0.0f, ImGui::GetContentRegionAvail().x - fps_w);
+        }
+        ImGui::TextDisabled("%s", fps_buf);
 
         ImGui::End();
     }
@@ -2130,7 +2172,7 @@ private:
         }
 
         auto drawUnsavedButtons = [&](auto&& on_save, auto&& on_dont_save) {
-            // Size to the longest label so ui_scale=2 never clips "Don't Save".
+            // Size to the longest label so scaled UI never clips "Don't Save"; wrap if needed.
             const float btn_w = std::max({ImGui::CalcTextSize("Save").x, ImGui::CalcTextSize("Don't Save").x,
                                           ImGui::CalcTextSize("Cancel").x}) +
                                ImGui::GetStyle().FramePadding.x * 2.0f + 8.0f;
@@ -2138,12 +2180,12 @@ private:
                 ImGui::CloseCurrentPopup();
                 on_save();
             }
-            ImGui::SameLine();
+            genesis::uiSameLineIfFits(btn_w);
             if (ImGui::Button("Don't Save", ImVec2(btn_w, 0))) {
                 ImGui::CloseCurrentPopup();
                 on_dont_save();
             }
-            ImGui::SameLine();
+            genesis::uiSameLineIfFits(btn_w);
             if (ImGui::Button("Cancel", ImVec2(btn_w, 0))) {
                 ImGui::CloseCurrentPopup();
             }
@@ -3388,7 +3430,7 @@ private:
 
     genesis::EditorSession session_;
     genesis::EditorPrefs prefs_{};
-    float ui_scale_baked_ = 2.0f;
+    float ui_scale_baked_ = 1.5f;
     genesis::SceneRuntime runtime_;
     genesis::ColorManagement color_mgmt_;
     genesis::Mesh grid_mesh_{};
