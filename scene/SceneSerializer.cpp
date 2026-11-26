@@ -309,6 +309,23 @@ ParticleSpawnShape spawnShapeFromName(const std::string& name) {
     return ParticleSpawnShape::Point;
 }
 
+const char* spawnDistributionName(ParticleSpawnDistribution dist) {
+    switch (dist) {
+    case ParticleSpawnDistribution::VolumeUniform:
+        return "volume_uniform";
+    case ParticleSpawnDistribution::Surface:
+        return "surface";
+    default:
+        return "volume";
+    }
+}
+
+ParticleSpawnDistribution spawnDistributionFromName(const std::string& name) {
+    if (name == "volume_uniform" || name == "uniform") return ParticleSpawnDistribution::VolumeUniform;
+    if (name == "surface") return ParticleSpawnDistribution::Surface;
+    return ParticleSpawnDistribution::Volume;
+}
+
 const char* renderMeshName(ParticleRenderMesh mesh) {
     switch (mesh) {
     case ParticleRenderMesh::Sphere:
@@ -476,6 +493,7 @@ json particleEmitterToJson(const ParticleEmitter& e) {
         {"scale_by_speed_mul_max", e.scale_by_speed_mul_max},
         {"spawn_per_unit", e.spawn_per_unit},
         {"spawn_shape", spawnShapeName(e.spawn_shape)},
+        {"spawn_distribution", spawnDistributionName(e.spawn_distribution)},
         {"spawn_radius", e.spawn_radius},
         {"spawn_box_height", e.spawn_box_height},
         {"cone_angle_degrees", e.cone_angle_degrees},
@@ -577,6 +595,12 @@ ParticleEmitter particleEmitterFromJson(const json& j) {
     e.scale_by_speed_mul_max = j.value("scale_by_speed_mul_max", e.scale_by_speed_mul_max);
     e.spawn_per_unit = j.value("spawn_per_unit", e.spawn_per_unit);
     if (j.contains("spawn_shape")) e.spawn_shape = spawnShapeFromName(j["spawn_shape"].get<std::string>());
+    if (j.contains("spawn_distribution")) {
+        e.spawn_distribution = spawnDistributionFromName(j["spawn_distribution"].get<std::string>());
+    } else if (e.spawn_shape == ParticleSpawnShape::Ring) {
+        // Legacy Ring was near-shell (0.9–1.0 R); keep that look without the new field.
+        e.spawn_distribution = ParticleSpawnDistribution::Surface;
+    }
     e.spawn_radius = j.value("spawn_radius", e.spawn_radius);
     e.spawn_box_height = j.value("spawn_box_height", e.spawn_box_height);
     e.cone_angle_degrees = j.value("cone_angle_degrees", e.cone_angle_degrees);
