@@ -498,8 +498,37 @@ const SceneMaterial& SceneRuntime::resolveMaterial(const Node& node) const {
     return materials_[*node.material_resource];
 }
 
-void SceneRuntime::updateTransforms() {
+bool SceneRuntime::applyEmitterLineTraces() {
+    // Worlds must be current so collision AABBs / parent inverses are valid.
     scene_.updateWorldTransforms();
+    std::vector<EmitterLineTraceCollider> colliders;
+    collectEmitterLineTraceColliders(
+        scene_,
+        [this](const Node& node, glm::vec3& out_min, glm::vec3& out_max) -> bool {
+            if (!node.mesh_resource.has_value()) {
+                return false;
+            }
+            const std::uint32_t mesh_id = *node.mesh_resource;
+            if (mesh_id >= meshes_.size()) {
+                return false;
+            }
+            const Mesh& mesh = meshes_[mesh_id];
+            out_min = mesh.local_aabb_min;
+            out_max = mesh.local_aabb_max;
+            return true;
+        },
+        colliders);
+    const bool any =
+        ::genesis::applyEmitterLineTraces(scene_, colliders, &emitter_line_trace_debug_);
+    if (any) {
+        scene_.updateWorldTransforms();
+    }
+    return any;
+}
+
+void SceneRuntime::updateTransforms() {
+    // Also re-locks Line Trace emitters when params / collision meshes move.
+    applyEmitterLineTraces();
 }
 
 void SceneRuntime::collectDrawCommands(std::vector<SceneDrawCommand>& out,
