@@ -525,6 +525,7 @@ protected:
             handleViewportSelection(scene);
             drawSelectionOverlays(scene);
             drawActorIcons(scene);
+            drawParticleSpawnDebug(scene);
             drawWallRayDebug();
         } else {
             viewport_.w = 0.0f;
@@ -2456,6 +2457,90 @@ private:
             }
             const ImVec2 center(viewport_.x + sx, viewport_.y + sy);
             drawOneActorIcon(draw, center, kIconRadius, kind, isSelected(node.id));
+        }
+    }
+
+    void drawParticleSpawnDebug(genesis::Scene& scene) {
+        // Editor-only helper (like actor icons / wall-ray). Never drawn in Game View or Pixera.
+        if (game_view_mode_ || !show_viewport_ || viewport_.w < 2.0f) {
+            return;
+        }
+
+        runtime_.updateTransforms();
+        const float aspect = renderAspect();
+        const glm::mat4 view_proj =
+            genesis::projectionForImGuizmo(outputProjectionMatrix(aspect)) * outputViewMatrix();
+        ImDrawList* draw = ImGui::GetForegroundDrawList();
+
+        auto project = [&](const glm::vec3& world, ImVec2& out) -> bool {
+            float sx = 0.0f;
+            float sy = 0.0f;
+            if (!projectWorldPointToScreen(view_proj, world, viewport_.w, viewport_.h, sx, sy)) {
+                return false;
+            }
+            out = ImVec2(viewport_.x + sx, viewport_.y + sy);
+            return true;
+        };
+
+        for (const genesis::Node& node : scene.nodes) {
+            if (!node.particle_emitter.has_value() || !node.particle_emitter->debug_show_spawn) {
+                continue;
+            }
+            // Visible=off hides the marker; Hidden in Game still shows in editor (like icons).
+            // Selection must not force-unhide — gate is Visible ancestry only here.
+            if (!genesis::isNodeDrawnInView(scene, node, false)) {
+                continue;
+            }
+
+            const glm::vec3 origin = glm::vec3(node.world[3]);
+            ImVec2 center{};
+            if (!project(origin, center)) {
+                continue;
+            }
+
+            const bool selected = isSelected(node.id);
+            // Soft amber diamond — readable under ImGuizmo, not harsh neon; distinct from cyan icons.
+            const ImU32 fill = selected ? IM_COL32(235, 175, 95, 245) : IM_COL32(210, 150, 80, 210);
+            const ImU32 edge = selected ? IM_COL32(255, 255, 255, 245) : IM_COL32(40, 32, 24, 210);
+            const ImU32 cross = selected ? IM_COL32(255, 245, 220, 235) : IM_COL32(245, 220, 180, 200);
+
+            constexpr float kRadius = 9.0f;
+            const ImVec2 diamond[4] = {
+                ImVec2(center.x, center.y - kRadius),
+                ImVec2(center.x + kRadius, center.y),
+                ImVec2(center.x, center.y + kRadius),
+                ImVec2(center.x - kRadius, center.y),
+            };
+            draw->AddConvexPolyFilled(diamond, 4, fill);
+            draw->AddPolyline(diamond, 4, edge, ImDrawFlags_Closed, selected ? 2.0f : 1.4f);
+            draw->AddLine(ImVec2(center.x - kRadius * 1.65f, center.y),
+                          ImVec2(center.x + kRadius * 1.65f, center.y), cross, 1.4f);
+            draw->AddLine(ImVec2(center.x, center.y - kRadius * 1.65f),
+                          ImVec2(center.x, center.y + kRadius * 1.65f), cross, 1.4f);
+            draw->AddCircleFilled(center, 2.2f, edge, 10);
+            if (selected) {
+                draw->AddCircle(center, kRadius + 3.5f, IM_COL32(255, 255, 255, 175), 22, 1.4f);
+            }
+
+            // Soft local axes (emitter orientation) — shorter than ImGuizmo, muted RGB.
+            const glm::mat3 basis(node.world);
+            constexpr float kAxisLen = 0.22f;
+            const struct {
+                glm::vec3 dir;
+                ImU32 col;
+            } axes[] = {
+                {basis[0], IM_COL32(190, 90, 85, 200)},
+                {basis[1], IM_COL32(95, 165, 105, 200)},
+                {basis[2], IM_COL32(85, 130, 195, 200)},
+            };
+            for (const auto& axis : axes) {
+                ImVec2 tip{};
+                if (!project(origin + axis.dir * kAxisLen, tip)) {
+                    continue;
+                }
+                draw->AddLine(center, tip, axis.col, 1.5f);
+                draw->AddCircleFilled(tip, 2.2f, axis.col, 8);
+            }
         }
     }
 

@@ -115,6 +115,8 @@ void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ct
         if (emitters == 0) {
             ImGui::TextDisabled("No emitters yet — add a template below.");
         }
+        bool any_spawn_debug = false;
+        bool all_spawn_debug = emitters > 0;
         for (const NodeId child : system_node.children) {
             Node* c = scene.find(child);
             if (!c || !c->particle_emitter.has_value()) {
@@ -122,6 +124,8 @@ void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ct
             }
             ImGui::PushID(static_cast<int>(child));
             const bool enabled = c->particle_emitter->enabled;
+            any_spawn_debug = any_spawn_debug || c->particle_emitter->debug_show_spawn;
+            all_spawn_debug = all_spawn_debug && c->particle_emitter->debug_show_spawn;
             ImGui::Bullet();
             ImGui::SameLine();
             ImGui::TextUnformatted(c->name.c_str());
@@ -130,6 +134,29 @@ void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ct
             ImGui::SameLine();
             ImGui::TextDisabled("· Tugela");
             ImGui::PopID();
+        }
+        if (emitters > 0) {
+            ImGui::Spacing();
+            bool show_spawn = all_spawn_debug;
+            if (ImGui::Checkbox("Show Spawn Location (all emitters)", &show_spawn)) {
+                for (const NodeId child : system_node.children) {
+                    Node* c = scene.find(child);
+                    if (!c || !c->particle_emitter.has_value()) {
+                        continue;
+                    }
+                    c->particle_emitter->debug_show_spawn = show_spawn;
+                }
+                mark(ctx, false);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Toggle spawn-origin markers on every emitter under this system. "
+                    "Hidden in Game View (G) and Pixera output.");
+            }
+            if (any_spawn_debug && !all_spawn_debug) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("(mixed)");
+            }
         }
         moduleIndentEnd();
     }
@@ -230,6 +257,12 @@ void drawParticleEmitterInspector(Node& emitter_node, const std::string& node_pa
         dirty |= ImGui::Checkbox("Looping", &e.looping);
         ImGui::SameLine();
         dirty |= ImGui::Checkbox("World space", &e.world_space);
+        dirty |= ImGui::Checkbox("Show Spawn Location", &e.debug_show_spawn);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Draw a spawn-origin marker at this emitter's transform in the editor viewport. "
+                "Hidden in Game View (G) and Pixera output.");
+        }
         dirty |= ImGui::DragFloat("Duration (0=∞)", &e.duration_seconds, 0.05f, 0.0f, 600.0f);
         dirty |= ImGui::DragFloat("Start delay", &e.start_delay_seconds, 0.01f, 0.0f, 60.0f);
         int max_p = static_cast<int>(e.max_particles);
