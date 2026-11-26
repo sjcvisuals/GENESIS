@@ -42,11 +42,8 @@ struct ParticleEmitterUiContext {
 // Remains true with zero emitters so Add Emitter still works in Tugela.
 bool isParticleSystemNode(const Scene& scene, const Node& node);
 
-// Outliner suffix: "SYS" / empty. Emitters are not Hierarchy actors.
+// Outliner suffix: "SYS" / "EM" / empty.
 const char* particleHierarchyBadge(const Scene& scene, const Node& node);
-
-// Hierarchy/outliner: emitters live under Systems but are authored only in Tugela.
-bool isHierarchyHiddenParticleEmitter(const Node& node);
 
 // Tugela System inspector (emitter list + add templates).
 void drawParticleSystemInspector(Node& system_node, ParticleEmitterUiContext& ctx);

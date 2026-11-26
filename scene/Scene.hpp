@@ -42,7 +42,7 @@ struct Node {
     std::optional<ParticleEmitter> particle_emitter;
     std::optional<FluidVolume> particle_fluid;
 
-    // Tugela System actor: holds emitter children authored in the graph, not Hierarchy.
+    // Tugela System actor: holds emitter children (Hierarchy children; systems start collapsed).
     // Persists when the system has zero emitters so Add Emitter still works.
     bool is_particle_system = false;
 
