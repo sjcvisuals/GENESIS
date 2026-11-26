@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(GENESIS VERSION 0.1.8 LANGUAGES CXX) # WinSparkle ProductVersion / packaging
+project(GENESIS VERSION 0.1.9 LANGUAGES CXX) # WinSparkle ProductVersion / packaging
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
